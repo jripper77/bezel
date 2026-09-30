@@ -4,6 +4,7 @@
 use bezel_cli::{Cli, Command, SensorsArgs, WatchStyle, run, run_sensors};
 use bezel_core::ports::SensorSource;
 use bezel_devices::{FakeBus, FakeConnector, SystemBus, SystemConnector};
+use bezel_render::SkiaRenderer;
 use bezel_sensors::{FakeSensors, SystemSensors};
 use clap::Parser;
 use std::io::{IsTerminal, Write};
@@ -36,8 +37,13 @@ fn main() -> ExitCode {
     }
     let result = match &cli.command {
         Command::Sensors(args) => sensors(args, cli.fake),
-        _ if cli.fake => run(&cli, &FakeBus::turing_88(), &FakeConnector::default()),
-        _ => run(&cli, &SystemBus, &SystemConnector),
+        _ if cli.fake => run(
+            &cli,
+            &FakeBus::turing_88(),
+            &FakeConnector::default(),
+            &mut SkiaRenderer::new(),
+        ),
+        _ => run(&cli, &SystemBus, &SystemConnector, &mut SkiaRenderer::new()),
     };
     match result {
         Ok(out) => {

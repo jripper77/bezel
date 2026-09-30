@@ -1,13 +1,20 @@
 //! Commands that talk to a screen.
 
+use std::collections::BTreeMap;
+use std::io::Cursor;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use bezel_core::app::open_screen;
+use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::geometry::Orientation;
+use bezel_core::domain::history::Histories;
 use bezel_core::domain::pattern::test_pattern as pattern;
 use bezel_core::domain::screen::Brightness;
-use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink};
+use bezel_core::domain::sensor::{Quantities, Snapshot};
+use bezel_core::domain::theme::{AssetRef, Background, Fit, Theme};
+use bezel_core::ports::{DeviceBus, FrameRenderer, RenderContext, ScreenConnector, ScreenLink};
 
 use crate::Target;
 
@@ -88,6 +95,100 @@ where
     ))
 }
 
+/// Largest picture `bezel show` reads, bytes.
+const MAX_PICTURE: u64 = 64 * 1024 * 1024;
+
+/// A time for renders that draw no clock.
+const NO_TIME: LocalTime = LocalTime {
+    year: 2000,
+    month: 1,
+    day: 1,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    weekday: 5,
+};
+
+/// Horizontal for a picture wider than tall, vertical otherwise.
+fn orientation_for(width: u32, height: u32) -> Orientation {
+    if width > height {
+        Orientation::Landscape
+    } else {
+        Orientation::Portrait
+    }
+}
+
+/// `bezel show`: draws the picture with the theme renderer (as a
+/// background) so it looks exactly as it would in a theme.
+pub fn show<B, C>(
+    bus: &B,
+    connector: &C,
+    renderer: &mut dyn FrameRenderer,
+    target: &Target,
+    path: &Path,
+    orientation: Option<Orientation>,
+    fit: Fit,
+) -> anyhow::Result<String>
+where
+    B: DeviceBus + ?Sized,
+    C: ScreenConnector + ?Sized,
+{
+    let size = std::fs::metadata(path)
+        .with_context(|| format!("cannot read {}", path.display()))?
+        .len();
+    anyhow::ensure!(
+        size <= MAX_PICTURE,
+        "{} is larger than 64 MiB",
+        path.display()
+    );
+    let bytes = std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
+    let (width, height) = image::ImageReader::new(Cursor::new(&bytes))
+        .with_guessed_format()?
+        .into_dimensions()
+        .with_context(|| format!("{} is not a PNG, JPEG or GIF picture", path.display()))?;
+    let orientation = orientation.unwrap_or_else(|| orientation_for(width, height));
+
+    let mut link = connect(bus, connector, target)?;
+    let panel = link.identity().model.panel;
+    let asset = AssetRef("picture".into());
+    let mut theme = Theme::blank("picture", panel, orientation);
+    theme.background = Background::Image {
+        asset: asset.clone(),
+        fit,
+    };
+    let assets = BTreeMap::from([(asset, bytes)]);
+    let (snapshot, histories, quantities) =
+        (Snapshot::default(), Histories::default(), Quantities::new());
+    let context = RenderContext {
+        snapshot: &snapshot,
+        histories: &histories,
+        quantities: &quantities,
+        time: NO_TIME,
+        language: Language::English,
+    };
+    let frame = renderer.render(&theme, &assets, context)?;
+    link.set_orientation(orientation)?;
+    link.present(&frame)?;
+    Ok(format!(
+        "{}: showing {} ({width}x{height}) on {}x{}\n",
+        describe(link.as_ref()),
+        path.display(),
+        theme.canvas.width,
+        theme.canvas.height
+    ))
+}
+
+/// `bezel off`.
+pub fn off<B, C>(bus: &B, connector: &C, target: &Target) -> anyhow::Result<String>
+where
+    B: DeviceBus + ?Sized,
+    C: ScreenConnector + ?Sized,
+{
+    let mut link = connect(bus, connector, target)?;
+    link.screen_off()?;
+    Ok(format!("{}: off\n", describe(link.as_ref())))
+}
+
 /// `bezel release`.
 pub fn release<B, C>(bus: &B, connector: &C, target: &Target) -> anyhow::Result<String>
 where
@@ -105,9 +206,103 @@ mod tests {
     use bezel_core::domain::frame::Rgba;
     use bezel_core::domain::pattern::CORNERS;
     use bezel_devices::{FakeBus, FakeConnector};
+    use bezel_render::{SkiaRenderer, SystemFonts};
 
     fn target() -> Target {
         Target { screen: None }
+    }
+
+    fn picture(name: &str, width: u32, height: u32) -> std::path::PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("bezel-show-{}-{name}.png", std::process::id()));
+        image::RgbaImage::from_pixel(width, height, image::Rgba([200, 30, 30, 255]))
+            .save(&path)
+            .unwrap();
+        path
+    }
+
+    #[test]
+    fn show_picks_the_orientation_from_the_picture() {
+        let connector = FakeConnector::default();
+        let mut renderer = SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip);
+        let (wide, tall) = (picture("wide", 400, 100), picture("tall", 100, 400));
+        let bus = FakeBus::turing_88();
+        let out = show(
+            &bus,
+            &connector,
+            &mut renderer,
+            &target(),
+            &wide,
+            None,
+            Fit::Cover,
+        )
+        .unwrap();
+        assert!(out.contains("on 1920x480"), "{out}");
+        show(
+            &bus,
+            &connector,
+            &mut renderer,
+            &target(),
+            &tall,
+            None,
+            Fit::Cover,
+        )
+        .unwrap();
+        show(
+            &bus,
+            &connector,
+            &mut renderer,
+            &target(),
+            &tall,
+            Some(Orientation::ReverseLandscape),
+            Fit::Contain,
+        )
+        .unwrap();
+        let log = connector.log();
+        assert_eq!(
+            log.orientations,
+            vec![
+                Orientation::Landscape,
+                Orientation::Portrait,
+                Orientation::ReverseLandscape
+            ]
+        );
+        assert_eq!(
+            log.frames[0].pixel(960, 240),
+            Some(Rgba::opaque(200, 30, 30))
+        );
+        assert_eq!(log.frames[1].size().width, 480);
+        // Contain: a tall picture on a wide screen leaves the sides empty.
+        assert_ne!(log.frames[2].pixel(0, 240), Some(Rgba::opaque(200, 30, 30)));
+        assert_eq!(
+            log.frames[2].pixel(960, 240),
+            Some(Rgba::opaque(200, 30, 30))
+        );
+
+        let text = std::env::temp_dir().join(format!("bezel-show-{}.txt", std::process::id()));
+        std::fs::write(&text, b"not a picture").unwrap();
+        let err = show(
+            &bus,
+            &connector,
+            &mut renderer,
+            &target(),
+            &text,
+            None,
+            Fit::Cover,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not a PNG"), "{err}");
+        for p in [wide, tall, text] {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+
+    #[test]
+    fn off_turns_the_panel_off() {
+        let connector = FakeConnector::default();
+        let out = off(&FakeBus::turing_88(), &connector, &target()).unwrap();
+        assert!(out.ends_with(": off\n"), "{out}");
+        assert_eq!(connector.log().offs, 1);
     }
 
     #[test]

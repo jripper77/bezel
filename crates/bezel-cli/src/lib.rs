@@ -7,10 +7,12 @@ mod devices;
 mod screen;
 mod sensors;
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use bezel_core::domain::geometry::Orientation;
-use bezel_core::ports::{DeviceBus, ScreenConnector};
+use bezel_core::domain::theme::Fit;
+use bezel_core::ports::{DeviceBus, FrameRenderer, ScreenConnector};
 use clap::{Parser, Subcommand, ValueEnum};
 
 pub use sensors::{WatchStyle, run as run_sensors};
@@ -47,17 +49,46 @@ pub struct Target {
     pub screen: Option<String>,
 }
 
-/// Orientation names on the command line.
+/// Orientation names on the command line: how the screen stands on the
+/// desk (`vertical`/`horizontal` work too; `reverse-*` is upside down).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum OrientationArg {
-    /// Taller than wide.
+    /// Taller than wide (vertical).
+    #[value(alias = "vertical")]
     Portrait,
     /// Portrait turned 180°.
+    #[value(alias = "vertical-flipped")]
     ReversePortrait,
-    /// Wider than tall.
+    /// Wider than tall (horizontal).
+    #[value(alias = "horizontal")]
     Landscape,
     /// Landscape turned 180°.
+    #[value(alias = "horizontal-flipped")]
     ReverseLandscape,
+}
+
+/// How `bezel show` fits an image to the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FitArg {
+    /// Fill the screen, cropping what overflows.
+    Cover,
+    /// Show the whole image, with bars where it does not fill.
+    Contain,
+    /// Stretch to the screen.
+    Fill,
+    /// Original size, from the top-left corner.
+    None,
+}
+
+impl From<FitArg> for Fit {
+    fn from(f: FitArg) -> Self {
+        match f {
+            FitArg::Cover => Fit::Cover,
+            FitArg::Contain => Fit::Contain,
+            FitArg::Fill => Fit::Fill,
+            FitArg::None => Fit::None,
+        }
+    }
 }
 
 impl From<OrientationArg> for Orientation {
@@ -130,6 +161,27 @@ pub enum Command {
         #[command(flatten)]
         target: Target,
     },
+    /// Show a picture (PNG, JPEG or GIF) until something else is drawn.
+    Show {
+        /// Screen to use.
+        #[command(flatten)]
+        target: Target,
+        /// The picture.
+        image: PathBuf,
+        /// Orientation (default: horizontal for a wide picture, vertical
+        /// otherwise).
+        #[arg(long, value_enum)]
+        orientation: Option<OrientationArg>,
+        /// How the picture fills the screen.
+        #[arg(long, value_enum, default_value_t = FitArg::Cover)]
+        fit: FitArg,
+    },
+    /// Turn the screen off. The next picture, pattern or theme wakes it.
+    Off {
+        /// Screen to use.
+        #[command(flatten)]
+        target: Target,
+    },
     /// Show the machine's sensors: CPU, GPU, memory, disks, network, board.
     /// Rates and usages are measured between two samples 250 ms apart, so
     /// the first output takes a quarter of a second.
@@ -137,7 +189,13 @@ pub enum Command {
 }
 
 /// Runs a parsed command and returns what should be printed on stdout.
-pub fn run<B, C>(cli: &Cli, bus: &B, connector: &C) -> anyhow::Result<String>
+/// `renderer` draws pictures and themes for the screen.
+pub fn run<B, C>(
+    cli: &Cli,
+    bus: &B,
+    connector: &C,
+    renderer: &mut dyn FrameRenderer,
+) -> anyhow::Result<String>
 where
     B: DeviceBus + ?Sized,
     C: ScreenConnector + ?Sized,
@@ -161,6 +219,21 @@ where
             screen::brightness(bus, connector, target, *percent)
         }
         Command::Release { target } => screen::release(bus, connector, target),
+        Command::Show {
+            target,
+            image,
+            orientation,
+            fit,
+        } => screen::show(
+            bus,
+            connector,
+            renderer,
+            target,
+            image,
+            orientation.map(Into::into),
+            (*fit).into(),
+        ),
+        Command::Off { target } => screen::off(bus, connector, target),
         // Streams its output and needs a sensor source: see `run_sensors`.
         Command::Sensors(_) => anyhow::bail!("`sensors` runs through run_sensors"),
     }
@@ -170,10 +243,17 @@ where
 mod tests {
     use super::*;
     use bezel_devices::{FakeBus, FakeConnector};
+    use bezel_render::{SkiaRenderer, SystemFonts};
 
     fn run_args(args: &[&str]) -> anyhow::Result<String> {
         let cli = Cli::try_parse_from(args)?;
-        run(&cli, &FakeBus::turing_88(), &FakeConnector::default())
+        let mut renderer = SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip);
+        run(
+            &cli,
+            &FakeBus::turing_88(),
+            &FakeConnector::default(),
+            &mut renderer,
+        )
     }
 
     #[test]
@@ -193,5 +273,26 @@ mod tests {
         };
         assert_eq!(args.watch, Some(Duration::from_millis(500)));
         assert_eq!(args.count, Some(3));
+    }
+
+    #[test]
+    fn orientations_accept_vertical_and_horizontal() {
+        for (name, expected) in [
+            ("vertical", OrientationArg::Portrait),
+            ("horizontal", OrientationArg::Landscape),
+            ("horizontal-flipped", OrientationArg::ReverseLandscape),
+            ("reverse-portrait", OrientationArg::ReversePortrait),
+        ] {
+            let cli =
+                Cli::try_parse_from(["bezel", "test-pattern", "--orientation", name]).unwrap();
+            let Command::TestPattern { orientation, .. } = cli.command else {
+                unreachable!("parsed as test-pattern")
+            };
+            assert_eq!(orientation, expected, "{name}");
+        }
+        assert_eq!(Fit::from(FitArg::Contain), Fit::Contain);
+        let off = run_args(&["bezel", "--fake", "off"]).unwrap();
+        assert!(off.contains("off"), "{off}");
+        assert!(run_args(&["bezel", "--fake", "show", "/nope.png"]).is_err());
     }
 }

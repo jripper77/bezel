@@ -1,7 +1,7 @@
 # Phase 5: Bezel Studio — Summary  (slug: studio-app)
 
-**Status:** partial
-**Tasks:** 5/6 complete, 0 blocked (T-5.5 pendente: e2e finais, PROJECT.md § Frontend, validação ao vivo na 8.8")
+**Status:** complete
+**Tasks:** 6/6 complete, 0 blocked
 
 > Nota de processo: T-5.1..T-5.4 (backend) foram executadas pelo orquestrador fora do `/jdi-do`; a T-5.6 e a
 > importação da T-5.4 pelo `jdi-doer-bezel` no worktree `wt/studio-orient` (commits cherry-picked).
@@ -27,6 +27,10 @@
     horizontal para telas em barra (≥ 2:1, como a 8.8") e a nativa nas demais;
   - modo ao vivo segue a troca na hora; galeria com selo Vertical/Horizontal.
 
+- T-5.5: e2e críticos (24 Playwright × claro/escuro com axe, incluindo os da aba de armazenamento da phase 6),
+  PROJECT.md § Frontend com `has_frontend: true` (D-2026-09-30-studio-app-6), install-local com temas e
+  fontes, teste de hardware opt-in `apps/bezel-studio/src-tauri/tests/hardware.rs` — `1bca123` e o commit do teste
+
 ## Blocked tasks
 - nenhuma
 
@@ -47,10 +51,11 @@
 
 ## Hardware validation
 - Studio instalado (`install-local.sh`) e aberto em modo simulado (`BEZEL_FAKE=1`) sem erros.
-- Não executado ainda na 8.8" real: a tela está com o `turing-smart-screen.service` do usuário. Modo ao vivo
-  e troca de orientação verificados no `FakeConnector` (orientações `[ReversePortrait, Landscape]`, frames
-  480×1920 → 1920×480). Pendente (DoD manual): desenhar um tema e vê-lo ao vivo na 8.8", fechar a janela e
-  seguir pela bandeja.
+- 8.8" real, serviço do usuário parado e religado: `BEZEL_HW_TESTS=1 cargo test -p bezel-studio --test hardware
+  -- --ignored` → backend do studio ao vivo com o tema incluso "Midnight 8.8\" horizontal" (7 atualizações em
+  8,8 s), virado para vertical com a tela ao vivo (8 atualizações em 8,7 s), depois devolvido; sem erros.
+- **Pendente de confirmação humana (DoD manual):** desenhar um tema na janela e vê-lo ao vivo na 8.8",
+  fechar a janela e seguir pela bandeja.
 
 ## Observações
 - Avisos do importador vêm em inglês do `bezel-themes`; a moldura é traduzida.

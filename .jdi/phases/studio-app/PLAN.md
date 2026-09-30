@@ -57,7 +57,7 @@ App de janela única com editor drag-and-drop WYSIWYG, sensores ao vivo, bandeja
 - **Files modified:** `apps/bezel-studio/tests/e2e/*.spec.mjs`, `.jdi/PROJECT.md` (§ Frontend via D-XX), `scripts/install-local.sh`
 - **Acceptance:** Playwright critical paths in light/dark with axe; install-local; hardware check live on the 8.8"
 - **Dependencies:** T-5.2, T-5.3, T-5.4, T-5.6
-- **Status:** pending
+- **Status:** completed (e2e: 3e9b21d..af98ba2, 24 Playwright × claro/escuro com axe; PROJECT.md § Frontend + D-2026-09-30-studio-app-6: 1bca123; install-local: 6fcbefd; hardware: teste opt-in `tests/hardware.rs` ok na 8.8")
 
 ## Execution
 - Total tasks: 6

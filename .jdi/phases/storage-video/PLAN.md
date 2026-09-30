@@ -75,7 +75,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - `bezel run` com tema de vídeo segue o `ThemeRuntime` (na tela / pôster com aviso / stream do PC).
 - **Dependencies:** T-6.2, T-6.3, T-6.4
 - **Test:** `storage::tests::rm_without_yes_is_refused`; `tests/storage.rs` com `--fake`
-- **Status:** pending
+- **Status:** completed (e0dc992; `README.md` e `CHANGELOG.md` também mudaram: seção `bezel storage` e linhas do Unreleased)
 
 #### T-6.7: Studio: aba de armazenamento no painel "Tela"
 - **Specialist:** jdi-doer-bezel

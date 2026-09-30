@@ -139,6 +139,16 @@ mod tests {
         );
     }
 
+    /// Enumeration only reads cached descriptors, so it is safe on any host
+    /// (CI runners included) and must not fail just because no screen is there.
+    #[test]
+    fn system_bus_enumerates_read_only() {
+        let endpoints = SystemBus.endpoints().expect("enumeration works");
+        for e in &endpoints {
+            assert!(!e.address.0.is_empty());
+        }
+    }
+
     #[test]
     fn only_bulk_families_are_scanned_over_usb() {
         assert!(is_bulk_screen(UsbId::new(0x1cbe, 0x0088)));

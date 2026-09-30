@@ -1,0 +1,33 @@
+[package]
+name = "bezel-studio"
+description = "Bezel Studio: the desktop app that designs themes for and drives USB smart screens."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "bezel_studio"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bezel-studio"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = "2.7.0"
+
+[dependencies]
+bezel-core = { workspace = true }
+bezel-devices = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# `custom-protocol` always: without it even `--release` is a Tauri dev build
+# that serves `devCsp` and expects a dev server (lesson from ddc-control).
+tauri = { version = "2.12.0", features = ["custom-protocol"] }
+tauri-plugin-single-instance = "2.5.0"
+
+[lints]
+workspace = true

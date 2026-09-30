@@ -4,7 +4,7 @@ members = [
     "crates/bezel-core",
     "crates/bezel-devices",
     "crates/bezel-cli",
-
+    "apps/bezel-studio/src-tauri",
 ]
 
 [workspace.package]

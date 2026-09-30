@@ -1,0 +1,164 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-2: #eef1f7;
+  --text: #111827;
+  --muted: #5b6474;
+  --border: #d9deea;
+  --accent: #4f46e5;
+  --accent-soft: #e0e7ff;
+  --ok: #065f46;
+  --warn: #7c2d12;
+  --screen-a: #0ea5e9;
+  --screen-b: #6366f1;
+  --screen-c: #a855f7;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 8px 24px rgb(15 23 42 / 8%);
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1020;
+    --surface: #121a2e;
+    --surface-2: #19223a;
+    --text: #e6e9f2;
+    --muted: #9aa3b8;
+    --border: #26314d;
+    --accent: #a5b4fc;
+    --accent-soft: #232b52;
+    --ok: #6ee7b7;
+    --warn: #fcd34d;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 35%);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-name { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.01em; }
+.status { flex: 1; margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon-button:hover { border-color: var(--accent); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.workspace {
+  display: grid;
+  grid-template-columns: 280px 1fr 300px;
+  min-height: 0;
+}
+
+.rail, .inspector {
+  background: var(--surface);
+  padding: 16px;
+  overflow: auto;
+}
+.rail { border-right: 1px solid var(--border); }
+.inspector { border-left: 1px solid var(--border); }
+
+.rail-title, .inspector-title {
+  margin: 0 0 12px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.screen-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+
+.screen-card {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.screen-card[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.screen-card-title { font-weight: 600; }
+.screen-card-meta { color: var(--muted); font-size: 0.85rem; }
+
+.badge {
+  justify-self: start;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.badge.awake { color: var(--ok); }
+.badge.asleep { color: var(--warn); }
+
+.empty { color: var(--muted); }
+.empty-title { font-weight: 600; color: var(--text); }
+
+.stage {
+  display: grid;
+  place-items: center;
+  gap: 16px;
+  padding: 24px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.device-frame {
+  padding: 14px;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #1e293b, #0b1120);
+  box-shadow: var(--shadow);
+  max-height: 100%;
+  max-width: 100%;
+}
+.device-screen {
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: linear-gradient(160deg, var(--screen-a), var(--screen-b) 55%, var(--screen-c));
+  color: #fff;
+  font-weight: 600;
+}
+.device-size { background: rgb(0 0 0 / 25%); padding: 4px 10px; border-radius: 999px; font-size: 0.85rem; }
+.stage-hint { margin: 0; color: var(--muted); text-align: center; max-width: 48ch; }
+
+.details { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; font-size: 0.9rem; }
+.details dt { color: var(--muted); }
+.details dd { margin: 0; overflow-wrap: anywhere; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .screen-card, .icon-button { transition: border-color 120ms ease, background 120ms ease; }
+}

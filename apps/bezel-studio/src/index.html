@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bezel</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="icon.svg" alt="" width="28" height="28" />
+        <span class="brand-name">Bezel</span>
+      </div>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <button type="button" class="icon-button" id="refresh" data-i18n-title="action.refresh" data-i18n-aria-label="action.refresh">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" /></svg>
+      </button>
+    </header>
+    <main class="workspace">
+      <nav class="rail" data-i18n-aria-label="screens.title">
+        <h2 class="rail-title" data-i18n="screens.title"></h2>
+        <ul class="screen-list" id="screen-list"></ul>
+        <div class="empty" id="empty" hidden>
+          <p class="empty-title" data-i18n="screens.empty.title"></p>
+          <p class="empty-hint" data-i18n="screens.empty.hint"></p>
+        </div>
+      </nav>
+      <section class="stage" data-i18n-aria-label="stage.title">
+        <div class="device-frame" id="device-frame" hidden>
+          <div class="device-screen" id="device-screen">
+            <span class="device-size" id="device-size"></span>
+          </div>
+        </div>
+        <p class="stage-hint" id="stage-hint" data-i18n="stage.hint"></p>
+      </section>
+      <aside class="inspector" data-i18n-aria-label="details.title">
+        <h2 class="inspector-title" data-i18n="details.title"></h2>
+        <dl class="details" id="details"></dl>
+      </aside>
+    </main>
+  </body>
+</html>

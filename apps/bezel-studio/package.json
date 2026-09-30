@@ -1,0 +1,14 @@
+{
+  "name": "bezel-studio-ui",
+  "private": true,
+  "description": "Tests of the Bezel Studio web UI. Nothing here ships: the UI has no npm runtime.",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:unit && node scripts/playwright-browsers.mjs && playwright test",
+    "test:unit": "node -e \"fs.mkdirSync('coverage',{recursive:true})\" && node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-exclude=\"src/app.js\" --test-coverage-lines=80 --test-reporter=tap --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"tests/ui/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0"
+  }
+}

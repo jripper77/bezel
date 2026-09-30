@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Bezel",
+  "mainBinaryName": "bezel-studio",
+  "identifier": "io.github.slipalison.bezel",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Bezel",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "Alison Amorim",
+    "category": "Utility",
+    "shortDescription": "Design themes for and drive USB smart screens (Turing, TURZX and compatible)",
+    "longDescription": "Bezel drives the USB system-monitor screens sold as Turing Smart Screen, TURZX, XuanFang, Kipye, WeAct and their rebrands, on Linux and Windows: live sensors, a drag-and-drop theme editor, images, video and the screen's SD card.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "license": "GPL-3.0-or-later",
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/udev/rules.d/60-bezel.rules": "../../../packaging/linux/60-bezel.rules"
+        },
+        "postInstallScript": "../../../packaging/linux/postinstall.sh"
+      },
+      "rpm": {
+        "files": {
+          "/usr/lib/udev/rules.d/60-bezel.rules": "../../../packaging/linux/60-bezel.rules"
+        },
+        "postInstallScript": "../../../packaging/linux/postinstall.sh"
+      }
+    }
+  }
+}

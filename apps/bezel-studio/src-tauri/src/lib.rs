@@ -15,6 +15,7 @@ pub mod dto;
 pub mod library;
 pub mod media;
 pub mod settings;
+pub mod storage;
 pub mod studio;
 mod tray;
 
@@ -27,7 +28,9 @@ use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::theme::Theme;
 use bezel_core::ports::{DeviceBus, ScreenConnector, SensorSource};
+use bezel_devices::fake::FakeStorage;
 use bezel_devices::{FakeBus, FakeConnector, SystemBus, SystemConnector};
+use bezel_media::FfmpegTranscoder;
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
@@ -37,6 +40,7 @@ use crate::backend::{Backend, DEFAULT_MODEL, UNTITLED, default_orientation};
 use crate::commands::Shared;
 use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
+use crate::storage::{MediaSetup, StorageState};
 use crate::studio::Studio;
 
 /// Label of the main window in `tauri.conf.json`.
@@ -121,6 +125,18 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::list_fonts,
             commands::get_autostart,
             commands::set_autostart,
+            commands::storage_overview,
+            commands::media_tools,
+            commands::locate_ffmpeg,
+            commands::pick_media,
+            commands::prepare_upload,
+            commands::prepare_theme_video,
+            commands::run_upload,
+            commands::cancel_job,
+            commands::delete_stored,
+            commands::play_stored,
+            commands::stop_playback,
+            commands::set_boot_media,
         ])
         .run(tauri::generate_context!())
 }
@@ -141,12 +157,16 @@ struct Adapters {
     sensors: Box<dyn SensorSource>,
 }
 
+/// Usable bytes of the simulated screen's memory card (a 32 GB card).
+const SIMULATED_CARD_BYTES: u64 = 31_914_983_424;
+
 fn adapters(simulate: bool) -> Adapters {
     if simulate {
         eprintln!("bezel-studio: {SIMULATION_SWITCH}=1, simulated Turing 8.8\" and sensors");
+        let storage = FakeStorage::default().with_card(SIMULATED_CARD_BYTES);
         Adapters {
             bus: Arc::new(FakeBus::turing_88()),
-            connector: Arc::new(FakeConnector::default()),
+            connector: Arc::new(FakeConnector::with_storage(storage)),
             sensors: Box::new(FakeSensors::demo()),
         }
     } else {
@@ -201,15 +221,33 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         starting_theme(),
     );
     let path = app.path();
+    let settings = SettingsFile::new(path.app_config_dir()?.join("settings.json"));
+    let ffmpeg = settings.load().ffmpeg_path.map(PathBuf::from);
+    let storage = StorageState::new(
+        Box::new(FfmpegTranscoder::new(ffmpeg)),
+        path.app_cache_dir()?.join("sending"),
+    );
     Ok(Backend {
         bus,
         connector,
         store: Arc::new(FsThemeStore),
         library: ThemeLibrary::new(path.app_data_dir()?.join("themes"), bundled_theme_dirs(app)),
-        settings: SettingsFile::new(path.app_config_dir()?.join("settings.json")),
+        settings,
         fonts,
         studio: Mutex::new(studio),
+        storage,
     })
+}
+
+/// The storage tab's Locate button moves the ffmpeg the adapter looks for.
+impl MediaSetup for FfmpegTranscoder {
+    fn set_tool_path(&mut self, path: Option<PathBuf>) {
+        self.set_ffmpeg_path(path);
+    }
+
+    fn tool_in_use(&mut self) -> Option<PathBuf> {
+        self.ffmpeg_in_use()
+    }
 }
 
 /// Shows the last live screen again, then samples and refreshes the live

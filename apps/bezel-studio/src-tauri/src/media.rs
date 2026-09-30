@@ -13,6 +13,12 @@ pub const THUMBNAIL_SIDE: u32 = 96;
 /// Extensions the image picker offers (the formats the renderer decodes).
 pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif"];
 
+/// Extensions the picker of files to send to a screen offers: the images
+/// screens show and the videos ffmpeg converts.
+pub const MEDIA_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "bmp", "gif", "mp4", "mov", "m4v", "mkv", "webm", "avi",
+];
+
 /// `image`, `font`, `video` or `other`, from the file extension.
 pub fn kind_of(asset: &AssetRef) -> &'static str {
     let extension = asset

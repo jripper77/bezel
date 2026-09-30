@@ -25,6 +25,18 @@
     "allow-list-assets",
     "allow-list-fonts",
     "allow-get-autostart",
-    "allow-set-autostart"
+    "allow-set-autostart",
+    "allow-storage-overview",
+    "allow-media-tools",
+    "allow-locate-ffmpeg",
+    "allow-pick-media",
+    "allow-prepare-upload",
+    "allow-prepare-theme-video",
+    "allow-run-upload",
+    "allow-cancel-job",
+    "allow-delete-stored",
+    "allow-play-stored",
+    "allow-stop-playback",
+    "allow-set-boot-media"
   ]
 }

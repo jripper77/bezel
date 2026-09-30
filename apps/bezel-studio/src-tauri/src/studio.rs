@@ -2,10 +2,20 @@
 //! assets, the latest sensor readings and graph histories, and the screen
 //! showing the theme live. Everything goes through the core's ports, so the
 //! whole session runs on fakes in tests.
+//!
+//! A theme with a video background (D-2026-09-30-storage-video-4): the
+//! preview always shows the poster; the live screen loops the stored video
+//! and gets overlays on a transparent base when the core's
+//! [`ThemeRuntime::start_video`] finds the video on the screen, and the
+//! poster otherwise ([`VideoState::VideoMissing`] carries what sending it
+//! takes). The session renders its own frames from the editor's readings, so
+//! its runtime only carries that decision: it gets the theme without assets
+//! (the decision reads the background, never the bytes).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
+use bezel_core::app::{MissingVideo, ThemeRuntime, VideoState};
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::Orientation;
@@ -21,8 +31,35 @@ use bezel_core::{BezelError, Result};
 /// The screen showing the edited theme.
 struct Live {
     key: String,
-    link: Box<dyn ScreenLink>,
+    /// `None` while a storage job borrows it ([`Studio::lend_live_link`]):
+    /// frames pause until it comes back.
+    link: Option<Box<dyn ScreenLink>>,
     orientation: Option<Orientation>,
+    /// How the theme's video background reaches this screen.
+    video: ThemeRuntime,
+    /// Start the video (again) before the next frame: after going live, after
+    /// a theme with another video, after a job that changed what plays.
+    restart_video: bool,
+}
+
+impl Live {
+    /// What a frame shows under the elements on this screen.
+    fn backdrop(&self) -> Backdrop<'static> {
+        match self.video.video() {
+            VideoState::OnDevice(_) => Backdrop::OnDevice,
+            _ => Backdrop::Poster,
+        }
+    }
+}
+
+/// What a borrowed live link resumes when it comes back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resume {
+    /// Frames only: the job only asked questions.
+    Frames,
+    /// Frames, and the theme's video started again: the job may have changed
+    /// what the screen plays (an upload stops playback first).
+    Video,
 }
 
 /// One editing session.
@@ -125,6 +162,11 @@ impl Studio {
         let mut histories = Histories::new(&theme.history_lengths());
         histories.adopt(&self.histories);
         self.histories = histories;
+        if let Some(live) = self.live.as_mut() {
+            let before = live.video.video().clone();
+            live.video.replace(theme.clone(), BTreeMap::new());
+            live.restart_video |= *live.video.video() != before;
+        }
         self.theme = theme;
     }
 
@@ -187,15 +229,20 @@ impl Studio {
 
     // ------------------------------------------------------------- frames --
 
-    /// Renders the edited theme with the latest readings.
+    /// Renders the edited theme with the latest readings, as the preview
+    /// shows it (a video background shows its poster).
     pub fn render(&mut self, time: LocalTime) -> Result<Frame> {
+        self.render_with(time, Backdrop::Poster)
+    }
+
+    fn render_with(&mut self, time: LocalTime, backdrop: Backdrop<'_>) -> Result<Frame> {
         let context = RenderContext {
             snapshot: &self.snapshot,
             histories: &self.histories,
             quantities: &self.quantities,
             time,
             language: self.language,
-            backdrop: Backdrop::Poster,
+            backdrop,
         };
         self.renderer.render(&self.theme, &self.assets, context)
     }
@@ -210,6 +257,55 @@ impl Studio {
         self.live_error.as_deref()
     }
 
+    /// How the theme's video background reaches the live screen (`None`
+    /// when no screen is live).
+    pub fn live_video(&self) -> Option<&VideoState> {
+        self.live.as_ref().map(|l| l.video.video())
+    }
+
+    /// The theme video the live screen `key` could play but does not store.
+    pub fn missing_video(&self, key: &str) -> Option<MissingVideo> {
+        match self.live.as_ref().filter(|l| l.key == key)?.video.video() {
+            VideoState::VideoMissing(missing) => Some(missing.clone()),
+            _ => None,
+        }
+    }
+
+    /// Lends the live link of `key` to a storage job: frames pause and the
+    /// session stays usable (previews keep rendering) while the job talks to
+    /// the screen. `None` when `key` is not live (or its link is lent).
+    pub fn lend_live_link(&mut self, key: &str) -> Option<Box<dyn ScreenLink>> {
+        self.live
+            .as_mut()
+            .filter(|l| l.key == key)
+            .and_then(|l| l.link.take())
+    }
+
+    /// Takes back a link lent by [`Self::lend_live_link`] and shows a frame
+    /// now (after `resume`). Hands the link back when `key` stopped being
+    /// live meanwhile: the caller closes it.
+    pub fn return_live_link(
+        &mut self,
+        key: &str,
+        link: Box<dyn ScreenLink>,
+        resume: Resume,
+        time: LocalTime,
+    ) -> Option<Box<dyn ScreenLink>> {
+        let Some(live) = self
+            .live
+            .as_mut()
+            .filter(|l| l.key == key && l.link.is_none())
+        else {
+            return Some(link);
+        };
+        live.link = Some(link);
+        live.restart_video |= resume == Resume::Video;
+        if let Err(e) = self.present(time) {
+            tracing::warn!(screen = key, "live screen stopped after a storage job: {e}");
+        }
+        None
+    }
+
     /// Shows the edited theme on `link` from now on, starting now.
     pub fn go_live(
         &mut self,
@@ -217,37 +313,70 @@ impl Studio {
         link: Box<dyn ScreenLink>,
         time: LocalTime,
     ) -> Result<()> {
+        let video = ThemeRuntime::new(self.theme.clone(), BTreeMap::new(), self.language);
         self.live = Some(Live {
             key,
-            link,
+            link: Some(link),
             orientation: None,
+            video,
+            restart_video: true,
         });
         self.live_error = None;
         self.present(time)
     }
 
-    /// Stops showing the theme and hands back the screen's link.
+    /// Stops showing the theme and hands back the screen's link (`None`
+    /// while a storage job borrows it: the job closes it when done).
     pub fn stop_live(&mut self) -> Option<Box<dyn ScreenLink>> {
-        self.live.take().map(|l| l.link)
+        self.live.take().and_then(|l| l.link)
     }
 
     /// Sets the brightness of the live screen when it is `key`; `false` when
-    /// that screen is not live.
+    /// that screen is not live. `InUse` while a storage job borrows its link.
     pub fn live_brightness(&mut self, key: &str, brightness: Brightness) -> Result<bool> {
-        match self.live.as_mut().filter(|l| l.key == key) {
-            Some(live) => live.link.set_brightness(brightness).map(|()| true),
-            None => Ok(false),
+        let Some(live) = self.live.as_mut().filter(|l| l.key == key) else {
+            return Ok(false);
+        };
+        let Some(link) = live.link.as_mut() else {
+            return Err(BezelError::InUse {
+                address: key.to_string(),
+                holders: vec![STORAGE_JOB.to_string()],
+            });
+        };
+        link.set_brightness(brightness).map(|()| true)
+    }
+
+    /// Starts the theme's video on the live screen when it has to (a failure
+    /// keeps the poster).
+    fn start_live_video(&mut self) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let Some(link) = live.link.as_mut() else {
+            return;
+        };
+        if std::mem::take(&mut live.restart_video)
+            && let Err(e) = live.video.start_video(link.as_mut(), None)
+        {
+            tracing::warn!(screen = live.key, "video background not started: {e}");
         }
     }
 
-    /// Renders and shows one frame on the live screen. A failure stops the
-    /// live mode (the link is dropped) and is kept for [`Self::live_error`].
+    /// Renders and shows one frame on the live screen (nothing while a
+    /// storage job borrows its link). A failure stops the live mode (the link
+    /// is dropped) and is kept for [`Self::live_error`].
     pub fn present(&mut self, time: LocalTime) -> Result<()> {
-        if self.live.is_none() {
+        self.start_live_video();
+        let Some(backdrop) = self
+            .live
+            .as_ref()
+            .filter(|l| l.link.is_some())
+            .map(Live::backdrop)
+        else {
             return Ok(());
-        }
+        };
         let result = self
-            .render(time)
+            .render_with(time, backdrop)
             .and_then(|frame| self.present_frame(&frame));
         if let Err(e) = &result {
             self.live = None;
@@ -261,7 +390,10 @@ impl Studio {
         let Some(live) = self.live.as_mut() else {
             return Ok(());
         };
-        let expected = live.link.identity().model.panel.in_orientation(orientation);
+        let Some(link) = live.link.as_mut() else {
+            return Ok(());
+        };
+        let expected = link.identity().model.panel.in_orientation(orientation);
         if frame.size() != expected {
             return Err(BezelError::Transport(format!(
                 "this theme is {}x{} but the screen is {}x{} in this orientation",
@@ -272,10 +404,10 @@ impl Studio {
             )));
         }
         if live.orientation != Some(orientation) {
-            live.link.set_orientation(orientation)?;
+            link.set_orientation(orientation)?;
             live.orientation = Some(orientation);
         }
-        live.link.present(frame)
+        link.present(frame)
     }
 
     /// One refresh: a sample, then a frame on the live screen.
@@ -286,6 +418,9 @@ impl Studio {
         self.present(time)
     }
 }
+
+/// Who holds a live screen while a storage job borrows its link.
+pub const STORAGE_JOB: &str = "a storage job of Bezel";
 
 /// `"My Photo.PNG"` → (`"my-photo"`, `".png"`): safe, lowercase asset names.
 fn split_name(file_name: &str) -> (String, String) {

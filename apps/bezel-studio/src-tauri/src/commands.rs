@@ -5,34 +5,36 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bezel_core::domain::job::Progress;
 use bezel_core::ports::ThemeLocation;
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::native::EXTENSION;
 use tauri::ipc::Response;
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Emitter as _, Runtime, State};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
 
 use crate::backend::{Backend, UNTITLED, UiResult};
 use crate::clock::now;
 use crate::dto::{
-    AddedDto, AssetDto, ImportedDto, SampleDto, SavedDto, ScreenDto, SensorDto, SessionDto,
-    ThemeEntryDto, parse_orientation,
+    AddedDto, AssetDto, ImportedDto, JobDto, MediaToolsDto, PrepareDto, ProgressDto, SampleDto,
+    SavedDto, ScreenDto, SensorDto, SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
 };
-use crate::media::IMAGE_EXTENSIONS;
+use crate::media::{IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
+use crate::storage::{ProgressThrottle, StorageResult};
 
 /// State managed by Tauri.
 pub type Shared = Arc<Backend>;
 
 /// Runs `work` on the blocking pool with the backend.
-async fn blocking<T: Send + 'static>(
+async fn blocking<T: Send + 'static, E: From<String> + Send + 'static>(
     state: &State<'_, Shared>,
-    work: impl FnOnce(&Backend) -> UiResult<T> + Send + 'static,
-) -> UiResult<T> {
+    work: impl FnOnce(&Backend) -> Result<T, E> + Send + 'static,
+) -> Result<T, E> {
     let backend = Arc::clone(state);
     tauri::async_runtime::spawn_blocking(move || work(&backend))
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| E::from(e.to_string()))?
 }
 
 /// A file chosen in the native open dialog, or `None` when cancelled.
@@ -223,4 +225,139 @@ pub fn set_autostart<R: Runtime>(app: AppHandle<R>, on: bool) -> UiResult<()> {
         manager.disable()
     }
     .map_err(|e| e.to_string())
+}
+
+// ------------------------------------------------------------- storage --
+
+/// Event carrying a running upload's progress ([`ProgressDto`]).
+pub const PROGRESS_EVENT: &str = "storage-progress";
+
+/// Capacity and files of a screen.
+#[tauri::command]
+pub async fn storage_overview(
+    state: State<'_, Shared>,
+    screen: String,
+) -> StorageResult<StorageDto> {
+    blocking(&state, move |b| b.storage_overview(&screen, now())).await
+}
+
+/// Whether ffmpeg can convert videos, with install hints when it cannot.
+#[tauri::command]
+pub async fn media_tools(state: State<'_, Shared>) -> UiResult<MediaToolsDto> {
+    blocking(&state, |b| Ok(b.media_tools())).await
+}
+
+/// Asks where ffmpeg is and uses it when it works. `None` when cancelled.
+#[tauri::command]
+pub async fn locate_ffmpeg<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+) -> UiResult<Option<MediaToolsDto>> {
+    let Some(path) = app.dialog().file().blocking_pick_file() else {
+        return Ok(None);
+    };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    blocking(&state, move |b| Ok(Some(b.locate_ffmpeg(&path)))).await
+}
+
+/// Asks for an image or a video to send to a screen. `None` when cancelled.
+#[tauri::command]
+pub async fn pick_media<R: Runtime>(app: AppHandle<R>) -> UiResult<Option<String>> {
+    Ok(pick_file(&app, "Media", MEDIA_EXTENSIONS)?.map(|p| p.display().to_string()))
+}
+
+/// The preflight of sending the local file `source` to `medium` of `screen`.
+#[tauri::command]
+pub async fn prepare_upload(
+    state: State<'_, Shared>,
+    screen: String,
+    source: String,
+    medium: String,
+) -> StorageResult<PrepareDto> {
+    blocking(&state, move |b| {
+        b.prepare_upload(&screen, &PathBuf::from(source), &medium, now())
+    })
+    .await
+}
+
+/// The preflight of sending the theme's video to the live screen.
+#[tauri::command]
+pub async fn prepare_theme_video(
+    state: State<'_, Shared>,
+    screen: String,
+) -> StorageResult<PrepareDto> {
+    blocking(&state, move |b| b.prepare_theme_video(&screen, now())).await
+}
+
+/// Runs a prepared upload; progress goes out as [`PROGRESS_EVENT`].
+#[tauri::command]
+pub async fn run_upload<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+    ticket: u64,
+    overwrite: bool,
+) -> StorageResult<JobDto> {
+    blocking(&state, move |b| {
+        let mut throttle = ProgressThrottle::default();
+        let mut report = |progress: Progress| {
+            if throttle.pass(progress)
+                && let Err(e) = app.emit(PROGRESS_EVENT, ProgressDto::from(progress))
+            {
+                tracing::warn!("upload progress not sent: {e}");
+            }
+        };
+        b.run_upload(ticket, overwrite, now(), &mut report)
+    })
+    .await
+}
+
+/// Asks the running upload to stop.
+#[tauri::command]
+pub fn cancel_job(state: State<'_, Shared>) -> bool {
+    state.cancel_job()
+}
+
+/// Deletes a stored file; `confirmed` comes from the dialog naming it.
+#[tauri::command]
+pub async fn delete_stored(
+    state: State<'_, Shared>,
+    screen: String,
+    path: String,
+    confirmed: bool,
+) -> StorageResult<()> {
+    blocking(&state, move |b| {
+        b.delete_stored(&screen, &path, confirmed, now())
+    })
+    .await
+}
+
+/// Plays a stored file.
+#[tauri::command]
+pub async fn play_stored(
+    state: State<'_, Shared>,
+    screen: String,
+    path: String,
+) -> StorageResult<()> {
+    blocking(&state, move |b| b.play_stored(&screen, &path, now())).await
+}
+
+/// Stops what the screen plays.
+#[tauri::command]
+pub async fn stop_playback(state: State<'_, Shared>, screen: String) -> StorageResult<()> {
+    blocking(&state, move |b| b.stop_playback(&screen, now())).await
+}
+
+/// Sets the boot media (`None`: the built-in screen); `confirmed` comes from
+/// the dialog naming it.
+#[tauri::command]
+pub async fn set_boot_media(
+    state: State<'_, Shared>,
+    screen: String,
+    path: Option<String>,
+    confirmed: bool,
+) -> StorageResult<()> {
+    blocking(&state, move |b| {
+        b.set_boot_media(&screen, path.as_deref(), confirmed, now())
+    })
+    .await
 }

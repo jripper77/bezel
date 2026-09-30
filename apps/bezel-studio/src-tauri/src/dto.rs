@@ -2,12 +2,16 @@
 
 use std::collections::BTreeMap;
 
+use bezel_core::app::VideoState;
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::{Endpoint, Screen, ScreenState};
 use bezel_core::domain::geometry::Orientation;
+use bezel_core::domain::job::Progress;
+use bezel_core::domain::media::{MediaInfo, MediaTools, Mismatch};
 use bezel_core::domain::sensor::{
     DisplayFormat, Quantities, Reading, SensorInfo, Snapshot, format_reading,
 };
+use bezel_core::domain::storage::{Capacity, FileEntry, NameError, Refusal, RemotePath};
 use bezel_themes::dto::{SizeDto, ThemeDto};
 use serde::Serialize;
 
@@ -193,6 +197,9 @@ pub struct SampleDto {
     pub live: Option<String>,
     /// Why the live screen stopped.
     pub live_error: Option<String>,
+    /// How the theme's video background reaches the live screen; `None`
+    /// when nothing is live or the theme has no video.
+    pub video: Option<LiveVideoDto>,
 }
 
 impl SampleDto {
@@ -309,6 +316,387 @@ pub struct AddedDto {
     /// Its reference.
     #[serde(rename = "ref")]
     pub reference: String,
+}
+
+/// How the theme's video background reaches the live screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveVideoDto {
+    /// `notStarted`, `onDevice`, `missing` (the "Send to screen" call to
+    /// action), `host`, `noConverter` or `noPlayback`.
+    pub state: &'static str,
+    /// The stored file it plays, or where it belongs when missing.
+    pub path: Option<String>,
+}
+
+impl LiveVideoDto {
+    /// The DTO of `state`; `None` for a theme without a video.
+    pub fn of(state: &VideoState) -> Option<Self> {
+        let (state, path) = match state {
+            VideoState::NoVideo => return None,
+            VideoState::NotStarted => ("notStarted", None),
+            VideoState::OnDevice(path) => ("onDevice", Some(path.to_string())),
+            VideoState::VideoMissing(missing) => ("missing", Some(missing.path.to_string())),
+            VideoState::Host => ("host", None),
+            VideoState::NoConverter { .. } => ("noConverter", None),
+            VideoState::NoPlayback => ("noPlayback", None),
+        };
+        Some(Self { state, path })
+    }
+}
+
+/// Size and use of one storage medium, bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapacityDto {
+    /// Usable size.
+    pub total: u64,
+    /// In use.
+    pub used: u64,
+    /// Available for uploads.
+    pub free: u64,
+}
+
+impl From<Capacity> for CapacityDto {
+    fn from(c: Capacity) -> Self {
+        Self {
+            total: c.total,
+            used: c.used,
+            free: c.free,
+        }
+    }
+}
+
+/// A file stored on a screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredFileDto {
+    /// `internal/video/clip.mp4`: what the storage commands take.
+    pub path: String,
+    /// `internal` or `sd`.
+    pub medium: &'static str,
+    /// `image` or `video`.
+    pub kind: &'static str,
+    /// The file name.
+    pub name: String,
+    /// Bytes, when the screen reports them.
+    pub size: Option<u64>,
+}
+
+impl StoredFileDto {
+    /// A file at `path`.
+    pub fn at(path: &RemotePath, size: Option<u64>) -> Self {
+        Self {
+            path: path.to_string(),
+            medium: path.location.medium.slug(),
+            kind: path.location.kind.slug(),
+            name: path.name.to_string(),
+            size,
+        }
+    }
+}
+
+impl From<&FileEntry> for StoredFileDto {
+    fn from(e: &FileEntry) -> Self {
+        Self::at(&e.path, e.size)
+    }
+}
+
+/// One of the four folders of a screen and what it holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderDto {
+    /// `internal` or `sd`.
+    pub medium: &'static str,
+    /// `image` or `video`.
+    pub kind: &'static str,
+    /// The files, in the order the screen lists them.
+    pub files: Vec<StoredFileDto>,
+    /// Why the folder could not be listed (the other folders still are).
+    pub error: Option<StorageErrorDto>,
+}
+
+/// What the storage tab shows: capacity and the files of every folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageDto {
+    /// Internal flash.
+    pub internal: CapacityDto,
+    /// The memory card; `None` without one.
+    pub card: Option<CapacityDto>,
+    /// Internal folders, then the card's when a card is present.
+    pub folders: Vec<FolderDto>,
+}
+
+/// Whether ffmpeg can convert videos, and how to install it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaToolsDto {
+    /// Conversions can run.
+    pub ready: bool,
+    /// The version ffmpeg reported.
+    pub version: Option<String>,
+    /// Install commands for this system, most likely first.
+    pub install_hints: Vec<String>,
+    /// The ffmpeg chosen with Locate (else the one on `PATH` is used).
+    pub configured: Option<String>,
+    /// A file chosen with Locate that is not a usable ffmpeg (nothing was
+    /// changed).
+    pub rejected: Option<String>,
+}
+
+impl MediaToolsDto {
+    /// The DTO of `tools`.
+    pub fn of(tools: &MediaTools, configured: Option<String>) -> Self {
+        let (ready, version, install_hints) = match tools {
+            MediaTools::Ready { version } => (true, Some(version.clone()), Vec::new()),
+            MediaTools::Missing { install_hints } => (false, None, install_hints.clone()),
+        };
+        Self {
+            ready,
+            version,
+            install_hints,
+            configured,
+            rejected: None,
+        }
+    }
+}
+
+/// The conversion an upload runs first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversionDto {
+    /// Output width (the panel in its native orientation).
+    pub width: u32,
+    /// Output height.
+    pub height: u32,
+    /// Clockwise quarter turns applied to the video first.
+    pub quarter_turns: u8,
+    /// Whether part of the picture is cut to fill the panel.
+    pub cropped: bool,
+}
+
+/// An upload that passed its preflight: what the confirmation shows.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedDto {
+    /// What `run_upload` takes.
+    pub ticket: u64,
+    /// The local file's name.
+    pub source: String,
+    /// Where it goes.
+    pub target: StoredFileDto,
+    /// Size of the local file.
+    pub bytes: u64,
+    /// Format of the local file (`MP4`, `PNG`…).
+    pub format: String,
+    /// Picture size of the local file.
+    pub dimensions: Option<SizeDto>,
+    /// The conversion, when one runs first.
+    pub convert: Option<ConversionDto>,
+    /// The stored file it replaces (needs the overwrite confirmation).
+    pub replaces: Option<StoredFileDto>,
+}
+
+/// A way the file differs from what the screen accepts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MismatchDto {
+    /// `format`, `codec`, `pixelFormat`, `bFrames`, `audio` or `resolution`.
+    pub code: &'static str,
+    /// What the file has (`GIF`, `1920x1080`).
+    pub found: Option<String>,
+    /// What the screen takes.
+    pub expected: Option<String>,
+}
+
+fn size_text(size: bezel_core::domain::geometry::Size) -> String {
+    format!("{}x{}", size.width, size.height)
+}
+
+impl From<&Mismatch> for MismatchDto {
+    fn from(m: &Mismatch) -> Self {
+        let (code, found, expected) = match m {
+            Mismatch::Format { found, accepted } => {
+                let names: Vec<String> = accepted.iter().map(ToString::to_string).collect();
+                ("format", Some(found.to_string()), Some(names.join(", ")))
+            }
+            Mismatch::Codec(_) => ("codec", None, None),
+            Mismatch::PixelFormat(_) => ("pixelFormat", None, None),
+            Mismatch::BFrames => ("bFrames", None, None),
+            Mismatch::Audio => ("audio", None, None),
+            Mismatch::Resolution { expected, found } => (
+                "resolution",
+                found.map(size_text),
+                Some(size_text(*expected)),
+            ),
+        };
+        Self {
+            code,
+            found,
+            expected,
+        }
+    }
+}
+
+/// Why an upload was refused before anything was converted, sent or deleted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefusalDto {
+    /// `invalidName`, `wrongExtension`, `wrongKind`, `wrongProfile`,
+    /// `needsConverter`, `emptyFile`, `tooLarge`, `noCard` or `noSpace`.
+    pub code: &'static str,
+    /// The core's explanation, in English.
+    pub message: String,
+    /// The name the file would get.
+    pub name: Option<String>,
+    /// Extensions that fit.
+    pub accepted: Vec<&'static str>,
+    /// How the file differs from what the screen takes.
+    pub mismatches: Vec<MismatchDto>,
+    /// Bytes to store.
+    pub bytes: Option<u64>,
+    /// The size limit, or the free bytes when it does not fit.
+    pub limit: Option<u64>,
+    /// Files the user may choose to delete to make room (largest first).
+    pub candidates: Vec<StoredFileDto>,
+}
+
+impl From<&Refusal> for RefusalDto {
+    fn from(r: &Refusal) -> Self {
+        let mut dto = Self {
+            code: "",
+            message: r.to_string(),
+            name: None,
+            accepted: Vec::new(),
+            mismatches: Vec::new(),
+            bytes: None,
+            limit: None,
+            candidates: Vec::new(),
+        };
+        let mismatches = |m: &[Mismatch]| m.iter().map(MismatchDto::from).collect();
+        dto.code = match r {
+            Refusal::InvalidName(e) => {
+                dto.name = name_error_char(e);
+                "invalidName"
+            }
+            Refusal::WrongExtension { name, accepted } => {
+                dto.name = Some(name.to_string());
+                dto.accepted = accepted.to_vec();
+                "wrongExtension"
+            }
+            Refusal::WrongKind { .. } => "wrongKind",
+            Refusal::WrongProfile(m) => {
+                dto.mismatches = mismatches(m);
+                "wrongProfile"
+            }
+            Refusal::NeedsConverter(m) => {
+                dto.mismatches = mismatches(m);
+                "needsConverter"
+            }
+            Refusal::EmptyFile => "emptyFile",
+            Refusal::TooLarge { bytes, limit } => {
+                (dto.bytes, dto.limit) = (Some(*bytes), Some(*limit));
+                "tooLarge"
+            }
+            Refusal::NoCard => "noCard",
+            Refusal::NoSpace {
+                needed,
+                free,
+                candidates,
+            } => {
+                (dto.bytes, dto.limit) = (Some(*needed), Some(*free));
+                dto.candidates = candidates.iter().map(StoredFileDto::from).collect();
+                "noSpace"
+            }
+        };
+        dto
+    }
+}
+
+/// The character that made a name invalid, when one did.
+fn name_error_char(e: &NameError) -> Option<String> {
+    match e {
+        NameError::Forbidden(c) => Some(c.to_string()),
+        _ => None,
+    }
+}
+
+/// The preflight's answer: ready to confirm, or refused with the reason.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum PrepareDto {
+    /// Passed: show the summary and ask.
+    Ready(PreparedDto),
+    /// Refused: explain it inline.
+    Refused(RefusalDto),
+}
+
+/// How an upload ended (errors other than a cancel reject the command).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum JobDto {
+    /// Stored and verified.
+    #[serde(rename_all = "camelCase")]
+    Done {
+        /// The stored file.
+        file: StoredFileDto,
+        /// Converted first.
+        converted: bool,
+    },
+    /// Cancelled by the user.
+    #[serde(rename_all = "camelCase")]
+    Cancelled {
+        /// Where the file was going.
+        path: String,
+        /// Bytes of an incomplete file left on the screen (offer a
+        /// confirmed delete), `None` when nothing is left.
+        partial: Option<u64>,
+    },
+}
+
+/// One progress report of a running job (the `storage-progress` event).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressDto {
+    /// `convert`, `upload` or `verify`.
+    pub phase: &'static str,
+    /// Units done (ms of video, bytes or checks).
+    pub done: u64,
+    /// Units in the phase; 0 when unknown.
+    pub total: u64,
+}
+
+impl From<Progress> for ProgressDto {
+    fn from(p: Progress) -> Self {
+        Self {
+            phase: p.phase.slug(),
+            done: p.done,
+            total: p.total,
+        }
+    }
+}
+
+/// A storage command's error: a code the UI translates, and the details.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageErrorDto {
+    /// `busy`, `unsupported`, `notConfirmed`, `inUse`, `stale`, `live`,
+    /// `noVideo` or `failed`.
+    pub code: &'static str,
+    /// What went wrong, in English.
+    pub message: String,
+}
+
+/// The format and picture size of a probed file, for the summary.
+pub fn media_summary(media: &MediaInfo) -> (String, Option<SizeDto>) {
+    (
+        media.format.to_string(),
+        media.dimensions.map(|d| SizeDto {
+            width: d.width,
+            height: d.height,
+        }),
+    )
 }
 
 #[cfg(test)]

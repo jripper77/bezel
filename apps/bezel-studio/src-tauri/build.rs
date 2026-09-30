@@ -24,6 +24,18 @@ const COMMANDS: &[&str] = &[
     "list_fonts",
     "get_autostart",
     "set_autostart",
+    "storage_overview",
+    "media_tools",
+    "locate_ffmpeg",
+    "pick_media",
+    "prepare_upload",
+    "prepare_theme_video",
+    "run_upload",
+    "cancel_job",
+    "delete_stored",
+    "play_stored",
+    "stop_playback",
+    "set_boot_media",
 ];
 
 fn main() -> ExitCode {

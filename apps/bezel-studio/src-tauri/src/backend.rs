@@ -18,12 +18,13 @@ use bezel_themes::dto::ThemeDto;
 use bezel_themes::import::import_path;
 
 use crate::dto::{
-    AddedDto, AssetDto, ImportedDto, SampleDto, SavedDto, ScreenDto, SensorDto, SessionDto,
-    ThemeEntryDto,
+    AddedDto, AssetDto, ImportedDto, LiveVideoDto, SampleDto, SavedDto, ScreenDto, SensorDto,
+    SessionDto, ThemeEntryDto,
 };
 use crate::library::{ThemeLibrary, is_native_theme};
 use crate::media::{kind_of, thumbnail_data_url};
 use crate::settings::SettingsFile;
+use crate::storage::StorageState;
 use crate::studio::Studio;
 
 /// Result of a UI command: errors are shown as text.
@@ -52,6 +53,8 @@ pub struct Backend {
     pub fonts: Vec<String>,
     /// The editing session.
     pub studio: Mutex<Studio>,
+    /// The screen's files: the media converter and the running operation.
+    pub storage: StorageState,
 }
 
 /// Header of a frame sent to the UI: width and height, u32 little-endian.
@@ -107,7 +110,7 @@ impl Backend {
         .map_err(text)
     }
 
-    fn connect(&self, key: &str) -> UiResult<Box<dyn ScreenLink>> {
+    pub(crate) fn connect(&self, key: &str) -> UiResult<Box<dyn ScreenLink>> {
         let screen = self.find_screen(key)?;
         self.connector.connect(&screen).map_err(text)
     }
@@ -129,6 +132,7 @@ impl Backend {
             return Ok(());
         }
         let key = screen.ok_or("no screen chosen")?;
+        self.storage.ensure_idle()?;
         // Opening wakes the screen (seconds); the session stays usable meanwhile.
         let link = self.connect(key)?;
         let orientation = {
@@ -162,6 +166,7 @@ impl Backend {
         {
             return Ok(());
         }
+        self.storage.ensure_idle()?;
         self.connect(screen)?
             .set_brightness(brightness)
             .map_err(text)
@@ -169,6 +174,7 @@ impl Backend {
 
     /// Hands a screen back to its own mode (stopping live mode on it).
     pub fn release(&self, screen: &str) -> UiResult<()> {
+        self.storage.ensure_idle()?;
         let live = {
             let mut studio = self.studio();
             if studio.live_key() == Some(screen) {
@@ -209,6 +215,7 @@ impl Backend {
             readings: SampleDto::readings(snapshot, studio.quantities()),
             live: studio.live_key().map(str::to_string),
             live_error: studio.live_error().map(str::to_string),
+            video: studio.live_video().and_then(LiveVideoDto::of),
         }
     }
 
@@ -509,6 +516,10 @@ mod tests {
             settings: SettingsFile::new(root.join("settings.json")),
             fonts: vec!["Inter".into()],
             studio: Mutex::new(studio),
+            storage: StorageState::new(
+                Box::new(crate::storage::tests::FakeMedia::ready()),
+                root.join("scratch"),
+            ),
         };
         Fixture {
             backend,

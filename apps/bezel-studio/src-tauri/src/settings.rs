@@ -21,6 +21,9 @@ pub struct Settings {
     /// The orientation last used with each screen (`portrait`, `landscape`…),
     /// by screen key.
     pub screen_orientations: BTreeMap<String, String>,
+    /// The ffmpeg chosen with the storage tab's Locate button (the program
+    /// or its folder); `PATH` is searched after it.
+    pub ffmpeg_path: Option<String>,
 }
 
 impl Settings {

@@ -23,7 +23,7 @@ Workspace hexagonal (core + adapters + CLI + app), especificação de engenharia
 
 ### Auto-verifiable
 - [ ] `bezel devices --json` lists the catalog-matched devices through the fake bus in a test
-      **Verify:** `cargo test -p bezel-cli --locked --test devices -- --exact devices_json_lists_fake_turing_88 2>&1 | grep -q '1 passed' && echo OK`
+      **Verify:** `cargo test -p bezel --locked --test devices -- --exact devices_json_lists_fake_turing_88 2>&1 | grep -q '1 passed' && echo OK`
       **Source:** CONTEXT
 - [ ] The 8.8" MCU + SoC pair is classified as ONE device with two endpoints
       **Verify:** `cargo test -p bezel-devices --locked -- --exact discovery::tests::groups_turing_88_mcu_and_soc 2>&1 | grep -q '1 passed' && echo OK`

@@ -370,9 +370,21 @@ impl Backend {
             .collect()
     }
 
-    /// Opens a theme of the library (or any theme file).
+    /// Opens a theme of the library, or a theme file the user picked in a
+    /// dialog during this session.
     pub fn open(&self, location: &str) -> UiResult<ThemeDto> {
         let location = ThemeLocation(location.to_string());
+        if !self.library.allows(&location) {
+            return Err(format!(
+                "{} is not in the theme library; import it instead",
+                location.0
+            ));
+        }
+        self.open_at(location)
+    }
+
+    /// Opens the theme at `location`, which the app chose itself.
+    fn open_at(&self, location: ThemeLocation) -> UiResult<ThemeDto> {
         let mut studio = self.studio();
         studio
             .open(self.store.as_ref(), location.clone())
@@ -382,10 +394,15 @@ impl Backend {
         Ok(ThemeDto::from(studio.theme()))
     }
 
-    /// Saves the UI's theme: to `target` when given, else where it was
-    /// opened from (a copy in the user folder for a bundled theme).
+    /// Saves the UI's theme: to `target` when given (a file picked in the
+    /// save dialog, [`ThemeLibrary::grant`]ed first), else where it was
+    /// opened from when the library allows it (otherwise, and for a bundled
+    /// theme, a copy in the user folder).
     pub fn save(&self, theme: &ThemeDto, target: Option<ThemeLocation>) -> UiResult<SavedDto> {
         let theme = theme_of(theme)?;
+        if let Some(target) = target.as_ref().filter(|t| !self.library.allows(t)) {
+            return Err(format!("{} was not picked to save to", target.0));
+        }
         let mut studio = self.studio();
         let location =
             target.unwrap_or_else(|| self.library.save_location(studio.location(), &theme.name));
@@ -498,7 +515,11 @@ impl Backend {
     /// [`Self::new_theme`] picks for it).
     pub fn restore_theme(&self) {
         if let Some(last) = self.settings.load().last_theme {
-            match self.open(&last) {
+            // The app's own record of a theme the window was allowed to open
+            // or save last time: saving writes back to it again.
+            let location = ThemeLocation(last.clone());
+            self.library.grant(&location);
+            match self.open_at(location) {
                 Ok(_) => return,
                 Err(e) => tracing::warn!(theme = last, "last theme not reopened: {e}"),
             }
@@ -526,7 +547,7 @@ impl Backend {
                 && crate::dto::orientation_slug(e.theme.orientation) == blank.orientation
         });
         if let Some(entry) = fitting
-            && let Err(e) = self.open(&entry.location.0)
+            && let Err(e) = self.open_at(entry.location.clone())
         {
             tracing::warn!(theme = entry.location.0, "bundled theme not opened: {e}");
         }
@@ -853,6 +874,58 @@ mod tests {
     }
 
     #[test]
+    fn the_window_opens_and_saves_only_where_allowed() {
+        let f = fixture("allowed");
+        let theme = f.backend.session().theme;
+        let outside = f.root.join("Desktop").join("Mine.bezeltheme");
+        let at = ThemeLocation(outside.display().to_string());
+        FsThemeStore
+            .save(&at, &theme_of(&theme).unwrap(), &Default::default())
+            .unwrap();
+        let sneaky = f.root.join("themes").join("..").join("Desktop");
+        for refused in [
+            outside.display().to_string(),
+            sneaky.join("Mine.bezeltheme").display().to_string(),
+            "/etc/passwd".into(),
+        ] {
+            let error = f.backend.open(&refused).unwrap_err();
+            assert!(error.contains("not in the theme library"), "{error}");
+        }
+        let error = f.backend.save(&theme, Some(at.clone())).unwrap_err();
+        assert!(error.contains("not picked"), "{error}");
+        assert!(!outside.with_file_name("theme.json").exists());
+
+        // A theme from elsewhere (an import keeps no location; say it had
+        // one) is saved as a copy in the user folder.
+        f.backend.studio().start(
+            theme_of(&theme).unwrap(),
+            Default::default(),
+            Some(at.clone()),
+        );
+        let copy = f.backend.save(&theme, None).unwrap().location;
+        assert!(
+            Path::new(&copy).starts_with(f.root.join("themes")),
+            "{copy}"
+        );
+
+        // Picked in a dialog: open and save reach it for the session, and
+        // the next start reopens it and saves back to it.
+        f.backend.library.grant(&at);
+        f.backend.open(&at.0).unwrap();
+        assert_eq!(f.backend.save(&theme, None).unwrap().location, at.0);
+        let next = fixture("allowed-next");
+        next.backend
+            .settings
+            .update(|s| s.last_theme = Some(at.0.clone()));
+        next.backend.restore_theme();
+        assert_eq!(
+            next.backend.session().location.as_deref(),
+            Some(at.0.as_str())
+        );
+        assert_eq!(next.backend.save(&theme, None).unwrap().location, at.0);
+    }
+
+    #[test]
     fn new_themes_follow_the_screen_shape_then_the_last_orientation_used() {
         let f = fixture("orientation");
         let model = model_by_id(DEFAULT_MODEL).unwrap();
@@ -1010,6 +1083,8 @@ static_text:
         assert_eq!(f.backend.session().location, None, "a copy, not the file");
         let folder = f.root.join("Folder theme");
         let target = ThemeLocation(folder.display().to_string());
+        // Picked in the save dialog.
+        f.backend.library.grant(&target);
         f.backend
             .save(&f.backend.session().theme, Some(target))
             .unwrap();

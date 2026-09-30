@@ -138,7 +138,10 @@ pub async fn save_theme<R: Runtime>(
             None => return Ok(None),
             Some(path) => {
                 let path = path.into_path().map_err(|e| e.to_string())?;
-                Some(ThemeLocation(path.display().to_string()))
+                let location = ThemeLocation(path.display().to_string());
+                // The user picked it: the window may save there from now on.
+                state.library.grant(&location);
+                Some(location)
             }
         }
     } else {
@@ -153,7 +156,7 @@ pub async fn list_themes(state: State<'_, Shared>) -> UiResult<Vec<ThemeEntryDto
     blocking(&state, |b| Ok(b.themes())).await
 }
 
-/// Opens a theme of the library.
+/// Opens a theme of the library (or one picked in a dialog this session).
 #[tauri::command]
 pub async fn open_theme(state: State<'_, Shared>, location: String) -> UiResult<ThemeDto> {
     blocking(&state, move |b| b.open(&location)).await

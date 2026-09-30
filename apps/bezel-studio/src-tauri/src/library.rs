@@ -1,7 +1,14 @@
 //! The theme library on disk: the user's themes (writable) and the themes
 //! that ship with the app (read-only; saving one writes a copy).
+//!
+//! The window only reaches theme files the library allows (defence in depth
+//! for a webview that asks for any path): the library's folders, and the
+//! files the user picked in a native dialog during this session
+//! ([`ThemeLibrary::grant`]).
 
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use bezel_core::domain::theme::Theme;
 use bezel_core::ports::ThemeLocation;
@@ -23,12 +30,61 @@ pub struct ThemeEntry {
 pub struct ThemeLibrary {
     user: PathBuf,
     bundled: Vec<PathBuf>,
+    /// Theme files outside the folders the user picked in this session.
+    granted: Arc<Mutex<BTreeSet<PathBuf>>>,
+}
+
+/// An absolute path without `.` or `..`: what it names is what it says.
+fn plain(path: &Path) -> bool {
+    path.is_absolute()
+        && path.components().all(|c| {
+            matches!(
+                c,
+                Component::Prefix(_) | Component::RootDir | Component::Normal(_)
+            )
+        })
+}
+
+/// Whether `path` is a plain path strictly inside `dir`.
+fn inside(path: &Path, dir: &Path) -> bool {
+    plain(path) && path != dir && path.starts_with(dir)
 }
 
 impl ThemeLibrary {
     /// A library writing to `user` and also listing `bundled` folders.
     pub fn new(user: PathBuf, bundled: Vec<PathBuf>) -> Self {
-        Self { user, bundled }
+        Self {
+            user,
+            bundled,
+            granted: Arc::default(),
+        }
+    }
+
+    fn granted(&self) -> std::sync::MutexGuard<'_, BTreeSet<PathBuf>> {
+        self.granted.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Lets the window reach `location` from now on: a file the user picked
+    /// in a native dialog (or the theme the app itself reopens at start).
+    pub fn grant(&self, location: &ThemeLocation) {
+        let path = PathBuf::from(&location.0);
+        if plain(&path) {
+            self.granted().insert(path);
+        }
+    }
+
+    /// Whether the window may open or write `location`: inside one of the
+    /// library's folders, or granted in this session.
+    pub fn allows(&self, location: &ThemeLocation) -> bool {
+        let path = Path::new(&location.0);
+        self.is_user(location)
+            || self.is_bundled(location)
+            || (plain(path) && self.granted().contains(path))
+    }
+
+    /// True for a location inside the user's folder.
+    pub fn is_user(&self, location: &ThemeLocation) -> bool {
+        inside(Path::new(&location.0), &self.user)
     }
 
     /// Where new and copied themes are saved.
@@ -61,7 +117,7 @@ impl ThemeLibrary {
     /// True for a location inside a bundled folder.
     pub fn is_bundled(&self, location: &ThemeLocation) -> bool {
         let path = Path::new(&location.0);
-        self.bundled.iter().any(|dir| path.starts_with(dir))
+        self.bundled.iter().any(|dir| inside(path, dir))
     }
 
     /// A free `.bezeltheme` location in the user folder named after `name`.
@@ -83,10 +139,14 @@ impl ThemeLibrary {
     }
 
     /// Where saving the theme opened from `current` should write: the same
-    /// place for a user theme, a new user file otherwise.
+    /// place for a theme of the user's folder or a file granted in this
+    /// session, a new file in the user's folder otherwise (a bundled theme,
+    /// or any other place).
     pub fn save_location(&self, current: Option<&ThemeLocation>, name: &str) -> ThemeLocation {
         match current {
-            Some(location) if !self.is_bundled(location) => location.clone(),
+            Some(location) if self.allows(location) && !self.is_bundled(location) => {
+                location.clone()
+            }
             _ => self.new_location(name),
         }
     }
@@ -213,6 +273,40 @@ mod tests {
         let copy = library.save_location(Some(&shipped), "Aurora");
         assert_eq!(Path::new(&copy.0), user.join("Aurora.bezeltheme"));
         assert_eq!(library.user_dir(), user.as_path());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn only_the_folders_and_granted_files_are_reachable() {
+        let root = scratch("allows");
+        let (user, bundled) = (root.join("user"), root.join("bundled"));
+        let library = ThemeLibrary::new(user.clone(), vec![bundled.clone()]);
+        let at = |p: &Path| ThemeLocation(p.display().to_string());
+        assert!(library.allows(&at(&user.join("mine.bezeltheme"))));
+        assert!(library.allows(&at(&bundled.join("shipped"))));
+        let outside = root.join("Desktop").join("x.bezeltheme");
+        for refused in [
+            outside.clone(),
+            user.clone(),
+            user.join("..").join("Desktop").join("x.bezeltheme"),
+            PathBuf::from("relative.bezeltheme"),
+            PathBuf::from("/etc/passwd"),
+        ] {
+            assert!(!library.allows(&at(&refused)), "{}", refused.display());
+        }
+        // Saving a theme from elsewhere writes a copy in the user folder…
+        let copy = library.save_location(Some(&at(&outside)), "X");
+        assert_eq!(Path::new(&copy.0), user.join("X.bezeltheme"));
+        // …until the user picks that file in a dialog.
+        library.grant(&at(&outside));
+        library.grant(&at(Path::new("dir/../x")));
+        assert!(library.allows(&at(&outside)));
+        assert!(library.clone().allows(&at(&outside)), "shared by copies");
+        assert_eq!(
+            library.save_location(Some(&at(&outside)), "X"),
+            at(&outside)
+        );
+        assert!(!library.allows(&at(Path::new("dir/../x"))));
         let _ = std::fs::remove_dir_all(&root);
     }
 

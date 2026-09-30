@@ -3,7 +3,8 @@
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 
-const BUTTON_CLASS = { primary: 'primary-button', danger: 'danger-button', text: 'text-button' };
+/** The class of each kind of button; any other kind is a text button. */
+const BUTTON_CLASS = { primary: 'primary-button', danger: 'danger-button' };
 
 /**
  * Asks a question; resolves with the `id` of the chosen action, or
@@ -17,7 +18,7 @@ export function askChoice(t, { title, body, actions, initial }) {
   return new Promise((resolve) => {
     const opener = document.activeElement;
     const cancel = el('button', { type: 'button', class: 'text-button', text: t('dialog.cancel') });
-    const buttons = actions.map((a) => el('button', { type: 'button', class: BUTTON_CLASS[a.kind ?? 'text'], dataset: { choice: a.id }, text: a.label }));
+    const buttons = actions.map((a) => el('button', { type: 'button', class: BUTTON_CLASS[a.kind] ?? 'text-button', dataset: { choice: a.id }, text: a.label }));
     const close = el('button', { type: 'button', class: 'icon-button dialog-close', title: t('dialog.close'), 'aria-label': t('dialog.close') }, [icon(ICONS.close, 16)]);
     const dialog = el('dialog', { class: 'confirm-dialog', 'aria-labelledby': 'choice-title', 'aria-describedby': 'choice-body' }, [
       el('div', { class: 'dialog-head' }, [el('h2', { id: 'choice-title', text: title }), close]),

@@ -43,6 +43,115 @@ test('every static key used by the code exists', () => {
   for (const key of keys) assert.ok(key in LOCALES.en, key);
 });
 
+/** String and template literals of `code`: where each starts and ends, and its text (`\0` for `${…}`). */
+function literals(code) {
+  const out = [];
+  for (let i = 0; i < code.length; i += 1) {
+    const c = code[i];
+    if (c === '/' && code[i + 1] === '/') {
+      i = code.indexOf('\n', i);
+      if (i < 0) break;
+      continue;
+    }
+    if (c === '/' && code[i + 1] === '*') {
+      i = code.indexOf('*/', i) + 1;
+      continue;
+    }
+    if (c !== "'" && c !== '"' && c !== '`') continue;
+    let j = i + 1;
+    let text = '';
+    while (j < code.length && code[j] !== c) {
+      if (code[j] === '\\') {
+        text += code[j + 1];
+        j += 2;
+      } else if (c === '`' && code[j] === '$' && code[j + 1] === '{') {
+        let depth = 1;
+        j += 2;
+        while (depth && j < code.length) {
+          depth += code[j] === '{' ? 1 : code[j] === '}' ? -1 : 0;
+          j += 1;
+        }
+        text += '\0';
+      } else {
+        text += code[j];
+        j += 1;
+      }
+    }
+    out.push({ start: i, end: j + 1, text });
+    i = j;
+  }
+  return out;
+}
+
+/** The top-level items of the list that opens at `open`, as [start, end) spans. */
+function items(code, open, byStart) {
+  const spans = [];
+  let depth = 0;
+  let from = open + 1;
+  for (let i = open + 1; i < code.length; i += 1) {
+    const literal = byStart.get(i);
+    if (literal) {
+      i = literal.end - 1;
+    } else if ('([{'.includes(code[i])) {
+      depth += 1;
+    } else if (')]}'.includes(code[i])) {
+      if (depth === 0) {
+        if (code.slice(from, i).trim()) spans.push([from, i]);
+        return spans;
+      }
+      depth -= 1;
+    } else if (code[i] === ',' && depth === 0) {
+      spans.push([from, i]);
+      from = i + 1;
+    }
+  }
+  return spans;
+}
+
+const hasWords = (text) => /\p{L}/u.test(text.replace(/\0/g, ''));
+// Where a literal would be shown: text, title, labels, placeholders, a
+// field's readout, a toast, and the children of `el(…)`.
+const SINK = /(?:\b(?:text|title|label|placeholder|alt|alphaLabel)|'aria-label')\s*:\s*$|\bformat:\s*\([^)]*\)\s*=>\s*$|\.(?:textContent|title|placeholder)\s*=\s*$|setAttribute\(\s*'(?:aria-label|title|placeholder)'\s*,\s*$|\b(?:toast|notify)\(\s*$/;
+
+/** The literal texts with words that `code` would show. */
+function visibleLiterals(code) {
+  const all = literals(code);
+  const byStart = new Map(all.map((l) => [l.start, l]));
+  const shown = all.filter((l) => hasWords(l.text) && SINK.test(code.slice(Math.max(0, l.start - 60), l.start)));
+  for (const call of code.matchAll(/\bel\(/g)) {
+    const children = items(code, call.index + 2, byStart)[2];
+    if (!children) continue;
+    const open = children[0] + code.slice(children[0], children[1]).search(/\S/);
+    if (code[open] !== '[') continue;
+    for (const [from, to] of items(code, open, byStart)) {
+      const start = from + code.slice(from, to).search(/\S/);
+      const literal = byStart.get(start);
+      if (literal && literal.end === start + code.slice(start, to).trimEnd().length && hasWords(literal.text)) shown.push(literal);
+    }
+  }
+  return shown.map((l) => l.text.replace(/\0/g, '${…}'));
+}
+
+test('the literal scan finds text shown without a translation', () => {
+  const code = "el('p', { text: 'Hello' }, ['World', t('x'), `${a} s`, `${a}%`, icon(I.x)]); x.textContent = 'Hi'; toast('Oops');"
+    + " y.setAttribute('aria-label', 'Lbl'); f(l, v, { format: (v) => `${v} min` }); el('i', { class: 'text-button', 'data-x': 'ok' }, []);";
+  assert.deepEqual(visibleLiterals(code).sort(), ['${…} min', '${…} s', 'Hello', 'Hi', 'Lbl', 'Oops', 'World']);
+});
+
+test('no text is written in the UI code: everything goes through t()', () => {
+  const files = ['app.js', ...readdirSync(new URL('ui/', src)).filter((f) => f.endsWith('.js')).map((f) => `ui/${f}`)];
+  const found = files.flatMap((f) => visibleLiterals(readFileSync(new URL(f, src), 'utf8')).map((text) => `${f}: ${text}`));
+  assert.deepEqual(found, []);
+});
+
+test('index.html has no text of its own but the brand', () => {
+  const html = readFileSync(new URL('index.html', src), 'utf8');
+  const texts = [...html.matchAll(/>([^<>]+)</g)].map((m) => m[1].trim()).filter((text) => /\p{L}/u.test(text));
+  assert.deepEqual([...new Set(texts)], ['Bezel']);
+  const attrs = [...html.matchAll(/\s(?:title|alt|placeholder|aria-label)="([^"]*)"/g)].map((m) => m[1]).filter((v) => /\p{L}/u.test(v));
+  assert.deepEqual(attrs, []);
+});
+
 test('every widget has a name', () => {
   for (const w of WIDGETS) assert.ok(`widget.${w}` in LOCALES.en, w);
 });

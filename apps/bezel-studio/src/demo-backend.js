@@ -94,6 +94,9 @@ export function demoDenied(address) {
   });
 }
 
+/** The fastest refresh a theme may ask for, seconds (the core's `MIN_REFRESH_SECONDS`). */
+export const DEMO_MIN_REFRESH = 0.25;
+
 /** Pause between two simulated progress reports, ms. */
 export const DEMO_STEP_MS = 150;
 const CONVERT_STEPS = 8;
@@ -420,7 +423,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       readings['gpu.1.fan'] = { unavailable: 'no fan sensor', display: '—' };
       return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError: null, video: videoOfTheme() });
     },
-    session: () => Promise.resolve({ theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location }),
+    session: () => Promise.resolve({ theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location, minRefreshSeconds: DEMO_MIN_REFRESH }),
     render: (next) => {
       const started = performance.now();
       const frame = renderApprox(next, now());

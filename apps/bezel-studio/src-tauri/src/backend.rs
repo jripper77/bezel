@@ -13,7 +13,7 @@ use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::screen::{Brightness, Confirm};
-use bezel_core::domain::theme::Theme;
+use bezel_core::domain::theme::{MIN_REFRESH_SECONDS, Theme};
 use bezel_core::ports::{
     DesktopModeHid, DeviceBus, ScreenConnector, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
 };
@@ -440,6 +440,7 @@ impl Backend {
         SessionDto {
             theme: ThemeDto::from(studio.theme()),
             location: studio.location().map(|l| l.0.clone()),
+            min_refresh_seconds: MIN_REFRESH_SECONDS,
         }
     }
 
@@ -686,7 +687,6 @@ pub const DEFAULT_MODEL: bezel_core::domain::device::ModelId =
 mod tests {
     use super::*;
     use bezel_core::domain::geometry::{Orientation, Size};
-    use bezel_core::domain::theme::MIN_REFRESH_SECONDS;
     use bezel_devices::{FakeBus, FakeConnector, FakeHid};
     use bezel_render::{SkiaRenderer, SystemFonts};
     use bezel_sensors::FakeSensors;
@@ -912,6 +912,8 @@ mod tests {
         let theme = f.backend.session().theme;
         let bytes = f.backend.render(&theme, TIME).unwrap();
         assert_eq!(&bytes[..8], &[224, 1, 0, 0, 128, 7, 0, 0]);
+        let json = serde_json::to_value(f.backend.session()).unwrap();
+        assert_eq!(json["minRefreshSeconds"], MIN_REFRESH_SECONDS);
         assert_eq!(bytes.len(), 8 + 480 * 1920 * 4);
         let mut bad = theme.clone();
         bad.orientation = "sideways".into();

@@ -82,12 +82,15 @@ export function joinColor(rgb, alphaPercent) {
   return `${rgb.toLowerCase()}${a.toString(16).padStart(2, '0')}`;
 }
 
-/** A color with opacity: native picker + hex text + alpha %. */
-export function colorField(label, hex, onChange, { alphaLabel = 'α' } = {}) {
+/**
+ * A color with opacity: native picker + hex text + alpha %. `alphaLabel`
+ * names the opacity input (translated by the caller).
+ */
+export function colorField(label, hex, onChange, { alphaLabel }) {
   const { rgb, alpha } = splitColor(hex);
   const picker = el('input', { type: 'color', value: rgb, 'aria-label': label });
   const text = el('input', { type: 'text', value: rgb, 'aria-label': label, spellcheck: false });
-  const a = el('input', { type: 'number', min: 0, max: 100, step: 1, value: String(alpha), 'aria-label': `${label} ${alphaLabel}` });
+  const a = el('input', { type: 'number', min: 0, max: 100, step: 1, value: String(alpha), 'aria-label': alphaLabel });
   const commit = () => onChange(joinColor(picker.value, Number(a.value)));
   picker.addEventListener('input', () => { text.value = picker.value; });
   picker.addEventListener('change', commit);

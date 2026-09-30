@@ -3,7 +3,7 @@
 // store command (one undo step).
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
-import { checkField, colorField, numberField, rangeField, segmented, selectField, textField } from './fields.js';
+import { checkField, colorField as colorInputs, numberField, rangeField, segmented, selectField, textField } from './fields.js';
 import { createWidget, widgetOf } from '../editor/widgets.js';
 import { ORIENTATIONS } from '../editor/geometry.js';
 
@@ -13,9 +13,11 @@ const CLOCK_PATTERNS = ['%H:%M', '%H:%M:%S', '%I:%M %p', '%d/%m/%Y', '%A', '%a %
 /**
  * @param {object} deps
  * @param {HTMLElement} deps.root
+ * @param {() => number} deps.minRefresh the fastest refresh a theme may ask for, seconds (from the backend)
  */
-export function createInspector({ root, store, t, sensors }) {
+export function createInspector({ root, store, t, sensors, minRefresh }) {
   const update = (id, patch) => store.dispatch('update', { id, patch });
+  const colorField = (label, hex, onChange) => colorInputs(label, hex, onChange, { alphaLabel: t('inspector.opacityOf', { name: label }) });
 
   function sensorOptions() {
     const groups = {};
@@ -54,7 +56,7 @@ export function createInspector({ root, store, t, sensors }) {
         : el('p', { class: 'hint', text: t(`bg.${bg.type}`) }),
       bg.type !== 'color' && el('button', { type: 'button', class: 'text-button', text: t('inspector.useColor'), onclick: () => store.dispatch('setTheme', { patch: { background: { type: 'color', color: '#0c0e16ff' } } }) }),
       el('h3', { text: t('inspector.refresh') }),
-      rangeField(t('inspector.refreshSeconds'), theme.refreshSeconds, (v) => store.dispatch('setTheme', { patch: { refreshSeconds: v } }), { min: 0.25, max: 5, step: 0.25, format: (v) => `${v} s` }),
+      rangeField(t('inspector.refreshSeconds'), theme.refreshSeconds, (v) => store.dispatch('setTheme', { patch: { refreshSeconds: v } }), { min: minRefresh(), max: 5, step: minRefresh(), format: (v) => t('unit.seconds', { value: v }) }),
     ];
   }
 

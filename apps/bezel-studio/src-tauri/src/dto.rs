@@ -299,6 +299,9 @@ pub struct SessionDto {
     pub theme: ThemeDto,
     /// Where it lives.
     pub location: Option<String>,
+    /// The fastest refresh a theme may ask for, seconds (the core's
+    /// `MIN_REFRESH_SECONDS`).
+    pub min_refresh_seconds: f32,
 }
 
 /// A theme of the library.

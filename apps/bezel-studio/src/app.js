@@ -70,8 +70,11 @@ function fail(e) {
 const session = await bridge.session().catch(() => null);
 // Without a session: a blank theme for the 8.8", horizontal like the backend's
 // default for bar-shaped screens.
-const store = createStore(session?.theme ?? { schema: 1, name: 'Untitled', canvas: { width: 1920, height: 480 }, orientation: 'landscape', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] });
+const store = createStore(session?.theme ?? { schema: 1, name: t('themes.untitled'), canvas: { width: 1920, height: 480 }, orientation: 'landscape', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] });
 state.location = session?.location ?? null;
+// The fastest refresh a theme may ask for comes from the backend (the
+// core's); without a backend nothing refreshes faster than once a second.
+const minRefresh = () => session?.minRefreshSeconds ?? 1;
 
 const canvasView = createCanvasView({
   store,
@@ -122,6 +125,7 @@ const inspector = createInspector({
   store,
   t,
   sensors: { catalog: () => state.catalog, fonts: () => state.fonts },
+  minRefresh,
 });
 
 // ----------------------------------------------------------- render ----
@@ -194,7 +198,7 @@ store.subscribe((_, reason) => refreshChrome(reason));
 
 // Clock and sensor elements change every refresh even without edits.
 function scheduleTick() {
-  const seconds = Math.max(0.25, store.getState().theme.refreshSeconds || 1);
+  const seconds = Math.max(minRefresh(), store.getState().theme.refreshSeconds || 1);
   setTimeout(() => {
     renderNow();
     scheduleTick();

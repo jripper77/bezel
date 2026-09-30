@@ -431,8 +431,10 @@ dependencies = [
  "nvml-wrapper",
  "rustix",
  "serde",
+ "socket2",
  "sysinfo",
  "tracing",
+ "windows-sys 0.61.2",
  "wmi",
 ]
 

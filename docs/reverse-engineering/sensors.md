@@ -243,9 +243,9 @@ Vendor app (static):
 | Disk I/O, temperature | `/proc/diskstats` (sectors x 512, elapsed-based); `drivetemp` or NVMe hwmon |
 | Network | `/sys/class/net/<if>/statistics/{rx,tx}_bytes` with monotonic elapsed time, 64-bit wrap handling, "auto" = default-route interface, and sum of all |
 | Volume | PipeWire / PulseAudio default sink |
-| FPS | optional: MangoHud or gamescope statistics when available; unavailable otherwise |
+| FPS | the newest MangoHud CSV log, read-only (section 8.2); unavailable with how to enable logging otherwise |
 | Weather | Open-Meteo (no key) with its geocoding API; cached, with a stale marker and timeouts |
-| Ping | unprivileged ICMP (`SOCK_DGRAM`, `ping_group_range`) or TCP-connect fallback, in its own task; timeout = unavailable |
+| Ping | unprivileged ICMP (`SOCK_DGRAM`, `ping_group_range`) or TCP-connect fallback, in its own task; timeout = unavailable (section 8.3) |
 | Date/time | CLDR-compatible formatter (Python themes use CLDR patterns such as `yyyy.MM.dd`, `HH:mm:ss zzz`, `EEE d MMM`); the vendor SubName vocabulary as aliases |
 
 ### 6.2 Windows
@@ -256,7 +256,7 @@ Vendor app (static):
 | Temperatures, clocks, voltages, fans, power | LibreHardwareMonitor's WMI provider when LHM is running (namespace to be confirmed during implementation), or HWiNFO's shared-memory interface when the user enables it in HWiNFO. Bezel reads what is published; it does not bundle either engine or require kernel drivers of its own. |
 | NVIDIA GPU | NVML |
 | AMD / Intel GPU | vendor libraries where available; PDH "GPU Engine" counters for usage |
-| FPS | RTSS shared memory when RivaTuner Statistics Server runs; unavailable otherwise |
+| FPS | RTSS shared memory when RivaTuner Statistics Server runs, read-only (section 8.1); unavailable otherwise |
 | Volume | Core Audio default render endpoint |
 
 ### 6.3 Cadence
@@ -269,7 +269,105 @@ render path. Each sample carries its timestamp so history graphs use real time s
 
 1. Units of LHM `Data` sensors in the version the Python project bundles (GiB versus GB, S17).
 2. Exact LHM sensor names on AMD Ryzen and for the FPS factor; psutil's Windows load-average emulation cadence.
-3. Whether ping3 works on Linux without `ping_group_range` or root.
+3. Whether ping3 works on Linux without `ping_group_range` or root. (Bezel does not depend on it: an ICMP datagram
+   socket outside `ping_group_range` is refused, and Bezel then times a TCP connect instead; section 8.3.)
 4. The vendor engine's `code.ini` flag semantics (64 / 0 / 8192) and the drop-down population rules for fans and
    voltages.
 5. NVIDIA memory units reported by GPUtil (assumed MiB).
+
+## 8. Game FPS and ping sources (Bezel 1.0)
+
+Bezel never hooks, injects into or draws over a game: `gpu.fps` reads what a frame-rate overlay that already runs
+publishes (D-2026-09-30-release-polish-4). Both readers are tested with golden fixtures in
+`crates/bezel-sensors/src/fps/fixtures/`, written by hand from the sources below; none comes from a real game yet, so
+the catalog marks the sensor "not validated on hardware" (`hardware_validated = false`). A missing source, or a value
+older than 3 s, is unavailable with a reason that says how to turn the source on (never 0, never the last value); a
+live source that reports 0 fps reads 0.
+
+### 8.1 RivaTuner Statistics Server shared memory (Windows)
+
+Source: `RTSSSharedMemory.h` of the RTSS SDK (installed with RivaTuner Statistics Server under `SDK\Include`; a copy
+is in the `Kaldaien/BMF` repository on GitHub), structure `RTSS_SHARED_MEMORY`, v2.x.
+
+- RTSS creates the named file mapping `RTSSSharedMemoryV2`. Bezel opens it with `OpenFileMappingW(FILE_MAP_READ)`,
+  maps the whole section with `MapViewOfFile(FILE_MAP_READ, 0)`, copies the committed region (`VirtualQuery`), and
+  unmaps it at once. Nothing is ever written. These Win32 calls are the only `unsafe` code in Bezel.
+- Header, little-endian DWORDs:
+
+| Offset | Field | Use |
+|---|---|---|
+| 0x00 | `dwSignature` | `'RTSS'` = 0x52545353 (bytes `SSTR`) when valid; 0xDEAD while RTSS tears the memory down; any other value = not initialised |
+| 0x04 | `dwVersion` | `(major << 16) + minor`; the application array exists from 0x00020000 (v2.0) |
+| 0x08 | `dwAppEntrySize` | bytes of one application entry (grows with each version) |
+| 0x0c | `dwAppArrOffset` | offset of the application array |
+| 0x10 | `dwAppArrSize` | number of application entries (256) |
+| 0x14-0x20 | `dwOSDEntrySize`, `dwOSDArrOffset`, `dwOSDArrSize`, `dwOSDFrame` | OSD slots; not read |
+
+  The header's comments on 0x08-0x1c name the wrong structures (the application fields say "OSD entry"); the field
+  names, application array first, are the layout. Readers must take the entry size and offset from the header, not
+  from a fixed version, as the SDK asks.
+- Application entry (`RTSS_SHARED_MEMORY_APP_ENTRY`), offsets from the entry start:
+
+| Offset | Field | Use |
+|---|---|---|
+| 0 | `dwProcessID` | 0 = free slot |
+| 4 | `szName[MAX_PATH]` | executable path (ANSI); shown by its file name |
+| 264 | `dwFlags` | graphics API flags; not read |
+| 268 | `dwTime0` | start of the last measurement period, ms; 0 = not measured yet (the SDK requires it non-zero) |
+| 272 | `dwTime1` | end of that period, ms |
+| 276 | `dwFrames` | frames presented in the period |
+| 280 | `dwFrameTime` | duration of the last frame, microseconds |
+
+- Frame rate: `1000 * dwFrames / (dwTime1 - dwTime0)`, the SDK's once-per-period formula; `1000000 / dwFrameTime`
+  when the period is empty.
+- Game: the measured entry whose period ended last. Its age is `GetTickCount() - dwTime1`, the clock read after the
+  copy, across the 49.7-day wrap; a period up to 1 s ahead of the clock counts as 0 ms old. **Inferred:** the SDK only
+  says "milliseconds"; `GetTickCount` is the clock another open-source RTSS reader (steelclock-go) compares with. To be
+  confirmed with a real game (phase release-polish, T-7.8).
+- A period that has not closed for 3 s means the game is minimized, paused or closing (RTSS closes a period only while
+  frames are presented): unavailable.
+
+### 8.2 MangoHud CSV logs (Linux)
+
+Source: MangoHud's `src/logging.cpp` (`writeFileHeaders`, `Logger::writeToFile`, `Logger::start_logging`,
+`writeSummary`) and `src/config.cpp` (`enumerate_config_files`, `parseConfigFile`, `parseConfigLine`), master of
+2026-09-30.
+
+- MangoHud logs while logging is toggled on (`toggle_logging`, default `Shift_L+F2`) or after `autostart_log=<seconds>`.
+  Each session writes `<output_folder>/<program>_<YYYY-MM-DD_HH-MM-SS>.csv` (under Wine, the program is the `.exe`
+  name); an empty `output_folder` means `$HOME`.
+- Layout (the bracketed lines only with `log_versioning`):
+
+```text
+[v1]
+[<MangoHud version>]
+[---------------------SYSTEM INFO---------------------]
+os,cpu,gpu,ram,kernel,driver,cpuscheduler
+<system values>
+[--------------------FRAME METRICS--------------------]
+fps,frametime,cpu_load,cpu_power,gpu_load,cpu_temp,gpu_temp,gpu_core_clock,gpu_mem_clock,gpu_vram_used,gpu_power,ram_used,swap_used,process_rss,cpu_mhz,elapsed
+<one row per logged interval, flushed as it is written; elapsed = nanoseconds since logging started>
+```
+
+- `stop_logging` then writes `<same name>_summary.csv` (percentiles and averages), which is not a frame log.
+- Bezel takes the newest file named `*_YYYY-MM-DD_HH-MM-SS.csv` by modification time, finds the `fps` column by name
+  in the frame-metric header (first 4 KiB) and reads it from the last complete row (last 4 KiB; a row still being
+  written is skipped). A file last written more than 3 s ago is stale.
+- Folder: `--mangohud-dir` (CLI) or the studio setting; else MangoHud's own lookup without the per-game files:
+  `MANGOHUD_CONFIGFILE` alone when set, else the first file that exists of `/etc/MangoHud.conf` and
+  `$XDG_CONFIG_HOME/MangoHud/MangoHud.conf` (`~/.config` without `XDG_CONFIG_HOME`), in that order (MangoHud reads only
+  the first one it finds); its `output_folder` (`key=value` lines, `#` comments, `~` expanded), else `$HOME`.
+
+### 8.3 `net.ping`
+
+- A thread of its own probes the host (setting `ping_host`, CLI `--ping-host`, default 8.8.8.8) once a second with a
+  2 s timeout; a sample only reads the last result, so a mute host never delays it (D-2026-09-30-release-polish-5). No
+  answer within the timeout, or a result older than 5 s (the probe is stuck, for example resolving the name), is
+  unavailable.
+- ICMP echo request (type 8, ICMPv6 128; identifier 0, a sequence number, 8 bytes of payload) through
+  `socket(AF_INET or AF_INET6, SOCK_DGRAM, IPPROTO_ICMP or IPPROTO_ICMPV6)`. Linux allows it for the groups in
+  `net.ipv4.ping_group_range` (Fedora: `0 2147483647`), writes its own identifier, filters the replies for the socket
+  and returns the ICMP message without the IP header. The reply (type 0, ICMPv6 129) must echo the sequence and
+  payload.
+- When that socket is refused (a user outside `ping_group_range`, Windows), Bezel times a TCP connect (SYN to SYN-ACK)
+  to port 53, then 443.

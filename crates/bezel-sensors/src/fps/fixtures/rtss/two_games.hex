@@ -1,0 +1,62 @@
+# RTSS shared memory ("RTSSSharedMemoryV2"), v2.0 layout, assembled by hand
+# from RTSSSharedMemory.h of the RTSS SDK (docs/reverse-engineering/sensors.md § 8).
+# Not a capture from a real RivaTuner (hardware_validated = false).
+#
+# Format: `size N` zero-fills an image of N bytes, `@OFFSET` moves the cursor,
+# every other token is one hex byte; `#` starts a comment. DWORDs are
+# little-endian.
+#
+# Two measured games and one hooked app not measured yet; slot 0 is free.
+# The Witcher 3 closed its last period at 101000 ms: 144 frames in 1000 ms.
+# Hades closed its last one at 91000 ms (60 fps), ten seconds earlier.
+
+size 0x26824
+@0x0000
+# --- header -------------------------------------------------------------
+53 53 54 52   # 0x00 dwSignature: 0x52545353
+00 00 02 00   # 0x04 dwVersion ((major << 16) | minor): 0x00020000
+58 02 00 00   # 0x08 dwAppEntrySize: 600
+24 10 00 00   # 0x0c dwAppArrOffset: 4132
+00 01 00 00   # 0x10 dwAppArrSize (entries): 256
+00 02 00 00   # 0x14 dwOSDEntrySize: 512
+24 00 00 00   # 0x18 dwOSDArrOffset: 36
+08 00 00 00   # 0x1c dwOSDArrSize (entries): 8
+34 12 00 00   # 0x20 dwOSDFrame: 4660
+@0x127c
+# --- arrApp[1] at 0x1024 + 1 * 600 ---------------------------
+92 10 00 00   # +0 dwProcessID: 4242
+# +4 szName: "C:\Games\The Witcher 3\bin\x64\witcher3.exe" (NUL-terminated, char[260])
+43 3a 5c 47 61 6d 65 73 5c 54 68 65 20 57 69 74
+63 68 65 72 20 33 5c 62 69 6e 5c 78 36 34 5c 77
+69 74 63 68 65 72 33 2e 65 78 65 00
+@0x1384
+00 00 00 01   # +264 dwFlags: 0x01000000
+a0 86 01 00   # +268 dwTime0 (ms): 100000
+88 8a 01 00   # +272 dwTime1 (ms): 101000
+90 00 00 00   # +276 dwFrames: 144
+20 1b 00 00   # +280 dwFrameTime (us): 6944
+@0x14d4
+# --- arrApp[2] at 0x1024 + 2 * 600 ---------------------------
+09 03 00 00   # +0 dwProcessID: 777
+# +4 szName: "C:\Games\Hades\x64\Hades.exe" (NUL-terminated, char[260])
+43 3a 5c 47 61 6d 65 73 5c 48 61 64 65 73 5c 78
+36 34 5c 48 61 64 65 73 2e 65 78 65 00
+@0x15dc
+00 00 00 01   # +264 dwFlags: 0x01000000
+90 5f 01 00   # +268 dwTime0 (ms): 90000
+78 63 01 00   # +272 dwTime1 (ms): 91000
+3c 00 00 00   # +276 dwFrames: 60
+1b 41 00 00   # +280 dwFrameTime (us): 16667
+@0x172c
+# --- arrApp[3] at 0x1024 + 3 * 600 ---------------------------
+63 00 00 00   # +0 dwProcessID: 99
+# +4 szName: "C:\Program Files\Mozilla Firefox\firefox.exe" (NUL-terminated, char[260])
+43 3a 5c 50 72 6f 67 72 61 6d 20 46 69 6c 65 73
+5c 4d 6f 7a 69 6c 6c 61 20 46 69 72 65 66 6f 78
+5c 66 69 72 65 66 6f 78 2e 65 78 65 00
+@0x1834
+00 00 00 01   # +264 dwFlags: 0x01000000
+00 00 00 00   # +268 dwTime0 (ms): 0
+00 00 00 00   # +272 dwTime1 (ms): 0
+00 00 00 00   # +276 dwFrames: 0
+00 00 00 00   # +280 dwFrameTime (us): 0

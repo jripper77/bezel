@@ -1,0 +1,35 @@
+# RTSS shared memory ("RTSSSharedMemoryV2"), v2.0 layout, assembled by hand
+# from RTSSSharedMemory.h of the RTSS SDK (docs/reverse-engineering/sensors.md § 8).
+# Not a capture from a real RivaTuner (hardware_validated = false).
+#
+# Format: `size N` zero-fills an image of N bytes, `@OFFSET` moves the cursor,
+# every other token is one hex byte; `#` starts a comment. DWORDs are
+# little-endian.
+#
+# One game on a loading screen that presented no frame in its last
+# period (200000..201000 ms): a live 0 fps, not a missing value.
+
+size 0x26824
+@0x0000
+# --- header -------------------------------------------------------------
+53 53 54 52   # 0x00 dwSignature: 0x52545353
+00 00 02 00   # 0x04 dwVersion ((major << 16) | minor): 0x00020000
+58 02 00 00   # 0x08 dwAppEntrySize: 600
+24 10 00 00   # 0x0c dwAppArrOffset: 4132
+00 01 00 00   # 0x10 dwAppArrSize (entries): 256
+00 02 00 00   # 0x14 dwOSDEntrySize: 512
+24 00 00 00   # 0x18 dwOSDArrOffset: 36
+08 00 00 00   # 0x1c dwOSDArrSize (entries): 8
+07 00 00 00   # 0x20 dwOSDFrame: 7
+@0x1024
+# --- arrApp[0] at 0x1024 + 0 * 600 ---------------------------
+1e 14 00 00   # +0 dwProcessID: 5150
+# +4 szName: "C:\Games\Loading\game.exe" (NUL-terminated, char[260])
+43 3a 5c 47 61 6d 65 73 5c 4c 6f 61 64 69 6e 67
+5c 67 61 6d 65 2e 65 78 65 00
+@0x112c
+00 00 00 01   # +264 dwFlags: 0x01000000
+40 0d 03 00   # +268 dwTime0 (ms): 200000
+28 11 03 00   # +272 dwTime1 (ms): 201000
+00 00 00 00   # +276 dwFrames: 0
+00 00 00 00   # +280 dwFrameTime (us): 0

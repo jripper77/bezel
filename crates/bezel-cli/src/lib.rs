@@ -25,6 +25,7 @@ use bezel_core::ports::{
     DesktopModeHid, DeviceBus, FrameRenderer, MediaTranscoder, ScreenConnector, SensorSource,
     ThemeStore,
 };
+use clap::builder::NonEmptyStringValueParser;
 use clap::{Parser, Subcommand, ValueEnum};
 
 pub use live::{Pace, RunRequest, SleepPace};
@@ -158,6 +159,19 @@ pub struct SensorsArgs {
     pub timing: bool,
 }
 
+/// Where the sensors that take settings measure from (`sensors`, `run`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
+pub struct SensorSettings {
+    /// Host whose round trip `net.ping` measures, a name or an address
+    /// [default: 8.8.8.8].
+    #[arg(long, value_name = "HOST", value_parser = NonEmptyStringValueParser::new())]
+    pub ping_host: Option<String>,
+    /// Folder of MangoHud's CSV logs that `gpu.fps` reads on Linux
+    /// [default: output_folder of MangoHud.conf, else your home folder].
+    #[arg(long, value_name = "DIR")]
+    pub mangohud_dir: Option<PathBuf>,
+}
+
 /// Subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -241,7 +255,14 @@ pub enum Command {
     /// Show the machine's sensors: CPU, GPU, memory, disks, network, board.
     /// Rates and usages are measured between two samples 250 ms apart, so
     /// the first output takes a quarter of a second.
-    Sensors(SensorsArgs),
+    Sensors {
+        /// Output options.
+        #[command(flatten)]
+        args: SensorsArgs,
+        /// Ping host and MangoHud folder.
+        #[command(flatten)]
+        settings: SensorSettings,
+    },
     /// Render one frame of a theme to a PNG of its canvas size, with this
     /// machine's sensors (the demo values with --fake).
     Render {
@@ -270,6 +291,9 @@ pub enum Command {
         /// PATH.
         #[arg(long, value_name = "PATH")]
         ffmpeg: Option<PathBuf>,
+        /// Ping host and MangoHud folder.
+        #[command(flatten)]
+        settings: SensorSettings,
     },
     /// Convert another app's theme (.turtheme, theme.yaml or a
     /// turing-smart-screen-python theme folder) into a native Bezel theme.
@@ -290,6 +314,14 @@ impl Command {
     pub fn theme(&self) -> Option<&Path> {
         match self {
             Command::Render { theme, .. } | Command::Run { theme, .. } => Some(theme),
+            _ => None,
+        }
+    }
+
+    /// The `--ping-host` and `--mangohud-dir` of `sensors` and `run`.
+    pub fn sensor_settings(&self) -> Option<&SensorSettings> {
+        match self {
+            Command::Sensors { settings, .. } | Command::Run { settings, .. } => Some(settings),
             _ => None,
         }
     }
@@ -407,7 +439,7 @@ where
         ),
         Command::Off { target } => screen::off(bus, connector, target),
         // Streams its output and needs a sensor source: see `run_sensors`.
-        Command::Sensors(_) => anyhow::bail!("`sensors` runs through run_sensors"),
+        Command::Sensors { .. } => anyhow::bail!("`sensors` runs through run_sensors"),
         // Need sensors and themes: see `run_theme_command`.
         Command::Render { .. } | Command::Run { .. } | Command::Import { .. } => {
             anyhow::bail!("theme commands run through run_theme_command")
@@ -479,11 +511,41 @@ mod tests {
         );
         let cli =
             Cli::try_parse_from(["bezel", "sensors", "--watch", "0.5", "--count", "3"]).unwrap();
-        let Command::Sensors(args) = cli.command else {
+        let Command::Sensors { args, settings } = cli.command else {
             unreachable!("parsed as sensors")
         };
         assert_eq!(args.watch, Some(Duration::from_millis(500)));
         assert_eq!(args.count, Some(3));
+        assert_eq!(settings, SensorSettings::default());
+    }
+
+    #[test]
+    fn sensors_and_run_take_the_ping_host_and_mangohud_folder() {
+        let wanted = SensorSettings {
+            ping_host: Some("1.1.1.1".to_string()),
+            mangohud_dir: Some(PathBuf::from("/games/logs")),
+        };
+        let flags = ["--ping-host", "1.1.1.1", "--mangohud-dir", "/games/logs"];
+        let sensors =
+            Cli::try_parse_from(["bezel", "sensors", "--json"].iter().chain(&flags)).unwrap();
+        assert_eq!(sensors.command.sensor_settings(), Some(&wanted));
+        let run = Cli::try_parse_from(["bezel", "run", "clock"].iter().chain(&flags)).unwrap();
+        assert_eq!(run.command.sensor_settings(), Some(&wanted));
+        let render = Cli::try_parse_from(["bezel", "render", "clock", "-o", "x.png"]).unwrap();
+        assert_eq!(render.command.sensor_settings(), None);
+        assert!(Cli::try_parse_from(["bezel", "sensors", "--ping-host", ""]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "bezel",
+                "render",
+                "clock",
+                "-o",
+                "x.png",
+                "--ping-host",
+                "h"
+            ])
+            .is_err()
+        );
     }
 
     /// Never waits and is never stopped (`--frames` ends the run).

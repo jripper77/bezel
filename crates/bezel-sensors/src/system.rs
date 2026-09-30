@@ -56,19 +56,26 @@ impl SystemSensors {
     /// Like [`SystemSensors::new`], with `options` for the sources that
     /// take settings.
     pub fn with_options(options: SensorOptions) -> Self {
-        let (providers, gpus) = platform(&options);
+        let (mut providers, gpus) = platform();
+        providers.push(Box::new(crate::fps::provider(&options)));
+        providers.push(Box::new(crate::ping::Ping::start(&options.ping_host)));
         Self::assemble(providers, gpus)
     }
 
-    /// Linux sensors read from fake `/sys` and `/proc` trees. NVIDIA GPUs,
-    /// which come from NVML rather than sysfs, are not included.
+    /// Linux sensors read from fake `/sys` and `/proc` trees, game FPS from
+    /// MangoHud logs in `sys/../mangohud` and a ping that answers in 12 ms.
+    /// NVIDIA GPUs, which come from NVML rather than sysfs, are not included.
     #[cfg(all(test, target_os = "linux"))]
     fn with_roots(sys: impl Into<PathBuf>, proc: impl Into<PathBuf>) -> Self {
+        let sys = sys.into();
+        let logs = sys.with_file_name("mangohud");
         let roots = crate::linux::Roots::new(sys, proc);
-        Self::assemble(
-            crate::linux::providers(&roots),
-            crate::amdgpu::discover(&roots),
-        )
+        let mut providers = crate::linux::providers(&roots);
+        providers.push(Box::new(crate::fps::Fps::new(
+            crate::fps::mangohud::MangoHud::new(Some(logs)),
+        )));
+        providers.push(Box::new(tests::answering_ping()));
+        Self::assemble(providers, crate::amdgpu::discover(&roots))
     }
 
     fn assemble(mut providers: Vec<Box<dyn Provider>>, gpus: Vec<FoundGpu>) -> Self {
@@ -106,10 +113,10 @@ fn rank(key: &str) -> u8 {
     u8::from(second.chars().any(|c| c.is_ascii_digit()))
 }
 
-/// The platform's providers and GPUs. No provider takes `_options` yet;
-/// the ping and game-FPS sources will (D-2026-09-30-release-polish-4, -5).
+/// The platform's providers and GPUs (game FPS and ping, which take
+/// options, are added by [`SystemSensors::with_options`]).
 #[cfg(target_os = "linux")]
-fn platform(_options: &SensorOptions) -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
     let roots = crate::linux::Roots::host();
     let mut gpus = crate::nvidia::discover();
     gpus.extend(crate::amdgpu::discover(&roots));
@@ -117,12 +124,12 @@ fn platform(_options: &SensorOptions) -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>)
 }
 
 #[cfg(windows)]
-fn platform(_options: &SensorOptions) -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
     (crate::windows::providers(), crate::nvidia::discover())
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn platform(_options: &SensorOptions) -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
     (Vec::new(), crate::nvidia::discover())
 }
 
@@ -178,6 +185,23 @@ impl SensorSource for SystemSensors {
 mod tests {
     use super::*;
 
+    /// A ping whose probe answers in 12 ms at once.
+    #[cfg(target_os = "linux")]
+    pub(super) fn answering_ping() -> crate::ping::Ping {
+        struct Answers;
+        impl crate::ping::Probe for Answers {
+            fn round_trip(&mut self) -> std::result::Result<std::time::Duration, String> {
+                Ok(std::time::Duration::from_millis(12))
+            }
+        }
+        crate::ping::Ping::with_probe(
+            "192.0.2.7",
+            Answers,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(1),
+        )
+    }
+
     #[test]
     fn summary_keys_rank_before_devices_and_chips() {
         assert_eq!(rank("cpu.usage"), 0);
@@ -230,16 +254,56 @@ mod tests {
         let get = |k: &str| snapshot.get(&bezel_core::domain::sensor::SensorKey::new(k).unwrap());
         assert_eq!(get("gpu.0.usage"), Reading::Value(42.0));
         assert_eq!(get(keys::GPU_USAGE), get("gpu.0.usage"));
-        // Imported themes find their keys, measured or explained. Ping and
-        // game FPS come from their own sources.
-        let listed: Vec<&str> = catalog.iter().map(|i| i.key.as_str()).collect();
-        for key in keys::IMPORTED {
-            if key != keys::GPU_FPS && key != keys::NET_PING {
-                assert!(listed.contains(&key), "{key} not listed");
-            }
-        }
         assert_eq!(get(keys::MEMORY_AVAILABLE_PERCENT), Reading::Value(50.0));
         assert!(matches!(get(keys::GPU_VOLTAGE), Reading::Unavailable(r) if r.contains("voltage")));
+    }
+
+    /// Themes imported from the vendor app and from the Python project bind
+    /// to [`keys::IMPORTED`]: each is listed and answered, measured or with
+    /// the reason, game FPS and ping included.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn imported_keys_are_published() {
+        use bezel_core::domain::sensor::{Reading, SensorKey, keys};
+        use std::time::Duration;
+        let t = crate::testing::FakeTree::new("imported");
+        t.file("proc/stat", "cpu  1 0 1 8 0 0 0 0\n")
+            .file("proc/meminfo", "MemTotal: 1024 kB\nMemAvailable: 256 kB\n")
+            .file(
+                "mangohud/witcher3_2026-09-30_21-05-00.csv",
+                include_str!("fps/fixtures/mangohud/witcher3_2026-09-30_21-05-00.csv"),
+            )
+            .dir("sys");
+        let mut sensors = SystemSensors::with_roots(t.path("sys"), t.path("proc"));
+        let catalog = sensors.catalog().unwrap();
+        let listed: Vec<&str> = catalog.iter().map(|i| i.key.as_str()).collect();
+        for key in keys::IMPORTED {
+            assert!(listed.contains(&key), "{key} not listed");
+        }
+        let ping = SensorKey::new(keys::NET_PING).unwrap();
+        let start = Instant::now();
+        let snapshot = loop {
+            let snapshot = sensors.sample().unwrap();
+            let measuring = matches!(
+                snapshot.get(&ping),
+                Reading::Unavailable(why) if why.starts_with("measuring")
+            );
+            if !measuring || start.elapsed() > Duration::from_secs(3) {
+                break snapshot;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        for key in keys::IMPORTED {
+            assert!(
+                snapshot.iter().any(|(k, _)| k.as_str() == key),
+                "{key} not sampled"
+            );
+        }
+        let get = |k: &str| snapshot.get(&SensorKey::new(k).unwrap());
+        assert_eq!(get(keys::GPU_FPS), Reading::Value(139.874));
+        assert_eq!(get(keys::NET_PING), Reading::Value(12.0));
+        assert_eq!(get(keys::MEMORY_AVAILABLE_PERCENT), Reading::Value(25.0));
+        assert!(matches!(get(keys::SYSTEM_VOLUME), Reading::Unavailable(_)));
     }
 
     /// The real machine, read-only: whatever it has, every catalog entry is

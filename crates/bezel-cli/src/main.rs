@@ -9,9 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use bezel_cli::theme::{bundled_candidates, data_home, first_dir, font_dirs, resolve};
 use bezel_cli::{
-    Cli, Command, ProgressStyle, Rendering, SensorsArgs, SleepPace, StorageArgs, StorageKit,
-    WatchStyle, clock, run, run_monitor_mode, run_sensors, run_storage_command, run_theme_command,
-    udev_rules,
+    Cli, Command, ProgressStyle, Rendering, SensorSettings, SensorsArgs, SleepPace, StorageArgs,
+    StorageKit, WatchStyle, clock, run, run_monitor_mode, run_sensors, run_storage_command,
+    run_theme_command, udev_rules,
 };
 use bezel_core::domain::job::CancelToken;
 use bezel_core::domain::storage::RemotePath;
@@ -20,7 +20,7 @@ use bezel_devices::fake::FakeStorage;
 use bezel_devices::{FakeBus, FakeConnector, FakeHid, SystemBus, SystemConnector, SystemHid};
 use bezel_media::FfmpegTranscoder;
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
-use bezel_sensors::{FakeSensors, SystemSensors};
+use bezel_sensors::{FakeSensors, SensorOptions, SystemSensors};
 use bezel_themes::FsThemeStore;
 use clap::Parser;
 
@@ -56,17 +56,25 @@ fn fake_connector() -> FakeConnector {
     FakeConnector::with_storage(storage)
 }
 
-fn sensor_source(fake: bool) -> Box<dyn SensorSource> {
+/// The machine's sensors (the demo ones with `--fake`), with the ping host
+/// and MangoHud folder of `settings` when the command takes them.
+fn sensor_source(fake: bool, settings: Option<&SensorSettings>) -> Box<dyn SensorSource> {
     if fake {
-        Box::new(FakeSensors::demo())
-    } else {
-        Box::new(SystemSensors::new())
+        return Box::new(FakeSensors::demo());
     }
+    let mut options = SensorOptions::default();
+    if let Some(settings) = settings {
+        if let Some(host) = &settings.ping_host {
+            options.ping_host.clone_from(host);
+        }
+        options.mangohud_dir.clone_from(&settings.mangohud_dir);
+    }
+    Box::new(SystemSensors::with_options(options))
 }
 
 /// `bezel sensors`, streamed straight to stdout.
-fn sensors(args: &SensorsArgs, fake: bool) -> anyhow::Result<String> {
-    let mut source = sensor_source(fake);
+fn sensors(args: &SensorsArgs, settings: &SensorSettings, fake: bool) -> anyhow::Result<String> {
+    let mut source = sensor_source(fake, Some(settings));
     let mut stdout = std::io::stdout().lock();
     let style = if stdout.is_terminal() {
         WatchStyle::Redraw
@@ -106,7 +114,7 @@ fn renderer_for(cli: &Cli, bundled: Option<&Path>) -> SkiaRenderer {
 fn themes(cli: &Cli) -> anyhow::Result<String> {
     let bundled = bundled_dir();
     let mut renderer = renderer_for(cli, bundled.as_deref());
-    let mut sensors = sensor_source(cli.fake);
+    let mut sensors = sensor_source(cli.fake, cli.command.sensor_settings());
     let stop = Arc::new(AtomicBool::new(false));
     if matches!(cli.command, Command::Run { .. }) {
         let flag = Arc::clone(&stop);
@@ -211,7 +219,7 @@ fn main() -> ExitCode {
             .init();
     }
     let result = match &cli.command {
-        Command::Sensors(args) => sensors(args, cli.fake),
+        Command::Sensors { args, settings } => sensors(args, settings, cli.fake),
         Command::Render { .. } | Command::Run { .. } | Command::Import { .. } => themes(&cli),
         Command::Storage(args) => storage(args, cli.fake),
         Command::MonitorMode { .. } => monitor_mode(&cli),

@@ -1,0 +1,22 @@
+# RTSS shared memory ("RTSSSharedMemoryV2"), v2.0 layout, assembled by hand
+# from RTSSSharedMemory.h of the RTSS SDK (docs/reverse-engineering/sensors.md § 8).
+# Not a capture from a real RivaTuner (hardware_validated = false).
+#
+# Format: `size N` zero-fills an image of N bytes, `@OFFSET` moves the cursor,
+# every other token is one hex byte; `#` starts a comment. DWORDs are
+# little-endian.
+#
+# RivaTuner Statistics Server is closing: signature 0xDEAD, no valid data.
+
+size 0x24
+@0x0000
+# --- header -------------------------------------------------------------
+ad de 00 00   # 0x00 dwSignature: 0x0000dead
+00 00 02 00   # 0x04 dwVersion ((major << 16) | minor): 0x00020000
+58 02 00 00   # 0x08 dwAppEntrySize: 600
+24 10 00 00   # 0x0c dwAppArrOffset: 4132
+00 01 00 00   # 0x10 dwAppArrSize (entries): 256
+00 02 00 00   # 0x14 dwOSDEntrySize: 512
+24 00 00 00   # 0x18 dwOSDArrOffset: 36
+08 00 00 00   # 0x1c dwOSDArrSize (entries): 8
+00 00 00 00   # 0x20 dwOSDFrame: 0

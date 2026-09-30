@@ -7,26 +7,36 @@
 //! mounts, and AMD GPUs through amdgpu's sysfs files. NVIDIA GPUs come from
 //! NVML, loaded at run time. On Windows, sysinfo measures CPU, memory,
 //! disks and network, and LibreHardwareMonitor's WMI namespace (when it
-//! runs) the temperatures, fans and power. [`FakeSensors`] replays scripted
-//! snapshots for tests and demos.
+//! runs) the temperatures, fans and power. On both, `gpu.fps` comes from a
+//! frame-rate overlay already running (MangoHud's logs on Linux, RivaTuner
+//! Statistics Server's shared memory on Windows) and `net.ping` from a probe
+//! thread of its own ([`SensorOptions`] chooses the host and the MangoHud
+//! folder). [`FakeSensors`] replays scripted snapshots for tests and demos.
 //!
 //! What every provider guarantees (D-2026-09-30-sensors-1 and -4):
 //! - a value that cannot be measured is `Reading::Unavailable(reason)`,
 //!   never a guess;
 //! - rates and usages come from counter deltas over the real time between
 //!   two `sample` calls, so their first sample reads "warming up";
-//! - a sample only reads local kernel files and never waits on the network.
-#![forbid(unsafe_code)]
+//! - a sample only reads local files (kernel, logs) and memory, never waits on
+//!   the network (the ping thread stores its last result; a sample reads it).
+//!
+//! `unsafe` is denied (the workspace lint); the one exception is the Win32
+//! code that maps RTSS's shared memory read-only (`fps::rtss`, Windows only),
+//! each call allowed in the smallest scope with its `// SAFETY:` reasoning.
+#![deny(unsafe_code)]
 
 #[cfg(target_os = "linux")]
 mod amdgpu;
 mod fake;
+mod fps;
 mod gpu;
 #[cfg(any(windows, test))]
 mod lhm;
 #[cfg(target_os = "linux")]
 mod linux;
 mod nvidia;
+mod ping;
 mod provider;
 mod system;
 #[cfg(test)]

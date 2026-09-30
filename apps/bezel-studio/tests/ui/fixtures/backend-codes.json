@@ -1,4 +1,84 @@
 {
+  "errors": {
+    "accessDenied": [
+      "address",
+      "reason"
+    ],
+    "brightnessRange": [],
+    "busy": [],
+    "cancelled": [],
+    "fileError": [
+      "file",
+      "reason"
+    ],
+    "fileTooLarge": [
+      "file",
+      "limit",
+      "size"
+    ],
+    "inUse": [
+      "address",
+      "holders"
+    ],
+    "invalidInput": [
+      "detail"
+    ],
+    "invalidTheme": [
+      "detail"
+    ],
+    "live": [],
+    "noModel": [],
+    "noScreenAddress": [],
+    "noScreenChosen": [],
+    "noVideo": [],
+    "notAnImage": [
+      "file"
+    ],
+    "notConfirmed": [
+      "detail"
+    ],
+    "notInLibrary": [
+      "location"
+    ],
+    "notPicked": [
+      "location"
+    ],
+    "refused": [
+      "detail"
+    ],
+    "screenNotFound": [
+      "screen"
+    ],
+    "stale": [],
+    "system": [
+      "detail"
+    ],
+    "themeFile": [
+      "detail"
+    ],
+    "themeMisfit": [
+      "screen",
+      "theme"
+    ],
+    "timeout": [
+      "detail"
+    ],
+    "transport": [
+      "detail"
+    ],
+    "unknownMedium": [
+      "medium"
+    ],
+    "unknownOrientation": [
+      "orientation"
+    ],
+    "unsupported": [
+      "detail"
+    ],
+    "videoNotInTheme": [
+      "asset"
+    ]
+  },
   "importLayers": [
     "background",
     "bar",
@@ -147,5 +227,24 @@
     "weekdayFormat": [
       "format"
     ]
-  }
+  },
+  "mismatches": [
+    "audio",
+    "bFrames",
+    "codec",
+    "format",
+    "pixelFormat",
+    "resolution"
+  ],
+  "refusals": [
+    "emptyFile",
+    "invalidName",
+    "needsConverter",
+    "noCard",
+    "noSpace",
+    "tooLarge",
+    "wrongExtension",
+    "wrongKind",
+    "wrongProfile"
+  ]
 }

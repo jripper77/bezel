@@ -16,28 +16,29 @@ use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, State, WebviewWindow
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
 
-use crate::backend::{Backend, UNTITLED, UiResult};
+use crate::backend::{Backend, UNTITLED};
 use crate::clock::now;
 use crate::dto::{
     AddedDto, AssetDto, ImportedDto, JobDto, MediaToolsDto, PrepareDto, ProgressDto, SampleDto,
     SavedDto, ScreenDto, SensorDto, SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
 };
 use crate::media::{IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
-use crate::storage::{ProgressThrottle, StorageResult};
+use crate::messages::{ErrorCode, UiError, UiResult};
+use crate::storage::ProgressThrottle;
 use crate::tray::LiveItem;
 
 /// State managed by Tauri.
 pub type Shared = Arc<Backend>;
 
 /// Runs `work` on the blocking pool with the backend.
-async fn blocking<T: Send + 'static, E: From<String> + Send + 'static>(
+async fn blocking<T: Send + 'static>(
     state: &State<'_, Shared>,
-    work: impl FnOnce(&Backend) -> Result<T, E> + Send + 'static,
-) -> Result<T, E> {
+    work: impl FnOnce(&Backend) -> UiResult<T> + Send + 'static,
+) -> UiResult<T> {
     let backend = Arc::clone(state);
     tauri::async_runtime::spawn_blocking(move || work(&backend))
         .await
-        .map_err(|e| E::from(e.to_string()))?
+        .map_err(UiError::system)?
 }
 
 /// A file chosen in the native open dialog, or `None` when cancelled.
@@ -50,7 +51,7 @@ fn pick_file<R: Runtime>(
         .file()
         .add_filter(filter, extensions)
         .blocking_pick_file()
-        .map(|p| p.into_path().map_err(|e| e.to_string()))
+        .map(|p| p.into_path().map_err(UiError::system))
         .transpose()
 }
 
@@ -137,7 +138,7 @@ pub async fn save_theme<R: Runtime>(
         match chosen {
             None => return Ok(None),
             Some(path) => {
-                let path = path.into_path().map_err(|e| e.to_string())?;
+                let path = path.into_path().map_err(UiError::system)?;
                 let location = ThemeLocation(path.display().to_string());
                 // The user picked it: the window may save there from now on.
                 state.library.grant(&location);
@@ -173,7 +174,10 @@ pub async fn new_theme(
 ) -> UiResult<ThemeDto> {
     let orientation = orientation
         .as_deref()
-        .map(|o| parse_orientation(o).ok_or_else(|| format!("unknown orientation {o:?}")))
+        .map(|o| {
+            parse_orientation(o)
+                .ok_or_else(|| UiError::new(ErrorCode::UnknownOrientation).arg("orientation", o))
+        })
         .transpose()?;
     blocking(&state, move |b| {
         b.new_theme(
@@ -255,13 +259,13 @@ pub fn close_window<R: Runtime>(
         crate::OnClose::Hide => window.hide(),
         crate::OnClose::Ask | crate::OnClose::Close => window.destroy(),
     }
-    .map_err(|e| e.to_string())
+    .map_err(UiError::system)
 }
 
 /// Whether Bezel starts at login.
 #[tauri::command]
 pub fn get_autostart<R: Runtime>(app: AppHandle<R>) -> UiResult<bool> {
-    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+    app.autolaunch().is_enabled().map_err(UiError::system)
 }
 
 /// Starts Bezel at login (in the tray, showing the last theme live) or not.
@@ -273,7 +277,7 @@ pub fn set_autostart<R: Runtime>(app: AppHandle<R>, on: bool) -> UiResult<()> {
     } else {
         manager.disable()
     }
-    .map_err(|e| e.to_string())
+    .map_err(UiError::system)
 }
 
 // ------------------------------------------------------------- storage --
@@ -290,10 +294,7 @@ fn confirm_of(confirmed: bool) -> Confirm {
 
 /// Capacity and files of a screen.
 #[tauri::command]
-pub async fn storage_overview(
-    state: State<'_, Shared>,
-    screen: String,
-) -> StorageResult<StorageDto> {
+pub async fn storage_overview(state: State<'_, Shared>, screen: String) -> UiResult<StorageDto> {
     blocking(&state, move |b| b.storage_overview(&screen, now())).await
 }
 
@@ -312,7 +313,7 @@ pub async fn locate_ffmpeg<R: Runtime>(
     let Some(path) = app.dialog().file().blocking_pick_file() else {
         return Ok(None);
     };
-    let path = path.into_path().map_err(|e| e.to_string())?;
+    let path = path.into_path().map_err(UiError::system)?;
     blocking(&state, move |b| Ok(Some(b.locate_ffmpeg(&path)))).await
 }
 
@@ -329,7 +330,7 @@ pub async fn prepare_upload(
     screen: String,
     source: String,
     medium: String,
-) -> StorageResult<PrepareDto> {
+) -> UiResult<PrepareDto> {
     blocking(&state, move |b| {
         b.prepare_upload(&screen, &PathBuf::from(source), &medium, now())
     })
@@ -338,10 +339,7 @@ pub async fn prepare_upload(
 
 /// The preflight of sending the theme's video to the live screen.
 #[tauri::command]
-pub async fn prepare_theme_video(
-    state: State<'_, Shared>,
-    screen: String,
-) -> StorageResult<PrepareDto> {
+pub async fn prepare_theme_video(state: State<'_, Shared>, screen: String) -> UiResult<PrepareDto> {
     blocking(&state, move |b| b.prepare_theme_video(&screen, now())).await
 }
 
@@ -352,7 +350,7 @@ pub async fn run_upload<R: Runtime>(
     state: State<'_, Shared>,
     ticket: u64,
     overwrite: bool,
-) -> StorageResult<JobDto> {
+) -> UiResult<JobDto> {
     blocking(&state, move |b| {
         let mut throttle = ProgressThrottle::default();
         let mut report = |progress: Progress| {
@@ -380,7 +378,7 @@ pub async fn delete_stored(
     screen: String,
     path: String,
     confirmed: bool,
-) -> StorageResult<()> {
+) -> UiResult<()> {
     blocking(&state, move |b| {
         b.delete_stored(&screen, &path, confirm_of(confirmed), now())
     })
@@ -389,17 +387,13 @@ pub async fn delete_stored(
 
 /// Plays a stored file.
 #[tauri::command]
-pub async fn play_stored(
-    state: State<'_, Shared>,
-    screen: String,
-    path: String,
-) -> StorageResult<()> {
+pub async fn play_stored(state: State<'_, Shared>, screen: String, path: String) -> UiResult<()> {
     blocking(&state, move |b| b.play_stored(&screen, &path, now())).await
 }
 
 /// Stops what the screen plays.
 #[tauri::command]
-pub async fn stop_playback(state: State<'_, Shared>, screen: String) -> StorageResult<()> {
+pub async fn stop_playback(state: State<'_, Shared>, screen: String) -> UiResult<()> {
     blocking(&state, move |b| b.stop_playback(&screen, now())).await
 }
 
@@ -413,7 +407,7 @@ pub async fn set_boot_media(
     path: Option<String>,
     confirmed: bool,
     brightness: Option<u8>,
-) -> StorageResult<()> {
+) -> UiResult<()> {
     blocking(&state, move |b| {
         let confirm = confirm_of(confirmed);
         b.set_boot_media(&screen, path.as_deref(), brightness, confirm, now())

@@ -19,3 +19,17 @@ export function warningText(t, w) {
   }
   return t(key, args);
 }
+
+/**
+ * The text of a failed command: a backend error `{code, args, message}`
+ * translated by its code; anything else (an unknown code, a JS error, a
+ * string) with its own message.
+ * @param {(k: string, p?: object) => string} t
+ * @param {unknown} e
+ */
+export function errorText(t, e) {
+  const code = typeof e?.code === 'string' ? e.code : null;
+  if (code && t.has(`error.${code}`)) return t(`error.${code}`, e.args ?? {});
+  const message = e?.message ?? (typeof e === 'string' ? e : String(e));
+  return t('error.unknown', { message });
+}

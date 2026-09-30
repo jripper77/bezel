@@ -6,14 +6,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { LOCALES, placeholders, translator } from '../../src/i18n/index.js';
-import { warningText } from '../../src/messages.js';
+import { errorText, warningText } from '../../src/messages.js';
+import { refusalText } from '../../src/ui/storage.js';
 
 const codes = JSON.parse(readFileSync(new URL('fixtures/backend-codes.json', import.meta.url), 'utf8'));
 const pt = translator('pt-BR');
 const en = translator('en');
 
-/** Checks the texts of `prefix.<code>` for every code of `table`. */
-function checkTexts(prefix, table) {
+/**
+ * Checks the texts of `prefix.<code>` for every code of `table`; `own`
+ * lists the UI's own keys under `prefix`.
+ */
+function checkTexts(prefix, table, own = []) {
   for (const [code, params] of Object.entries(table)) {
     const key = `${prefix}.${code}`;
     for (const [locale, strings] of Object.entries(LOCALES)) {
@@ -24,13 +28,13 @@ function checkTexts(prefix, table) {
     assert.deepEqual(placeholders(LOCALES.en[key]), placeholders(LOCALES['pt-BR'][key]), `${key}: en and pt-BR use other {params}`);
   }
   const known = new Set(Object.keys(table).map((code) => `${prefix}.${code}`));
-  const stale = Object.keys(LOCALES.en).filter((k) => k.startsWith(`${prefix}.`) && !known.has(k) && !k.startsWith(`${prefix}.layer.`));
+  const stale = Object.keys(LOCALES.en).filter((k) => k.startsWith(`${prefix}.`) && !known.has(k) && !own.some((o) => k.startsWith(`${prefix}.${o}`)));
   assert.deepEqual(stale, [], `texts for codes the backend no longer sends (${prefix})`);
 }
 
 test('every import warning has a text in each language with its params', () => {
   assert.ok(Object.keys(codes.importWarnings).length > 40);
-  checkTexts('importWarning', codes.importWarnings);
+  checkTexts('importWarning', codes.importWarnings, ['layer.']);
   for (const layer of codes.importLayers) {
     for (const [locale, strings] of Object.entries(LOCALES)) assert.ok(`importWarning.layer.${layer}` in strings, `${locale}: layer ${layer}`);
   }
@@ -53,4 +57,36 @@ test('an import warning this UI does not know keeps the backend text', () => {
   assert.equal(warningText(en, 'plain text'), 'plain text');
   const odd = { code: 'layerWithoutData', args: { layer: 'hologram' } };
   assert.equal(warningText(en, odd), 'A hologram without a data source was left out.', 'an unknown layer stays as sent');
+});
+
+test('every error code has a text in each language with its params', () => {
+  assert.ok(Object.keys(codes.errors).length > 25);
+  checkTexts('error', codes.errors, ['unknown']);
+});
+
+test('errors read in the chosen language, with their arguments', () => {
+  const denied = { code: 'accessDenied', args: { address: '/dev/ttyACM1', reason: 'Permission denied (os error 13)' }, message: 'access denied to /dev/ttyACM1: Permission denied (os error 13)' };
+  assert.equal(errorText(pt, denied), 'O sistema não deixou o Bezel abrir /dev/ttyACM1 (Permission denied (os error 13)).');
+  assert.equal(errorText(en, denied), 'The system did not let Bezel open /dev/ttyACM1 (Permission denied (os error 13)).');
+  const misfit = { code: 'themeMisfit', args: { theme: '320x480', screen: '480x1920' } };
+  assert.match(errorText(pt, misfit), /^Este tema tem 320x480, mas a tela tem 480x1920/);
+  assert.match(errorText(pt, { code: 'busy', args: {} }), /ocupada/);
+  assert.match(errorText(pt, { code: 'timeout' }), /não respondeu a tempo/, 'no args at all');
+});
+
+test('an error this UI does not know keeps its own text', () => {
+  assert.equal(errorText(en, { code: 'somethingNew', args: {}, message: 'the new thing' }), 'It did not work: the new thing');
+  assert.equal(errorText(pt, new Error('boom')), 'Não deu certo: boom');
+  assert.equal(errorText(en, 'plain'), 'It did not work: plain');
+  assert.equal(errorText(en, null), 'It did not work: null');
+});
+
+test('every refusal and every way a file differs has its own sentence', () => {
+  for (const [locale, t] of [['pt-BR', pt], ['en', en]]) {
+    for (const code of codes.refusals) {
+      const text = refusalText(t, locale, { code, message: `core text of ${code}` });
+      assert.ok(!text.includes('core text') && !text.includes('storage.'), `${locale}: ${code}`);
+    }
+    for (const code of codes.mismatches) assert.ok(t.has(`storage.mismatch.${code}`), `${locale}: ${code}`);
+  }
 });

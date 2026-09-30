@@ -1,6 +1,6 @@
 //! What each UI command does, without Tauri: the commands module only adds
 //! threads, dialogs and IPC around these methods, so they run on fakes in
-//! tests. Errors reach the UI as text.
+//! tests. Errors reach the UI as codes with arguments ([`UiError`]).
 
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -25,17 +25,12 @@ use crate::dto::{
 };
 use crate::library::ThemeLibrary;
 use crate::media::{kind_of, thumbnail_data_url};
+pub use crate::messages::UiResult;
+use crate::messages::{ErrorCode, UiError};
 use crate::settings::SettingsFile;
 use crate::storage::StorageState;
 pub use crate::studio::MAX_REFRESH;
 use crate::studio::{Delivery, Studio};
-
-/// Result of a UI command: errors are shown as text.
-pub type UiResult<T> = Result<T, String>;
-
-fn text(e: impl std::fmt::Display) -> String {
-    e.to_string()
-}
 
 /// Largest file accepted as an image or theme, bytes.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -132,7 +127,7 @@ pub fn frame_bytes(frame: &bezel_core::domain::frame::Frame) -> Vec<u8> {
 }
 
 fn theme_of(dto: &ThemeDto) -> UiResult<Theme> {
-    Theme::try_from(dto).map_err(|e| e.0)
+    Theme::try_from(dto).map_err(|e| UiError::new(ErrorCode::InvalidTheme).arg("detail", e.0))
 }
 
 /// Orientation of a new theme for `model` when none was used with its screen
@@ -148,16 +143,15 @@ pub fn default_orientation(model: &DeviceModel) -> Orientation {
 }
 
 fn read_file(path: &Path) -> UiResult<Vec<u8>> {
-    let size = std::fs::metadata(path).map_err(text)?.len();
+    let unreadable = |e| UiError::file(path.display(), e);
+    let size = std::fs::metadata(path).map_err(unreadable)?.len();
     if size > MAX_FILE_BYTES {
-        return Err(format!(
-            "{} is {} MiB; the limit is {} MiB",
-            path.display(),
-            size / (1024 * 1024),
-            MAX_FILE_BYTES / (1024 * 1024)
-        ));
+        return Err(UiError::new(ErrorCode::FileTooLarge)
+            .arg("file", path.display())
+            .arg("size", size / (1024 * 1024))
+            .arg("limit", MAX_FILE_BYTES / (1024 * 1024)));
     }
-    std::fs::read(path).map_err(text)
+    std::fs::read(path).map_err(unreadable)
 }
 
 impl Backend {
@@ -192,23 +186,22 @@ impl Backend {
     }
 
     fn find_screen(&self, key: &str) -> UiResult<Screen> {
-        choose_screen(
-            discover_screens(self.bus.as_ref()).map_err(text)?,
+        Ok(choose_screen(
+            discover_screens(self.bus.as_ref())?,
             Some(key),
-        )
-        .map_err(text)
+        )?)
     }
 
     pub(crate) fn connect(&self, key: &str) -> UiResult<Box<dyn ScreenLink>> {
         let screen = self.find_screen(key)?;
-        self.connector.connect(&screen).map_err(text)
+        Ok(self.connector.connect(&screen)?)
     }
 
     // ------------------------------------------------------------ screens --
 
     /// The connected screens.
     pub fn screens(&self) -> UiResult<Vec<ScreenDto>> {
-        let screens = discover_screens(self.bus.as_ref()).map_err(text)?;
+        let screens = discover_screens(self.bus.as_ref())?;
         Ok(screens.iter().map(ScreenDto::from).collect())
     }
 
@@ -221,7 +214,7 @@ impl Backend {
             self.settings.update(|s| s.live_screen = None);
             return Ok(());
         }
-        let key = screen.ok_or("no screen chosen")?;
+        let key = screen.ok_or_else(|| UiError::new(ErrorCode::NoScreenChosen))?;
         self.storage.ensure_idle()?;
         // Opening wakes the screen (seconds); the session stays usable meanwhile.
         let link = self.connect(key)?;
@@ -230,7 +223,7 @@ impl Backend {
             studio.go_live(key.to_string(), link);
             studio.theme().orientation
         };
-        self.show_now(time).map_err(text)?;
+        self.show_now(time)?;
         self.settings.update(|s| {
             s.live_screen = Some(key.to_string());
             s.remember_orientation(key, orientation);
@@ -246,10 +239,11 @@ impl Backend {
             self.set_live(false, None, time)?;
             return Ok(false);
         }
-        let screen = discover_screens(self.bus.as_ref())
-            .and_then(|screens| choose_screen(screens, None))
-            .map_err(text)?;
-        let key = screen.address().ok_or("the screen has no address")?;
+        let screen =
+            discover_screens(self.bus.as_ref()).and_then(|screens| choose_screen(screens, None))?;
+        let key = screen
+            .address()
+            .ok_or_else(|| UiError::new(ErrorCode::NoScreenAddress))?;
         self.set_live(true, Some(&key.0), time)?;
         Ok(true)
     }
@@ -265,18 +259,13 @@ impl Backend {
 
     /// Sets a screen's brightness (through the live link when it is live).
     pub fn set_brightness(&self, screen: &str, percent: u8) -> UiResult<()> {
-        let brightness = Brightness::new(percent).ok_or("brightness is 0 to 100")?;
-        if self
-            .idle_studio()
-            .live_brightness(screen, brightness)
-            .map_err(text)?
-        {
+        let brightness =
+            Brightness::new(percent).ok_or_else(|| UiError::new(ErrorCode::BrightnessRange))?;
+        if self.idle_studio().live_brightness(screen, brightness)? {
             return Ok(());
         }
         self.storage.ensure_idle()?;
-        self.connect(screen)?
-            .set_brightness(brightness)
-            .map_err(text)
+        Ok(self.connect(screen)?.set_brightness(brightness)?)
     }
 
     /// Hands a screen back to its own mode (stopping live mode on it).
@@ -297,7 +286,7 @@ impl Backend {
             }
             None => self.connect(screen)?,
         };
-        link.release().map_err(text)
+        Ok(link.release()?)
     }
 
     // ------------------------------------------------------------ sensors --
@@ -306,8 +295,7 @@ impl Backend {
     pub fn catalog(&self) -> UiResult<Vec<SensorDto>> {
         let mut studio = self.studio();
         Ok(studio
-            .refresh_catalog()
-            .map_err(text)?
+            .refresh_catalog()?
             .iter()
             .map(SensorDto::from)
             .collect())
@@ -321,7 +309,7 @@ impl Backend {
             sample_millis: millis,
             readings: SampleDto::readings(snapshot, studio.quantities()),
             live: studio.live_key().map(str::to_string),
-            live_error: studio.live_error().map(str::to_string),
+            live_error: studio.live_error().cloned(),
             video: studio.live_video().and_then(LiveVideoDto::of),
         }
     }
@@ -342,7 +330,7 @@ impl Backend {
         let theme = theme_of(theme)?;
         let mut studio = self.studio();
         studio.set_theme(theme);
-        studio.render(time).map(|f| frame_bytes(&f)).map_err(text)
+        Ok(studio.render(time).map(|f| frame_bytes(&f))?)
     }
 
     /// Takes the UI's theme and shows it on the live screen now, in the
@@ -355,7 +343,7 @@ impl Backend {
             studio.set_theme(theme);
             studio.live_key().map(str::to_string)
         };
-        self.show_now(time).map_err(text)?;
+        self.show_now(time)?;
         if let Some(key) = live {
             self.remember_orientation(&key, orientation);
         }
@@ -376,10 +364,7 @@ impl Backend {
     pub fn open(&self, location: &str) -> UiResult<ThemeDto> {
         let location = ThemeLocation(location.to_string());
         if !self.library.allows(&location) {
-            return Err(format!(
-                "{} is not in the theme library; import it instead",
-                location.0
-            ));
+            return Err(UiError::new(ErrorCode::NotInLibrary).arg("location", location.0));
         }
         self.open_at(location)
     }
@@ -387,9 +372,7 @@ impl Backend {
     /// Opens the theme at `location`, which the app chose itself.
     fn open_at(&self, location: ThemeLocation) -> UiResult<ThemeDto> {
         let mut studio = self.studio();
-        studio
-            .open(self.store.as_ref(), location.clone())
-            .map_err(text)?;
+        studio.open(self.store.as_ref(), location.clone())?;
         self.settings
             .update(|s| s.last_theme = Some(location.0.clone()));
         Ok(ThemeDto::from(studio.theme()))
@@ -402,15 +385,13 @@ impl Backend {
     pub fn save(&self, theme: &ThemeDto, target: Option<ThemeLocation>) -> UiResult<SavedDto> {
         let theme = theme_of(theme)?;
         if let Some(target) = target.as_ref().filter(|t| !self.library.allows(t)) {
-            return Err(format!("{} was not picked to save to", target.0));
+            return Err(UiError::new(ErrorCode::NotPicked).arg("location", &target.0));
         }
         let mut studio = self.studio();
         let location =
             target.unwrap_or_else(|| self.library.save_location(studio.location(), &theme.name));
         studio.set_theme(theme);
-        studio
-            .save(self.store.as_ref(), location.clone())
-            .map_err(text)?;
+        studio.save(self.store.as_ref(), location.clone())?;
         self.settings
             .update(|s| s.last_theme = Some(location.0.clone()));
         Ok(SavedDto {
@@ -432,7 +413,7 @@ impl Backend {
             .and_then(|key| self.find_screen(key).ok())
             .and_then(|s| s.candidates.first().copied())
             .or_else(|| model_by_id(DEFAULT_MODEL))
-            .ok_or("no model to size the theme")?;
+            .ok_or_else(|| UiError::new(ErrorCode::NoModel))?;
         let orientation = match (orientation, screen) {
             (Some(chosen), Some(key)) => {
                 self.remember_orientation(key, chosen);
@@ -455,10 +436,10 @@ impl Backend {
     /// what had no exact equivalent as warnings.
     pub fn import(&self, path: &Path) -> UiResult<ImportedDto> {
         let (theme, assets, warnings) = if is_native(path) {
-            let (theme, assets) = self.store.load(&native_location(path)).map_err(text)?;
+            let (theme, assets) = self.store.load(&native_location(path))?;
             (theme, assets, Vec::new())
         } else {
-            let (theme, assets, report) = import_path(path).map_err(text)?;
+            let (theme, assets, report) = import_path(path)?;
             (
                 theme,
                 assets,
@@ -480,7 +461,7 @@ impl Backend {
     pub fn add_image(&self, path: &Path) -> UiResult<AddedDto> {
         let bytes = read_file(path)?;
         if image::guess_format(&bytes).is_err() {
-            return Err(format!("{} is not an image", path.display()));
+            return Err(UiError::new(ErrorCode::NotAnImage).arg("file", path.display()));
         }
         let name = path
             .file_name()
@@ -894,10 +875,12 @@ mod tests {
             "/etc/passwd".into(),
         ] {
             let error = f.backend.open(&refused).unwrap_err();
-            assert!(error.contains("not in the theme library"), "{error}");
+            assert_eq!(error.code(), "notInLibrary", "{error}");
+            assert_eq!(error.value("location"), Some(refused.as_str()));
         }
         let error = f.backend.save(&theme, Some(at.clone())).unwrap_err();
-        assert!(error.contains("not picked"), "{error}");
+        assert_eq!(error.code(), "notPicked", "{error}");
+        assert!(error.to_string().contains("not picked"), "{error}");
         assert!(!outside.with_file_name("theme.json").exists());
 
         // A theme from elsewhere (an import keeps no location; say it had

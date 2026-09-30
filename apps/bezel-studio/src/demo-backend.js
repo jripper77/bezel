@@ -134,7 +134,8 @@ function createDemoStorage(chosen, { delay, live, theme }) {
   let job = null;
   const state = { playback: null, boot: null, bootBrightness: null };
 
-  const refuse = (code, message) => Promise.reject(Object.assign(new Error(message), { code }));
+  // Errors like the app's: a code, its arguments and the English text.
+  const refuse = (code, message, args = {}) => Promise.reject(Object.assign(new Error(message), { code, args }));
   const screenOf = (key) => (chosen.screens ?? []).find((s) => s.key === key);
   const limited = (key) => screenOf(key)?.family === 'turing-usb';
   const entry = (path, size = files.get(path) ?? null) => {
@@ -239,7 +240,7 @@ function createDemoStorage(chosen, { delay, live, theme }) {
 
   return {
     storageOverview: (key) => {
-      if (!screenOf(key)?.models.every((m) => m.capabilities.storage)) return refuse('unsupported', 'no storage');
+      if (!screenOf(key)?.models.every((m) => m.capabilities.storage)) return refuse('unsupported', 'not supported: no storage', { detail: 'no storage' });
       if (job) return refuse('busy', 'a storage operation is using the screen');
       const folders = (card ? ['internal', 'sd'] : ['internal']).flatMap((medium) => ['image', 'video'].map((kind) => ({
         medium,
@@ -265,7 +266,7 @@ function createDemoStorage(chosen, { delay, live, theme }) {
     prepareUpload: (key, source, medium) => {
       if (job) return refuse('busy', 'a storage operation is using the screen');
       const local = locals.get(source);
-      if (!local || !screenOf(key)) return refuse('failed', `${source}: no such file`);
+      if (!local || !screenOf(key)) return refuse('fileError', `${source}: no such file`, { file: source, reason: 'no such file' });
       return Promise.resolve(check(local, medium));
     },
     prepareThemeVideo: (key) => {
@@ -293,14 +294,14 @@ function createDemoStorage(chosen, { delay, live, theme }) {
       return Promise.resolve(Boolean(job));
     },
     deleteStored: (key, path, confirmed) => {
-      if (limited(key)) return refuse('unsupported', 'this screen does not delete files');
+      if (limited(key)) return refuse('unsupported', 'not supported: deleting files', { detail: 'deleting files' });
       if (!confirmed) return refuse('notConfirmed', `deleting ${path} needs confirmation`);
       files.delete(path);
       return Promise.resolve();
     },
     playStored: (key, path) => {
       if (live() === key) return refuse('live', 'turn live mode off to play files');
-      if (!(files.get(path) > 0)) return refuse('failed', `${path} is not stored on the screen`);
+      if (!(files.get(path) > 0)) return refuse('invalidInput', `invalid input: ${path} is not stored on the screen`, { detail: `${path} is not stored on the screen` });
       state.playback = path;
       return Promise.resolve();
     },
@@ -310,9 +311,9 @@ function createDemoStorage(chosen, { delay, live, theme }) {
       return Promise.resolve();
     },
     setBootMedia: (key, path, confirmed, brightness = null) => {
-      if (limited(key)) return refuse('unsupported', 'this screen keeps its own boot media');
+      if (limited(key)) return refuse('unsupported', 'not supported: the boot media', { detail: 'the boot media' });
       if (!confirmed) return refuse('notConfirmed', 'the boot media needs confirmation');
-      if (path && !(files.get(path) > 0)) return refuse('failed', `${path} is not stored on the screen`);
+      if (path && !(files.get(path) > 0)) return refuse('invalidInput', `invalid input: ${path} is not stored on the screen`, { detail: `${path} is not stored on the screen` });
       state.boot = path;
       if (brightness !== null) state.bootBrightness = brightness;
       if (path) state.playback = path;
@@ -402,7 +403,8 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     }))),
     openTheme: (location) => {
       const found = saved.find((s) => s.location === location);
-      return found ? Promise.resolve(structuredClone(found.theme)) : Promise.reject(new Error(`no theme at ${location}`));
+      if (found) return Promise.resolve(structuredClone(found.theme));
+      return Promise.reject(Object.assign(new Error(`${location} is not in the theme library; import it instead`), { code: 'notInLibrary', args: { location } }));
     },
     newTheme: (screen, name = 'Untitled', orientation = null) => {
       const model = modelOf(screen);

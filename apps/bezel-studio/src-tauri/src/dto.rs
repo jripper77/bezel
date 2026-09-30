@@ -16,7 +16,7 @@ use bezel_themes::dto::{SizeDto, ThemeDto};
 use serde::Serialize;
 
 use crate::library::ThemeEntry;
-use crate::messages::WarningDto;
+use crate::messages::{UiError, WarningDto};
 
 /// One screen as the UI sees it.
 #[derive(Debug, Clone, Serialize)]
@@ -197,7 +197,7 @@ pub struct SampleDto {
     /// Key of the screen showing the theme.
     pub live: Option<String>,
     /// Why the live screen stopped.
-    pub live_error: Option<String>,
+    pub live_error: Option<UiError>,
     /// How the theme's video background reaches the live screen; `None`
     /// when nothing is live or the theme has no video.
     pub video: Option<LiveVideoDto>,
@@ -414,7 +414,7 @@ pub struct FolderDto {
     /// The files, in the order the screen lists them.
     pub files: Vec<StoredFileDto>,
     /// Why the folder could not be listed (the other folders still are).
-    pub error: Option<StorageErrorDto>,
+    pub error: Option<UiError>,
 }
 
 /// What the storage tab shows: capacity and the files of every folder.
@@ -676,17 +676,6 @@ impl From<Progress> for ProgressDto {
             total: p.total,
         }
     }
-}
-
-/// A storage command's error: a code the UI translates, and the details.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StorageErrorDto {
-    /// `busy`, `unsupported`, `notConfirmed`, `inUse`, `stale`, `live`,
-    /// `noVideo` or `failed`.
-    pub code: &'static str,
-    /// What went wrong, in English.
-    pub message: String,
 }
 
 /// The format and picture size of a probed file, for the summary.

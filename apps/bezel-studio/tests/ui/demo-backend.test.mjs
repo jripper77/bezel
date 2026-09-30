@@ -41,7 +41,7 @@ test('saving, listing and opening themes', async () => {
   assert.deepEqual((await demo.listThemes()).map((x) => x.bundled), [true, false]);
   assert.deepEqual((await demo.listThemes()).map((x) => x.orientation), ['reverse-portrait', 'reverse-portrait']);
   assert.equal((await demo.openTheme('demo://Mine')).name, 'Mine');
-  await assert.rejects(demo.openTheme('demo://nope'), /no theme/);
+  await assert.rejects(demo.openTheme('demo://nope'), (e) => e.code === 'notInLibrary' && e.args.location === 'demo://nope');
   await demo.saveTheme({ ...theme, name: 'Mine', orientation: 'landscape', canvas: { width: 1920, height: 480 } }, false);
   assert.equal((await demo.listThemes()).length, 2);
   assert.equal((await demo.listThemes())[1].orientation, 'landscape', 'saving again updates the entry');

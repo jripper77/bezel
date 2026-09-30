@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { translator } from '../../src/i18n/index.js';
-import { baseName, bootKeepsText, errorMessage, formatBytes, progressParts, refusalText, storageFeatures, usedFraction } from '../../src/ui/storage.js';
+import { baseName, bootKeepsText, formatBytes, progressParts, refusalText, storageFeatures, usedFraction } from '../../src/ui/storage.js';
 import { createDemoBackend, demoKindOf, demoSuggestName, demoTurns, demoVideoName } from '../../src/demo-backend.js';
 import { DEMO_PICKED, DEMO_STORAGE, DEMO_VIDEO_THEME, SCENARIOS } from '../../src/demo-data.js';
 
@@ -56,11 +56,7 @@ test('every refusal of the preflight has its own sentence', () => {
   assert.equal(refusalText(en, 'en', { code: 'somethingNew', message: 'core text' }), 'core text');
 });
 
-test('storage errors are translated by code, others keep their text', () => {
-  assert.match(errorMessage(pt, { code: 'unsupported', message: 'not supported: delete' }), /não permite/);
-  assert.match(errorMessage(pt, { code: 'busy' }), /ocupada/);
-  assert.equal(errorMessage(en, new Error('boom')), 'It did not work: boom');
-  assert.equal(errorMessage(en, 'plain'), 'It did not work: plain');
+test('file names come from local paths', () => {
   assert.equal(baseName('/home/me/Vídeos/clip.mp4'), 'clip.mp4');
   assert.equal(baseName('C:\\Users\\me\\clip.mp4'), 'clip.mp4');
 });
@@ -124,7 +120,7 @@ test('demo storage lists, uploads with progress, cancels and deletes only when c
   await demo.deleteStored(KEY, cancelled.path, true);
   assert.equal(demo.storageState().files.has(cancelled.path), false);
   assert.equal(demo.fileSource(null), null);
-  await assert.rejects(demo.prepareUpload(KEY, 'demo://missing.png', 'sd'), (e) => e.code === 'failed');
+  await assert.rejects(demo.prepareUpload(KEY, 'demo://missing.png', 'sd'), (e) => e.code === 'fileError' && e.args.file === 'demo://missing.png');
 });
 
 test('demo storage refuses like the preflight', async () => {
@@ -154,7 +150,7 @@ test('demo playback, boot media and what live mode allows', async () => {
   assert.equal(demo.storageState().playback, logo);
   await demo.stopPlayback(KEY);
   assert.equal(demo.storageState().playback, null);
-  await assert.rejects(demo.playStored(KEY, 'internal/image/none.png'), (e) => e.code === 'failed');
+  await assert.rejects(demo.playStored(KEY, 'internal/image/none.png'), (e) => e.code === 'invalidInput');
   await assert.rejects(demo.setBootMedia(KEY, logo, false), (e) => e.code === 'notConfirmed');
   await demo.setBootMedia(KEY, logo, true);
   assert.equal(demo.storageState().boot, logo);
@@ -162,7 +158,7 @@ test('demo playback, boot media and what live mode allows', async () => {
   await demo.setBootMedia(KEY, null, true, 40);
   assert.equal(demo.storageState().boot, null);
   assert.equal(demo.storageState().bootBrightness, 40);
-  await assert.rejects(demo.setBootMedia(KEY, 'internal/video/none.mp4', true), (e) => e.code === 'failed');
+  await assert.rejects(demo.setBootMedia(KEY, 'internal/video/none.mp4', true), (e) => e.code === 'invalidInput');
   await demo.setLive(true, KEY);
   await assert.rejects(demo.playStored(KEY, logo), (e) => e.code === 'live');
   await assert.rejects(demo.stopPlayback(KEY), (e) => e.code === 'live');

@@ -11,6 +11,7 @@ import { el } from './ui/dom.js';
 import { askChoice } from './ui/dialog.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
+import { errorText } from './messages.js';
 
 const locale = pickLocale(navigator.languages ?? [navigator.language]);
 const t = translator(locale);
@@ -45,7 +46,8 @@ function toast(message) {
   toast.timer = setTimeout(() => { box.hidden = true; }, 3500);
 }
 
-const errorText = (e) => e?.message ?? String(e);
+/** Shows why a command failed. */
+const fail = (e) => toast(errorText(t, e));
 
 // ------------------------------------------------------------ store ----
 const session = await bridge.session().catch(() => null);
@@ -75,9 +77,9 @@ const library = createLibrary({
     refreshThemes: () => refreshThemes(),
     importTheme: () => importTheme(),
     addImage: () => addImage(),
-    setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).then(() => { state.brightness[screen] = percent; }).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
-    release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
-    setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
+    setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).then(() => { state.brightness[screen] = percent; }).catch((e) => fail(e)),
+    release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => fail(e)),
+    setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => fail(e)),
     autostart: () => state.autostart,
   },
 });
@@ -111,7 +113,7 @@ async function drawPreview() {
     canvasView.drawFrame(frame);
     $('status-render').textContent = t('status.render', { ms: Math.round(frame.millis) });
   } catch (e) {
-    $('status-render').textContent = t('status.renderError', { message: errorText(e) });
+    $('status-render').textContent = t('status.renderError', { message: errorText(t, e) });
   }
 }
 
@@ -123,7 +125,7 @@ let liveTimer = null;
 function pushLive() {
   if (!state.live) return;
   clearTimeout(liveTimer);
-  liveTimer = setTimeout(() => bridge.pushTheme(store.getState().theme).catch((e) => toast(t('toast.error', { message: errorText(e) }))), 150);
+  liveTimer = setTimeout(() => bridge.pushTheme(store.getState().theme).catch((e) => fail(e)), 150);
 }
 
 // The canvas is fitted again whenever the theme turns between vertical and
@@ -187,7 +189,7 @@ async function loadCatalog() {
     state.catalog = await bridge.catalog();
     library.setCatalog(state.catalog);
   } catch (e) {
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
   }
 }
 
@@ -215,7 +217,7 @@ function renderScreenSelect() {
   const current = state.screens.find((s) => s.key === state.screen);
   $('screen-dot').className = `dot${state.live ? ' live' : current?.state === 'awake' ? ' awake' : ''}`;
   let device = t('top.noScreen');
-  if (state.screenError) device = t('status.devicesError', { message: state.screenError });
+  if (state.screenError) device = t('status.devicesError', { message: errorText(t, state.screenError) });
   else if (current && state.live && state.liveVideo?.state === 'missing') device = t('status.liveVideoMissing');
   else if (current) device = state.live ? t('status.live') : t(`screen.state.${current.state}`);
   $('status-device').textContent = device;
@@ -229,7 +231,7 @@ async function refreshScreens() {
     state.screenError = null;
   } catch (e) {
     state.screens = [];
-    state.screenError = errorText(e);
+    state.screenError = e;
   }
   if (!state.screens.some((s) => s.key === state.screen)) state.screen = state.screens[0]?.key ?? null;
   renderScreenSelect();
@@ -245,7 +247,7 @@ function syncLive(s) {
     renderScreenSelect();
   }
   if (live === state.live && (!live || s.live === state.screen)) return;
-  if (!live && state.live && s.liveError) toast(t('toast.liveStopped', { message: s.liveError }));
+  if (!live && state.live && s.liveError) toast(t('toast.liveStopped', { message: errorText(t, s.liveError) }));
   state.live = live;
   if (live) state.screen = s.live;
   $('live').checked = live;
@@ -264,7 +266,7 @@ async function setLive(on) {
     if (on) await bridge.pushTheme(store.getState().theme);
   } catch (e) {
     state.live = false;
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
   }
   $('live').checked = state.live;
   renderScreenSelect();
@@ -282,7 +284,7 @@ async function refreshThemes() {
   try {
     library.renderThemes(await bridge.listThemes());
   } catch (e) {
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
   }
 }
 
@@ -291,7 +293,7 @@ async function refreshAssets() {
     state.assets = await bridge.assets();
     library.renderMedia(state.assets);
   } catch (e) {
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
   }
 }
 
@@ -325,7 +327,7 @@ async function openTheme(location) {
     canvasView.fit();
     toast(t('toast.opened', { name: theme.name }));
   } catch (e) {
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
   }
 }
 
@@ -341,7 +343,7 @@ async function newTheme(axis) {
     await refreshAssets();
     canvasView.fit();
   } catch (e) {
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
   }
 }
 
@@ -359,7 +361,7 @@ async function importTheme() {
     if (warnings.length === 0) toast(t('toast.imported'));
     else toast(warnings.length === 1 ? t('toast.importedWithOneWarning') : t('toast.importedWithWarnings', { count: warnings.length }));
   } catch (e) {
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
   }
 }
 
@@ -368,7 +370,7 @@ async function addImage() {
     const added = await bridge.addImage();
     if (added) await refreshAssets();
   } catch (e) {
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
   }
 }
 
@@ -383,14 +385,14 @@ async function save(saveAs = false) {
     refreshThemes();
     return true;
   } catch (e) {
-    toast(t('toast.error', { message: errorText(e) }));
+    fail(e);
     return false;
   }
 }
 
 // The window's close button with unsaved edits (and no screen live).
 bridge.onCloseRequested(async () => {
-  if (await settleUnsaved()) await bridge.closeWindow().catch((e) => toast(t('toast.error', { message: errorText(e) })));
+  if (await settleUnsaved()) await bridge.closeWindow().catch((e) => fail(e));
 }).catch(() => {});
 
 // ---------------------------------------------------------- chrome -----

@@ -234,7 +234,7 @@ impl Fixture {
         }
     }
 
-    fn run(&self, ticket: u64, overwrite: Confirm) -> (StorageResult<JobDto>, Vec<Progress>) {
+    fn run(&self, ticket: u64, overwrite: Confirm) -> (UiResult<JobDto>, Vec<Progress>) {
         let mut seen = Vec::new();
         let result = self
             .backend
@@ -323,7 +323,7 @@ fn the_tab_lists_capacity_and_the_files_of_both_media() {
     assert_eq!(dto.card, None);
     assert_eq!(dto.folders.len(), 2);
     let err = f.backend.storage_overview("COM9", TIME).unwrap_err();
-    assert_eq!(err.code, "failed");
+    assert_eq!(err.code(), "screenNotFound");
 }
 
 #[test]
@@ -338,17 +338,17 @@ fn deleting_and_the_boot_media_need_the_dialogs_confirmation() {
         .backend
         .delete_stored(KEY, clip, Confirm::No, TIME)
         .unwrap_err();
-    assert_eq!(err.code, "notConfirmed");
+    assert_eq!(err.code(), "notConfirmed");
     let err = f
         .backend
         .set_boot_media(KEY, Some(clip), Some(40), Confirm::No, TIME)
         .unwrap_err();
-    assert_eq!(err.code, "notConfirmed");
+    assert_eq!(err.code(), "notConfirmed");
     let err = f
         .backend
         .set_boot_media(KEY, None, Some(40), Confirm::No, TIME)
         .unwrap_err();
-    assert_eq!(err.code, "notConfirmed");
+    assert_eq!(err.code(), "notConfirmed");
     assert!(f.writes().is_empty(), "nothing reached the screen");
     assert!(
         f.connector.log().brightness.is_empty(),
@@ -358,7 +358,7 @@ fn deleting_and_the_boot_media_need_the_dialogs_confirmation() {
         .backend
         .set_boot_media(KEY, Some(clip), Some(101), Confirm::Yes, TIME)
         .unwrap_err();
-    assert_eq!(err.code, "failed");
+    assert_eq!(err.code(), "brightnessRange");
 
     // The screen starts with the brightness set in the session.
     f.backend
@@ -387,8 +387,8 @@ fn deleting_and_the_boot_media_need_the_dialogs_confirmation() {
         f.backend
             .delete_stored(KEY, "elsewhere/clip.mp4", Confirm::Yes, TIME)
             .unwrap_err()
-            .code,
-        "failed"
+            .code(),
+        "invalidInput"
     );
 
     // Play and stop on a screen that is not live.
@@ -402,7 +402,7 @@ fn deleting_and_the_boot_media_need_the_dialogs_confirmation() {
     f.backend.stop_playback(KEY, TIME).unwrap();
     assert_eq!(f.storage().playback, Playback::Idle);
     let err = f.backend.play_stored(KEY, clip, TIME).unwrap_err();
-    assert_eq!(err.code, "failed", "{err:?}");
+    assert_eq!(err.code(), "invalidInput", "{err:?}");
 }
 
 #[test]
@@ -432,7 +432,7 @@ fn an_upload_is_prepared_confirmed_sent_and_verified() {
     );
     assert_eq!(seen.last(), Some(&Progress::new(JobPhase::Verify, 1, 1)));
     let err = f.run(ready.ticket, Confirm::No).0.unwrap_err();
-    assert_eq!(err.code, "stale", "a ticket runs once");
+    assert_eq!(err.code(), "stale", "a ticket runs once");
 
     // An image goes to the image folder of the card.
     let f = fixture_with(
@@ -450,7 +450,7 @@ fn an_upload_is_prepared_confirmed_sent_and_verified() {
         .backend
         .prepare_upload(KEY, &f.local("x.png", 1), "cloud", TIME)
         .unwrap_err();
-    assert_eq!(err.code, "failed");
+    assert_eq!(err.code(), "unknownMedium");
 }
 
 #[test]
@@ -473,7 +473,7 @@ fn replacing_a_file_needs_the_overwrite_confirmation() {
             .count()
     };
     let err = f.run(again.ticket, Confirm::No).0.unwrap_err();
-    assert_eq!(err.code, "notConfirmed");
+    assert_eq!(err.code(), "notConfirmed");
     assert_eq!(uploads(&f), 1, "nothing was sent over the file");
 
     let confirmed = f.ready(&local, "internal");
@@ -651,16 +651,18 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
                 f.backend
                     .set_brightness(KEY, 50)
                     .unwrap_err()
+                    .to_string()
                     .contains("in use")
             );
             assert!(
                 f.backend
                     .release(KEY)
                     .unwrap_err()
+                    .to_string()
                     .contains("storage operation")
             );
             assert_eq!(
-                f.backend.storage_overview(KEY, TIME).unwrap_err().code,
+                f.backend.storage_overview(KEY, TIME).unwrap_err().code(),
                 "busy"
             );
         });
@@ -676,8 +678,11 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
         .backend
         .play_stored(KEY, "internal/video/native.mp4", TIME)
         .unwrap_err();
-    assert_eq!(err.code, "live");
-    assert_eq!(f.backend.stop_playback(KEY, TIME).unwrap_err().code, "live");
+    assert_eq!(err.code(), "live");
+    assert_eq!(
+        f.backend.stop_playback(KEY, TIME).unwrap_err().code(),
+        "live"
+    );
 }
 
 #[test]
@@ -692,7 +697,7 @@ fn live_mode_turned_off_during_a_job_closes_the_link_after_it() {
             if p.phase == JobPhase::Upload && p.done == 0 {
                 f.backend.set_live(false, None, TIME).unwrap();
                 let err = f.backend.set_live(true, Some(KEY), TIME).unwrap_err();
-                assert!(err.contains("storage operation"), "{err}");
+                assert_eq!(err.code(), "busy", "{err}");
             }
         });
     assert!(matches!(result, Ok(JobDto::Done { .. })));
@@ -726,7 +731,7 @@ fn sending_the_theme_video_lets_the_live_screen_play_it() {
     let (theme, assets) = video_theme();
     f.backend.studio().start(theme, assets, None);
     let err = f.backend.prepare_theme_video(KEY, TIME).unwrap_err();
-    assert_eq!(err.code, "noVideo", "not live");
+    assert_eq!(err.code(), "noVideo", "not live");
 
     f.backend.set_live(true, Some(KEY), TIME).unwrap();
     let video = f.backend.sample().video.unwrap();
@@ -799,22 +804,46 @@ fn the_progress_throttle_keeps_phase_changes_ends_and_steps() {
 
 #[test]
 fn core_errors_keep_a_code_the_ui_translates() {
+    let x = || "x".to_string();
     let cases = [
-        (BezelError::Unsupported("x".into()), "unsupported"),
-        (BezelError::NotConfirmed("x".into()), "notConfirmed"),
-        (BezelError::Timeout("x".into()), "timeout"),
-        (BezelError::Cancelled { partial: None }, "cancelled"),
-        (BezelError::Transport("x".into()), "failed"),
+        (BezelError::ScreenNotFound(x()), "screenNotFound"),
+        (
+            BezelError::AccessDenied {
+                address: x(),
+                reason: x(),
+            },
+            "accessDenied",
+        ),
         (
             BezelError::InUse {
                 address: "a".into(),
-                holders: vec![],
+                holders: vec!["b".into(), "c".into()],
             },
             "inUse",
         ),
+        (BezelError::Timeout(x()), "timeout"),
+        (BezelError::InvalidInput(x()), "invalidInput"),
+        (BezelError::Transport(x()), "transport"),
+        (BezelError::Unsupported(x()), "unsupported"),
+        (BezelError::Cancelled { partial: None }, "cancelled"),
+        (BezelError::NotConfirmed(x()), "notConfirmed"),
+        (
+            BezelError::Refused(bezel_core::domain::storage::Refusal::EmptyFile),
+            "refused",
+        ),
+        (BezelError::ThemeFile(x()), "themeFile"),
     ];
     for (e, code) in cases {
-        assert_eq!(core_error(e).code, code);
+        let english = e.to_string();
+        let ui = UiError::from(e);
+        assert_eq!(ui.code(), code);
+        if code != "cancelled" {
+            assert_eq!(ui.to_string(), english, "the core's own sentence");
+        }
     }
-    assert_eq!(StorageErrorDto::from("boom".to_string()).code, "failed");
+    let busy = UiError::from(BezelError::InUse {
+        address: "a".into(),
+        holders: vec!["b".into(), "c".into()],
+    });
+    assert_eq!(busy.value("holders"), Some("b, c"));
 }

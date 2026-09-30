@@ -19,7 +19,6 @@
 //! answer of the UI's confirmation dialog, which names the file); the core
 //! refuses `Confirm::No` before any byte is sent.
 
-use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -43,46 +42,10 @@ use bezel_core::ports::{MediaLocation, MediaTranscoder, ScreenLink};
 use crate::backend::Backend;
 use crate::dto::{
     ConversionDto, FolderDto, JobDto, MediaToolsDto, PrepareDto, PreparedDto, RefusalDto,
-    StorageDto, StorageErrorDto, StoredFileDto, media_summary,
+    StorageDto, StoredFileDto, media_summary,
 };
+use crate::messages::{ErrorCode, UiError, UiResult};
 use crate::studio::{Resume, SharedMedia};
-
-/// Result of a storage command: errors carry a code the UI translates.
-pub type StorageResult<T> = Result<T, StorageErrorDto>;
-
-impl From<String> for StorageErrorDto {
-    fn from(message: String) -> Self {
-        failed(message)
-    }
-}
-
-fn error(code: &'static str, message: impl Display) -> StorageErrorDto {
-    StorageErrorDto {
-        code,
-        message: message.to_string(),
-    }
-}
-
-fn failed(message: impl Display) -> StorageErrorDto {
-    error("failed", message)
-}
-
-/// A core error as the UI shows it.
-pub fn core_error(e: BezelError) -> StorageErrorDto {
-    let code = match &e {
-        BezelError::Unsupported(_) => "unsupported",
-        BezelError::NotConfirmed(_) => "notConfirmed",
-        BezelError::InUse { .. } => "inUse",
-        BezelError::Timeout(_) => "timeout",
-        BezelError::Cancelled { .. } => "cancelled",
-        BezelError::Refused(_) => "refused",
-        _ => "failed",
-    };
-    error(code, e)
-}
-
-/// Why a storage command waits: another one holds the screen.
-pub const BUSY: &str = "a storage operation is using the screen; wait for it to end or cancel it";
 
 /// The media converter as the studio drives it: the core's port, plus where
 /// its external tool is, which the settings' Locate button changes. The
@@ -161,11 +124,11 @@ impl StorageState {
         Arc::clone(&self.media)
     }
 
-    fn claim(&self) -> StorageResult<Claim<'_>> {
+    fn claim(&self) -> UiResult<Claim<'_>> {
         self.busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map(|_| Claim(&self.busy))
-            .map_err(|_| error("busy", BUSY))
+            .map_err(|_| UiError::new(ErrorCode::Busy))
     }
 
     /// Whether a storage operation holds a screen.
@@ -173,10 +136,10 @@ impl StorageState {
         self.busy.load(Ordering::SeqCst)
     }
 
-    /// `Err(BUSY)` while a storage operation holds a screen.
-    pub fn ensure_idle(&self) -> Result<(), String> {
+    /// `busy` while a storage operation holds a screen.
+    pub fn ensure_idle(&self) -> UiResult<()> {
         if self.is_busy() {
-            return Err(BUSY.to_string());
+            return Err(UiError::new(ErrorCode::Busy));
         }
         Ok(())
     }
@@ -210,27 +173,24 @@ impl StorageState {
         ticket
     }
 
-    fn take(&self, ticket: u64) -> StorageResult<Pending> {
+    fn take(&self, ticket: u64) -> UiResult<Pending> {
         let mut pending = lock(&self.pending);
         match pending.take() {
             Some(p) if p.ticket == ticket => Ok(p),
             other => {
                 *pending = other;
-                Err(error(
-                    "stale",
-                    "this upload is no longer prepared; drop the file again",
-                ))
+                Err(UiError::new(ErrorCode::Stale))
             }
         }
     }
 
     /// Writes the theme's video `asset` where the converter can read it.
-    fn write_scratch(&self, asset: &AssetRef, bytes: &[u8]) -> StorageResult<PathBuf> {
+    fn write_scratch(&self, asset: &AssetRef, bytes: &[u8]) -> UiResult<PathBuf> {
         let name = asset.0.rsplit(['/', '\\']).next().unwrap_or("video");
         let file = self.scratch.join(name);
         std::fs::create_dir_all(&self.scratch)
             .and_then(|()| std::fs::write(&file, bytes))
-            .map_err(|e| failed(format!("{}: {e}", file.display())))?;
+            .map_err(|e| UiError::file(file.display(), e))?;
         Ok(file)
     }
 }
@@ -251,12 +211,12 @@ impl Access {
     }
 }
 
-fn remote(path: &str) -> StorageResult<RemotePath> {
-    RemotePath::parse(path).map_err(core_error)
+fn remote(path: &str) -> UiResult<RemotePath> {
+    Ok(RemotePath::parse(path)?)
 }
 
-fn flat<T>(result: bezel_core::Result<T>) -> StorageResult<T> {
-    result.map_err(core_error)
+fn flat<T>(result: bezel_core::Result<T>) -> UiResult<T> {
+    Ok(result?)
 }
 
 /// The adjustments of a video that must be converted anyway: it stands like
@@ -290,7 +250,7 @@ fn overview(link: &mut dyn ScreenLink) -> bezel_core::Result<StorageDto> {
         for kind in MediaKind::ALL {
             let (files, error) = match storage::list(link, StorageLocation::new(*medium, kind)) {
                 Ok(entries) => (entries.iter().map(StoredFileDto::from).collect(), None),
-                Err(e) => (Vec::new(), Some(core_error(e))),
+                Err(e) => (Vec::new(), Some(UiError::from(e))),
             };
             folders.push(FolderDto {
                 medium: medium.slug(),
@@ -338,14 +298,11 @@ fn prepared_dto(ticket: u64, source: String, prepared: &PreparedUpload) -> Prepa
 
 impl Backend {
     /// Borrows the live link of `screen`, or opens the screen.
-    fn acquire(&self, screen: &str) -> StorageResult<Access> {
-        let lent = self
-            .idle_studio()
-            .lend_live_link(screen)
-            .map_err(core_error)?;
+    fn acquire(&self, screen: &str) -> UiResult<Access> {
+        let lent = self.idle_studio().lend_live_link(screen)?;
         match lent {
             Some(link) => Ok(Access::Live(link)),
-            None => self.connect(screen).map(Access::Own).map_err(failed),
+            None => self.connect(screen).map(Access::Own),
         }
     }
 
@@ -368,7 +325,7 @@ impl Backend {
         resume: Resume,
         time: LocalTime,
         work: impl FnOnce(&mut dyn ScreenLink) -> R,
-    ) -> StorageResult<R> {
+    ) -> UiResult<R> {
         let mut access = self.acquire(screen)?;
         let result = work(access.link());
         self.give_back(screen, access, resume, time);
@@ -382,19 +339,16 @@ impl Backend {
         resume: Resume,
         time: LocalTime,
         work: impl FnOnce(&mut dyn ScreenLink) -> bezel_core::Result<T>,
-    ) -> StorageResult<T> {
+    ) -> UiResult<T> {
         let _claim = self.storage.claim()?;
         self.on_screen(screen, resume, time, work).and_then(flat)
     }
 
     /// Playing or stopping files on a live screen would be hidden by the
     /// theme's frames, or stop its video: refused.
-    fn refuse_while_live(&self, screen: &str) -> StorageResult<()> {
+    fn refuse_while_live(&self, screen: &str) -> UiResult<()> {
         if self.studio().live_key() == Some(screen) {
-            return Err(error(
-                "live",
-                "turn live mode off to play or stop files: the theme covers them",
-            ));
+            return Err(UiError::new(ErrorCode::Live));
         }
         Ok(())
     }
@@ -402,7 +356,7 @@ impl Backend {
     // ----------------------------------------------------------- queries --
 
     /// Capacity and files of `screen`.
-    pub fn storage_overview(&self, screen: &str, time: LocalTime) -> StorageResult<StorageDto> {
+    pub fn storage_overview(&self, screen: &str, time: LocalTime) -> UiResult<StorageDto> {
         self.with_screen(screen, Resume::Frames, time, overview)
     }
 
@@ -454,7 +408,7 @@ impl Backend {
             &mut dyn ScreenLink,
             &mut dyn MediaTranscoder,
         ) -> bezel_core::Result<UploadRequest>,
-    ) -> StorageResult<PrepareDto> {
+    ) -> UiResult<PrepareDto> {
         let checked = self.with_screen(screen, Resume::Frames, time, |link| {
             let mut media = self.storage.media();
             let media: &mut dyn MediaTranscoder = media.as_mut();
@@ -472,7 +426,7 @@ impl Backend {
             }
             Ok(Err(e)) => {
                 remove_scratch(scratch.as_deref());
-                Err(core_error(e))
+                Err(e.into())
             }
             Err(e) => {
                 remove_scratch(scratch.as_deref());
@@ -491,9 +445,9 @@ impl Backend {
         source: &Path,
         medium: &str,
         time: LocalTime,
-    ) -> StorageResult<PrepareDto> {
+    ) -> UiResult<PrepareDto> {
         let medium = Medium::from_slug(medium)
-            .ok_or_else(|| failed(format!("{medium}: expected internal or sd")))?;
+            .ok_or_else(|| UiError::new(ErrorCode::UnknownMedium).arg("medium", medium))?;
         let orientation = self.studio().theme().orientation;
         let host_name = file_name(source);
         let location = MediaLocation(source.display().to_string());
@@ -514,21 +468,15 @@ impl Backend {
     /// Prepares "Send to screen" for the live screen missing the theme's
     /// video (D-2026-09-30-storage-video-4): where the runtime looks for it,
     /// turned to the panel and cropped to cover it.
-    pub fn prepare_theme_video(&self, screen: &str, time: LocalTime) -> StorageResult<PrepareDto> {
+    pub fn prepare_theme_video(&self, screen: &str, time: LocalTime) -> UiResult<PrepareDto> {
         let (missing, bytes, orientation) = {
             let studio = self.studio();
-            let missing = studio.missing_video(screen).ok_or_else(|| {
-                error(
-                    "noVideo",
-                    "the live screen is not missing the theme's video",
-                )
-            })?;
+            let missing = studio
+                .missing_video(screen)
+                .ok_or_else(|| UiError::new(ErrorCode::NoVideo))?;
             let bytes = studio.assets().get(&missing.asset).cloned();
             let bytes = bytes.ok_or_else(|| {
-                error(
-                    "noVideo",
-                    format!("{} is not in the theme", missing.asset.0),
-                )
+                UiError::new(ErrorCode::VideoNotInTheme).arg("asset", &missing.asset.0)
             })?;
             (missing, bytes, studio.theme().orientation)
         };
@@ -554,7 +502,7 @@ impl Backend {
         overwrite: Confirm,
         time: LocalTime,
         progress: &mut dyn FnMut(Progress),
-    ) -> StorageResult<JobDto> {
+    ) -> UiResult<JobDto> {
         let _claim = self.storage.claim()?;
         let pending = self.storage.take(ticket)?;
         let path = pending.prepared.plan.path.to_string();
@@ -566,7 +514,7 @@ impl Backend {
                 converted: done.converted,
             }),
             Err(BezelError::Cancelled { partial }) => Ok(JobDto::Cancelled { path, partial }),
-            Err(e) => Err(core_error(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -578,7 +526,7 @@ impl Backend {
         confirm: Confirm,
         time: LocalTime,
         progress: &mut dyn FnMut(Progress),
-    ) -> StorageResult<bezel_core::Result<storage::Uploaded>> {
+    ) -> UiResult<bezel_core::Result<storage::Uploaded>> {
         let token = CancelToken::new();
         *lock(&self.storage.cancel) = Some(token.clone());
         let result = self.on_screen(&pending.screen, Resume::Video, time, |link| {
@@ -605,7 +553,7 @@ impl Backend {
         path: &str,
         confirm: Confirm,
         time: LocalTime,
-    ) -> StorageResult<()> {
+    ) -> UiResult<()> {
         let path = remote(path)?;
         self.with_screen(screen, Resume::Video, time, |link| {
             storage::delete(link, &path, confirm)
@@ -613,7 +561,7 @@ impl Backend {
     }
 
     /// Plays a stored file on a screen that is not live (videos loop).
-    pub fn play_stored(&self, screen: &str, path: &str, time: LocalTime) -> StorageResult<()> {
+    pub fn play_stored(&self, screen: &str, path: &str, time: LocalTime) -> UiResult<()> {
         self.refuse_while_live(screen)?;
         let path = remote(path)?;
         self.with_screen(screen, Resume::Frames, time, |link| {
@@ -622,7 +570,7 @@ impl Backend {
     }
 
     /// Stops what a screen that is not live plays.
-    pub fn stop_playback(&self, screen: &str, time: LocalTime) -> StorageResult<()> {
+    pub fn stop_playback(&self, screen: &str, time: LocalTime) -> UiResult<()> {
         self.refuse_while_live(screen)?;
         self.with_screen(screen, Resume::Frames, time, storage::stop)
     }
@@ -640,13 +588,15 @@ impl Backend {
         brightness: Option<u8>,
         confirm: Confirm,
         time: LocalTime,
-    ) -> StorageResult<()> {
+    ) -> UiResult<()> {
         let boot = match path {
             Some(path) => BootMedia::File(remote(path)?),
             None => BootMedia::Default,
         };
         let brightness = brightness
-            .map(|percent| Brightness::new(percent).ok_or_else(|| failed("brightness is 0 to 100")))
+            .map(|percent| {
+                Brightness::new(percent).ok_or_else(|| UiError::new(ErrorCode::BrightnessRange))
+            })
             .transpose()?;
         self.with_screen(screen, Resume::Video, time, |link| {
             storage::set_boot_media(link, &boot, brightness, confirm)

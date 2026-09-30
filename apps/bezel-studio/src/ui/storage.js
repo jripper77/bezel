@@ -7,12 +7,10 @@
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { makeDraggable } from './dragdrop.js';
+import { errorText } from '../messages.js';
 
 export const MEDIA = Object.freeze(['internal', 'sd']);
 export const KINDS = Object.freeze(['image', 'video']);
-
-/** Error codes of the storage commands that have their own text. */
-export const ERROR_CODES = Object.freeze(['busy', 'unsupported', 'notConfirmed', 'inUse', 'timeout', 'stale', 'live', 'noVideo']);
 
 /**
  * Decimal sizes, like the screens' limits ("120 MB"): 184 kB, 24.1 MB.
@@ -114,12 +112,6 @@ export function refusalText(t, locale, r) {
     default:
       return r.message ?? String(r.code);
   }
-}
-
-/** A storage command's error (`{code, message}` or an Error) as text. */
-export function errorMessage(t, e) {
-  if (ERROR_CODES.includes(e?.code)) return t(`storage.error.${e.code}`);
-  return t('storage.error.failed', { message: e?.message ?? String(e) });
 }
 
 /** The file name at the end of a local path or demo source. */
@@ -252,7 +244,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       await work();
       if (success) notify(success);
     } catch (e) {
-      view.notice = { kind: 'error', text: errorMessage(t, e) };
+      view.notice = { kind: 'error', text: errorText(t, e) };
     }
     view.working = false;
     if (reload) await load();
@@ -265,7 +257,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     try {
       source = await bridge.pickMedia();
     } catch (e) {
-      view.notice = { kind: 'error', text: errorMessage(t, e) };
+      view.notice = { kind: 'error', text: errorText(t, e) };
       renderNotices();
       return;
     }
@@ -290,7 +282,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     try {
       answer = await ask();
     } catch (e) {
-      view.notice = { kind: 'error', text: errorMessage(t, e) };
+      view.notice = { kind: 'error', text: errorText(t, e) };
     }
     view.working = false;
     if (answer?.status === 'refused') view.notice = { kind: 'refused', name: label, refusal: answer };
@@ -344,7 +336,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       // partial file may remain (seen on the 8.8").
       view.notice = view.job?.cancelling && e?.code === 'timeout'
         ? { kind: 'error', text: t('storage.cancelledLost', { name: view.job.name }) }
-        : { kind: 'error', text: errorMessage(t, e) };
+        : { kind: 'error', text: errorText(t, e) };
     }
     const { name } = view.job;
     view.job = null;
@@ -414,7 +406,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       view.notice = tools.rejected ? { kind: 'error', text: t('storage.ffmpegRejected', { path: tools.rejected }) } : null;
       if (tools.ready) notify(t('storage.ffmpegReady', { version: tools.version ?? '' }));
     } catch (e) {
-      view.notice = { kind: 'error', text: errorMessage(t, e) };
+      view.notice = { kind: 'error', text: errorText(t, e) };
     }
     renderNotices();
   }
@@ -579,7 +571,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
   function folder(f, features, slot) {
     const id = `storage-${f.medium}-${f.kind}`;
     let content;
-    if (f.error) content = el('p', { class: 'empty-note', text: t('storage.folderError', { reason: errorMessage(t, f.error) }) });
+    if (f.error) content = el('p', { class: 'empty-note', text: t('storage.folderError', { reason: errorText(t, f.error) }) });
     else if (!f.files.length) content = el('p', { class: 'empty-note', text: t(`storage.empty.${f.kind}`) });
     else content = el('ul', { class: 'stored-files', 'aria-labelledby': id }, f.files.map((file) => fileRow(file, features, slot)));
     return el('div', { class: 'folder' }, [
@@ -626,7 +618,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     }
     if (view.status === 'error') {
       body.replaceChildren(
-        el('p', { class: 'empty-note', role: 'alert', text: t('storage.loadError', { message: errorMessage(t, view.error) }) }),
+        el('p', { class: 'empty-note', role: 'alert', text: t('storage.loadError', { message: errorText(t, view.error) }) }),
         el('div', { class: 'button-row' }, [el('button', { type: 'button', class: 'text-button', text: t('storage.retry'), onclick: load })]),
       );
       return;

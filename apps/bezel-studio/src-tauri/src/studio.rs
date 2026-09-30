@@ -38,6 +38,7 @@ use bezel_core::ports::{
 };
 use bezel_core::{BezelError, Result};
 
+use crate::messages::{ErrorCode, UiError};
 use crate::storage::MediaSetup;
 
 /// Slowest refresh, seconds (sensors still update the UI this often; the
@@ -168,7 +169,7 @@ pub struct Studio {
     unsampled: u32,
     location: Option<ThemeLocation>,
     live: Option<Live>,
-    live_error: Option<String>,
+    live_error: Option<UiError>,
     host: Option<HostDecoding>,
 }
 
@@ -347,8 +348,8 @@ impl Studio {
     }
 
     /// Why the live screen stopped, until the next `go_live`.
-    pub fn live_error(&self) -> Option<&str> {
-        self.live_error.as_deref()
+    pub fn live_error(&self) -> Option<&UiError> {
+        self.live_error.as_ref()
     }
 
     /// How the theme's video background reaches the live screen (`None`
@@ -514,20 +515,18 @@ impl Studio {
             .host
             .as_ref()
             .map_or(Duration::ZERO, |h| h.started.elapsed());
-        let frame = self
-            .runtime
-            .render(self.renderer.as_mut(), time, video)
-            .and_then(|frame| {
-                fits(self.runtime.theme(), panel)?;
-                Ok(frame)
-            });
-        let frame = match frame {
+        let frame = match self.runtime.render(self.renderer.as_mut(), time, video) {
             Ok(frame) => frame,
             Err(e) => {
-                self.stop_with(&e);
+                self.stop_with(UiError::from(e.clone()));
                 return Err(e);
             }
         };
+        if let Some(misfit) = misfit(self.runtime.theme(), panel) {
+            let error = BezelError::InvalidInput(misfit.to_string());
+            self.stop_with(misfit);
+            return Err(error);
+        }
         let Some(live) = self.live.as_mut() else {
             return Ok(None);
         };
@@ -562,7 +561,7 @@ impl Studio {
             return Some(link);
         };
         if let Err(e) = outcome {
-            self.stop_with(e);
+            self.stop_with(UiError::from(e.clone()));
             return Some(link);
         }
         live.slot = Slot::Here(link);
@@ -573,10 +572,10 @@ impl Studio {
     }
 
     /// Stops the live mode after `error`.
-    fn stop_with(&mut self, error: &BezelError) {
+    fn stop_with(&mut self, error: UiError) {
         self.runtime.forget_screen();
         self.live = None;
-        self.live_error = Some(error.to_string());
+        self.live_error = Some(error);
     }
 
     /// Time between two refreshes: the theme's refresh, or a picture of a
@@ -610,15 +609,16 @@ impl Studio {
     }
 }
 
-/// Refuses a theme that does not fit a panel whose portrait size is `panel`.
-fn fits(theme: &Theme, panel: Size) -> Result<()> {
-    let Some(expected) = theme.misfit(panel) else {
-        return Ok(());
-    };
-    Err(BezelError::Transport(format!(
-        "this theme is {}x{} but the screen is {}x{} in this orientation",
-        theme.canvas.width, theme.canvas.height, expected.width, expected.height
-    )))
+/// Why `theme` does not fit a panel whose portrait size is `panel`, if it
+/// does not.
+fn misfit(theme: &Theme, panel: Size) -> Option<UiError> {
+    let expected = theme.misfit(panel)?;
+    let size = |s: Size| format!("{}x{}", s.width, s.height);
+    Some(
+        UiError::new(ErrorCode::ThemeMisfit)
+            .arg("theme", size(theme.canvas))
+            .arg("screen", size(expected)),
+    )
 }
 
 /// Starts the theme's video `asset` on `link` offering to decode it here
@@ -807,7 +807,12 @@ mod tests {
         let error = present(&mut s).unwrap_err().to_string();
         assert!(error.contains("320x480"), "{error}");
         assert_eq!(s.live_key(), None);
-        assert!(s.live_error().unwrap().contains("480x1920"));
+        let why = s.live_error().unwrap();
+        assert_eq!(why.code(), "themeMisfit");
+        assert_eq!(
+            (why.value("theme"), why.value("screen")),
+            (Some("320x480"), Some("480x1920"))
+        );
         assert!(s.stop_live().is_none());
         present(&mut s).unwrap();
     }
@@ -1213,7 +1218,8 @@ mod tests {
         let error = go_live(&mut s, Box::new(Unplugged(link))).unwrap_err();
         assert!(error.to_string().contains("cable"), "{error}");
         assert_eq!(s.live_key(), None);
-        assert!(s.live_error().unwrap().contains("cable"));
+        assert_eq!(s.live_error().unwrap().code(), "transport");
+        assert!(s.live_error().unwrap().to_string().contains("cable"));
         assert!(s.frame_for_screen(TIME).unwrap().is_none());
     }
 

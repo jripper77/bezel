@@ -12,20 +12,20 @@ App de janela única com editor drag-and-drop WYSIWYG, sensores ao vivo, bandeja
 
 #### T-5.1: Editor store
 - **Specialist:** jdi-doer-bezel
-- **Files modified:** `apps/bezel-studio/src/editor/{store,commands,snap,geometry}.js`, `apps/bezel-studio/tests/ui/editor-*.test.mjs`
+- **Files modified:** `apps/bezel-studio/src/editor/{store,snap,geometry,widgets}.js` (os comandos ficaram em `store.js`), `apps/bezel-studio/tests/ui/editor-*.test.mjs`
 - **Acceptance:** immutable theme state (DTO shape), command stack with undo/redo and coalescing of drags, add/remove/duplicate/reorder/move/resize/update, snapping to canvas and elements, alignment/distribution, selection model
 - **Dependencies:** none
 - **Test:** `npm run test:unit`
 - **Status:** completed (790aefb)
 
 #### T-5.2: Workspace layout and canvas
-- **Files modified:** `apps/bezel-studio/src/{index.html,styles.css,app.js}`, `apps/bezel-studio/src/ui/{canvas,overlay,topbar,statusbar}.js`
+- **Files modified:** `apps/bezel-studio/src/{index.html,styles.css,app.js,shortcuts.js}`, `apps/bezel-studio/src/ui/{canvas,dragdrop,dom,icons}.js` (overlay, barra superior e de status ficaram em `canvas.js`/`app.js`)
 - **Acceptance:** three-column layout; canvas with bezel, zoom/fit/pan; preview image from the bridge; overlay handles, marquee, guides; keyboard shortcuts
 - **Dependencies:** T-5.1
 - **Status:** completed (3e9b21d)
 
 #### T-5.3: Library panels and inspector
-- **Files modified:** `apps/bezel-studio/src/ui/{library,inspector,fields,color}.js`, `apps/bezel-studio/src/i18n/*`
+- **Files modified:** `apps/bezel-studio/src/ui/{library,inspector,fields}.js` (o campo de cor ficou em `fields.js`), `apps/bezel-studio/src/i18n/*`
 - **Acceptance:** widgets palette and sensor browser draggable onto the canvas; layers with visibility/lock/reorder; theme gallery; media; screen controls; inspector forms for every element kind and for the theme
 - **Dependencies:** T-5.1
 - **Status:** completed (3e9b21d)

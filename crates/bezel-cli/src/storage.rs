@@ -19,7 +19,8 @@ use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::job::{CancelToken, Job, JobPhase, Progress};
 use bezel_core::domain::media::{
-    ConvertOptions, MediaInfo, MediaKind, MediaTools, TranscodeTarget, UploadProfile, cover_crop,
+    ConvertOptions, MediaInfo, MediaKind, MediaTools, TranscodeTarget, UploadProfile,
+    fitting_options,
 };
 use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::storage::{
@@ -590,10 +591,11 @@ fn profile_of(model: &DeviceModel) -> anyhow::Result<UploadProfile> {
     })
 }
 
-/// The conversion that fits a video to the panel: turned for the way the
-/// screen stands, cropped to the panel's shape (never stretched), at `fps`.
-/// A video already at the panel's native size, with no orientation asked
-/// for, is left as it is.
+/// The conversion that fits a video to the panel at `fps`: turned for the
+/// way the screen stands and cropped to the panel's shape, never stretched
+/// (the core's `fitting_options`). The way it stands is `orientation`, else
+/// the video's own shape; a video already at the panel's native size, with
+/// no orientation asked for, is left as it is.
 fn convert_options(
     model: &DeviceModel,
     profile: &UploadProfile,
@@ -608,20 +610,15 @@ fn convert_options(
     if media.kind() != Some(MediaKind::Video) {
         return ConvertOptions::default();
     }
-    let panel = profile.video_size;
     let orientation = match (orientation, media.dimensions) {
         (Some(o), _) => Orientation::from(o),
-        (None, Some(size)) if size == panel => return unchanged,
+        (None, Some(size)) if size == profile.video_size => return unchanged,
         (None, Some(size)) if size.width > size.height => Orientation::Landscape,
         (None, _) => Orientation::Portrait,
     };
-    let quarter_turns = orientation.quarter_turns_to(model.native_orientation);
     ConvertOptions {
-        quarter_turns,
-        crop: media
-            .dimensions
-            .and_then(|size| cover_crop(size, quarter_turns, panel)),
-        ..unchanged
+        frame_rate: fps,
+        ..fitting_options(model, orientation, media)
     }
 }
 

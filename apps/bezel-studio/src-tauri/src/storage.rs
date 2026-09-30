@@ -30,7 +30,9 @@ use bezel_core::domain::clock::LocalTime;
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::job::{CancelToken, Job, Progress};
-use bezel_core::domain::media::{ConvertOptions, MediaInfo, MediaKind, UploadProfile, cover_crop};
+use bezel_core::domain::media::{
+    ConvertOptions, MediaInfo, MediaKind, UploadProfile, fitting_options,
+};
 use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::storage::{
     BootMedia, Medium, RemotePath, Repeat, StorageLocation, UploadAction,
@@ -257,31 +259,21 @@ fn flat<T>(result: bezel_core::Result<T>) -> StorageResult<T> {
     result.map_err(core_error)
 }
 
-/// The adjustments of a video that must be converted anyway: turned from the
-/// edited theme's orientation to the panel's (so it stands like the theme on
-/// the screen) and cropped to cover the panel without distortion. A video
+/// The adjustments of a video that must be converted anyway: it stands like
+/// the edited theme in `orientation` on the screen (the core's
+/// `fitting_options`: turned to the panel and cropped to cover it). A video
 /// already in the screen's profile, and every image, goes as it is.
-fn fitting_options(
+fn upload_options(
     model: &DeviceModel,
     orientation: Orientation,
     media: &MediaInfo,
 ) -> ConvertOptions {
-    let Some(profile) = UploadProfile::for_model(model) else {
-        return ConvertOptions::default();
-    };
-    if media.kind() != Some(MediaKind::Video)
-        || profile.mismatches(MediaKind::Video, media).is_empty()
-    {
+    let in_profile = UploadProfile::for_model(model)
+        .is_some_and(|profile| profile.mismatches(MediaKind::Video, media).is_empty());
+    if in_profile {
         return ConvertOptions::default();
     }
-    let quarter_turns = orientation.quarter_turns_to(model.native_orientation);
-    ConvertOptions {
-        quarter_turns,
-        crop: media
-            .dimensions
-            .and_then(|size| cover_crop(size, quarter_turns, profile.video_size)),
-        ..ConvertOptions::default()
-    }
+    fitting_options(model, orientation, media)
 }
 
 /// Capacity and every folder's files; a folder that cannot be listed says
@@ -511,7 +503,7 @@ impl Backend {
             let kind = probed.kind().unwrap_or(MediaKind::Image);
             let suggested = storage::suggest_name(link, &name, &probed)?;
             Ok(UploadRequest {
-                options: fitting_options(link.identity().model, orientation, &probed),
+                options: upload_options(link.identity().model, orientation, &probed),
                 name: suggested.map_or(name, |n| n.to_string()),
                 location: StorageLocation::new(medium, kind),
                 source: location,
@@ -523,7 +515,7 @@ impl Backend {
     /// video (D-2026-09-30-storage-video-4): where the runtime looks for it,
     /// turned to the panel and cropped to cover it.
     pub fn prepare_theme_video(&self, screen: &str, time: LocalTime) -> StorageResult<PrepareDto> {
-        let (missing, bytes) = {
+        let (missing, bytes, orientation) = {
             let studio = self.studio();
             let missing = studio.missing_video(screen).ok_or_else(|| {
                 error(
@@ -538,7 +530,7 @@ impl Backend {
                     format!("{} is not in the theme", missing.asset.0),
                 )
             })?;
-            (missing, bytes)
+            (missing, bytes, studio.theme().orientation)
         };
         let file = self.storage.write_scratch(&missing.asset, &bytes)?;
         let location = MediaLocation(file.display().to_string());
@@ -546,11 +538,8 @@ impl Backend {
         self.prepare(screen, time, source, Some(file), move |link, media| {
             let mut request = missing.upload_request(location);
             let probed = media.probe(&request.source)?;
-            let profile = UploadProfile::for_model(link.identity().model);
-            if let (Some(profile), Some(size)) = (profile, probed.dimensions) {
-                let turns = request.options.quarter_turns;
-                request.options.crop = cover_crop(size, turns, profile.video_size);
-            }
+            // The runtime's turns for this theme and screen, and the crop.
+            request.options = fitting_options(link.identity().model, orientation, &probed);
             Ok(request)
         })
     }

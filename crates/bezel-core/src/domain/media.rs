@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use super::device::{DeviceModel, Family};
 use super::frame::Rect;
-use super::geometry::Size;
+use super::geometry::{Orientation, Size};
 use super::storage::FileName;
 
 /// Still picture or moving picture. Also names the two folders every storage
@@ -296,6 +296,33 @@ pub fn cover_crop(source: Size, quarter_turns: u8, target: Size) -> Option<Rect>
     })
 }
 
+/// The conversion that makes a video stand on `model`'s panel the way it
+/// stands in `orientation`: turned by the quarter turns from `orientation`
+/// to the panel's native one, then cropped to cover the panel without
+/// distortion ([`cover_crop`]; no crop when its size is unknown or already
+/// has the panel's shape). Pictures, and screens that store no media, need
+/// no adjustment. The frame rate and tone are left to the caller.
+pub fn fitting_options(
+    model: &DeviceModel,
+    orientation: Orientation,
+    media: &MediaInfo,
+) -> ConvertOptions {
+    let Some(profile) = UploadProfile::for_model(model) else {
+        return ConvertOptions::default();
+    };
+    if media.kind() != Some(MediaKind::Video) {
+        return ConvertOptions::default();
+    }
+    let quarter_turns = orientation.quarter_turns_to(model.native_orientation);
+    ConvertOptions {
+        quarter_turns,
+        crop: media
+            .dimensions
+            .and_then(|size| cover_crop(size, quarter_turns, profile.video_size)),
+        ..ConvertOptions::default()
+    }
+}
+
 impl ConvertOptions {
     /// True when the options leave the picture as it is.
     pub fn is_identity(&self) -> bool {
@@ -574,6 +601,41 @@ pub(crate) mod tests {
         assert_eq!(cover_crop(Size::new(1920, 480), 1, panel), None);
         assert_eq!(cover_crop(Size::new(0, 10), 0, panel), None);
     }
+
+    #[test]
+    fn fitting_options_turn_and_cover_crop() {
+        let model = |id| model_by_id(ModelId(id)).expect("model");
+        // The 8.8" stands natively upside down (reverse portrait): a
+        // landscape clip turns once and loses its sides.
+        let screen = model("turing-8.8");
+        let wide = mp4(Size::new(1920, 1080), 1000);
+        let fitted = fitting_options(screen, Orientation::Landscape, &wide);
+        assert_eq!(fitted.quarter_turns, 1);
+        assert_eq!(
+            fitted.crop,
+            cover_crop(Size::new(1920, 1080), 1, Size::new(480, 1920))
+        );
+        assert_eq!((fitted.frame_rate, fitted.tone), (None, Tone::Natural));
+        let native = mp4(Size::new(480, 1920), 1000);
+        let upright = fitting_options(screen, Orientation::Portrait, &native);
+        assert_eq!((upright.quarter_turns, upright.crop), (2, None));
+        let unknown = MediaInfo {
+            dimensions: None,
+            ..wide.clone()
+        };
+        let turned = fitting_options(screen, Orientation::ReverseLandscape, &unknown);
+        assert_eq!((turned.quarter_turns, turned.crop), (3, None));
+        // Pictures and screens without storage need nothing.
+        let picture = still(MediaFormat::Png, 10);
+        let none = ConvertOptions::default();
+        assert_eq!(
+            fitting_options(screen, Orientation::Landscape, &picture),
+            none
+        );
+        let tiny = model("weact-fs-0.96");
+        assert_eq!(fitting_options(tiny, Orientation::Landscape, &wide), none);
+    }
+
     use crate::domain::catalog::model_by_id;
     use crate::domain::device::ModelId;
 

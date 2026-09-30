@@ -2,17 +2,23 @@
 #![forbid(unsafe_code)]
 
 use bezel_cli::{Cli, run};
-use bezel_devices::{FakeBus, SystemBus};
+use bezel_devices::{FakeBus, FakeConnector, SystemBus, SystemConnector};
 use clap::Parser;
 use std::io::Write;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if cli.verbose {
+        tracing_subscriber::fmt()
+            .with_env_filter("bezel=debug,bezel_devices=debug,bezel_core=debug")
+            .with_writer(std::io::stderr)
+            .init();
+    }
     let result = if cli.fake {
-        run(&cli, &FakeBus::turing_88())
+        run(&cli, &FakeBus::turing_88(), &FakeConnector::default())
     } else {
-        run(&cli, &SystemBus)
+        run(&cli, &SystemBus, &SystemConnector)
     };
     match result {
         Ok(out) => {

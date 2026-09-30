@@ -1,11 +1,15 @@
 //! Ports: the traits adapters implement (driven) or call (driving).
 
 use crate::Result;
+use crate::domain::clock::{Language, LocalTime};
 use crate::domain::discovery::{Endpoint, Screen};
 use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
+use crate::domain::history::Histories;
 use crate::domain::screen::{Brightness, ScreenIdentity};
 use crate::domain::sensor::{SensorInfo, Snapshot};
+use crate::domain::theme::{AssetRef, Theme};
+use std::collections::BTreeMap;
 
 /// Driven port: enumerates the USB endpoints the host can see, without
 /// opening or writing to any of them.
@@ -47,4 +51,45 @@ pub trait SensorSource: Send {
     fn catalog(&mut self) -> Result<Vec<SensorInfo>>;
     /// Current readings of every sensor in the catalog.
     fn sample(&mut self) -> Result<Snapshot>;
+}
+
+/// Everything a frame depends on besides the theme.
+#[derive(Debug, Clone, Copy)]
+pub struct RenderContext<'a> {
+    /// Current readings.
+    pub snapshot: &'a Snapshot,
+    /// Graph histories.
+    pub histories: &'a Histories,
+    /// Local wall-clock time for clock elements.
+    pub time: LocalTime,
+    /// Language of day and month names.
+    pub language: Language,
+}
+
+/// Driven port: draws a theme into a frame of its canvas size.
+pub trait FrameRenderer: Send {
+    /// Renders `theme` with `assets` in `context`.
+    fn render(
+        &mut self,
+        theme: &Theme,
+        assets: &BTreeMap<AssetRef, Vec<u8>>,
+        context: RenderContext<'_>,
+    ) -> Result<Frame>;
+}
+
+/// Where a theme lives for a [`ThemeStore`] (a file or folder for disk stores).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ThemeLocation(pub String);
+
+/// Driven port: reads and writes themes with their assets.
+pub trait ThemeStore {
+    /// Loads a theme and its assets.
+    fn load(&self, location: &ThemeLocation) -> Result<(Theme, BTreeMap<AssetRef, Vec<u8>>)>;
+    /// Saves a theme and its assets.
+    fn save(
+        &self,
+        location: &ThemeLocation,
+        theme: &Theme,
+        assets: &BTreeMap<AssetRef, Vec<u8>>,
+    ) -> Result<()>;
 }

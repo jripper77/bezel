@@ -1,0 +1,1 @@
+D-2026-09-30-device-protocols-3 (2026-09-30): Before opening a serial port the connector lists the other processes holding it (/proc/<pid>/fd on Linux) and fails with InUse naming them, instead of interleaving packets with another program (the dev machine runs turing-smart-screen.service).

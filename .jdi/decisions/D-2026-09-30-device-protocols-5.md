@@ -1,0 +1,1 @@
+D-2026-09-30-device-protocols-5 (2026-09-30): Families without hardware on the bench ship with golden byte vectors from the references and hardware_validated=false; the Turing 8.8" rev C is marked validated after the real-screen checks of this phase.

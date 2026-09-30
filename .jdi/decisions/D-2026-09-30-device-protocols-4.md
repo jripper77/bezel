@@ -1,0 +1,1 @@
+D-2026-09-30-device-protocols-4 (2026-09-30): Raw-USB families go through nusb; their crypto uses RustCrypto: Turing USB = DES-CBC, key = IV = 'slv3tuzx', PKCS#7 padding as the vendor app sends it; WCH = DES-ECB with the vendor key on the 8-byte command and bytes 2..9 of each 32-byte reply.

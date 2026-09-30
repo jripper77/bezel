@@ -16,7 +16,7 @@
   versionados, round-trip — `6e6cbc8`, `d3a4158`
 - T-4.4: importadores YAML do Python e `.turtheme` do TURZX (parser NRBF com whitelist) com
   `ImportReport` — `504ab76`
-- T-4.5: CLI `render`/`run`/`import` + temas embutidos — `cff8794`
+- T-4.5: CLI `render`/`run`/`import` + temas embutidos — `46c903f`
   - `bezel render <tema> -o out.png [--fake]`: um frame via `ThemeRuntime` (amostra de aquecimento +
     250 ms, depois o frame) num PNG do tamanho do canvas; aceita `.bezeltheme`, pasta nativa, nome de
     tema embutido e também `.turtheme`, `theme.yaml` e pasta de tema Python (convertidos na hora, avisos

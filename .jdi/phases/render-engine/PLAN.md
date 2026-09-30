@@ -44,7 +44,7 @@ Modelo de tema, renderer WYSIWYG, formato nativo, importadores e runtime headles
 - **Files modified:** `crates/bezel-cli/**`, `themes/**`
 - **Acceptance:** `bezel render <theme> -o out.png`, `bezel run <theme>` (Ctrl+C releases the screen), `bezel import <src> -o <dst>`; bundled themes for the main panel sizes; `ThemeRuntime` integration tests with the fakes
 - **Dependencies:** T-4.2, T-4.3
-- **Status:** completed (cff8794)
+- **Status:** completed (46c903f)
 
 ## Execution
 - Total tasks: 5

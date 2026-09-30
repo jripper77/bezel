@@ -174,9 +174,13 @@ impl TextEngine {
         if let Some(family) = self.installed(&font.family) {
             return Some(family);
         }
+        let fallback = match &self.default_family {
+            Some(family) => format!("{family:?}"),
+            None => "no font".to_string(),
+        };
         diagnostics.warn(format!(
-            "font family {:?} is not available; using {:?}",
-            font.family, self.default_family
+            "font family {:?} is not available; using {fallback}",
+            font.family
         ));
         self.default_family.clone()
     }

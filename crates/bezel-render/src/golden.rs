@@ -418,6 +418,11 @@ pub(crate) fn images(r: &mut SkiaRenderer) {
         64,
         "missing asset draws nothing"
     );
+    assert!(
+        r.problems().iter().any(|p| p.contains("q.png is missing")),
+        "{:?}",
+        r.problems()
+    );
 }
 
 fn shape_frame(

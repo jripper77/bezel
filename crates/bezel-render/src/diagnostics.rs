@@ -26,6 +26,13 @@ impl Diagnostics {
         }
     }
 
+    /// The distinct problems logged so far, sorted.
+    pub fn messages(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.seen.iter().cloned().collect();
+        out.sort();
+        out
+    }
+
     /// Number of distinct problems logged (tests).
     #[cfg(test)]
     pub fn count(&self) -> usize {
@@ -109,6 +116,7 @@ mod tests {
         d.warn("b".into());
         assert_eq!(d.count(), 2);
         assert!(d.mentions("b"));
+        assert_eq!(d.messages(), vec!["a".to_string(), "b".to_string()]);
         for i in 0..MEMORY + 1 {
             d.warn(format!("m{i}"));
         }

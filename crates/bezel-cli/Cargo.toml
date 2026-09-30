@@ -21,12 +21,18 @@ bezel-core = { workspace = true }
 bezel-devices = { workspace = true }
 bezel-sensors = { workspace = true }
 bezel-render = { workspace = true }
+bezel-themes = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4.6.7", features = ["derive"] }
 anyhow = "1"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+sys-locale = "0.3.2"
+# Ctrl+C (and SIGTERM/SIGHUP with `termination`) ends `bezel run`, which then
+# hands the screen back instead of leaving it frozen on the last frame.
+ctrlc = { version = "3.5.2", features = ["termination"] }
 
 [dev-dependencies]
 assert_cmd = "2"

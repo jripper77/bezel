@@ -16,6 +16,7 @@
 
 mod composite;
 mod diagnostics;
+mod fonts;
 mod gauges;
 mod graph;
 mod images;
@@ -32,6 +33,7 @@ mod golden;
 #[cfg(test)]
 mod testkit;
 
+pub use fonts::font_files;
 pub use renderer::SkiaRenderer;
 pub use text::SystemFonts;
 

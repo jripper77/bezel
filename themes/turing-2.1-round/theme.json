@@ -1,0 +1,490 @@
+{
+  "schema": 1,
+  "name": "Midnight 2.1\" round",
+  "canvas": {
+    "width": 480,
+    "height": 480
+  },
+  "orientation": "portrait",
+  "refreshSeconds": 1.0,
+  "background": {
+    "type": "color",
+    "color": "#05070cff"
+  },
+  "elements": [
+    {
+      "id": 1,
+      "name": "Face",
+      "frame": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 480.0,
+        "height": 480.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "shape",
+        "shape": "ellipse",
+        "radius": 0.0,
+        "fill": {
+          "angle": 90.0,
+          "stops": [
+            [
+              0.0,
+              "#101830ff"
+            ],
+            [
+              1.0,
+              "#05070cff"
+            ]
+          ]
+        },
+        "strokeWidth": 0.0
+      }
+    },
+    {
+      "id": 2,
+      "name": "CPU arc",
+      "frame": {
+        "x": 16.0,
+        "y": 16.0,
+        "width": 448.0,
+        "height": 448.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "ring",
+        "binding": {
+          "key": "cpu.usage",
+          "min": 0.0,
+          "max": 100.0
+        },
+        "startAngle": -150.0,
+        "sweep": 120.0,
+        "thickness": 18.0,
+        "clockwise": true,
+        "fill": {
+          "angle": 270.0,
+          "stops": [
+            [
+              0.0,
+              "#22d3eeff"
+            ],
+            [
+              1.0,
+              "#6366f1ff"
+            ]
+          ]
+        },
+        "track": "#ffffff14",
+        "roundCaps": true
+      }
+    },
+    {
+      "id": 3,
+      "name": "GPU arc",
+      "frame": {
+        "x": 16.0,
+        "y": 16.0,
+        "width": 448.0,
+        "height": 448.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "ring",
+        "binding": {
+          "key": "gpu.usage",
+          "min": 0.0,
+          "max": 100.0
+        },
+        "startAngle": 150.0,
+        "sweep": 120.0,
+        "thickness": 18.0,
+        "clockwise": false,
+        "fill": {
+          "angle": 270.0,
+          "stops": [
+            [
+              0.0,
+              "#c084fcff"
+            ],
+            [
+              1.0,
+              "#f472b6ff"
+            ]
+          ]
+        },
+        "track": "#ffffff14",
+        "roundCaps": true
+      }
+    },
+    {
+      "id": 4,
+      "name": "Date",
+      "frame": {
+        "x": 0.0,
+        "y": 104.0,
+        "width": 480.0,
+        "height": 32.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "clock",
+          "pattern": "%a %e %b"
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 500,
+            "italic": false
+          },
+          "size": 22.0,
+          "paint": "#8b94a9ff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 0.0
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "Time",
+      "frame": {
+        "x": 0.0,
+        "y": 140.0,
+        "width": 480.0,
+        "height": 124.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "clock",
+          "pattern": "%H:%M"
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 700,
+            "italic": false
+          },
+          "size": 104.0,
+          "paint": "#f3f5faff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": -3.0
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "CPU title",
+      "frame": {
+        "x": 110.0,
+        "y": 282.0,
+        "width": 120.0,
+        "height": 20.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "static",
+          "text": "CPU"
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 600,
+            "italic": false
+          },
+          "size": 13.0,
+          "paint": "#8b94a9ff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 2.08
+        }
+      }
+    },
+    {
+      "id": 7,
+      "name": "CPU usage",
+      "frame": {
+        "x": 110.0,
+        "y": 300.0,
+        "width": 120.0,
+        "height": 44.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "sensor",
+          "key": "cpu.usage",
+          "format": {
+            "showUnit": true,
+            "fahrenheit": false,
+            "decimalBytes": false
+          },
+          "prefix": "",
+          "suffix": ""
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 700,
+            "italic": false
+          },
+          "size": 34.0,
+          "paint": "#22d3eeff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 0.0
+        }
+      }
+    },
+    {
+      "id": 8,
+      "name": "CPU temperature",
+      "frame": {
+        "x": 110.0,
+        "y": 342.0,
+        "width": 120.0,
+        "height": 26.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "sensor",
+          "key": "cpu.temperature",
+          "format": {
+            "showUnit": true,
+            "fahrenheit": false,
+            "decimalBytes": false
+          },
+          "prefix": "",
+          "suffix": ""
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 500,
+            "italic": false
+          },
+          "size": 18.0,
+          "paint": "#fb923cff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 0.0
+        }
+      }
+    },
+    {
+      "id": 9,
+      "name": "GPU title",
+      "frame": {
+        "x": 250.0,
+        "y": 282.0,
+        "width": 120.0,
+        "height": 20.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "static",
+          "text": "GPU"
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 600,
+            "italic": false
+          },
+          "size": 13.0,
+          "paint": "#8b94a9ff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 2.08
+        }
+      }
+    },
+    {
+      "id": 10,
+      "name": "GPU usage",
+      "frame": {
+        "x": 250.0,
+        "y": 300.0,
+        "width": 120.0,
+        "height": 44.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "sensor",
+          "key": "gpu.usage",
+          "format": {
+            "showUnit": true,
+            "fahrenheit": false,
+            "decimalBytes": false
+          },
+          "prefix": "",
+          "suffix": ""
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 700,
+            "italic": false
+          },
+          "size": 34.0,
+          "paint": "#c084fcff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 0.0
+        }
+      }
+    },
+    {
+      "id": 11,
+      "name": "GPU temperature",
+      "frame": {
+        "x": 250.0,
+        "y": 342.0,
+        "width": 120.0,
+        "height": 26.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "sensor",
+          "key": "gpu.temperature",
+          "format": {
+            "showUnit": true,
+            "fahrenheit": false,
+            "decimalBytes": false
+          },
+          "prefix": "",
+          "suffix": ""
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 500,
+            "italic": false
+          },
+          "size": 18.0,
+          "paint": "#fb923cff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 0.0
+        }
+      }
+    },
+    {
+      "id": 12,
+      "name": "Memory",
+      "frame": {
+        "x": 90.0,
+        "y": 384.0,
+        "width": 300.0,
+        "height": 26.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "sensor",
+          "key": "memory.percent",
+          "format": {
+            "showUnit": true,
+            "fahrenheit": false,
+            "decimalBytes": false
+          },
+          "prefix": "RAM ",
+          "suffix": ""
+        },
+        "style": {
+          "font": {
+            "family": "Inter",
+            "weight": 600,
+            "italic": false
+          },
+          "size": 16.0,
+          "paint": "#34d399ff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 0.0
+        }
+      }
+    },
+    {
+      "id": 13,
+      "name": "Download",
+      "frame": {
+        "x": 90.0,
+        "y": 410.0,
+        "width": 300.0,
+        "height": 24.0
+      },
+      "opacity": 1.0,
+      "visible": true,
+      "locked": false,
+      "kind": {
+        "type": "text",
+        "content": {
+          "type": "sensor",
+          "key": "net.down",
+          "format": {
+            "showUnit": true,
+            "fahrenheit": false,
+            "decimalBytes": false
+          },
+          "prefix": "↓ ",
+          "suffix": ""
+        },
+        "style": {
+          "font": {
+            "family": "JetBrains Mono",
+            "weight": 500,
+            "italic": false
+          },
+          "size": 15.0,
+          "paint": "#38bdf8ff",
+          "align": "center",
+          "valign": "middle",
+          "letterSpacing": 0.0
+        }
+      }
+    }
+  ]
+}

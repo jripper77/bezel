@@ -1,20 +1,26 @@
 //! Command-line driving adapter of Bezel. `main.rs` is the composition root;
-//! everything here is testable against any [`DeviceBus`], [`ScreenConnector`]
-//! and [`SensorSource`](bezel_core::ports::SensorSource).
+//! everything here is testable against any [`DeviceBus`], [`ScreenConnector`],
+//! [`SensorSource`], [`FrameRenderer`] and [`ThemeStore`].
 #![forbid(unsafe_code)]
 
+pub mod clock;
 mod devices;
+pub mod live;
 mod screen;
 mod sensors;
+pub mod theme;
 
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::theme::Fit;
-use bezel_core::ports::{DeviceBus, FrameRenderer, ScreenConnector};
+use bezel_core::ports::{DeviceBus, FrameRenderer, ScreenConnector, SensorSource, ThemeStore};
 use clap::{Parser, Subcommand, ValueEnum};
 
+pub use live::{Pace, RunRequest, SleepPace};
 pub use sensors::{WatchStyle, run as run_sensors};
 
 /// Product version: the one CI or `scripts/install-local.sh` stamped, else the crate's.
@@ -186,6 +192,102 @@ pub enum Command {
     /// Rates and usages are measured between two samples 250 ms apart, so
     /// the first output takes a quarter of a second.
     Sensors(SensorsArgs),
+    /// Render one frame of a theme to a PNG of its canvas size, with this
+    /// machine's sensors (the demo values with --fake).
+    Render {
+        /// A .bezeltheme file or theme folder, the name of a bundled theme, or
+        /// another app's theme to preview (.turtheme, theme.yaml or a
+        /// turing-smart-screen-python theme folder).
+        theme: PathBuf,
+        /// The PNG to write.
+        #[arg(long, short = 'o', value_name = "PNG")]
+        output: PathBuf,
+    },
+    /// Show a theme on the screen with live sensors until Ctrl+C, then hand
+    /// the screen back to its standalone mode.
+    Run {
+        /// Screen to use.
+        #[command(flatten)]
+        target: Target,
+        /// A .bezeltheme file or theme folder, the name of a bundled theme, or
+        /// another app's theme (converted on the fly).
+        theme: PathBuf,
+        /// Stop after N frames.
+        #[arg(long, value_name = "N", hide = true)]
+        frames: Option<u64>,
+    },
+    /// Convert another app's theme (.turtheme, theme.yaml or a
+    /// turing-smart-screen-python theme folder) into a native Bezel theme.
+    Import {
+        /// The theme to convert.
+        source: PathBuf,
+        /// A .bezeltheme file to write, or a folder for any other name.
+        #[arg(long, short = 'o', value_name = "DEST")]
+        output: PathBuf,
+    },
+}
+
+impl Command {
+    /// The theme a `render` or `run` command names.
+    pub fn theme(&self) -> Option<&Path> {
+        match self {
+            Command::Render { theme, .. } | Command::Run { theme, .. } => Some(theme),
+            _ => None,
+        }
+    }
+}
+
+/// What `render` and `run` draw with, built by the composition root.
+pub struct Rendering<'a> {
+    /// Reads native themes.
+    pub store: &'a dyn ThemeStore,
+    /// Draws frames.
+    pub renderer: &'a mut dyn FrameRenderer,
+    /// Measures the machine.
+    pub sensors: &'a mut dyn SensorSource,
+    /// The local wall-clock time.
+    pub clock: &'a dyn Fn() -> LocalTime,
+    /// Language of day and month names.
+    pub language: Language,
+    /// Folder of the themes that ship with Bezel, when installed.
+    pub bundled: Option<&'a Path>,
+}
+
+/// Runs `render`, `run` or `import` and returns what should be printed on
+/// stdout; `run` reports progress on `log` and waits with `pace`.
+pub fn run_theme_command<B, C>(
+    cli: &Cli,
+    bus: &B,
+    connector: &C,
+    kit: &mut Rendering<'_>,
+    pace: &mut dyn Pace,
+    log: &mut dyn Write,
+) -> anyhow::Result<String>
+where
+    B: DeviceBus + ?Sized,
+    C: ScreenConnector + ?Sized,
+{
+    match &cli.command {
+        Command::Render { theme, output } => {
+            let path = theme::resolve(theme, kit.bundled)?;
+            theme::render(kit, &path, output, &mut |d| pace.wait(d), log)
+        }
+        Command::Run {
+            target,
+            theme,
+            frames,
+        } => {
+            let path = theme::resolve(theme, kit.bundled)?;
+            let request = RunRequest {
+                target,
+                theme: &path,
+                max_frames: *frames,
+            };
+            live::run(bus, connector, kit, request, pace, log)
+        }
+        Command::Import { source, output } => theme::import(kit.store, source, output),
+        _ => anyhow::bail!("not a theme command"),
+    }
 }
 
 /// Runs a parsed command and returns what should be printed on stdout.
@@ -236,6 +338,10 @@ where
         Command::Off { target } => screen::off(bus, connector, target),
         // Streams its output and needs a sensor source: see `run_sensors`.
         Command::Sensors(_) => anyhow::bail!("`sensors` runs through run_sensors"),
+        // Need sensors and themes: see `run_theme_command`.
+        Command::Render { .. } | Command::Run { .. } | Command::Import { .. } => {
+            anyhow::bail!("theme commands run through run_theme_command")
+        }
     }
 }
 
@@ -273,6 +379,90 @@ mod tests {
         };
         assert_eq!(args.watch, Some(Duration::from_millis(500)));
         assert_eq!(args.count, Some(3));
+    }
+
+    /// Never waits and is never stopped (`--frames` ends the run).
+    struct NoWait;
+
+    impl Pace for NoWait {
+        fn wait(&mut self, _: Duration) {}
+
+        fn stopped(&self) -> bool {
+            false
+        }
+    }
+
+    fn theme_command(args: &[&str]) -> anyhow::Result<(String, FakeConnector)> {
+        let cli = Cli::try_parse_from(args)?;
+        let themes = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes");
+        let mut renderer = SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip);
+        let mut sensors = bezel_sensors::FakeSensors::demo();
+        let now = || bezel_core::domain::clock::LocalTime {
+            year: 2026,
+            month: 9,
+            day: 30,
+            hour: 21,
+            minute: 5,
+            second: 0,
+            weekday: 2,
+        };
+        let mut kit = Rendering {
+            store: &bezel_themes::FsThemeStore,
+            renderer: &mut renderer,
+            sensors: &mut sensors,
+            clock: &now,
+            language: Language::English,
+            bundled: Some(&themes),
+        };
+        let connector = FakeConnector::default();
+        let out = run_theme_command(
+            &cli,
+            &FakeBus::turing_88(),
+            &connector,
+            &mut kit,
+            &mut NoWait,
+            &mut Vec::new(),
+        )?;
+        Ok((out, connector))
+    }
+
+    #[test]
+    fn theme_commands_run_through_run_theme_command() {
+        let png = std::env::temp_dir().join(format!("bezel-lib-{}.png", std::process::id()));
+        let png_arg = png.display().to_string();
+        let err = run_args(&["bezel", "--fake", "render", "x", "-o", &png_arg]).unwrap_err();
+        assert!(err.to_string().contains("run_theme_command"), "{err}");
+        assert!(theme_command(&["bezel", "devices"]).is_err());
+
+        let (out, _) =
+            theme_command(&["bezel", "render", "turing-2.1-round", "-o", &png_arg]).unwrap();
+        assert!(out.contains("(480x480 vertical)"), "{out}");
+        let (out, connector) =
+            theme_command(&["bezel", "run", "turing-8.8-vertical", "--frames", "1"]).unwrap();
+        assert!(out.contains("1 frames"), "{out}");
+        assert_eq!(connector.log().releases, 1);
+        let folder = std::env::temp_dir().join(format!("bezel-lib-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes/turing-2.1-round");
+        let (out, _) = theme_command(&[
+            "bezel",
+            "import",
+            &src.display().to_string(),
+            "-o",
+            &folder.display().to_string(),
+        ])
+        .unwrap();
+        assert!(
+            out.contains("Midnight 2.1\" round (480x480 vertical)"),
+            "{out}"
+        );
+        assert!(folder.join("theme.json").is_file());
+        let cli = Cli::try_parse_from(["bezel", "run", "a"]).unwrap();
+        assert_eq!(cli.command.theme(), Some(Path::new("a")));
+        let cli = Cli::try_parse_from(["bezel", "import", "a", "-o", "b"]).unwrap();
+        assert_eq!(cli.command.theme(), None);
+        let _ = std::fs::remove_dir_all(folder);
+        let _ = std::fs::remove_file(png);
     }
 
     #[test]

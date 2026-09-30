@@ -110,6 +110,13 @@ impl SkiaRenderer {
     pub fn font_families(&self) -> Vec<String> {
         self.text.families()
     }
+
+    /// The distinct problems met while drawing so far (a missing asset, an
+    /// unknown font family, an unreadable image), sorted. Each is also logged
+    /// once with `tracing`.
+    pub fn problems(&self) -> Vec<String> {
+        self.diagnostics.messages()
+    }
 }
 
 impl FrameRenderer for SkiaRenderer {

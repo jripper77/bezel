@@ -19,9 +19,7 @@ use bezel_themes::native::{EXTENSION, MANIFEST};
 
 use crate::Rendering;
 
-/// Time between the warm-up sample and the rendered one, so rates and
-/// usages cover a real interval.
-pub const WARM_UP: Duration = Duration::from_millis(250);
+pub use crate::sensors::WARM_UP;
 
 /// A theme ready to draw.
 #[derive(Debug, Clone)]

@@ -1180,5 +1180,4 @@ impl Importer {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)] // a failing test panics
 mod tests;

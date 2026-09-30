@@ -958,7 +958,6 @@ pub(crate) mod write {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)] // a failing test panics
 mod tests {
     use super::write::{Stream, Ty};
     use super::*;

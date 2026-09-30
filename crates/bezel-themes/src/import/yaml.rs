@@ -248,7 +248,6 @@ impl<'de> Deserialize<'de> for Node {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)] // a failing test panics
 mod tests {
     use super::*;
 

@@ -2,10 +2,15 @@
 //! the vendor app's `.turtheme` files and turing-smart-screen-python's
 //! theme folders, then round-trips each result through `FsThemeStore`.
 //!
-//! Locations default to the developer's checkout and can be overridden with
-//! `BEZEL_TURZX_APP` (the vendor app folder) and `BEZEL_PYTHON_THEMES`
-//! (`res/themes` of the Python repository).
-#![allow(clippy::panic)] // a failing test panics
+//! Locations default to a `turx` checkout (the reverse-engineering
+//! workspace) next to this repository, or `$BEZEL_IMPORT_CORPUS`, and each
+//! can be overridden with `BEZEL_TURZX_APP` (the vendor app folder) and
+//! `BEZEL_PYTHON_THEMES` (`res/themes` of the Python repository).
+
+#![allow(
+    clippy::panic,
+    reason = "an integration test: its helpers panic to fail the test"
+)]
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -15,11 +20,22 @@ use bezel_core::ports::{ThemeLocation, ThemeStore};
 use bezel_themes::FsThemeStore;
 use bezel_themes::import::import_path;
 
-const TURZX_APP: &str = "/home/slipalison/repos/turx/TURZX-V3.07-88inchENG";
-const PYTHON_THEMES: &str = "/home/slipalison/repos/turx/turing-smart-screen-python/res/themes";
+/// Where the corpus lives: `$BEZEL_IMPORT_CORPUS`, else a `turx` checkout next to
+/// this repository (the reverse-engineering workspace, not part of Bezel).
+fn corpus_root() -> PathBuf {
+    std::env::var_os("BEZEL_IMPORT_CORPUS").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../turx"),
+        PathBuf::from,
+    )
+}
+
+/// The vendor app's install folder inside the corpus.
+const TURZX_APP: &str = "TURZX-V3.07-88inchENG";
+/// turing-smart-screen-python's themes inside the corpus.
+const PYTHON_THEMES: &str = "turing-smart-screen-python/res/themes";
 
 fn location(var: &str, default: &str) -> PathBuf {
-    std::env::var_os(var).map_or_else(|| PathBuf::from(default), PathBuf::from)
+    std::env::var_os(var).map_or_else(|| corpus_root().join(default), PathBuf::from)
 }
 
 fn files_with_extension(dir: &Path, extension: &str) -> Vec<PathBuf> {

@@ -19,4 +19,11 @@ ignore = [
     # `VariantStrIter`/`Variant::str_iter`.
     # Re-check when Tauri/wry move to glib >= 0.20.
     "RUSTSEC-2024-0429",
+    # ttf-parser 0.25.1 — unmaintained (no vulnerability). Path: fontdb 0.23
+    # -> ttf-parser, through cosmic-text 0.19 and bezel-render (text shaping
+    # of themes). It only parses font files Bezel loads itself: the bundled
+    # OFL fonts and the fonts installed on the machine.
+    # Re-check when cosmic-text/fontdb move to a maintained parser
+    # (skrifa/read-fonts, already in the tree through swash).
+    "RUSTSEC-2026-0192",
 ]

@@ -235,7 +235,6 @@ pub fn named_color(name: &str) -> Option<Rgba> {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)] // a failing test panics
 mod tests {
     use super::*;
 

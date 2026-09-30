@@ -279,7 +279,6 @@ pub(crate) fn test_png(w: u32, h: u32) -> Vec<u8> {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)] // a failing test panics
 mod tests {
     use super::*;
 

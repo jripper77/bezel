@@ -957,7 +957,9 @@ fn play(link: &mut dyn ScreenLink, path: &RemotePath, repeat: Repeat) -> anyhow:
     ))
 }
 
-/// What `boot` is about to do, printed with or without `--yes`.
+/// What `boot` is about to do, printed with or without `--yes`: the file,
+/// and what the screen keeps with it (OPTIONS: the brightness it boots
+/// with, and its own sleep timer, which Bezel leaves off).
 fn boot_summary(args: &BootArgs) -> String {
     let mut out = match &args.media {
         BootMedia::Default => "Boot media: the screen's built-in start screen\n".to_string(),
@@ -977,7 +979,8 @@ fn boot_summary(args: &BootArgs) -> String {
         None => "the vendor default, about 67% (170 of 255; --brightness chooses)".to_string(),
     };
     out.push_str(&format!(
-        "  The screen keeps this choice with the brightness it boots with: {brightness}\n"
+        "  The screen keeps this choice with the brightness it boots with: {brightness}\n  \
+         and with its sleep timer off: it does not go to sleep on its own\n"
     ));
     out
 }
@@ -1706,6 +1709,10 @@ mod tests {
             "{log}"
         );
         assert!(log.contains("the vendor default, about 67%"), "{log}");
+        assert!(
+            log.contains("with its sleep timer off: it does not go to sleep on its own"),
+            "{log}"
+        );
         assert_eq!(
             connector.log().storage.calls.len(),
             calls_before,

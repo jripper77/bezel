@@ -1,6 +1,7 @@
 // The editor in demo mode: it loads without console errors or serious
 // accessibility violations (light and dark projects), widgets and sensors
-// drag onto the canvas, keyboard edits undo, the screen turns between
+// drag onto the canvas, keyboard edits undo (arrows on tabs only switch
+// tabs), the screen turns between
 // vertical and horizontal, and imports list what had no equivalent.
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
@@ -112,6 +113,37 @@ test('keyboard move and undo', async ({ page }) => {
   await page.keyboard.press('Control+s');
   await expect(page.locator('#status-main')).toHaveText('Tudo salvo');
   await expect(page.locator('#toast')).toHaveText('Tema salvo.');
+  expect(errors).toEqual([]);
+});
+
+test('arrow keys on tabs switch tabs and leave the element alone', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await page.getByRole('tab', { name: 'Camadas' }).click();
+  await page.getByRole('button', { name: /^CPU/ }).click();
+  const x = page.getByRole('spinbutton', { name: 'X', exact: true });
+  await expect(x).toHaveValue('90');
+
+  await page.getByRole('tab', { name: 'Camadas' }).focus();
+  await page.keyboard.press('ArrowRight');
+  const themes = page.getByRole('tab', { name: 'Temas' });
+  await expect(themes).toBeFocused();
+  await expect(themes).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Tela' })).toHaveAttribute('aria-selected', 'true');
+
+  // The Screen panel's subtabs as well.
+  const settings = page.getByRole('tab', { name: 'Ajustes' });
+  await settings.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Armazenamento' })).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(settings).toBeFocused();
+
+  await expect(x).toHaveValue('90');
+  await expect(page.locator('#status-main')).toHaveText('Tudo salvo');
+  await expect(page.getByRole('button', { name: 'Desfazer (Ctrl+Z)' })).toBeDisabled();
   expect(errors).toEqual([]);
 });
 

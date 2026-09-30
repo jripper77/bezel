@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shortcutFor } from '../../src/shortcuts.js';
+import { shortcutFor, usesArrows } from '../../src/shortcuts.js';
 
 const key = (k, mods = {}) => ({ key: k, ...mods });
 
@@ -28,4 +28,26 @@ test('typing in a field keeps its keys, except save', () => {
   assert.deepEqual(shortcutFor(key('s', { ctrlKey: true }), input), { type: 'save' });
   assert.deepEqual(shortcutFor(key('S', { ctrlKey: true, shiftKey: true }), input), { type: 'saveAs' });
   assert.deepEqual(shortcutFor(key('Delete'), { tagName: 'BUTTON' }), { type: 'remove' });
+});
+
+/** A fake element with an ARIA role inside `parent`. */
+const node = (tagName, role = null, parent = null) => ({
+  tagName,
+  getAttribute: (name) => (name === 'role' ? role : null),
+  parentElement: parent,
+});
+
+test('arrows stay with widgets that move with them', () => {
+  const tablist = node('DIV', 'tablist');
+  const tab = node('BUTTON', 'tab', tablist);
+  for (const focused of [tab, tablist, node('DIV', 'slider'), node('SPAN', null, node('DIV', 'radiogroup')), node('LI', 'option', node('UL', 'listbox'))]) {
+    assert.equal(shortcutFor(key('ArrowRight'), focused), null);
+    assert.equal(shortcutFor(key('ArrowUp', { shiftKey: true }), focused), null);
+  }
+  // Other shortcuts still work there, and arrows nudge from plain buttons.
+  assert.deepEqual(shortcutFor(key('z', { ctrlKey: true }), tab), { type: 'undo' });
+  assert.deepEqual(shortcutFor(key('Delete'), tab), { type: 'remove' });
+  assert.deepEqual(shortcutFor(key('ArrowRight'), node('BUTTON', null, node('LI'))), { type: 'nudge', dx: 1, dy: 0 });
+  assert.equal(usesArrows(null), false);
+  assert.equal(usesArrows(node('BUTTON')), false);
 });

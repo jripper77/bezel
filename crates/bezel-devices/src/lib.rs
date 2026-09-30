@@ -11,6 +11,7 @@ pub mod discovery;
 pub mod driver;
 pub mod fake;
 pub mod protocol;
+pub mod usb;
 pub mod wire;
 
 pub use connector::SystemConnector;

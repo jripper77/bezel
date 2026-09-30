@@ -37,4 +37,4 @@ mod testing;
 mod windows;
 
 pub use fake::FakeSensors;
-pub use system::SystemSensors;
+pub use system::{SensorOptions, SystemSensors};

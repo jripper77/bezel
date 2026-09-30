@@ -16,7 +16,7 @@ Modelo de tema, renderer WYSIWYG, formato nativo, importadores e runtime headles
 - **Acceptance:** model of D-1; `format_clock` (pt-BR/en names); `Histories` with gaps and adoption after edits; `FrameRenderer`, `ThemeStore`, `RenderContext`; `ThemeRuntime::{frame, show, replace}`
 - **Dependencies:** none
 - **Test:** `cargo test -p bezel-core`
-- **Status:** pending
+- **Status:** completed (58e2518, 73bcd39)
 
 ### Wave 2 (parallel)
 
@@ -24,19 +24,19 @@ Modelo de tema, renderer WYSIWYG, formato nativo, importadores e runtime headles
 - **Files modified:** `crates/bezel-render/**` (new), root `Cargo.toml`, `Cargo.lock`
 - **Acceptance:** `SkiaRenderer` implements `FrameRenderer` for every element kind and background, gradients, opacity, fits, GIF frame by time, cosmic-text shaping with bundled/system fonts; golden tests; ≤ 15 ms for a typical 480x1920 theme in release
 - **Dependencies:** T-4.1
-- **Status:** pending
+- **Status:** completed (96f7d4b, d3a4158)
 
 #### T-4.3: bezel-themes native format
 - **Files modified:** `crates/bezel-themes/src/{lib,native,dto}.rs` (new crate), root `Cargo.toml`, `Cargo.lock`
 - **Acceptance:** `FsThemeStore` implements `ThemeStore` for `.bezeltheme` zips and folders; versioned DTOs; round-trip test
 - **Dependencies:** T-4.1
-- **Status:** pending
+- **Status:** completed (6e6cbc8, d3a4158)
 
 #### T-4.4: Importers (Python YAML, TURZX .turtheme)
 - **Files modified:** `crates/bezel-themes/src/import/**`, `crates/bezel-themes/tests/import_corpus.rs`
 - **Acceptance:** both importers map every element kind the model has and report what they drop; ignored corpus test over the local TURZX and Python theme folders
 - **Dependencies:** T-4.3
-- **Status:** pending
+- **Status:** completed (504ab76)
 
 ### Wave 3
 

@@ -14,10 +14,10 @@
 //! on, releasing the screen or setting its brightness answer `busy`: the
 //! screen's port has one owner.
 //!
-//! Confirmation: deleting, replacing a file and changing the boot media reach
-//! the core with `Confirm::Yes` only when the command says the user confirmed
-//! (the UI passes it from its confirmation dialog, which names the file);
-//! otherwise the core refuses before any byte is sent.
+//! Confirmation: deleting, replacing a file and changing the boot media take
+//! the user's [`Confirm`], which only the Tauri commands make (from the
+//! answer of the UI's confirmation dialog, which names the file); the core
+//! refuses `Confirm::No` before any byte is sent.
 
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
@@ -241,10 +241,6 @@ impl Access {
             Access::Live(link) | Access::Own(link) => link.as_mut(),
         }
     }
-}
-
-fn confirm_of(confirmed: bool) -> Confirm {
-    if confirmed { Confirm::Yes } else { Confirm::No }
 }
 
 fn remote(path: &str) -> StorageResult<RemotePath> {
@@ -547,20 +543,20 @@ impl Backend {
     }
 
     /// Runs the prepared upload `ticket`: converts, sends and verifies,
-    /// reporting to `progress`. `overwrite` is the user's confirmation of the
+    /// reporting to `progress`. `overwrite` is the user's answer about the
     /// replaced file the summary named. A cancel is an answer, not an error:
     /// it says what the interrupted upload left on the screen.
     pub fn run_upload(
         &self,
         ticket: u64,
-        overwrite: bool,
+        overwrite: Confirm,
         time: LocalTime,
         progress: &mut dyn FnMut(Progress),
     ) -> StorageResult<JobDto> {
         let _claim = self.storage.claim()?;
         let pending = self.storage.take(ticket)?;
         let path = pending.prepared.plan.path.to_string();
-        let result = self.upload_pending(&pending, confirm_of(overwrite), time, progress);
+        let result = self.upload_pending(&pending, overwrite, time, progress);
         pending.discard();
         match result? {
             Ok(done) => Ok(JobDto::Done {
@@ -599,18 +595,18 @@ impl Backend {
 
     // --------------------------------------------------- files and boot --
 
-    /// Deletes a stored file; `confirmed` is the user's answer to the dialog
+    /// Deletes a stored file; `confirm` is the user's answer to the dialog
     /// naming it.
     pub fn delete_stored(
         &self,
         screen: &str,
         path: &str,
-        confirmed: bool,
+        confirm: Confirm,
         time: LocalTime,
     ) -> StorageResult<()> {
         let path = remote(path)?;
         self.with_screen(screen, Resume::Video, time, |link| {
-            storage::delete(link, &path, confirm_of(confirmed))
+            storage::delete(link, &path, confirm)
         })
     }
 
@@ -630,13 +626,13 @@ impl Backend {
     }
 
     /// Sets what the screen shows on its own after power-up: `path`, or the
-    /// built-in screen for `None`. `confirmed` is the user's answer to the
+    /// built-in screen for `None`. `confirm` is the user's answer to the
     /// dialog naming it (the choice persists on the screen).
     pub fn set_boot_media(
         &self,
         screen: &str,
         path: Option<&str>,
-        confirmed: bool,
+        confirm: Confirm,
         time: LocalTime,
     ) -> StorageResult<()> {
         let boot = match path {
@@ -644,7 +640,7 @@ impl Backend {
             None => BootMedia::Default,
         };
         self.with_screen(screen, Resume::Video, time, |link| {
-            storage::set_boot_media(link, &boot, confirm_of(confirmed))
+            storage::set_boot_media(link, &boot, confirm)
         })
     }
 }

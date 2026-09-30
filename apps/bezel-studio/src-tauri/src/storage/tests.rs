@@ -214,7 +214,7 @@ impl Fixture {
         }
     }
 
-    fn run(&self, ticket: u64, overwrite: bool) -> (StorageResult<JobDto>, Vec<Progress>) {
+    fn run(&self, ticket: u64, overwrite: Confirm) -> (StorageResult<JobDto>, Vec<Progress>) {
         let mut seen = Vec::new();
         let result = self
             .backend
@@ -314,22 +314,25 @@ fn deleting_and_the_boot_media_need_the_dialogs_confirmation() {
     let f = fixture_with("confirm", storage, FakeMedia::ready());
     let clip = "internal/video/clip.mp4";
 
-    let err = f.backend.delete_stored(KEY, clip, false, TIME).unwrap_err();
-    assert_eq!(err.code, "notConfirmed");
     let err = f
         .backend
-        .set_boot_media(KEY, Some(clip), false, TIME)
+        .delete_stored(KEY, clip, Confirm::No, TIME)
         .unwrap_err();
     assert_eq!(err.code, "notConfirmed");
     let err = f
         .backend
-        .set_boot_media(KEY, None, false, TIME)
+        .set_boot_media(KEY, Some(clip), Confirm::No, TIME)
+        .unwrap_err();
+    assert_eq!(err.code, "notConfirmed");
+    let err = f
+        .backend
+        .set_boot_media(KEY, None, Confirm::No, TIME)
         .unwrap_err();
     assert_eq!(err.code, "notConfirmed");
     assert!(f.writes().is_empty(), "nothing reached the screen");
 
     f.backend
-        .set_boot_media(KEY, Some(clip), true, TIME)
+        .set_boot_media(KEY, Some(clip), Confirm::Yes, TIME)
         .unwrap();
     let storage = f.storage();
     assert_eq!(storage.start_mode, Some(StartMode::Video));
@@ -337,14 +340,18 @@ fn deleting_and_the_boot_media_need_the_dialogs_confirmation() {
         storage.playback,
         Playback::Video(remote_path(clip), Repeat::Loop)
     );
-    f.backend.set_boot_media(KEY, None, true, TIME).unwrap();
+    f.backend
+        .set_boot_media(KEY, None, Confirm::Yes, TIME)
+        .unwrap();
     assert_eq!(f.storage().start_mode, Some(StartMode::Default));
 
-    f.backend.delete_stored(KEY, clip, true, TIME).unwrap();
+    f.backend
+        .delete_stored(KEY, clip, Confirm::Yes, TIME)
+        .unwrap();
     assert!(!f.storage().files.contains_key(&remote_path(clip)));
     assert_eq!(
         f.backend
-            .delete_stored(KEY, "elsewhere/clip.mp4", true, TIME)
+            .delete_stored(KEY, "elsewhere/clip.mp4", Confirm::Yes, TIME)
             .unwrap_err()
             .code,
         "failed"
@@ -376,7 +383,7 @@ fn an_upload_is_prepared_confirmed_sent_and_verified() {
     assert_eq!(ready.replaces, None);
     assert!(f.writes().is_empty(), "preparing only asks");
 
-    let (result, seen) = f.run(ready.ticket, false);
+    let (result, seen) = f.run(ready.ticket, Confirm::No);
     let JobDto::Done { file, converted } = result.unwrap() else {
         panic!("not done");
     };
@@ -390,7 +397,7 @@ fn an_upload_is_prepared_confirmed_sent_and_verified() {
             .any(|p| p.phase == JobPhase::Upload && p.done == 3000)
     );
     assert_eq!(seen.last(), Some(&Progress::new(JobPhase::Verify, 1, 1)));
-    let err = f.run(ready.ticket, false).0.unwrap_err();
+    let err = f.run(ready.ticket, Confirm::No).0.unwrap_err();
     assert_eq!(err.code, "stale", "a ticket runs once");
 
     // An image goes to the image folder of the card.
@@ -402,7 +409,7 @@ fn an_upload_is_prepared_confirmed_sent_and_verified() {
     let ready = f.ready(&f.local("Logo.PNG", 400), "sd");
     assert_eq!(ready.target.path, "sd/image/logo.png");
     assert!(matches!(
-        f.run(ready.ticket, false).0,
+        f.run(ready.ticket, Confirm::No).0,
         Ok(JobDto::Done { .. })
     ));
     let err = f
@@ -417,7 +424,7 @@ fn replacing_a_file_needs_the_overwrite_confirmation() {
     let f = fixture("replace");
     let local = f.local("native.mp4", 2000);
     let first = f.ready(&local, "internal");
-    f.run(first.ticket, false).0.unwrap();
+    f.run(first.ticket, Confirm::No).0.unwrap();
 
     let again = f.ready(&local, "internal");
     let replaces = again.replaces.clone().unwrap();
@@ -431,13 +438,13 @@ fn replacing_a_file_needs_the_overwrite_confirmation() {
             .filter(|c| matches!(c, StorageCall::Upload(..)))
             .count()
     };
-    let err = f.run(again.ticket, false).0.unwrap_err();
+    let err = f.run(again.ticket, Confirm::No).0.unwrap_err();
     assert_eq!(err.code, "notConfirmed");
     assert_eq!(uploads(&f), 1, "nothing was sent over the file");
 
     let confirmed = f.ready(&local, "internal");
     assert!(matches!(
-        f.run(confirmed.ticket, true).0,
+        f.run(confirmed.ticket, Confirm::Yes).0,
         Ok(JobDto::Done { .. })
     ));
     assert_eq!(uploads(&f), 2);
@@ -450,12 +457,14 @@ fn a_cancelled_upload_reports_the_partial_file() {
     let local = f.local("native-big.mp4", FAKE_UPLOAD_CHUNK * 5);
     let ready = f.ready(&local, "internal");
     let mut seen = Vec::new();
-    let result = f.backend.run_upload(ready.ticket, false, TIME, &mut |p| {
-        seen.push(p);
-        if p.phase == JobPhase::Upload && p.done > 0 {
-            assert!(f.backend.cancel_job());
-        }
-    });
+    let result = f
+        .backend
+        .run_upload(ready.ticket, Confirm::No, TIME, &mut |p| {
+            seen.push(p);
+            if p.phase == JobPhase::Upload && p.done > 0 {
+                assert!(f.backend.cancel_job());
+            }
+        });
     let JobDto::Cancelled { path, partial } = result.unwrap() else {
         panic!("not cancelled");
     };
@@ -468,7 +477,9 @@ fn a_cancelled_upload_reports_the_partial_file() {
         listed.folders[1].files[0].size,
         Some(FAKE_UPLOAD_CHUNK as u64)
     );
-    f.backend.delete_stored(KEY, &path, true, TIME).unwrap();
+    f.backend
+        .delete_stored(KEY, &path, Confirm::Yes, TIME)
+        .unwrap();
     assert!(f.storage().files.is_empty());
 }
 
@@ -487,7 +498,7 @@ fn a_video_to_convert_is_turned_like_the_theme_and_cropped() {
     assert_eq!(convert.quarter_turns, 1, "landscape → reverse portrait");
     assert!(convert.cropped);
 
-    let (result, seen) = f.run(ready.ticket, false);
+    let (result, seen) = f.run(ready.ticket, Confirm::No);
     let JobDto::Done { file, converted } = result.unwrap() else {
         panic!("not done");
     };
@@ -588,35 +599,37 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
     );
 
     let mut checked = false;
-    let result = f.backend.run_upload(ready.ticket, false, TIME, &mut |p| {
-        if p.phase != JobPhase::Upload || checked {
-            return;
-        }
-        checked = true;
-        // The session is not locked: previews render and the loop samples,
-        // but no frame reaches the screen.
-        let theme = f.backend.session().theme;
-        assert!(f.backend.render(&theme, TIME).is_ok());
-        f.backend.tick(TIME);
-        assert_eq!(f.connector.log().frames.len(), 2);
-        // The screen's port has one owner meanwhile.
-        assert!(
-            f.backend
-                .set_brightness(KEY, 50)
-                .unwrap_err()
-                .contains("in use")
-        );
-        assert!(
-            f.backend
-                .release(KEY)
-                .unwrap_err()
-                .contains("storage operation")
-        );
-        assert_eq!(
-            f.backend.storage_overview(KEY, TIME).unwrap_err().code,
-            "busy"
-        );
-    });
+    let result = f
+        .backend
+        .run_upload(ready.ticket, Confirm::No, TIME, &mut |p| {
+            if p.phase != JobPhase::Upload || checked {
+                return;
+            }
+            checked = true;
+            // The session is not locked: previews render and the loop samples,
+            // but no frame reaches the screen.
+            let theme = f.backend.session().theme;
+            assert!(f.backend.render(&theme, TIME).is_ok());
+            f.backend.tick(TIME);
+            assert_eq!(f.connector.log().frames.len(), 2);
+            // The screen's port has one owner meanwhile.
+            assert!(
+                f.backend
+                    .set_brightness(KEY, 50)
+                    .unwrap_err()
+                    .contains("in use")
+            );
+            assert!(
+                f.backend
+                    .release(KEY)
+                    .unwrap_err()
+                    .contains("storage operation")
+            );
+            assert_eq!(
+                f.backend.storage_overview(KEY, TIME).unwrap_err().code,
+                "busy"
+            );
+        });
     assert!(checked);
     assert!(matches!(result, Ok(JobDto::Done { .. })));
     assert_eq!(frames(), 3, "the link came back with a frame");
@@ -639,13 +652,15 @@ fn live_mode_turned_off_during_a_job_closes_the_link_after_it() {
     f.backend.set_live(true, Some(KEY), TIME).unwrap();
     let ready = f.ready(&f.local("native.mp4", FAKE_UPLOAD_CHUNK * 2), "internal");
     let before = f.connector.log().frames.len();
-    let result = f.backend.run_upload(ready.ticket, false, TIME, &mut |p| {
-        if p.phase == JobPhase::Upload && p.done == 0 {
-            f.backend.set_live(false, None, TIME).unwrap();
-            let err = f.backend.set_live(true, Some(KEY), TIME).unwrap_err();
-            assert!(err.contains("storage operation"), "{err}");
-        }
-    });
+    let result = f
+        .backend
+        .run_upload(ready.ticket, Confirm::No, TIME, &mut |p| {
+            if p.phase == JobPhase::Upload && p.done == 0 {
+                f.backend.set_live(false, None, TIME).unwrap();
+                let err = f.backend.set_live(true, Some(KEY), TIME).unwrap_err();
+                assert!(err.contains("storage operation"), "{err}");
+            }
+        });
     assert!(matches!(result, Ok(JobDto::Done { .. })));
     assert_eq!(f.backend.sample().live, None);
     assert_eq!(
@@ -700,7 +715,7 @@ fn sending_the_theme_video_lets_the_live_screen_play_it() {
     let scratch = f.root.join("scratch").join("intro.mp4");
     assert!(scratch.is_file());
 
-    let (result, _) = f.run(ready.ticket, false);
+    let (result, _) = f.run(ready.ticket, Confirm::No);
     assert!(matches!(
         result,
         Ok(JobDto::Done {

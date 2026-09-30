@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bezel_core::domain::job::Progress;
+use bezel_core::domain::screen::Confirm;
 use bezel_core::ports::ThemeLocation;
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::native::EXTENSION;
@@ -232,6 +233,13 @@ pub fn set_autostart<R: Runtime>(app: AppHandle<R>, on: bool) -> UiResult<()> {
 /// Event carrying a running upload's progress ([`ProgressDto`]).
 pub const PROGRESS_EVENT: &str = "storage-progress";
 
+/// The answer of the UI's confirmation dialog (which names the file) as the
+/// core takes it. Only these commands, the human-facing edge, make a
+/// [`Confirm`] (D-2026-09-30-storage-video-1).
+fn confirm_of(confirmed: bool) -> Confirm {
+    if confirmed { Confirm::Yes } else { Confirm::No }
+}
+
 /// Capacity and files of a screen.
 #[tauri::command]
 pub async fn storage_overview(
@@ -306,7 +314,7 @@ pub async fn run_upload<R: Runtime>(
                 tracing::warn!("upload progress not sent: {e}");
             }
         };
-        b.run_upload(ticket, overwrite, now(), &mut report)
+        b.run_upload(ticket, confirm_of(overwrite), now(), &mut report)
     })
     .await
 }
@@ -326,7 +334,7 @@ pub async fn delete_stored(
     confirmed: bool,
 ) -> StorageResult<()> {
     blocking(&state, move |b| {
-        b.delete_stored(&screen, &path, confirmed, now())
+        b.delete_stored(&screen, &path, confirm_of(confirmed), now())
     })
     .await
 }
@@ -357,7 +365,18 @@ pub async fn set_boot_media(
     confirmed: bool,
 ) -> StorageResult<()> {
     blocking(&state, move |b| {
-        b.set_boot_media(&screen, path.as_deref(), confirmed, now())
+        b.set_boot_media(&screen, path.as_deref(), confirm_of(confirmed), now())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_confirmed_dialog_is_confirm_yes() {
+        assert_eq!(confirm_of(true), Confirm::Yes);
+        assert_eq!(confirm_of(false), Confirm::No);
+    }
 }

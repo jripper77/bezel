@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use bezel_core::app::{HostVideo, MissingVideo, ThemeRuntime, VideoState, open_screen};
 use bezel_core::domain::device::DeviceModel;
-use bezel_core::domain::theme::{AssetRef, Background, Theme};
+use bezel_core::domain::theme::{AssetRef, Background, Theme, refresh_interval};
 use bezel_core::ports::{DeviceBus, MediaLocation, MediaTranscoder, ScreenConnector, ScreenLink};
 use bezel_themes::native::{MANIFEST, safe_asset_path};
 
@@ -26,9 +26,8 @@ use crate::messages::Messages;
 use crate::theme::{Loaded, describe, load, warning_lines};
 use crate::{OrientationArg, Rendering, Target};
 
-/// Fastest refresh, seconds.
-pub const MIN_REFRESH: f32 = 0.25;
-/// Slowest refresh, seconds.
+/// Slowest refresh, seconds (the fastest is the core's
+/// `MIN_REFRESH_SECONDS`).
 pub const MAX_REFRESH: f32 = 60.0;
 
 /// The cadence of `bezel run`: waiting between frames and knowing when the
@@ -73,14 +72,10 @@ impl Pace for SleepPace {
     }
 }
 
-/// Seconds between frames for a theme's `refresh_seconds`.
+/// Seconds between frames for a theme's `refresh_seconds`, at most
+/// [`MAX_REFRESH`].
 pub fn interval(refresh_seconds: f32) -> Duration {
-    let secs = if refresh_seconds.is_finite() {
-        refresh_seconds.clamp(MIN_REFRESH, MAX_REFRESH)
-    } else {
-        1.0
-    };
-    Duration::from_secs_f32(secs)
+    refresh_interval(refresh_seconds, MAX_REFRESH)
 }
 
 /// What `bezel run` shows, and where.

@@ -31,7 +31,7 @@ use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot};
-use bezel_core::domain::theme::{AssetRef, Background, Theme};
+use bezel_core::domain::theme::{AssetRef, Background, Theme, refresh_interval};
 use bezel_core::ports::{
     Backdrop, FrameRenderer, MediaLocation, MediaTranscoder, ScreenLink, SensorSource,
     ThemeLocation, ThemeStore,
@@ -40,9 +40,8 @@ use bezel_core::{BezelError, Result};
 
 use crate::storage::MediaSetup;
 
-/// Fastest refresh, seconds.
-pub const MIN_REFRESH: f32 = 0.25;
-/// Slowest refresh, seconds (sensors still update the UI this often).
+/// Slowest refresh, seconds (sensors still update the UI this often; the
+/// fastest is the core's `MIN_REFRESH_SECONDS`).
 pub const MAX_REFRESH: f32 = 2.0;
 
 /// The media converter the storage tab shares with the session.
@@ -586,11 +585,9 @@ impl Studio {
         self.refresh()
     }
 
-    /// The theme's refresh, clamped.
+    /// The theme's refresh, at most [`MAX_REFRESH`].
     fn refresh(&self) -> Duration {
-        let seconds = self.runtime.theme().refresh_seconds;
-        let seconds = if seconds.is_finite() { seconds } else { 1.0 };
-        Duration::from_secs_f32(seconds.clamp(MIN_REFRESH, MAX_REFRESH))
+        refresh_interval(self.runtime.theme().refresh_seconds, MAX_REFRESH)
     }
 
     /// One refresh: a sample when one is due (every refresh, or every

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use bezel_core::domain::sensor::{
     Category, DisplayFormat, Reading, SensorInfo, Snapshot, format_reading,
 };
+use bezel_core::domain::theme::MIN_REFRESH_SECONDS;
 use bezel_core::ports::SensorSource;
 use serde::Serialize;
 
@@ -19,9 +20,6 @@ use crate::SensorsArgs;
 
 /// Time between the warm-up sample and the first printed one.
 pub const WARM_UP: Duration = Duration::from_millis(250);
-
-/// Shortest `--watch` interval.
-pub const MIN_INTERVAL: Duration = Duration::from_millis(250);
 
 /// How `--watch` shows successive tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,16 +169,15 @@ fn render(
     }
 }
 
-/// Parses `--watch` seconds (fractions allowed, at least [`MIN_INTERVAL`]).
+/// Parses `--watch` seconds (fractions allowed, at least the core's
+/// [`MIN_REFRESH_SECONDS`]).
 pub fn parse_interval(text: &str) -> Result<Duration, String> {
     let secs: f64 = text
         .parse()
         .map_err(|_| format!("`{text}` is not a number of seconds"))?;
-    if !secs.is_finite() || secs < MIN_INTERVAL.as_secs_f64() {
-        return Err(format!(
-            "the interval must be at least {} s",
-            MIN_INTERVAL.as_secs_f64()
-        ));
+    let fastest = f64::from(MIN_REFRESH_SECONDS);
+    if !secs.is_finite() || secs < fastest {
+        return Err(format!("the interval must be at least {fastest} s"));
     }
     Ok(Duration::from_secs_f64(secs))
 }

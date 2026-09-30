@@ -26,8 +26,8 @@ use crate::library::{ThemeLibrary, is_native_theme};
 use crate::media::{kind_of, thumbnail_data_url};
 use crate::settings::SettingsFile;
 use crate::storage::StorageState;
+pub use crate::studio::MAX_REFRESH;
 use crate::studio::{Delivery, Studio};
-pub use crate::studio::{MAX_REFRESH, MIN_REFRESH};
 
 /// Result of a UI command: errors are shown as text.
 pub type UiResult<T> = Result<T, String>;
@@ -587,6 +587,7 @@ mod tests {
     use super::*;
     use bezel_core::domain::clock::Language;
     use bezel_core::domain::geometry::{Orientation, Size};
+    use bezel_core::domain::theme::MIN_REFRESH_SECONDS;
     use bezel_devices::{FakeBus, FakeConnector};
     use bezel_render::{SkiaRenderer, SystemFonts};
     use bezel_sensors::FakeSensors;
@@ -706,7 +707,7 @@ mod tests {
         assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
         let theme = f.backend.session().theme;
         f.backend.push(&theme, TIME).unwrap();
-        assert!(f.backend.tick(TIME).as_secs_f32() >= MIN_REFRESH);
+        assert!(f.backend.tick(TIME).as_secs_f32() >= MIN_REFRESH_SECONDS);
         assert_eq!(f.connector.log().frames.len(), 3);
         f.backend.set_brightness(KEY, 40).unwrap();
         assert!(f.backend.set_brightness(KEY, 101).is_err());
@@ -791,7 +792,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
             assert!(f.connector.log().brightness.is_empty(), "after the frame");
             let_through.send(()).unwrap();
-            assert!(ticking.join().unwrap() >= Duration::from_secs_f32(MIN_REFRESH));
+            assert!(ticking.join().unwrap() >= Duration::from_secs_f32(MIN_REFRESH_SECONDS));
             dimming.join().unwrap().unwrap();
         });
         let log = f.connector.log();

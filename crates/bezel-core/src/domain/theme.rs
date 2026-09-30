@@ -6,6 +6,8 @@
 //! The model is plain data so the editor can change it freely and every
 //! adapter (renderer, file formats, importers) reads the same thing.
 
+use std::time::Duration;
+
 use super::frame::Rgba;
 use super::geometry::{Orientation, Size};
 use super::sensor::{DisplayFormat, SensorKey};
@@ -415,6 +417,24 @@ pub struct Theme {
     pub refresh_seconds: f32,
 }
 
+/// Fastest refresh, in seconds: a theme (or a watch of the sensors) never
+/// samples and draws more often than this.
+pub const MIN_REFRESH_SECONDS: f32 = 0.25;
+
+/// Time between two refreshes of a theme asking for `refresh_seconds`: at
+/// least [`MIN_REFRESH_SECONDS`], at most `slowest_seconds` (the driving
+/// adapter's limit), one second when it asks for no number.
+pub fn refresh_interval(refresh_seconds: f32, slowest_seconds: f32) -> Duration {
+    let seconds = if refresh_seconds.is_finite() {
+        refresh_seconds
+            .min(slowest_seconds)
+            .max(MIN_REFRESH_SECONDS)
+    } else {
+        1.0
+    };
+    Duration::from_secs_f32(seconds)
+}
+
 impl Theme {
     /// An empty theme for a panel whose portrait size is `panel`.
     pub fn blank(name: &str, panel: Size, orientation: Orientation) -> Self {
@@ -639,5 +659,19 @@ mod tests {
         assert_eq!(b.center(), (65.0, 40.0));
         let bg = Theme::blank("x", Size::new(80, 160), Orientation::Portrait);
         assert!(bg.assets().is_empty());
+    }
+
+    #[test]
+    fn refreshes_stay_between_the_fastest_and_the_slowest() {
+        assert_eq!(refresh_interval(1.0, 60.0), Duration::from_secs(1));
+        assert_eq!(refresh_interval(0.01, 60.0), Duration::from_millis(250));
+        assert_eq!(refresh_interval(3600.0, 60.0), Duration::from_secs(60));
+        assert_eq!(refresh_interval(5.0, 2.0), Duration::from_secs(2));
+        assert_eq!(refresh_interval(f32::NAN, 2.0), Duration::from_secs(1));
+        assert_eq!(
+            refresh_interval(f32::INFINITY, 60.0),
+            Duration::from_secs(1)
+        );
+        assert_eq!(refresh_interval(1.0, 0.1), Duration::from_millis(250));
     }
 }

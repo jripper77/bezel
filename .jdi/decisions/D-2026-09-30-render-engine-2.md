@@ -1,0 +1,1 @@
+D-2026-09-30-render-engine-2 (2026-09-30): One renderer for everything (WYSIWYG): tiny-skia for paths, gradients and compositing, cosmic-text for shaping with bundled theme fonts first and system fonts after, image for PNG/JPEG/GIF decoding with a per-asset cache; the studio preview and the device frame are the same bytes.

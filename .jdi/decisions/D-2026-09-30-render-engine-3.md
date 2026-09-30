@@ -1,0 +1,1 @@
+D-2026-09-30-render-engine-3 (2026-09-30): Native format .bezeltheme = zip with theme.json (versioned serde DTOs, schema 1) and assets/; the same layout unzipped is a valid theme folder for development. DTOs live in bezel-themes, never in the core.

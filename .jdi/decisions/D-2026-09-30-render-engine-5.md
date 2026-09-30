@@ -1,0 +1,1 @@
+D-2026-09-30-render-engine-5 (2026-09-30): Headless mode: bezel run <theme> drives a screen at the theme refresh rate (sample, render, diff, present), releases the screen on Ctrl+C/SIGTERM and can run as a systemd user service or Windows logon task; bezel render writes a PNG for previews and golden tests.

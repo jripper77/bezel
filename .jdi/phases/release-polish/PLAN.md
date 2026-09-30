@@ -42,7 +42,7 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
   - Cancelamento com recuperação estourada: antes do HELLO completa o tamanho declarado com enchimento (249+1), mede com GET_FILE_SIZE e devolve `Cancelled { partial }`; o envio seguinte não recebe bytes soltos (fio roteirizado); nenhum comando destrutivo novo.
 - **Dependencies:** none
 - **Test:** `connector::tests::rev_c_wakes_and_retries_with_injected_bus`, `driver::turing_rev_c::tests::timed_out_cancel_pads_the_declared_length`
-- **Status:** completed (831c715; enchimento validado no hardware só na T-7.8)
+- **Status:** completed (connector testável; sem enchimento após cancelar: D-2026-09-30-release-polish-10)
 
 #### T-7.4: HID desktop mode e `bezel udev-rules`
 - **Specialist:** jdi-doer-bezel

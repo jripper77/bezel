@@ -33,30 +33,37 @@
   sem Apagar/Boot; demo e i18n).
 - Orquestrador: `cover_crop` no core (`d4130d1`); correções achadas no hardware (`2743b4a`): escrita serial
   resistente a sinais e cancelamento no meio de uma escrita.
+- Correções da revisão (fix mode do `jdi-doer-bezel`, `a087db3`..`a87f80b`): testes de caso de uso fora do
+  `src` do core (`tests/{storage,runtime_video}.rs` sobre os fakes), testes das retentativas do `SerialWire`,
+  saída da CLI sem erros descartados (`messages.rs`), `Confirm` só em `commands.rs`, brilho do boot pelo caso
+  de uso (`set_boot_media(.., brightness)`); orquestrador: DoD 2 também roda o teste de integração
+  (`f81a145`), dica do parcial após um cancelamento sem resposta no studio (`7ac49c4`), documentação.
 
 ## Blocked tasks
 - nenhuma
 
 ## Files modified
 - `crates/bezel-core/src/{domain/{storage,job,media,mod,error},ports/mod,app/{mod,storage,runtime}}.rs`,
-  `crates/bezel-core/tests/storage.rs`
+  `crates/bezel-core/tests/{storage,runtime_video}.rs`, `crates/bezel-core/Cargo.toml`
 - `crates/bezel-devices/src/{protocol,driver}/{turing_rev_c,turing_usb}.rs`, `driver/mod.rs`, `fake.rs`,
   `wire.rs`
 - `crates/bezel-media/**` (novo), `crates/bezel-render/src/{renderer,golden,testkit}.rs`
-- `crates/bezel-cli/src/{storage,lib,main,live,screen}.rs`, `crates/bezel-cli/tests/storage.rs`
+- `crates/bezel-cli/src/{storage,messages,lib,main,live,screen,devices,theme}.rs`, `crates/bezel-cli/tests/storage.rs`
 - `apps/bezel-studio/src-tauri/src/{storage,studio,media,commands,dto,lib,settings}.rs`, `build.rs`,
-  `capabilities/default.json`; `apps/bezel-studio/src/{ui/storage,ui/icons,app,bridge,demo-backend}.js`,
+  `capabilities/default.json`; `apps/bezel-studio/src/{ui/storage,ui/icons,ui/library,app,bridge,demo-backend}.js`,
   `src/i18n/*`, `src/{index.html,styles.css}`, `tests/**`
 - `Cargo.toml`, `Cargo.lock`, `README.md`, `CHANGELOG.md`, `docs/reverse-engineering/protocol-turing-rev-c.md`
 
 ## Tests
-- `cargo test --workspace --locked`: 499 passando, 0 falhando, 6 ignorados (4 de ffmpeg real, rodados à parte:
-  4/4); UI: 56 unitários, 24 Playwright (claro/escuro, axe)
-- DoD Auto: as 8 linhas do CONTEXT → OK (verificadas pelo revisor)
-- Coverage (`cargo llvm-cov`): 94,88% de linhas no workspace
+- `cargo test --workspace --locked`: 509 passando, 0 falhando, 6 ignorados (4 de ffmpeg real, rodados à parte:
+  4/4); UI: 57 unitários, 24 Playwright (claro/escuro, axe)
+- DoD Auto: as 8 linhas do CONTEXT → OK (re-verificação do revisor)
+- Coverage (`cargo llvm-cov`): 94,94% de linhas no workspace; `app/storage.rs` 99,15%, `app/runtime.rs`
+  100%, `wire.rs` 82,97%
 
 ## Hardware validation
-Turing 8.8" (ROM 1.90) com cartão de 29,7 GiB; serviço do usuário parado e religado; só `bezel_test_*`
+Turing 8.8" (ROM 1.90) com cartão de 29,7 GiB; `bezel` instalado por `scripts/install-local.sh`
+(`0.1.0-dev.98`) e, após `2743b4a`, o binário de release da `main`; serviço do usuário parado e religado; só `bezel_test_*`
 criados e todos apagados (arquivos do usuário intocados). Detalhes em protocol-turing-rev-c.md § 19.
 - `storage info/ls` (+`--json`): interna 65,9 MiB, cartão detectado; recusas sem `--yes` não enviam nada.
 - PNG, MP4 nativo e MP4 1920x1080 convertido (90°, centro, 24 fps, sem áudio) enviados, verificados e

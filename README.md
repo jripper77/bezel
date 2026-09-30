@@ -20,9 +20,9 @@ bezel off                                 # the next command wakes the screen
 bezel release                             # back to the screen's own clock/media
 ```
 
-Use the screen standing up or lying down: every command takes
+Use the screen standing up or lying down: `test-pattern` and `show` take
 `--orientation vertical|horizontal` (or `vertical-flipped`, `horizontal-flipped`
-when the cable comes out the other side).
+when the cable comes out the other side), and a theme carries its own orientation.
 
 ## Supported screens
 

@@ -219,3 +219,28 @@ test('the boot media asks first, files drop on a medium and TUR_USB keeps its ow
   await expectAccessible(page);
   expect(errors).toEqual([]);
 });
+
+test('a file stored with the wrong size is explained and deleted on request', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await openStorage(page);
+  const internal = page.getByRole('region', { name: 'Memória interna' });
+  const dataTransfer = await page.evaluateHandle(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(16)], 'torto.png', { type: 'image/png' }));
+    return dt;
+  });
+  await internal.locator('.drop-zone').dispatchEvent('drop', { dataTransfer });
+  await page.getByRole('dialog', { name: 'Enviar “torto.png” para a tela?' }).getByRole('button', { name: 'Enviar', exact: true }).click();
+  const failed = page.getByRole('region', { name: 'Não deu certo' });
+  await expect(failed).toContainText('“internal/image/torto.png” foi gravado com 255990 bytes em vez de 256000. Apague e envie de novo.', UPLOAD);
+  await expectAccessible(page);
+
+  // Nothing is deleted on its own: the button asks first.
+  await expect(internal.getByRole('listitem').filter({ hasText: 'torto.png' })).toHaveCount(1);
+  await failed.getByRole('button', { name: 'Apagar “torto.png”' }).click();
+  await page.getByRole('dialog', { name: 'Apagar “torto.png”?' }).getByRole('button', { name: 'Apagar', exact: true }).click();
+  await expect(toast(page)).toHaveText('“torto.png” foi apagado.');
+  await expect(internal.getByRole('listitem').filter({ hasText: 'torto.png' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

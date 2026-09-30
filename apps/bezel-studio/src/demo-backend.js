@@ -172,7 +172,7 @@ function createDemoStorage(chosen, { delay, live, theme }) {
   function readyAnswer(local, path, convert) {
     const ticket = (tickets += 1);
     const replaces = files.get(path) > 0 ? entry(path) : null;
-    pending.set(ticket, { path, bytes: local.size, convert });
+    pending.set(ticket, { path, bytes: local.size, convert, storedShort: Boolean(local.storedShort) });
     return {
       status: 'ready',
       ticket,
@@ -236,6 +236,12 @@ function createDemoStorage(chosen, { delay, live, theme }) {
     }
     emit('verify', 0, 1);
     await delay(DEMO_STEP_MS);
+    if (p.storedShort) {
+      const stored = size - 10;
+      files.set(p.path, stored);
+      const message = `${p.path} was stored with ${stored} bytes, not the file's ${size}: the stored size differs; delete it and send it again`;
+      throw Object.assign(new Error(message), { code: 'sizeMismatch', args: { file: p.path, stored: String(stored), expected: String(size) } });
+    }
     emit('verify', 1, 1);
     state.playback = null;
     return { status: 'done', file: entry(p.path, size), converted: Boolean(p.convert) };

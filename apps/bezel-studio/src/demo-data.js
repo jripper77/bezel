@@ -78,6 +78,8 @@ export const DEMO_LOCAL_FILES = Object.freeze({
   'ferias.mp4': { size: 24_117_248, format: 'MP4', width: 1920, height: 1080, native: false },
   'relogio.mp4': { size: 6_291_456, format: 'MP4', width: 480, height: 1920, native: true },
   'foto.png': { size: 512_000, format: 'PNG', width: 1080, height: 1080 },
+  // Stored with the wrong size, like a file bytes of a cancelled upload landed in.
+  'torto.png': { size: 256_000, format: 'PNG', width: 480, height: 480, storedShort: true },
 });
 
 /** The file the demo's picker returns. */

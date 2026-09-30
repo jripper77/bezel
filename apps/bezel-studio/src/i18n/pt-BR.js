@@ -48,6 +48,7 @@ export default {
   'error.notPicked': 'O Bezel só salva onde você escolheu, e {location} não foi escolhido.',
   'error.refused': 'A tela recusou o arquivo: {detail}',
   'error.screenNotFound': 'Tela não encontrada: {screen}. Confira o cabo USB.',
+  'error.sizeMismatch': '“{file}” foi gravado com {stored} bytes em vez de {expected}. Apague e envie de novo.',
   'error.stale': 'Esse envio expirou. Escolha o arquivo de novo.',
   'error.system': 'O sistema recusou: {detail}',
   'error.themeFile': 'O arquivo de tema não pôde ser usado: {detail}',

@@ -55,6 +55,11 @@
     "screenNotFound": [
       "screen"
     ],
+    "sizeMismatch": [
+      "expected",
+      "file",
+      "stored"
+    ],
     "stale": [],
     "system": [
       "detail"

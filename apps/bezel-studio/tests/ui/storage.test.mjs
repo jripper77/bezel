@@ -183,3 +183,13 @@ test('a live theme video missing from the screen is sent on request', async () =
   assert.deepEqual((await demo.sample()).video, { state: 'onDevice', path: 'sd/video/nebula_90.mp4' });
   await assert.rejects(demo.prepareThemeVideo(KEY), (e) => e.code === 'noVideo');
 });
+
+test('a file stored with the wrong size fails its check and stays for a delete', async () => {
+  const demo = createDemoBackend('turing88', instant);
+  const ready = await demo.prepareUpload(KEY, 'demo://torto.png', 'internal');
+  await assert.rejects(
+    demo.runUpload(ready.ticket, false),
+    (e) => e.code === 'sizeMismatch' && e.args.file === 'internal/image/torto.png' && e.args.expected === '256000',
+  );
+  assert.equal(demo.storageState().files.get('internal/image/torto.png'), 255_990);
+});

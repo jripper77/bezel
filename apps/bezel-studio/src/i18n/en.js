@@ -48,6 +48,7 @@ export default {
   'error.notPicked': 'Bezel only saves where you chose, and {location} was not chosen.',
   'error.refused': 'The screen refused the file: {detail}',
   'error.screenNotFound': 'Screen not found: {screen}. Check the USB cable.',
+  'error.sizeMismatch': '“{file}” was stored with {stored} bytes instead of {expected}. Delete it and send it again.',
   'error.stale': 'This upload expired. Choose the file again.',
   'error.system': 'The system refused: {detail}',
   'error.themeFile': 'The theme file could not be used: {detail}',

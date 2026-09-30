@@ -336,7 +336,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       // partial file may remain (seen on the 8.8").
       view.notice = view.job?.cancelling && e?.code === 'timeout'
         ? { kind: 'error', text: t('storage.cancelledLost', { name: view.job.name }) }
-        : { kind: 'error', text: errorText(t, e) };
+        : { kind: 'error', text: errorText(t, e), path: e?.code === 'sizeMismatch' ? e.args?.file : null };
     }
     const { name } = view.job;
     view.job = null;
@@ -450,7 +450,15 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       if (n.refusal.code === 'needsConverter') children.push(ffmpegHelp());
       return notice('refused', ICONS.warning, t('storage.refusedTitle', { name: n.name }), children, { dismiss: true });
     }
-    return notice('error', ICONS.warning, t('storage.errorTitle'), [el('p', { text: n.text })], { dismiss: true });
+    // A file stored with the wrong size is deleted on request, never on its own.
+    const children = [el('p', { text: n.text })];
+    if (n.path && storageFeatures(screen()).remove) {
+      const file = fileOf(n.path);
+      children.push(el('div', { class: 'button-row' }, [
+        el('button', { type: 'button', class: 'text-button', text: t('storage.delete', { name: file.name }), disabled: busy(), onclick: () => askDelete(file) }),
+      ]));
+    }
+    return notice('error', ICONS.warning, t('storage.errorTitle'), children, { dismiss: true });
   }
 
   function ffmpegHelp() {

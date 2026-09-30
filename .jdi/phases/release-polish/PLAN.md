@@ -79,7 +79,8 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
   - Modo demo emula tudo; Playwright claro/escuro × pt-BR/en, axe sem violações sérias/críticas.
 - **Dependencies:** T-7.1, T-7.2, T-7.4
 - **Test:** `node --test tests/ui/i18n.test.mjs tests/ui/backend-messages.test.mjs`; `npm test`
-- **Status:** pending
+- **Status:** completed (`599e734`..`c1033ec`, 12 commits)
+- **Nota:** fora de `files_modified`, sinalizados: `apps/bezel-studio/src-tauri/{build.rs,capabilities/default.json}` (os comandos novos `list_devices`, que substitui `list_screens`, `leave_desktop_mode`, `preferences`, `set_language`, `set_sensor_options`, `pick_folder` e `quit_app` precisam do `allow-*`), `apps/bezel-studio/src-tauri/tests/hardware.rs` (o literal do `Backend` ganhou os campos novos) e `crates/bezel-themes/tests/import_corpus.rs` (teste ignorado; lê `w.to_string()`). Mudanças visíveis: diálogo Preferências na barra (idioma, destino do ping, pasta do MangoHud); a bandeja, os filtros dos diálogos nativos e o nome de um tema novo seguem o idioma; o texto em inglês da CLI muda só em dois avisos do importador (`orientation "x"` em vez de `Some("x")`, e a cor lida como texto). O erro de tamanho do upload (`66c3001`, na main) chega como `Transport` e é reconhecido pelo texto para virar `sizeMismatch`; uma variante própria no core seria melhor (arquivo fora desta tarefa). Merge com a main conferido sem conflito: clippy limpo, 651 testes Rust e 86 unitários de UI. Sobras: os valores das leituras vêm formatados do core com ponto decimal também em pt-BR (`4.72 GHz`); rótulos que a máquina dá aos sensores (hwmon, discos, placas de rede) seguem em inglês, só as chaves fixas do catálogo têm nome traduzido.
 
 ### Wave 3
 

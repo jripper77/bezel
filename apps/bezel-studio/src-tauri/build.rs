@@ -38,6 +38,8 @@ const COMMANDS: &[&str] = &[
     "set_boot_media",
     "set_unsaved",
     "close_window",
+    "preferences",
+    "set_language",
 ];
 
 fn main() -> ExitCode {

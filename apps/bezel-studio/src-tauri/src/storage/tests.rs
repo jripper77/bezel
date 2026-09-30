@@ -261,6 +261,7 @@ fn fixture_with(name: &str, storage: FakeStorage, media: FakeMedia) -> Fixture {
         store: Arc::new(FsThemeStore),
         library: ThemeLibrary::new(root.join("themes"), vec![]),
         settings: SettingsFile::new(root.join("settings.json")),
+        system_language: Language::English,
         fonts: Vec::new(),
         studio: crate::backend::Session::new(studio),
         storage: StorageState::new(Box::new(media), root.join("scratch")),

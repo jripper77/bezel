@@ -1,48 +1,22 @@
 //! The tray icon: Bezel keeps running there while a screen is live. Its
 //! menu opens or hides the window, turns live mode on or off (the check
-//! mark follows the session, whoever changed it) and quits.
+//! mark follows the session, whoever changed it) and quits. Its labels
+//! follow the app's language.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
+use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-use crate::clock::{language, now};
+use crate::clock::now;
 use crate::commands::Shared;
-use bezel_core::domain::clock::Language;
+use crate::texts::Texts;
 
 const SHOW: &str = "show";
 const HIDE: &str = "hide";
 const LIVE: &str = "live";
 const QUIT: &str = "quit";
-
-/// Menu labels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Labels {
-    show: &'static str,
-    hide: &'static str,
-    live: &'static str,
-    quit: &'static str,
-}
-
-/// Menu labels in the user's language.
-fn labels(lang: Language) -> Labels {
-    match lang {
-        Language::PortugueseBr => Labels {
-            show: "Abrir o Bezel",
-            hide: "Ocultar a janela",
-            live: "Ao vivo na tela",
-            quit: "Sair",
-        },
-        Language::English => Labels {
-            show: "Open Bezel",
-            hide: "Hide the window",
-            live: "Live on the screen",
-            quit: "Quit",
-        },
-    }
-}
 
 /// The menu's live check item, kept in step with the session.
 #[derive(Clone)]
@@ -105,22 +79,59 @@ fn toggle_live(app: &AppHandle, item: &LiveItem) {
     }
 }
 
-/// Adds the tray icon with its menu; `live` is whether a screen is live now.
-pub(crate) fn create(app: &AppHandle, live: bool) -> tauri::Result<LiveItem> {
-    let text = labels(language());
+/// The menu's items, to label them again in another language.
+#[derive(Clone)]
+pub(crate) struct TrayMenu {
+    show: MenuItem<tauri::Wry>,
+    hide: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+    live: LiveItem,
+}
+
+impl TrayMenu {
+    /// The live check item, which follows the session.
+    pub(crate) fn live(&self) -> &LiveItem {
+        &self.live
+    }
+
+    /// Labels the menu with `text`.
+    pub(crate) fn relabel(&self, text: &Texts) {
+        let labels = [
+            self.show.set_text(text.show),
+            self.hide.set_text(text.hide),
+            self.live.item.set_text(text.live),
+            self.quit.set_text(text.quit),
+        ];
+        for result in labels {
+            if let Err(e) = result {
+                tracing::warn!("tray menu not relabelled: {e}");
+            }
+        }
+    }
+}
+
+/// Adds the tray icon with its menu in `text`; `live` is whether a screen
+/// is live now.
+pub(crate) fn create(app: &AppHandle, live: bool, text: &Texts) -> tauri::Result<TrayMenu> {
     let live_item = LiveItem {
         item: CheckMenuItemBuilder::with_id(LIVE, text.live)
             .checked(live)
             .build(app)?,
         shown: Arc::new(Mutex::new(Some(live))),
     };
+    let items = TrayMenu {
+        show: MenuItemBuilder::with_id(SHOW, text.show).build(app)?,
+        hide: MenuItemBuilder::with_id(HIDE, text.hide).build(app)?,
+        quit: MenuItemBuilder::with_id(QUIT, text.quit).build(app)?,
+        live: live_item.clone(),
+    };
     let menu = MenuBuilder::new(app)
-        .item(&MenuItemBuilder::with_id(SHOW, text.show).build(app)?)
-        .item(&MenuItemBuilder::with_id(HIDE, text.hide).build(app)?)
+        .item(&items.show)
+        .item(&items.hide)
         .separator()
         .item(&live_item.item)
         .separator()
-        .item(&MenuItemBuilder::with_id(QUIT, text.quit).build(app)?)
+        .item(&items.quit)
         .build()?;
     let clicked = live_item.clone();
     let mut builder = TrayIconBuilder::with_id("bezel")
@@ -148,27 +159,5 @@ pub(crate) fn create(app: &AppHandle, live: bool) -> tauri::Result<LiveItem> {
         builder = builder.icon(icon.clone());
     }
     builder.build(app)?;
-    Ok(live_item)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn labels_follow_the_language() {
-        let pt = labels(Language::PortugueseBr);
-        assert_eq!((pt.show, pt.quit), ("Abrir o Bezel", "Sair"));
-        assert_eq!((pt.hide, pt.live), ("Ocultar a janela", "Ao vivo na tela"));
-        let en = labels(Language::English);
-        assert_eq!(
-            (en.show, en.hide, en.live, en.quit),
-            (
-                "Open Bezel",
-                "Hide the window",
-                "Live on the screen",
-                "Quit"
-            )
-        );
-    }
+    Ok(items)
 }

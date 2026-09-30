@@ -39,6 +39,8 @@
     "allow-stop-playback",
     "allow-set-boot-media",
     "allow-set-unsaved",
-    "allow-close-window"
+    "allow-close-window",
+    "allow-preferences",
+    "allow-set-language"
   ]
 }

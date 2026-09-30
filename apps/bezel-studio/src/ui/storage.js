@@ -184,7 +184,7 @@ export function createConfirm(t) {
  * @param {object} deps
  * @param {HTMLElement} deps.root where the tab is drawn
  * @param {(k: string, p?: object) => string} deps.t
- * @param {string} deps.locale
+ * @param {() => string} deps.locale the UI's language now
  * @param {object} deps.bridge
  * @param {(message: string) => void} deps.notify short confirmation (toast)
  * @param {() => {screen: object|null, live: boolean, liveVideo: {state: string, path?: string}|null}} deps.context
@@ -211,7 +211,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
 
   const screen = () => context().screen;
   const busy = () => Boolean(view.job) || view.working;
-  const bytes = (n) => formatBytes(n, locale);
+  const bytes = (n) => formatBytes(n, locale());
 
   // ------------------------------------------------------------- loading --
   async function load() {
@@ -437,7 +437,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       return notice('cancelled', ICONS.info, t('storage.cancelled'), children, { dismiss: true });
     }
     if (n.kind === 'refused') {
-      const children = [el('p', { text: refusalText(t, locale, n.refusal) })];
+      const children = [el('p', { text: refusalText(t, locale(), n.refusal) })];
       const candidates = n.refusal.candidates ?? [];
       if (candidates.length && storageFeatures(screen()).remove) {
         children.push(el('p', { text: t('storage.candidates') }));
@@ -488,11 +488,12 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
   const jobAmount = el('span', { class: 'job-amount' });
   const jobBar = el('progress', { class: 'job-bar', max: 1, 'aria-label': t('storage.progressLabel') });
   const jobCancel = el('button', { type: 'button', class: 'text-button', text: t('storage.cancel'), onclick: cancelJob });
+  const jobHint = el('p', { class: 'hint', text: t('storage.busy') });
   jobBox.replaceChildren(
     el('div', { class: 'job-head' }, [icon(ICONS.upload, 18), jobTitle]),
     jobBar,
     el('div', { class: 'job-status' }, [jobPhase, jobAmount]),
-    el('p', { class: 'hint', text: t('storage.busy') }),
+    jobHint,
     el('div', { class: 'button-row' }, [jobCancel]),
   );
 
@@ -500,7 +501,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     const job = view.job;
     jobBox.hidden = !job;
     if (!job) return;
-    const parts = progressParts(t, locale, job);
+    const parts = progressParts(t, locale(), job);
     jobTitle.textContent = t('storage.jobTitle', { name: job.name });
     jobPhase.textContent = job.cancelling ? t('storage.cancelling') : parts.phase;
     jobAmount.textContent = parts.amount;
@@ -690,5 +691,12 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       if (!view.job) renderBody();
     },
     refresh: load,
+    /** The UI's language changed: every text is drawn again. */
+    retranslate() {
+      jobBar.setAttribute('aria-label', t('storage.progressLabel'));
+      jobCancel.textContent = t('storage.cancel');
+      jobHint.textContent = t('storage.busy');
+      renderAll();
+    },
   };
 }

@@ -48,6 +48,11 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   let catalog = [];
   let readings = {};
   let editing = null;
+  // What each panel shows, to draw it again in another language.
+  let themes = [];
+  let media = [];
+  let importReport = null;
+  let screenArgs = [[], null, false, {}];
 
   // ---------------------------------------------------------------- tabs --
   const tabs = [...document.querySelectorAll('.tabs [role="tab"]')];
@@ -196,6 +201,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   }
 
   function renderThemes(list) {
+    themes = list;
     const grid = $('theme-grid');
     if (!list.length) {
       grid.replaceChildren(el('li', { class: 'empty-note', text: t('themes.empty') }));
@@ -206,6 +212,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
 
   /** Lists what an import could not map exactly, until dismissed; `null` clears it. */
   function showImportReport(report) {
+    importReport = report;
     const root = $('import-report');
     if (!report?.warnings?.length) {
       root.replaceChildren();
@@ -214,7 +221,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
     const count = report.warnings.length;
     const dismiss = el('button', {
       type: 'button', class: 'icon-button', title: t('import.dismiss'), 'aria-label': t('import.dismiss'),
-      onclick: () => { root.replaceChildren(); $('theme-import').focus(); },
+      onclick: () => { showImportReport(null); $('theme-import').focus(); },
     }, [icon(ICONS.close, 16)]);
     root.replaceChildren(el('section', { class: 'notice', 'aria-labelledby': 'import-report-title' }, [
       el('div', { class: 'notice-head' }, [icon(ICONS.warning, 18), el('h2', { id: 'import-report-title', text: t('import.title') }), dismiss]),
@@ -230,6 +237,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
 
   // --------------------------------------------------------------- media --
   function renderMedia(assets) {
+    media = assets;
     const list = $('media-list');
     const images = assets.filter((a) => a.kind === 'image');
     if (!images.length) {
@@ -257,6 +265,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
 
   /** @param {Record<string, number>} brightness the level set on each screen in this session */
   function renderScreen(screens, current, live, brightness = {}) {
+    screenArgs = [screens, current, live, brightness];
     const root = $('screen-panel');
     if (!screens.length) {
       root.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }), autostartField());
@@ -290,5 +299,15 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
     renderMedia,
     renderScreen,
     selectTab: (name) => selectTab(tabs.find((x) => x.dataset.tab === name)),
+    /** The UI's language changed: every panel is drawn again. */
+    retranslate() {
+      renderWidgets();
+      renderSensors();
+      renderLayers();
+      renderThemes(themes);
+      showImportReport(importReport);
+      renderMedia(media);
+      renderScreen(...screenArgs);
+    },
   };
 }

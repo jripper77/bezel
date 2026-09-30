@@ -5,10 +5,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use bezel_core::domain::clock::Language;
 use bezel_core::domain::geometry::Orientation;
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{orientation_slug, parse_orientation};
+use crate::texts::parse_language;
 
 /// Remembered choices (`settings.json` in the app's config folder).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,9 +26,17 @@ pub struct Settings {
     /// The ffmpeg chosen with the storage tab's Locate button (the program
     /// or its folder); `PATH` is searched after it.
     pub ffmpeg_path: Option<String>,
+    /// The language the user chose (`pt-BR` or `en`); without one the app
+    /// follows the system's.
+    pub language: Option<String>,
 }
 
 impl Settings {
+    /// The language the user chose, if a valid one was stored.
+    pub fn language(&self) -> Option<Language> {
+        self.language.as_deref().and_then(parse_language)
+    }
+
     /// The orientation last used with `screen`, if a valid one was stored.
     pub fn orientation_for(&self, screen: &str) -> Option<Orientation> {
         self.screen_orientations

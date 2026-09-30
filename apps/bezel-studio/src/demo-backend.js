@@ -4,6 +4,7 @@ import { DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_STORAGE, SCENARIOS } from './demo-d
 import { DEMO_THEME } from './demo-theme.js';
 import { renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
+import { pickLocale } from './i18n/index.js';
 
 /** Well-known demo sensors: key, category, label, quantity, base value, swing. */
 export const DEMO_SENSORS = Object.freeze([
@@ -332,7 +333,8 @@ function createDemoStorage(chosen, { delay, live, theme }) {
 /**
  * @param {string} scenario key of SCENARIOS
  * @param {{now?: () => number, delay?: (ms: number) => Promise<void>}} [clock]
- * @param {{onWindow?: (state: 'hidden'|'closed') => void}} [hooks] what the window does
+ * @param {{onWindow?: (state: 'hidden'|'closed') => void, languages?: readonly string[]}} [hooks]
+ *   what the window does, and the system's languages
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const now = clock.now ?? (() => Date.now() / 1000);
@@ -352,6 +354,9 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   // live, asks the UI when edits are unsaved, and closes it otherwise.
   let unsaved = false;
   let windowState = 'open';
+  // The language the user chose (`null`: the system's, from the browser).
+  let language = null;
+  const systemLanguage = pickLocale(hooks.languages ?? []);
   const closeListeners = new Set();
   const windowGoes = (state) => {
     windowState = state;
@@ -447,6 +452,14 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       else windowGoes('closed');
     },
     windowState: () => windowState,
+    preferences: () => Promise.resolve({ language, systemLanguage }),
+    setLanguage: (next) => {
+      if (next !== null && !['pt-BR', 'en'].includes(next)) {
+        return Promise.reject(Object.assign(new Error(`unknown language "${next}"`), { code: 'unknownLanguage', args: { language: next } }));
+      }
+      language = next;
+      return Promise.resolve();
+    },
     isLive: () => Boolean(live),
   };
 }

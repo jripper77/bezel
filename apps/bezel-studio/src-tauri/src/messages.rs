@@ -78,6 +78,7 @@ error_codes! {
     InvalidTheme = "invalidTheme" => "invalid theme: {detail}",
     ThemeMisfit = "themeMisfit"
         => "this theme is {theme} but the screen is {screen} in this orientation",
+    UnknownLanguage = "unknownLanguage" => "unknown language \"{language}\"",
     System = "system" => "system error: {detail}",
 }
 

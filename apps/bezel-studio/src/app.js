@@ -9,14 +9,21 @@ import { createInspector } from './ui/inspector.js';
 import { createStoragePanel, wireSubtabs } from './ui/storage.js';
 import { el } from './ui/dom.js';
 import { askChoice } from './ui/dialog.js';
+import { createPreferences } from './ui/preferences.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
 import { errorText } from './messages.js';
 
-const locale = pickLocale(navigator.languages ?? [navigator.language]);
-const t = translator(locale);
 const bridge = createBridge(window);
 const $ = (id) => document.getElementById(id);
+
+// The language: the one chosen in the preferences, else the system's. It can
+// change while the app runs, so every module translates through `t`.
+const prefs = await bridge.preferences().catch(() => null);
+let locale = prefs?.language ?? prefs?.systemLanguage ?? pickLocale(navigator.languages ?? [navigator.language]);
+let current = translator(locale);
+const t = (key, params) => current(key, params);
+t.has = (key) => current.has(key);
 
 document.documentElement.lang = locale;
 applyTranslations(document, t);
@@ -87,7 +94,7 @@ const library = createLibrary({
 const storage = createStoragePanel({
   root: $('storage-panel'),
   t,
-  locale,
+  locale: () => locale,
   bridge,
   notify: toast,
   context: () => ({
@@ -435,6 +442,23 @@ document.addEventListener('keydown', (evt) => {
     default: break;
   }
 });
+
+// ----------------------------------------------------------- language --
+/** Shows the whole UI in `next` (`pt-BR` or `en`). */
+function setLocale(next) {
+  locale = next;
+  current = translator(next);
+  document.documentElement.lang = next;
+  applyTranslations(document, t);
+  library.retranslate();
+  storage.retranslate();
+  refreshChrome('select');
+  renderScreenSelect();
+  renderNow();
+}
+
+const preferences = createPreferences({ t, bridge, onLanguage: setLocale, notify: toast });
+$('preferences').addEventListener('click', () => preferences.open());
 
 // ------------------------------------------------------------ start ----
 library.renderWidgets();

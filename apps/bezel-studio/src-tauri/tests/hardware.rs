@@ -43,6 +43,7 @@ fn backend(scratch: &Path) -> Backend {
         store: Arc::new(FsThemeStore),
         library: ThemeLibrary::new(scratch.join("themes"), vec![themes]),
         settings: SettingsFile::new(scratch.join("settings.json")),
+        system_language: language(),
         fonts,
         studio: Session::new(Studio::new(
             Box::new(SystemSensors::new()),

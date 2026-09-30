@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { LOCALES, applyTranslations, pickLocale, translator } from '../../src/i18n/index.js';
 import { WIDGETS } from '../../src/editor/widgets.js';
+import { LANGUAGES, languageOptions } from '../../src/ui/preferences.js';
+import { createDemoBackend } from '../../src/demo-backend.js';
 
 const src = new URL('../../src/', import.meta.url);
 
@@ -66,4 +68,25 @@ test('applyTranslations fills text, title, aria-label and placeholder', () => {
   assert.equal(title.title, 'Undo (Ctrl+Z)');
   assert.equal(aria.attrs['aria-label'], 'Library');
   assert.equal(hint.placeholder, 'Search sensors');
+});
+
+test('the language choices name the system language and each language by its own name', () => {
+  assert.deepEqual(LANGUAGES, Object.keys(LOCALES));
+  assert.deepEqual(languageOptions(translator('pt-BR'), 'en'), [
+    ['', 'Igual ao do sistema (English)'],
+    ['pt-BR', 'Português (Brasil)'],
+    ['en', 'English'],
+  ]);
+  assert.equal(languageOptions(translator('en'), 'pt-BR')[0][1], 'Same as the system (Português (Brasil))');
+});
+
+test('the demo keeps the chosen language and follows the browser otherwise', async () => {
+  const demo = createDemoBackend('turing88', {}, { languages: ['pt-BR', 'en'] });
+  assert.deepEqual(await demo.preferences(), { language: null, systemLanguage: 'pt-BR' });
+  await demo.setLanguage('en');
+  assert.equal((await demo.preferences()).language, 'en');
+  await assert.rejects(demo.setLanguage('de'), (e) => e.code === 'unknownLanguage' && e.args.language === 'de');
+  await demo.setLanguage(null);
+  assert.equal((await demo.preferences()).language, null);
+  assert.equal((await createDemoBackend('turing88').preferences()).systemLanguage, 'en');
 });

@@ -298,6 +298,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .danger-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--danger); background: var(--danger); color: var(--danger-text); font-weight: 600; cursor: pointer; }
 .primary-button:disabled, .danger-button:disabled { opacity: 0.45; cursor: default; }
 
+/* ------------------------------------------------------- preferences -- */
+.prefs-dialog { width: min(480px, calc(100vw - 32px)); }
+.prefs-section { display: grid; gap: 4px; padding: 4px 0 8px; }
+.prefs-section + .prefs-section { border-top: 1px solid var(--border); padding-top: 12px; }
+.prefs-section h3 { margin: 4px 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.prefs-section .field select, .prefs-section .field input[type="text"] { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+.prefs-section .hint { margin: 0; }
+
 /* Narrow windows (the app allows 960 px): the brand and the orientation
    labels go, the orientation names stay for screen readers and in tooltips. */
 @media (max-width: 1180px) {

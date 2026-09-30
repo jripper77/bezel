@@ -16,16 +16,17 @@ use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, State, WebviewWindow
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
 
-use crate::backend::{Backend, UNTITLED};
+use crate::backend::Backend;
 use crate::clock::now;
 use crate::dto::{
-    AddedDto, AssetDto, ImportedDto, JobDto, MediaToolsDto, PrepareDto, ProgressDto, SampleDto,
-    SavedDto, ScreenDto, SensorDto, SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
+    AddedDto, AssetDto, ImportedDto, JobDto, MediaToolsDto, PreferencesDto, PrepareDto,
+    ProgressDto, SampleDto, SavedDto, ScreenDto, SensorDto, SessionDto, StorageDto, ThemeEntryDto,
+    parse_orientation,
 };
 use crate::media::{IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
 use crate::storage::ProgressThrottle;
-use crate::tray::LiveItem;
+use crate::tray::{LiveItem, TrayMenu};
 
 /// State managed by Tauri.
 pub type Shared = Arc<Backend>;
@@ -180,9 +181,10 @@ pub async fn new_theme(
         })
         .transpose()?;
     blocking(&state, move |b| {
+        let untitled = b.texts().untitled;
         b.new_theme(
             screen.as_deref(),
-            name.as_deref().unwrap_or(UNTITLED),
+            name.as_deref().unwrap_or(untitled),
             orientation,
         )
     })
@@ -199,7 +201,7 @@ pub async fn import_theme<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, Shared>,
 ) -> UiResult<Option<ImportedDto>> {
-    let Some(path) = pick_file(&app, "Themes", &IMPORT_EXTENSIONS)? else {
+    let Some(path) = pick_file(&app, state.texts().themes, &IMPORT_EXTENSIONS)? else {
         return Ok(None);
     };
     blocking(&state, move |b| b.import(&path).map(Some)).await
@@ -211,7 +213,7 @@ pub async fn add_image<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, Shared>,
 ) -> UiResult<Option<AddedDto>> {
-    let Some(path) = pick_file(&app, "Images", IMAGE_EXTENSIONS)? else {
+    let Some(path) = pick_file(&app, state.texts().images, IMAGE_EXTENSIONS)? else {
         return Ok(None);
     };
     blocking(&state, move |b| b.add_image(&path).map(Some)).await
@@ -280,6 +282,29 @@ pub fn set_autostart<R: Runtime>(app: AppHandle<R>, on: bool) -> UiResult<()> {
     .map_err(UiError::system)
 }
 
+// --------------------------------------------------------- preferences --
+
+/// The language chosen in the settings and the system's.
+#[tauri::command]
+pub fn preferences(state: State<'_, Shared>) -> PreferencesDto {
+    state.preferences()
+}
+
+/// Uses `language` (`pt-BR`, `en`, or `None` for the system's) from now on,
+/// in the tray too.
+#[tauri::command]
+pub fn set_language(
+    app: AppHandle,
+    state: State<'_, Shared>,
+    language: Option<String>,
+) -> UiResult<()> {
+    state.set_language(language.as_deref())?;
+    if let Some(tray) = app.try_state::<TrayMenu>() {
+        tray.relabel(&state.texts());
+    }
+    Ok(())
+}
+
 // ------------------------------------------------------------- storage --
 
 /// Event carrying a running upload's progress ([`ProgressDto`]).
@@ -319,8 +344,12 @@ pub async fn locate_ffmpeg<R: Runtime>(
 
 /// Asks for an image or a video to send to a screen. `None` when cancelled.
 #[tauri::command]
-pub async fn pick_media<R: Runtime>(app: AppHandle<R>) -> UiResult<Option<String>> {
-    Ok(pick_file(&app, "Media", MEDIA_EXTENSIONS)?.map(|p| p.display().to_string()))
+pub async fn pick_media<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+) -> UiResult<Option<String>> {
+    let filter = state.texts().media;
+    Ok(pick_file(&app, filter, MEDIA_EXTENSIONS)?.map(|p| p.display().to_string()))
 }
 
 /// The preflight of sending the local file `source` to `medium` of `screen`.

@@ -18,6 +18,7 @@ pub mod messages;
 pub mod settings;
 pub mod storage;
 pub mod studio;
+pub mod texts;
 mod tray;
 
 use std::ffi::OsStr;
@@ -37,7 +38,7 @@ use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
 use tauri::{AppHandle, Emitter as _, Manager, WindowEvent};
 
-use crate::backend::{Backend, DEFAULT_MODEL, Pacer, Session, UNTITLED, default_orientation};
+use crate::backend::{Backend, DEFAULT_MODEL, Pacer, Session, default_orientation};
 use crate::commands::{Shared, Unsaved};
 use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
@@ -115,9 +116,10 @@ pub fn run() -> Result<(), tauri::Error> {
             app.manage(Arc::clone(&backend));
             app.manage(Unsaved::default());
             let live = backend.studio().live_key().is_some();
-            let live_item = tray::create(app.handle(), live)?;
-            app.manage(live_item.clone());
-            start_refresh_loop(backend, live_item);
+            let tray = tray::create(app.handle(), live, &backend.texts())?;
+            app.manage(tray.live().clone());
+            app.manage(tray.clone());
+            start_refresh_loop(backend, tray.live().clone());
             if !hidden {
                 show_main_window(app.handle());
             }
@@ -180,6 +182,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::set_boot_media,
             commands::set_unsaved,
             commands::close_window,
+            commands::preferences,
+            commands::set_language,
         ])
         .run(tauri::generate_context!())
 }
@@ -226,9 +230,10 @@ fn adapters(simulate: bool) -> Adapters {
 /// A blank theme for the most common screen (horizontal, like every
 /// bar-shaped one), until [`Backend::restore_theme`] picks the real one.
 fn starting_theme() -> Theme {
+    let name = texts::texts(clock::language()).untitled;
     match model_by_id(DEFAULT_MODEL) {
-        Some(m) => Theme::blank(UNTITLED, m.panel, default_orientation(m)),
-        None => Theme::blank(UNTITLED, Size::new(480, 1920), Orientation::Landscape),
+        Some(m) => Theme::blank(name, m.panel, default_orientation(m)),
+        None => Theme::blank(name, Size::new(480, 1920), Orientation::Landscape),
     }
 }
 
@@ -261,6 +266,8 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     let fonts = renderer.font_families();
     let path = app.path();
     let settings = SettingsFile::new(path.app_config_dir()?.join("settings.json"));
+    let system_language = clock::language();
+    let language = settings.load().language().unwrap_or(system_language);
     let ffmpeg = settings.load().ffmpeg_path.map(PathBuf::from);
     let cache = path.app_cache_dir()?;
     let storage = StorageState::new(
@@ -269,19 +276,15 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     );
     // Screens that cannot play videos get the theme's video decoded here by
     // the storage tab's converter.
-    let studio = Studio::new(
-        sensors,
-        Box::new(renderer),
-        clock::language(),
-        starting_theme(),
-    )
-    .with_host_decoding(storage.shared_media(), cache.join("playing"));
+    let studio = Studio::new(sensors, Box::new(renderer), language, starting_theme())
+        .with_host_decoding(storage.shared_media(), cache.join("playing"));
     Ok(Backend {
         bus,
         connector,
         store: Arc::new(FsThemeStore),
         library: ThemeLibrary::new(path.app_data_dir()?.join("themes"), bundled_theme_dirs(app)),
         settings,
+        system_language,
         fonts,
         studio: Session::new(studio),
         storage,

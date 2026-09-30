@@ -161,6 +161,7 @@ pub enum Resume {
 pub struct Studio {
     sensors: Box<dyn SensorSource>,
     renderer: Box<dyn FrameRenderer>,
+    language: Language,
     runtime: ThemeRuntime,
     catalog: Vec<SensorInfo>,
     sample_millis: f64,
@@ -185,6 +186,7 @@ impl Studio {
         Self {
             sensors,
             renderer,
+            language,
             runtime: ThemeRuntime::new(theme, BTreeMap::new(), language),
             catalog: Vec::new(),
             sample_millis: 0.0,
@@ -202,6 +204,30 @@ impl Studio {
     pub fn with_host_decoding(mut self, media: SharedMedia, dir: PathBuf) -> Self {
         self.host = Some(HostDecoding { media, dir });
         self
+    }
+
+    /// Draws day and month names in `language` from now on: the runtime
+    /// starts again with the same theme and assets (graph histories start
+    /// over, and the live screen's video is started again).
+    pub fn set_language(&mut self, language: Language) {
+        if language == self.language {
+            return;
+        }
+        self.language = language;
+        let theme = self.runtime.theme().clone();
+        let assets = self.runtime.assets().clone();
+        // The old runtime, and a video it decodes here, stop first.
+        self.runtime = ThemeRuntime::new(theme, assets, language);
+        self.runtime.use_catalog(&self.catalog);
+        if let Some(live) = self.live.as_mut() {
+            live.host = None;
+            live.restart_video = true;
+        }
+    }
+
+    /// The language of day and month names.
+    pub fn language(&self) -> Language {
+        self.language
     }
 
     // ------------------------------------------------------------ sensors --
@@ -922,6 +948,47 @@ mod tests {
         assert_eq!(s.render(TIME).unwrap().size(), Size::new(1920, 480));
         assert_eq!(*renders.0.lock().unwrap(), 2);
         assert_eq!(s.location(), None);
+    }
+
+    /// Records the language of each render.
+    #[derive(Default, Clone)]
+    struct Languages(Arc<Mutex<Vec<Language>>>);
+
+    impl FrameRenderer for Languages {
+        fn render(
+            &mut self,
+            theme: &Theme,
+            _: &BTreeMap<AssetRef, Vec<u8>>,
+            context: RenderContext<'_>,
+        ) -> Result<Frame> {
+            self.0.lock().unwrap().push(context.language);
+            Ok(Frame::filled(theme.canvas, Rgba::BLACK))
+        }
+    }
+
+    #[test]
+    fn day_and_month_names_follow_a_new_language() {
+        let seen = Languages::default();
+        let mut s = Studio::new(
+            Box::new(FakeSensors::demo()),
+            Box::new(seen.clone()),
+            Language::English,
+            theme_88(),
+        );
+        s.refresh_catalog().unwrap();
+        let asset = s.add_asset("logo.png", vec![1, 2, 3]);
+        s.render(TIME).unwrap();
+        s.set_language(Language::PortugueseBr);
+        s.set_language(Language::PortugueseBr);
+        s.render(TIME).unwrap();
+        assert_eq!(
+            *seen.0.lock().unwrap(),
+            [Language::English, Language::PortugueseBr]
+        );
+        assert_eq!(s.language(), Language::PortugueseBr);
+        assert!(s.assets().contains_key(&asset), "the assets stay");
+        assert_eq!(s.theme().name, "T", "the theme stays");
+        assert!(!s.quantities().is_empty(), "the catalog stays");
     }
 
     /// What a frame showed under the elements, and how many samples of

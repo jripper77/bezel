@@ -369,3 +369,39 @@ test('an import lists what had no equivalent', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Importar…' })).toBeFocused();
   expect(errors).toEqual([]);
 });
+
+test('the language follows the system until one is chosen', async ({ page }) => {
+  const errors = watchErrors(page);
+  const html = page.locator('html');
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await expect(html).toHaveAttribute('lang', 'pt-BR');
+  const opener = page.getByRole('button', { name: 'Preferências' });
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: 'Preferências' });
+  const language = dialog.getByRole('combobox', { name: 'Idioma do Bezel' });
+  await expect(language).toBeFocused();
+  await expect(language).toHaveValue('');
+  await expect(language.locator('option:checked')).toHaveText('Igual ao do sistema (Português (Brasil))');
+  await expectAccessible(page);
+
+  // Another language applies at once, the dialog included.
+  await language.selectOption('en');
+  await expect(html).toHaveAttribute('lang', 'en');
+  await expect(page.getByRole('dialog', { name: 'Preferences' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Sensors' })).toBeVisible();
+  await expect(page.locator('#status-main')).toHaveText('All saved');
+  await expect(page.locator('#inspector').getByRole('heading', { name: 'Theme' })).toBeVisible();
+  await expectAccessible(page);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Preferences' })).toBeFocused();
+
+  // Back to the system's.
+  await page.getByRole('button', { name: 'Preferences' }).click();
+  await page.getByRole('dialog').getByRole('combobox').selectOption('');
+  await expect(html).toHaveAttribute('lang', 'pt-BR');
+  await page.getByRole('dialog').getByRole('button', { name: 'Concluir' }).click();
+  await expect(page.getByRole('tab', { name: 'Sensores' })).toBeVisible();
+  expect(errors).toEqual([]);
+});

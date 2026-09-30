@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use bezel_core::app::{choose_screen, discover_screens};
 use bezel_core::domain::catalog::model_by_id;
-use bezel_core::domain::clock::LocalTime;
+use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::geometry::Orientation;
@@ -20,8 +20,8 @@ use bezel_themes::import::import_path;
 use bezel_themes::native::{is_native, native_location};
 
 use crate::dto::{
-    AddedDto, AssetDto, ImportedDto, LiveVideoDto, SampleDto, SavedDto, ScreenDto, SensorDto,
-    SessionDto, ThemeEntryDto,
+    AddedDto, AssetDto, ImportedDto, LiveVideoDto, PreferencesDto, SampleDto, SavedDto, ScreenDto,
+    SensorDto, SessionDto, ThemeEntryDto,
 };
 use crate::library::ThemeLibrary;
 use crate::media::{kind_of, thumbnail_data_url};
@@ -31,6 +31,7 @@ use crate::settings::SettingsFile;
 use crate::storage::StorageState;
 pub use crate::studio::MAX_REFRESH;
 use crate::studio::{Delivery, Studio};
+use crate::texts::{Texts, language_slug, parse_language, texts};
 
 /// Largest file accepted as an image or theme, bytes.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -47,6 +48,9 @@ pub struct Backend {
     pub library: ThemeLibrary,
     /// Remembered choices.
     pub settings: SettingsFile,
+    /// The system's language, which the app follows unless the user chose
+    /// another in the settings.
+    pub system_language: Language,
     /// Font families themes can use.
     pub fonts: Vec<String>,
     /// The editing session.
@@ -195,6 +199,45 @@ impl Backend {
     pub(crate) fn connect(&self, key: &str) -> UiResult<Box<dyn ScreenLink>> {
         let screen = self.find_screen(key)?;
         Ok(self.connector.connect(&screen)?)
+    }
+
+    // -------------------------------------------------------- preferences --
+
+    /// The app's language: the one chosen in the settings, else the system's.
+    pub fn language(&self) -> Language {
+        self.settings
+            .load()
+            .language()
+            .unwrap_or(self.system_language)
+    }
+
+    /// The backend's own texts, in the app's language.
+    pub fn texts(&self) -> Texts {
+        texts(self.language())
+    }
+
+    /// What the preferences show.
+    pub fn preferences(&self) -> PreferencesDto {
+        PreferencesDto {
+            language: self.settings.load().language().map(language_slug),
+            system_language: language_slug(self.system_language),
+        }
+    }
+
+    /// Uses `language` (`pt-BR` or `en`) from now on, or the system's for
+    /// `None`, and remembers the choice. Returns the language in use.
+    pub fn set_language(&self, language: Option<&str>) -> UiResult<Language> {
+        let chosen = language
+            .map(|slug| {
+                parse_language(slug)
+                    .ok_or_else(|| UiError::new(ErrorCode::UnknownLanguage).arg("language", slug))
+            })
+            .transpose()?;
+        self.settings
+            .update(|s| s.language = chosen.map(|l| language_slug(l).to_string()));
+        let language = chosen.unwrap_or(self.system_language);
+        self.studio().set_language(language);
+        Ok(language)
     }
 
     // ------------------------------------------------------------ screens --
@@ -516,7 +559,7 @@ impl Backend {
             .as_ref()
             .and_then(Screen::address)
             .map(|a| a.0.clone());
-        let blank = match self.new_theme(key.as_deref(), UNTITLED, None) {
+        let blank = match self.new_theme(key.as_deref(), self.texts().untitled, None) {
             Ok(theme) => theme,
             Err(e) => {
                 tracing::warn!("no starting theme: {e}");
@@ -560,9 +603,6 @@ impl Backend {
     }
 }
 
-/// Name of a theme started without one.
-pub const UNTITLED: &str = "Untitled";
-
 /// Model a new theme is sized for when no screen is connected.
 pub const DEFAULT_MODEL: bezel_core::domain::device::ModelId =
     bezel_core::domain::device::ModelId("turing-8.8");
@@ -570,7 +610,6 @@ pub const DEFAULT_MODEL: bezel_core::domain::device::ModelId =
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bezel_core::domain::clock::Language;
     use bezel_core::domain::geometry::{Orientation, Size};
     use bezel_core::domain::theme::MIN_REFRESH_SECONDS;
     use bezel_devices::{FakeBus, FakeConnector};
@@ -621,6 +660,7 @@ mod tests {
             store: Arc::new(FsThemeStore),
             library: ThemeLibrary::new(root.join("themes"), vec![]),
             settings: SettingsFile::new(root.join("settings.json")),
+            system_language: Language::English,
             fonts: vec!["Inter".into()],
             studio: Session::new(studio),
             storage: StorageState::new(
@@ -670,6 +710,31 @@ mod tests {
             "{}",
             saved.location
         );
+    }
+
+    #[test]
+    fn the_language_follows_the_system_until_one_is_chosen() {
+        let f = fixture("language");
+        assert_eq!(f.backend.language(), Language::English);
+        let prefs = f.backend.preferences();
+        assert_eq!((prefs.language, prefs.system_language), (None, "en"));
+        assert_eq!(f.backend.texts().untitled, "Untitled");
+
+        let chosen = f.backend.set_language(Some("pt-BR")).unwrap();
+        assert_eq!(chosen, Language::PortugueseBr);
+        assert_eq!(f.backend.preferences().language, Some("pt-BR"));
+        assert_eq!(f.backend.texts().untitled, "Sem título");
+        assert_eq!(f.backend.studio().language(), Language::PortugueseBr);
+        let json = std::fs::read_to_string(f.backend.settings.path()).unwrap();
+        assert!(json.contains("\"language\": \"pt-BR\""), "{json}");
+
+        let error = f.backend.set_language(Some("klingon")).unwrap_err();
+        assert_eq!(error.code(), "unknownLanguage");
+        assert_eq!(f.backend.language(), Language::PortugueseBr, "unchanged");
+
+        assert_eq!(f.backend.set_language(None).unwrap(), Language::English);
+        assert_eq!(f.backend.preferences().language, None);
+        assert_eq!(f.backend.studio().language(), Language::English);
     }
 
     #[test]
@@ -968,7 +1033,7 @@ mod tests {
         let start = f.backend.session();
         assert_eq!(
             (start.theme.name.as_str(), start.theme.orientation.as_str()),
-            (UNTITLED, "reverse-portrait")
+            ("Untitled", "reverse-portrait")
         );
         assert_eq!(start.location, None);
         f.backend
@@ -977,7 +1042,7 @@ mod tests {
         f.backend.restore_theme();
         assert_eq!(
             f.backend.session().theme.name,
-            UNTITLED,
+            "Untitled",
             "an unreadable last theme"
         );
     }

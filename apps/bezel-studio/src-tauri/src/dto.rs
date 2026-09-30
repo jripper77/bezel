@@ -302,6 +302,17 @@ pub struct SavedDto {
     pub location: String,
 }
 
+/// What the preferences show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferencesDto {
+    /// The language the user chose (`pt-BR` or `en`); `None` follows the
+    /// system.
+    pub language: Option<&'static str>,
+    /// The system's language.
+    pub system_language: &'static str,
+}
+
 /// A theme imported from another app.
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportedDto {

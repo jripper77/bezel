@@ -17,7 +17,10 @@ use bezel_core::domain::theme::{
 
 use super::colors::{self, Known};
 use super::nrbf::{Class, Graph, Limits, Object, ObjectId, Primitive, Value};
-use super::{Builder, Imported, covering_fit, file_name, image_size, line_height, text_width};
+use super::{
+    Builder, ImportWarning, Imported, WarningCode as Code, covering_fit, file_name, image_size,
+    line_height, text_width,
+};
 
 /// Classes a `.turtheme` may contain (themes-turzx.md section 5).
 const CLASSES: [&str; 15] = [
@@ -103,7 +106,7 @@ struct Spec {
     /// Decimals of the vendor's text.
     decimals: Option<u8>,
     /// Reported once per theme when the source is bound.
-    note: Option<&'static str>,
+    note: Option<Code>,
 }
 
 const fn spec(name: &'static str, key: &'static str, scale: f64, full: f64) -> Spec {
@@ -116,9 +119,6 @@ const fn spec(name: &'static str, key: &'static str, scale: f64, full: f64) -> S
         note: None,
     }
 }
-
-const REBIND: &str = "the vendor app lets the user pick this sensor; rebind it in the editor";
-const NOT_SUPPORTED: &str = "not supported yet; the layer shows it as unavailable";
 
 /// The vendor data names (sensors.md section 3) and their Bezel keys.
 const SENSORS: [Spec; 38] = [
@@ -160,7 +160,7 @@ const SENSORS: [Spec; 38] = [
     spec("GPULOAD", keys::GPU_USAGE, 1.0, 100.0),
     spec("GPUPWR", keys::GPU_POWER, 1.0, 500.0),
     Spec {
-        note: Some("the vendor app shows the GPU fan in RPM; Bezel shows its duty in percent"),
+        note: Some(Code::GpuFanPercent),
         ..spec("GPUFAN", keys::GPU_FAN, 1.0, 100.0)
     },
     Spec {
@@ -182,7 +182,7 @@ const SENSORS: [Spec; 38] = [
         ..spec("RAMTOTAL", keys::MEMORY_TOTAL, MIB, 100.0)
     },
     Spec {
-        note: Some("the memory \"model\" text has no Bezel equivalent"),
+        note: Some(Code::MemoryModel),
         ..spec("RAMMODEL", "vendor.RAMMODEL", 1.0, 100.0)
     },
     Spec {
@@ -198,19 +198,19 @@ const SENSORS: [Spec; 38] = [
         ..spec("RAMTOTAL_GB", keys::MEMORY_TOTAL, GIB, 100.0)
     },
     Spec {
-        note: Some(REBIND),
+        note: Some(Code::RebindSensor),
         ..spec("WATERPUMP", keys::FAN_PUMP, 1.0, 8000.0)
     },
     Spec {
-        note: Some(REBIND),
+        note: Some(Code::RebindSensor),
         ..spec("CASEFAN1", keys::FAN_CASE_1, 1.0, 8000.0)
     },
     Spec {
-        note: Some(REBIND),
+        note: Some(Code::RebindSensor),
         ..spec("CASEFAN2", keys::FAN_CASE_2, 1.0, 8000.0)
     },
     Spec {
-        note: Some("Windows drive letters were kept; rebind the layer to a mount point"),
+        note: Some(Code::DriveLetters),
         ..spec("DRVLOAD", "disk.{}:.percent", 1.0, 100.0)
     },
     spec("HDDTEMP", "disk.{}.temperature", 1.0, 100.0),
@@ -224,11 +224,11 @@ const SENSORS: [Spec; 38] = [
         ..spec("DOWNDSPEED", keys::NET_DOWN, 1024.0, 100.0)
     },
     Spec {
-        note: Some(NOT_SUPPORTED),
+        note: Some(Code::SensorNotSupported),
         ..spec("Volume", keys::SYSTEM_VOLUME, 1.0, 100.0)
     },
     Spec {
-        note: Some("the vendor weather service is not supported"),
+        note: Some(Code::VendorWeather),
         ..spec("Weather", "vendor.Weather", 1.0, 100.0)
     },
     spec("FPS", keys::GPU_FPS, 1.0, 100.0),
@@ -470,8 +470,8 @@ struct Importer {
 }
 
 impl Importer {
-    fn warn(&mut self, message: impl Into<String>) {
-        self.b.report.warn(message);
+    fn warn(&mut self, warning: impl Into<ImportWarning>) {
+        self.b.report.warn(warning.into());
     }
 
     /// Background from the first layer: a still image covering the canvas,
@@ -485,7 +485,7 @@ impl Importer {
     ) -> (Background, &'i [Obj<'g>]) {
         let black = Background::Color(Rgba::BLACK);
         let Some((first, rest)) = items.split_first() else {
-            self.warn("the theme has no layers");
+            self.warn(Code::NoLayers);
             return (black, items);
         };
         let kind = first.kind();
@@ -510,9 +510,7 @@ impl Importer {
                     poster,
                 },
                 (None, Some(asset)) => {
-                    self.warn(
-                        "the background video has no file name; only its poster was imported",
-                    );
+                    self.warn(Code::VideoWithoutName);
                     Background::Image {
                         asset,
                         fit: Fit::Fill,
@@ -539,10 +537,11 @@ impl Importer {
         match video(name) {
             Some(bytes) => self.b.asset(path, || bytes),
             None => {
-                self.warn(format!(
-                    "the background video {name} is not inside the .turtheme and was not found \
-                     next to it; copy it into the theme as {path}"
-                ));
+                self.warn(
+                    ImportWarning::new(Code::VideoNotFound)
+                        .arg("name", name)
+                        .arg("path", &path),
+                );
                 AssetRef(path)
             }
         }
@@ -551,13 +550,11 @@ impl Importer {
     /// The picture of an image-like layer as an asset, with its size.
     fn bitmap_asset<'g>(&mut self, item: Obj<'g>, role: &str) -> Option<(AssetRef, u32, u32)> {
         let Some((id, bytes)) = item.bitmap("bitmap").or_else(|| item.bitmap("O_bitmap")) else {
-            self.warn(format!("a {role} layer without a picture was dropped"));
+            self.warn(ImportWarning::new(Code::LayerWithoutPicture).arg("layer", role));
             return None;
         };
         let Some((w, h, ext)) = image_size(bytes) else {
-            self.warn(format!(
-                "a {role} picture that is not PNG, GIF or JPEG was dropped"
-            ));
+            self.warn(ImportWarning::new(Code::UnsupportedPicture).arg("layer", role));
             return None;
         };
         let asset = match self.bitmaps.get(&id) {
@@ -578,16 +575,14 @@ impl Importer {
             "Text" | "Data" => self.text(item, visible),
             "Image" => self.image(item, visible),
             "Animation" => {
-                self.warn(
-                    "a video layer above the background is not supported; its poster is shown",
-                );
+                self.warn(Code::VideoLayer);
                 self.image(item, visible);
             }
             "StatuBar" => self.bar(item, visible),
             "ArchBar" => self.ring(item, visible),
             "Clock" => self.needle(item, visible),
             "Chart" => self.chart(item, visible),
-            other => self.warn(format!("a layer of unknown type {other:?} was dropped")),
+            other => self.warn(ImportWarning::new(Code::UnknownLayer).arg("type", other)),
         }
     }
 
@@ -615,7 +610,7 @@ impl Importer {
     /// right edge per the alignment; `posY` the top of the line box.
     fn text<'g>(&mut self, item: Obj<'g>, visible: bool) {
         let Some(fc) = item.obj("fontConfig") else {
-            self.warn("a text layer without font settings was dropped");
+            self.warn(Code::TextWithoutFont);
             return;
         };
         let md = item.obj("m_data");
@@ -699,19 +694,19 @@ impl Importer {
             ("DAY", "" | "Day_en") => known("%a"),
             ("APM", _) => known("%p"),
             ("DATE", "M_cn") => {
-                self.warn("Chinese month names are shown as numbers");
+                self.warn(Code::ChineseMonths);
                 known("%m月")
             }
             ("DAY", "Day_cn" | "Num_cn" | "Num") => {
-                self.warn(format!(
-                    "the weekday format {sub} is shown as an English short name"
-                ));
+                self.warn(ImportWarning::new(Code::WeekdayFormat).arg("format", sub));
                 known("%a")
             }
             ("TIME" | "DATE" | "DAY", other) => {
-                self.warn(format!(
-                    "the {data} format {other:?} is unknown; a default is used"
-                ));
+                self.warn(
+                    ImportWarning::new(Code::UnknownClockFormat)
+                        .arg("field", data)
+                        .arg("format", other),
+                );
                 known(match data {
                     "TIME" => "%H:%M",
                     "DATE" => "%Y-%m-%d",
@@ -724,9 +719,7 @@ impl Importer {
 
     fn sensor(&mut self, data: &str, sub: Option<&str>, fahrenheit: bool) -> Option<Sensor> {
         let Some(spec) = SENSORS.iter().find(|s| s.name == data) else {
-            self.warn(format!(
-                "the data source {data:?} is unknown; it was kept as vendor.{data}"
-            ));
+            self.warn(ImportWarning::new(Code::UnknownDataSource).arg("source", data));
             let key = sensor_key(&format!("vendor.{data}"))?;
             return Some(Sensor {
                 key,
@@ -736,7 +729,7 @@ impl Importer {
             });
         };
         if let Some(note) = spec.note {
-            self.warn(format!("{data}: {note}"));
+            self.warn(ImportWarning::new(note).arg("source", data));
         }
         let fallback = if data == "DRVLOAD" { "C" } else { "0" };
         let sub = sub
@@ -773,10 +766,7 @@ impl Importer {
             "RAM" | "RAM_GB" => return percent(keys::MEMORY_PERCENT),
             "RAMVALID" | "RAMVALID_GB" => return percent(keys::MEMORY_AVAILABLE_PERCENT),
             "TIME" | "DATE" | "DAY" | "APM" | "StaticText" => {
-                self.warn(format!(
-                    "bars, rings, needles and charts bound to {data} are not supported; \
-                     bound to vendor.{data}"
-                ));
+                self.warn(ImportWarning::new(Code::UnsupportedBinding).arg("source", data));
                 return percent(&format!("vendor.{data}"));
             }
             _ => {}
@@ -812,11 +802,13 @@ impl Importer {
             return match colors::known_color(index) {
                 Some(Known::Web(rgba)) => Some(rgba),
                 Some(Known::System(rgba)) => {
-                    self.warn("Windows system colors were replaced by their Windows 10 defaults");
+                    self.warn(Code::SystemColors);
                     Some(rgba)
                 }
                 None => {
-                    self.warn(format!("the .NET known color {index} is unknown"));
+                    self.warn(
+                        ImportWarning::new(Code::UnknownKnownColor).arg("index", index.to_string()),
+                    );
                     None
                 }
             };
@@ -829,7 +821,7 @@ impl Importer {
             let name = c.text("name").unwrap_or_default();
             let found = colors::named_color(name);
             if found.is_none() {
-                self.warn(format!("the color name {name:?} is unknown"));
+                self.warn(ImportWarning::new(Code::UnknownColorName).arg("color", name));
             }
             return found;
         }
@@ -898,16 +890,14 @@ impl Importer {
     fn report_fonts(&mut self) {
         if !self.fonts.is_empty() {
             let list = self.fonts.iter().cloned().collect::<Vec<_>>().join(", ");
-            self.warn(format!(
-                "fonts are not stored in .turtheme files; install them or pick others: {list}"
-            ));
+            self.warn(ImportWarning::new(Code::FontsNotStored).arg("fonts", list));
         }
     }
 
     fn data_of<'g>(&mut self, item: Obj<'g>, what: &str) -> Option<Obj<'g>> {
         let md = item.obj("m_data");
         if md.is_none() {
-            self.warn(format!("a {what} without a data source was dropped"));
+            self.warn(ImportWarning::new(Code::LayerWithoutData).arg("layer", what));
         }
         md
     }
@@ -986,7 +976,7 @@ impl Importer {
             );
         }
         if item.flag("revert") {
-            self.warn("inverted bars (1 - value) are not supported; they fill normally");
+            self.warn(Code::InvertedBar);
         }
         let segments = item.flag("useSubsection").then(|| Segments {
             count: 20,
@@ -1138,9 +1128,7 @@ impl Importer {
         let frame = BoxF::new(x, y, px(width), px(height));
         let name = format!("Chart: {}", label(md));
         if item.flag("rollDirection") {
-            self.warn(
-                "charts scrolling from right to left are not supported; they scroll normally",
-            );
+            self.warn(Code::ChartDirection);
         }
         self.b.push(
             name.clone(),

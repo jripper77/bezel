@@ -1,0 +1,151 @@
+{
+  "importLayers": [
+    "background",
+    "bar",
+    "chart",
+    "image",
+    "needle",
+    "poster",
+    "ring"
+  ],
+  "importWarnings": {
+    "backplateLed": [],
+    "barWithoutSize": [
+      "name"
+    ],
+    "chartDirection": [],
+    "chineseMonths": [],
+    "cpuFanGuessed": [
+      "name"
+    ],
+    "customData": [
+      "name"
+    ],
+    "dateField": [
+      "field",
+      "format"
+    ],
+    "driveLetters": [
+      "source"
+    ],
+    "fileUnreadable": [
+      "error",
+      "name"
+    ],
+    "fontNotBundled": [
+      "error",
+      "path"
+    ],
+    "fontPathOutside": [
+      "path"
+    ],
+    "fontsNotStored": [
+      "fonts"
+    ],
+    "gpuFanPercent": [
+      "source"
+    ],
+    "graphAxes": [
+      "name"
+    ],
+    "invertedBar": [],
+    "layerWithoutData": [
+      "layer"
+    ],
+    "layerWithoutPicture": [
+      "layer"
+    ],
+    "memoryModel": [
+      "source"
+    ],
+    "noFontsFolder": [],
+    "noLayers": [],
+    "noPath": [
+      "name"
+    ],
+    "noText": [
+      "name"
+    ],
+    "notAColor": [
+      "key",
+      "name",
+      "value"
+    ],
+    "notAnImage": [
+      "name",
+      "path"
+    ],
+    "pathOutside": [
+      "name",
+      "path"
+    ],
+    "radialWithoutRadius": [
+      "name"
+    ],
+    "rebindSensor": [
+      "source"
+    ],
+    "sensorNotSupported": [
+      "source"
+    ],
+    "systemColors": [],
+    "textWithoutFont": [],
+    "unknownClockFormat": [
+      "field",
+      "format"
+    ],
+    "unknownColorName": [
+      "color"
+    ],
+    "unknownDataSource": [
+      "source"
+    ],
+    "unknownDecoration": [
+      "decoration",
+      "name"
+    ],
+    "unknownDisplaySize": [
+      "size"
+    ],
+    "unknownKnownColor": [
+      "index"
+    ],
+    "unknownLayer": [
+      "type"
+    ],
+    "unknownOrientation": [
+      "orientation"
+    ],
+    "unknownSensor": [
+      "name"
+    ],
+    "unsupportedBinding": [
+      "source"
+    ],
+    "unsupportedPicture": [
+      "layer"
+    ],
+    "unusedKey": [
+      "key",
+      "name"
+    ],
+    "unusedTopKey": [
+      "key"
+    ],
+    "vendorWeather": [
+      "source"
+    ],
+    "videoLayer": [],
+    "videoNotFound": [
+      "name",
+      "path"
+    ],
+    "videoWithoutName": [],
+    "weatherNotSupported": [
+      "name"
+    ],
+    "weekdayFormat": [
+      "format"
+    ]
+  }
+}

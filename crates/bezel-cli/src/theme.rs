@@ -144,7 +144,7 @@ pub fn load(store: &dyn ThemeStore, path: &Path) -> anyhow::Result<Loaded> {
     Ok(Loaded {
         theme,
         assets,
-        warnings: report.warnings,
+        warnings: report.warnings.iter().map(ToString::to_string).collect(),
     })
 }
 

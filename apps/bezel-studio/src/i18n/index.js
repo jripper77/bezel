@@ -20,15 +20,23 @@ export function pickLocale(languages) {
 }
 
 /**
- * A translator bound to a locale. Unknown keys come back as the key itself.
+ * A translator bound to a locale. Unknown keys come back as the key itself;
+ * `t.has(key)` tells whether a key is known.
  * @param {'pt-BR' | 'en'} locale
  */
 export function translator(locale) {
   const table = LOCALES[locale] ?? en;
-  return (key, params = {}) => {
+  const t = (key, params = {}) => {
     const text = table[key] ?? en[key] ?? key;
     return text.replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? `{${name}}`));
   };
+  t.has = (key) => key in table || key in en;
+  return t;
+}
+
+/** The `{name}` placeholders of a text, sorted and once each. */
+export function placeholders(text) {
+  return [...new Set([...String(text).matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
 }
 
 /**

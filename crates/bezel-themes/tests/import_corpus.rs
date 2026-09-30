@@ -109,7 +109,7 @@ fn imports_the_local_corpus() {
             }
         };
         for w in &report.warnings {
-            *kinds.entry(warning_kind(w)).or_default() += 1;
+            *kinds.entry(warning_kind(&w.to_string())).or_default() += 1;
         }
         let referenced = theme.assets();
         for asset in assets.keys() {

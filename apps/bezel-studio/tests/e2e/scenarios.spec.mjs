@@ -362,7 +362,7 @@ test('an import lists what had no equivalent', async ({ page }) => {
   const report = page.getByRole('region', { name: 'Avisos da importação' });
   await expect(report).toBeVisible();
   await expect(report.getByRole('listitem')).toHaveCount(2);
-  await expect(report).toContainText('backplate LED');
+  await expect(report).toContainText('LED traseiro');
   await expectAccessible(page);
   await report.getByRole('button', { name: 'Fechar avisos' }).click();
   await expect(report).toHaveCount(0);

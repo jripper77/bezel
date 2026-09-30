@@ -14,6 +14,7 @@ pub mod commands;
 pub mod dto;
 pub mod library;
 pub mod media;
+pub mod messages;
 pub mod settings;
 pub mod storage;
 pub mod studio;

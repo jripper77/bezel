@@ -195,7 +195,10 @@ impl Drop for Repo {
 }
 
 fn has(report: &ImportReport, needle: &str) -> bool {
-    report.warnings.iter().any(|w| w.contains(needle))
+    report
+        .warnings
+        .iter()
+        .any(|w| w.to_string().contains(needle))
 }
 
 fn find<'t>(theme: &'t Theme, name: &str) -> &'t bezel_core::domain::theme::Element {
@@ -477,7 +480,7 @@ fn defaults_missing_fonts_and_import_path() {
     );
     for needle in [
         "the display size 7.7\" is unknown",
-        "orientation Some(\"sideways\") is unknown",
+        "orientation \"sideways\" is unknown",
         "res/fonts) was not found",
         "the bar decoration \"Star\" is unknown",
     ] {

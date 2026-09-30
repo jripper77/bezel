@@ -6,6 +6,7 @@ import { makeDraggable } from './dragdrop.js';
 import { checkField } from './fields.js';
 import { WIDGETS, widgetOf } from '../editor/widgets.js';
 import { isHorizontal } from '../editor/geometry.js';
+import { warningText } from '../messages.js';
 
 const CATEGORY_ORDER = ['cpu', 'gpu', 'memory', 'disk', 'network', 'board', 'system'];
 
@@ -218,7 +219,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
     root.replaceChildren(el('section', { class: 'notice', 'aria-labelledby': 'import-report-title' }, [
       el('div', { class: 'notice-head' }, [icon(ICONS.warning, 18), el('h2', { id: 'import-report-title', text: t('import.title') }), dismiss]),
       el('p', { text: count === 1 ? t('import.summaryOne', { name: report.name }) : t('import.summary', { name: report.name, count }) }),
-      el('ul', {}, report.warnings.map((w) => el('li', { text: w }))),
+      el('ul', {}, report.warnings.map((w) => el('li', { text: warningText(t, w) }))),
     ]));
   }
 

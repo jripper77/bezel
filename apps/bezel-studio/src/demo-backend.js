@@ -51,8 +51,12 @@ export function demoValue(base, swing, t, seed) {
 
 /** What the demo import reports, like the Python theme importer does. */
 export const DEMO_IMPORT_WARNINGS = Object.freeze([
-  'the backplate LED color (XuanFang rev B) is not part of a Bezel theme',
-  'STATS.CPU.FAN_SPEED: Bezel does not measure this yet; the widget shows it as unavailable',
+  { code: 'backplateLed', args: {}, message: 'the backplate LED color (XuanFang rev B) is not part of a Bezel theme' },
+  {
+    code: 'cpuFanGuessed',
+    args: { name: 'CPU.FAN_SPEED.TEXT' },
+    message: "STATS.CPU.FAN_SPEED.TEXT: the Python app estimates this percent from the fan's RPM; Bezel measures the RPM (cpu.fan): rebind the widget to it and set its range",
+  },
 ]);
 
 /**
@@ -409,7 +413,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       const canvas = isHorizontal(chosenOrientation) ? { width: long, height: short } : { width: short, height: long };
       return Promise.resolve({ ...structuredClone(DEMO_THEME), name, orientation: chosenOrientation, canvas, elements: [] });
     },
-    importTheme: () => Promise.resolve({ theme: { ...structuredClone(DEMO_THEME), name: 'Imported' }, warnings: [...DEMO_IMPORT_WARNINGS] }),
+    importTheme: () => Promise.resolve({ theme: { ...structuredClone(DEMO_THEME), name: 'Imported' }, warnings: structuredClone(DEMO_IMPORT_WARNINGS) }),
     addImage: () => {
       const ref = `assets/image-${images.length + 1}.png`;
       images.push(ref);

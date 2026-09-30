@@ -459,7 +459,11 @@ impl Backend {
             (theme, assets, Vec::new())
         } else {
             let (theme, assets, report) = import_path(path).map_err(text)?;
-            (theme, assets, report.warnings)
+            (
+                theme,
+                assets,
+                report.warnings.iter().map(Into::into).collect(),
+            )
         };
         let mut studio = self.studio();
         // A copy: saving writes to the user folder, not over the imported file.
@@ -1118,7 +1122,10 @@ static_text:
                 (480, 320)
             );
             assert!(
-                imported.warnings.iter().any(|w| w.contains("LED")),
+                imported
+                    .warnings
+                    .iter()
+                    .any(|w| w.code == "backplateLed" && w.message.contains("LED")),
                 "{:?}",
                 imported.warnings
             );
@@ -1126,6 +1133,7 @@ static_text:
         }
         let json = serde_json::to_value(f.backend.import(&dir).unwrap()).unwrap();
         assert!(json["warnings"].as_array().is_some_and(|w| !w.is_empty()));
+        assert_eq!(json["warnings"][0]["code"], "backplateLed");
 
         let junk = f.root.join("notes.turtheme");
         std::fs::write(&junk, b"not a theme").unwrap();

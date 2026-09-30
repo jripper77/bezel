@@ -16,6 +16,7 @@ use bezel_themes::dto::{SizeDto, ThemeDto};
 use serde::Serialize;
 
 use crate::library::ThemeEntry;
+use crate::messages::WarningDto;
 
 /// One screen as the UI sees it.
 #[derive(Debug, Clone, Serialize)]
@@ -307,7 +308,7 @@ pub struct ImportedDto {
     /// The converted theme (now the edited one).
     pub theme: ThemeDto,
     /// What had no equivalent.
-    pub warnings: Vec<String>,
+    pub warnings: Vec<WarningDto>,
 }
 
 /// An asset added to the theme.

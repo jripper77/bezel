@@ -21,8 +21,8 @@ use bezel_core::domain::theme::{
 use super::colors::named_color;
 use super::yaml::{self, Node};
 use super::{
-    Builder, Imported, covering_fit, image_size, line_height, read_inside, read_limited,
-    relative_inside, text_width,
+    Builder, ImportWarning, Imported, WarningCode as Code, covering_fit, image_size, line_height,
+    read_inside, read_limited, relative_inside, text_width,
 };
 use crate::color::from_hex;
 
@@ -35,8 +35,6 @@ const MIB: f64 = 1024.0 * 1024.0;
 /// guessed maximum (sensors.md § 5, S3). Bezel does not guess it: the
 /// widget keeps this key, which reads unavailable, and the report says so.
 const CPU_FAN_PERCENT: &str = "cpu.fan.percent";
-const CPU_FAN_GUESSED: &str = "the Python app estimates this percent from the fan's RPM; \
-     Bezel measures the RPM (cpu.fan): rebind the widget to it and set its range";
 /// Not a sensor: `DATE` widgets become clock text, the key only fills the
 /// source record.
 const CLOCK: &str = "clock";
@@ -87,7 +85,7 @@ pub fn import_file(file: &Path, dir: &Path) -> Result<Imported, String> {
     }
     for (key, _) in doc.entries() {
         if !["display", "author", "static_images", "static_text", "STATS"].contains(&key) {
-            im.warn(format!("the top-level key {key} is not used"));
+            im.warn(ImportWarning::new(Code::UnusedTopKey).arg("key", key));
         }
     }
     let refresh = im
@@ -220,7 +218,7 @@ struct Source {
     chars: usize,
     /// Clock kind for `DATE` widgets: `Some(true)` = date, `Some(false)` = time.
     clock: Option<bool>,
-    note: Option<&'static str>,
+    note: Option<Code>,
 }
 
 fn source(path: &[String], widget: &str) -> Option<Source> {
@@ -241,7 +239,7 @@ fn source(path: &[String], widget: &str) -> Option<Source> {
         chars: 9,
         ..plain(key)
     };
-    let noted = |key: &str, note: &'static str| Source {
+    let noted = |key: &str, note: Code| Source {
         note: Some(note),
         decimals: None,
         chars: 8,
@@ -271,7 +269,7 @@ fn source(path: &[String], widget: &str) -> Option<Source> {
         },
         (["CPU", "TEMPERATURE"], _) => plain(keys::CPU_TEMPERATURE),
         (["CPU", "FAN_SPEED"], _) => Source {
-            note: Some(CPU_FAN_GUESSED),
+            note: Some(Code::CpuFanGuessed),
             ..plain(CPU_FAN_PERCENT)
         },
         (["GPU", "PERCENTAGE"], _) => plain(keys::GPU_USAGE),
@@ -316,17 +314,14 @@ fn source(path: &[String], widget: &str) -> Option<Source> {
         },
         (["WEATHER", what], _) => noted(
             &format!("weather.{}", what.to_ascii_lowercase()),
-            "weather is not supported yet",
+            Code::WeatherNotSupported,
         ),
         (["PING"], _) => Source {
             decimals: None,
             chars: 8,
             ..plain(keys::NET_PING)
         },
-        (["CUSTOM", class], _) => noted(
-            &format!("custom.{class}"),
-            "custom Python data classes cannot run in Bezel",
-        ),
+        (["CUSTOM", class], _) => noted(&format!("custom.{class}"), Code::CustomData),
         _ => return None,
     })
 }
@@ -440,8 +435,8 @@ struct Importer {
 }
 
 impl Importer {
-    fn warn(&mut self, message: impl Into<String>) {
-        self.b.report.warn(message);
+    fn warn(&mut self, warning: impl Into<ImportWarning>) {
+        self.b.report.warn(warning.into());
     }
 
     fn num(block: &Node, key: &str, default: f64) -> f64 {
@@ -464,9 +459,13 @@ impl Importer {
         match block.get(key) {
             None | Some(Node::Null) => default,
             Some(node) => parse_color(node).unwrap_or_else(|| {
-                self.warn(format!(
-                    "{name}: the {key} {node:?} is not a color; a default is used"
-                ));
+                let value = node.as_text().unwrap_or_else(|| format!("{node:?}"));
+                self.warn(
+                    ImportWarning::new(Code::NotAColor)
+                        .arg("name", name)
+                        .arg("key", key)
+                        .arg("value", value),
+                );
                 default
             }),
         }
@@ -476,7 +475,11 @@ impl Importer {
         let known = known_keys(kind);
         for (key, _) in block.entries() {
             if !known.contains(&key) {
-                self.warn(format!("{name}: {key} is not used"));
+                self.warn(
+                    ImportWarning::new(Code::UnusedKey)
+                        .arg("name", name)
+                        .arg("key", key),
+                );
             }
         }
     }
@@ -487,7 +490,7 @@ impl Importer {
         let panel = match size.as_deref() {
             None => Size::new(320, 480),
             Some(s) => panel(s).unwrap_or_else(|| {
-                self.warn(format!("the display size {s} is unknown; 3.5\" is used"));
+                self.warn(ImportWarning::new(Code::UnknownDisplaySize).arg("size", s));
                 Size::new(320, 480)
             }),
         };
@@ -500,16 +503,17 @@ impl Importer {
             Some("reverse_portrait") => Orientation::ReversePortrait,
             Some("reverse_landscape") => Orientation::ReverseLandscape,
             other => {
-                self.warn(format!(
-                    "the display orientation {other:?} is unknown; portrait is used"
-                ));
+                self.warn(
+                    ImportWarning::new(Code::UnknownOrientation)
+                        .arg("orientation", other.unwrap_or_default()),
+                );
                 Orientation::Portrait
             }
         };
         if let Some(led) = display.get("DISPLAY_RGB_LED")
             && parse_color(led) != Some(Rgba::WHITE)
         {
-            self.warn("the backplate LED color (XuanFang rev B) is not part of a Bezel theme");
+            self.warn(Code::BackplateLed);
         }
         (panel.in_orientation(orientation), orientation)
     }
@@ -519,19 +523,25 @@ impl Importer {
             let label = format!("static_images.{name}");
             self.check_keys(&label, block, "static_images");
             let Some(path) = Self::text_of(block, "PATH") else {
-                self.warn(format!("{label}: no PATH; dropped"));
+                self.warn(ImportWarning::new(Code::NoPath).arg("name", &label));
                 continue;
             };
             let Some(rel) = relative_inside(&path) else {
-                self.warn(format!(
-                    "{label}: the path {path:?} leaves the theme folder; dropped"
-                ));
+                self.warn(
+                    ImportWarning::new(Code::PathOutside)
+                        .arg("name", &label)
+                        .arg("path", &path),
+                );
                 continue;
             };
             let bytes = match read_inside(&self.dir, &rel, MAX_FILE) {
                 Ok(bytes) => bytes,
                 Err(e) => {
-                    self.warn(format!("{label}: {e}; dropped"));
+                    self.warn(
+                        ImportWarning::new(Code::FileUnreadable)
+                            .arg("name", &label)
+                            .arg("error", e),
+                    );
                     continue;
                 }
             };
@@ -541,9 +551,11 @@ impl Importer {
                 _ if w > 0.0 && h > 0.0 => (w, h),
                 Some((iw, ih, _)) => (iw as f32, ih as f32),
                 None => {
-                    self.warn(format!(
-                        "{label}: {path} is not a PNG, GIF or JPEG; dropped"
-                    ));
+                    self.warn(
+                        ImportWarning::new(Code::NotAnImage)
+                            .arg("name", &label)
+                            .arg("path", &path),
+                    );
                     continue;
                 }
             };
@@ -584,9 +596,7 @@ impl Importer {
     /// Bundles a font of the Python repository's `res/fonts/`.
     fn font_asset(&mut self, path: &str) -> Option<AssetRef> {
         let Some(rel) = relative_inside(path) else {
-            self.warn(format!(
-                "the font path {path:?} leaves the fonts folder; not bundled"
-            ));
+            self.warn(ImportWarning::new(Code::FontPathOutside).arg("path", path));
             return None;
         };
         let asset = AssetRef(slash_path("assets/fonts", &rel));
@@ -594,13 +604,17 @@ impl Importer {
             return Some(asset);
         }
         let Some(root) = self.fonts.clone() else {
-            self.warn("the Python fonts folder (res/fonts) was not found; fonts are not bundled");
+            self.warn(Code::NoFontsFolder);
             return None;
         };
         match read_inside(&root, &rel, MAX_FILE) {
             Ok(bytes) => Some(self.b.asset(asset.0, || bytes)),
             Err(e) => {
-                self.warn(format!("the font {path} was not bundled: {e}"));
+                self.warn(
+                    ImportWarning::new(Code::FontNotBundled)
+                        .arg("path", path)
+                        .arg("error", e),
+                );
                 None
             }
         }
@@ -612,7 +626,7 @@ impl Importer {
             self.check_keys(&label, block, "static_text");
             let text = Self::text_of(block, "TEXT").unwrap_or_default();
             if text.is_empty() {
-                self.warn(format!("{label}: no TEXT; dropped"));
+                self.warn(ImportWarning::new(Code::NoText).arg("name", &label));
                 continue;
             }
             let chars = text.lines().map(|l| l.chars().count()).max().unwrap_or(0);
@@ -742,7 +756,11 @@ impl Importer {
                 path.pop();
             } else {
                 let at = path.join(".");
-                self.warn(format!("STATS.{at}: {key} is not used"));
+                self.warn(
+                    ImportWarning::new(Code::UnusedKey)
+                        .arg("name", format!("STATS.{at}"))
+                        .arg("key", key),
+                );
             }
         }
     }
@@ -753,11 +771,11 @@ impl Importer {
         }
         let name = format!("{}.{kind}", path.join("."));
         let Some(source) = source(path, kind) else {
-            self.warn(format!("STATS.{name}: unknown sensor; dropped"));
+            self.warn(ImportWarning::new(Code::UnknownSensor).arg("name", &name));
             return;
         };
         if let Some(note) = source.note {
-            self.warn(format!("STATS.{name}: {note}"));
+            self.warn(ImportWarning::new(note).arg("name", &name));
         }
         self.check_keys(&format!("STATS.{name}"), block, kind);
         let Some(key) = SensorKey::new(source.key.replace(char::is_whitespace, "_")) else {
@@ -858,9 +876,11 @@ impl Importer {
                 '%' => "%%",
                 c if c.is_ascii_alphabetic() => {
                     let field: String = std::iter::repeat_n(c, run).collect();
-                    self.warn(format!(
-                        "the date/time field {field} of {format:?} is not supported and was left out"
-                    ));
+                    self.warn(
+                        ImportWarning::new(Code::DateField)
+                            .arg("field", field)
+                            .arg("format", format),
+                    );
                     ""
                 }
                 _ => {
@@ -878,7 +898,7 @@ impl Importer {
         let (x, y) = (Self::coord(block, "X"), Self::coord(block, "Y"));
         let (w, h) = (Self::coord(block, "WIDTH"), Self::coord(block, "HEIGHT"));
         if w <= 0.0 || h <= 0.0 {
-            self.warn(format!("STATS.{name}: a bar without a size was dropped"));
+            self.warn(ImportWarning::new(Code::BarWithoutSize).arg("name", name));
             return;
         }
         let reverse = Self::flag(block, "REVERSE_DIRECTION", false);
@@ -936,9 +956,7 @@ impl Importer {
         let (cx, cy) = (Self::coord(block, "X"), Self::coord(block, "Y"));
         let radius = Self::num(block, "RADIUS", 1.0).clamp(0.0, 100_000.0) as f32;
         if radius <= 0.0 {
-            self.warn(format!(
-                "STATS.{name}: a radial bar without a radius was dropped"
-            ));
+            self.warn(ImportWarning::new(Code::RadialWithoutRadius).arg("name", name));
             return;
         }
         let thickness = (Self::num(block, "WIDTH", 1.0).clamp(1.0, 100_000.0) as f32).min(radius);
@@ -975,9 +993,11 @@ impl Importer {
             Some("Ellipse") => Cap::Round,
             None | Some("" | "Rectangle") => Cap::Butt,
             Some(other) => {
-                self.warn(format!(
-                    "STATS.{name}: the bar decoration {other:?} is unknown"
-                ));
+                self.warn(
+                    ImportWarning::new(Code::UnknownDecoration)
+                        .arg("name", name)
+                        .arg("decoration", other),
+                );
                 Cap::Butt
             }
         };
@@ -1066,9 +1086,7 @@ impl Importer {
             Self::num(block, "HEIGHT", 1.0).clamp(1.0, 100_000.0) as f32,
         );
         if Self::flag(block, "AXIS", false) {
-            self.warn(format!(
-                "STATS.{name}: line graph axes and labels are not supported"
-            ));
+            self.warn(ImportWarning::new(Code::GraphAxes).arg("name", name));
         }
         self.solid_box(name, block, frame, Rgba::BLACK);
         let color = self.color(block, "LINE_COLOR", Rgba::BLACK, name);

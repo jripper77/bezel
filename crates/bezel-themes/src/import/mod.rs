@@ -12,7 +12,10 @@ pub mod colors;
 pub mod nrbf;
 pub mod python_yaml;
 pub mod turzx;
+mod warning;
 mod yaml;
+
+pub use warning::{ImportWarning, LAYER_NAMES, WarningCode};
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -25,19 +28,19 @@ use bezel_core::{BezelError, Result};
 /// What an importer produced: the theme, its assets and the report.
 pub type Imported = (Theme, BTreeMap<AssetRef, Vec<u8>>, ImportReport);
 
-/// What could not be mapped exactly, in plain sentences.
+/// What could not be mapped exactly: codes with arguments, which read as
+/// English sentences.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImportReport {
     /// One entry per distinct problem.
-    pub warnings: Vec<String>,
+    pub warnings: Vec<ImportWarning>,
 }
 
 impl ImportReport {
     /// Records a problem once.
-    pub fn warn(&mut self, message: impl Into<String>) {
-        let message = message.into();
-        if !self.warnings.contains(&message) {
-            self.warnings.push(message);
+    pub fn warn(&mut self, warning: ImportWarning) {
+        if !self.warnings.contains(&warning) {
+            self.warnings.push(warning);
         }
     }
 
@@ -334,10 +337,12 @@ mod tests {
     fn report_dedupes() {
         let mut r = ImportReport::default();
         assert!(r.is_clean());
-        r.warn("a");
-        r.warn("a");
-        r.warn(String::from("b"));
-        assert_eq!(r.warnings, vec!["a", "b"]);
+        let a = ImportWarning::new(WarningCode::NoLayers);
+        let b = ImportWarning::new(WarningCode::UnusedTopKey).arg("key", "extra");
+        r.warn(a.clone());
+        r.warn(a.clone());
+        r.warn(b.clone());
+        assert_eq!(r.warnings, vec![a, b]);
         assert!(!r.is_clean());
     }
 

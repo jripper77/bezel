@@ -319,7 +319,10 @@ fn run(root: &N, video: Option<&[u8]>) -> Imported {
 }
 
 fn has(report: &crate::import::ImportReport, needle: &str) -> bool {
-    report.warnings.iter().any(|w| w.contains(needle))
+    report
+        .warnings
+        .iter()
+        .any(|w| w.to_string().contains(needle))
 }
 
 fn key(k: &str) -> SensorKey {

@@ -15,6 +15,17 @@ tracing = { workspace = true }
 # how a rev C screen's MCU and SoC are grouped into one screen (D-2026-09-30-foundation-3).
 serialport = { version = "4.10.1", features = ["usbportinfo-location"] }
 nusb = "0.2.7"
+# Raw-USB families encrypt their command headers (D-2026-09-30-device-protocols-4):
+# DES-CBC for Turing USB, DES-ECB for WCH. Padding is written by hand, so the
+# `block-padding` feature stays off.
+des = { version = "0.9", default-features = false }
+cbc = { version = "0.2", default-features = false }
+ecb = { version = "0.2", default-features = false }
+# Turing USB frames travel as PNG (JPEG when the PNG exceeds 1 MiB).
+png = { version = "0.18", default-features = false }
+jpeg-encoder = { version = "0.7", default-features = false }
+# Turing USB headers carry the milliseconds since local midnight.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [lints]
 workspace = true

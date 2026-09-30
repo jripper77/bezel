@@ -759,7 +759,10 @@ mod tests {
         );
         out.unwrap();
         assert!(
-            log.contains(&format!("  bezel import {} -o <FOLDER>", zipped.display())),
+            log.contains(&format!(
+                "  bezel import {} -o <FOLDER>",
+                quoted(&zipped.to_string_lossy())
+            )),
             "{log}"
         );
         assert!(

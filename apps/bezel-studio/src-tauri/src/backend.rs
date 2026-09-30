@@ -871,11 +871,13 @@ mod tests {
         });
         let explained = f.backend.explain(denied.clone());
         let command = explained.udev_command().unwrap();
+        let rule = f.root.join("cache").join("60-bezel.rules");
+        let quoted = bezel_devices::udev::shell_quote(&rule.to_string_lossy());
         assert!(
-            command.contains("60-bezel.rules /etc/udev/rules.d/"),
+            command.contains(&format!("{quoted} /etc/udev/rules.d/")),
             "{command}"
         );
-        assert!(f.root.join("cache").join("60-bezel.rules").is_file());
+        assert!(rule.is_file());
         let other = f.backend.explain(UiError::new(ErrorCode::Busy));
         assert_eq!(other.udev_command(), None, "only a denied port");
         let mut elsewhere = fixture("denied-elsewhere");

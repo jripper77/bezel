@@ -8,8 +8,8 @@ devices. Confidence: **static** throughout (no capture or hardware test yet).
 | Family | Python reference | Vendor app (TURZX V3.07) |
 |---|---|---|
 | rev A, rev B, rev D, WeAct | no video | not covered by the analysed parts (pending) |
-| rev C (serial, Linux SoC) | no video | **on-device playback**: the background video is transcoded to MP4 (H.264), stored on the device (internal flash or TF card) and played by the device; the PC sends only the theme overlay plus an opacity list (POSLEN, [pixel-formats.md](pixel-formats.md) section 8). A device "start mode" can boot straight into a stored video or image. |
-| TUR_USB (0x1CBE) | **streaming to the device decoder**: MP4 -> Annex-B `.h264`, sent in chunks with command 121 ([protocol-turing-usb.md](protocol-turing-usb.md) section 7); also upload of `.h264` / `.png` files and play commands 98 / 110 / 113 | Annex-B `.h264` with no B-frames (section 3) |
+| rev C (serial, Linux SoC) | no video | **on-device playback**: the background video, already transcoded to MP4 (H.264) at the panel resolution, is uploaded once to the TF card (internal flash without a card) and looped by the device (0x78); the PC never streams video frames and keeps sending the theme overlay at 1 Hz, with per-pixel alpha on large screens and an opacity list (POSLEN, [pixel-formats.md](pixel-formats.md) section 8) on small screens. A QUERY_STATUS counter detects a stalled video. A device "start mode" can boot straight into a stored video or image ([protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 13.5). |
+| TUR_USB (0x1CBE) | **streaming to the device decoder**: MP4 -> Annex-B `.h264`, sent in chunks with command 121 ([protocol-turing-usb.md](protocol-turing-usb.md) section 7); also upload of `.h264` / `.png` files and play commands 98 / 110 / 113 (unused by its display class) | **streaming to the device decoder**: transcoded Annex-B `.h264` with no B-frames (section 3), streamed with command 121 at the frame rate set by command 15, with queue-depth flow control; a PNG overlay with alpha at 1 Hz on top. Stored files play with 110 / 113 from the device page |
 | WCH (0x43A8) | not supported | **PC-side decode**: FFmpeg decodes on the PC, every video frame is composited with the theme overlay and sent as a full raw BGR frame at the source frame rate ([protocol-wch.md](protocol-wch.md) section 9) |
 
 The vendor app never live-encodes the desktop or the rendered theme to H.264: an in-process x264 encoder
@@ -49,8 +49,8 @@ MP4 with fixed 24 fps (when requested by the caller):
 -i "<src>"  -vf <rot><crop>scale=W:H,setsar=1:1 -c:v "libx264" -crf 20  -r 24 -an  -pix_fmt yuv420p -f mp4 "<dst>" -y
 ```
 
-Raw Annex-B `.h264` for the 0x1CBE family, variant A (`[ -r 30]` is present only when the device reports a
-capability flag):
+Raw Annex-B `.h264` for the 0x1CBE family, variant A (`[ -r 30]` is present only for the 6.8" 1cbe:0068 whose
+version string reports hardware 1):
 
 ```
 -i "<src>"  -vf <rot><crop>scale=W:H,setsar=1:1,eq=brightness=-0.1:contrast=0.9:saturation=1  -c:v "libx264" -x264opts bframes=0 -crf 20 [ -r 30] -an  -pix_fmt yuv420p -f h264 "<dst>" -y
@@ -101,11 +101,13 @@ source-video pixels, and a flag that says whether to apply them):
 
 | Where | Path | Source |
 |---|---|---|
-| TUR_USB device, images | `/tmp/sdcard/mmcblk0p1/img/<name>.png` | Python `upload_file` |
-| TUR_USB device, videos | `/tmp/sdcard/mmcblk0p1/video/<name>.h264` | Python `upload_file` |
-| serial (Linux SoC) device, internal flash | `/mnt/UDISK/video/<name>.mp4` | `videoTargetPath` values in vendor themes |
-| serial device, TF card | `/mnt/SDCARD/video/<name>.mp4` | `videoTargetPath` values in vendor themes |
-| serial device, settings file | `/usr/data/app.cfg` (the vendor app deletes it in one flow; purpose unknown) | vendor app |
+| TUR_USB device, TF card | `/tmp/sdcard/mmcblk0p1/img/`, `/tmp/sdcard/mmcblk0p1/video/` (Python uploads `<name>.png` and `<name>.h264` there) | Python `upload_file`, vendor app |
+| TUR_USB device, internal | `/usr/data/img/`, `/usr/data/video/`; also `/usr/data/boot.jpg` (boot logo), `/usr/data/update.app` (firmware), `/usr/data/app.cfg` (settings; deleted only in the vendor's factory test mode) | vendor app |
+| rev C large screens (4", 6.5", 6.8", 8", 8.8"), internal flash | `/mnt/UDISK/img/`, `/mnt/UDISK/video/` | vendor app; `videoTargetPath` values in vendor themes |
+| rev C small screens, internal flash | `/root/img/`, `/root/video/` | vendor app |
+| rev C, TF card | `/mnt/SDCARD/img/`, `/mnt/SDCARD/video/` | vendor app; `videoTargetPath` values in vendor themes |
+| every family, RAM | `/tmp/video/` (lost at reboot) | vendor app |
+| rev C firmware image | `/update.app` | vendor app |
 | vendor device page | four locations: internal Video, internal Image, SD Card Video, SD Card Image (internal ones hidden for the 0x1CBE family) | vendor UI |
 | PC, vendor app | `video\<res>\` (background videos per resolution key, plus rotated variants) | vendor folder layout ([themes-turzx.md](themes-turzx.md) section 8) |
 
@@ -121,3 +123,6 @@ explain it inline.
   inline.
 - H.264 Annex-B for 0x1CBE must not contain B-frames (vendor default `-x264opts bframes=0`); a stream copy from an MP4
   that has B-frames is untested.
+- Never free space by deleting stored videos automatically: when an upload does not fit, the vendor app deletes every
+  file in the device's video directories ([protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 13.6). Uploads,
+  deletions and persistent start modes are explicit user actions (decision `D-2026-09-30-device-protocols-2`).

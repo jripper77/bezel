@@ -9,13 +9,13 @@ a bug: fix it, or fix the spec and say why in the commit message.
 
 | File | Contents |
 |---|---|
-| [devices.md](devices.md) | Supported models, resolutions, native orientation, protocol family, USB ids and serial markers, detection and disambiguation, rev C MCU/SoC pairing and wake-up |
+| [devices.md](devices.md) | The supported-device table (mirrors the catalog), USB descriptors and string markers, detection and disambiguation, vendor-table entries Bezel does not support, rev C MCU/SoC pairing and wake-up |
 | [protocol-turing-rev-a.md](protocol-turing-rev-a.md) | Turing 3.5" and UsbPCMonitor 3.5"/5"/7" (6-byte packed commands, RGB565 LE) |
 | [protocol-xuanfang-rev-b.md](protocol-xuanfang-rev-b.md) | XuanFang 3.5" rev B and "flagship" (10-byte framed commands, RGB565 BE, backplate LEDs) |
-| [protocol-turing-rev-c.md](protocol-turing-rev-c.md) | Turing 2.1"/2.8"/5"/8.8" UART generation (250-byte blocks, `ef 69` headers, BGR/BGRA row runs) |
+| [protocol-turing-rev-c.md](protocol-turing-rev-c.md) | Turing serial SoC generation, 2.1" to 8.8" (250-byte `ef 69` commands, 249+1 data blocks, BGRA frames, run-list partials, storage, on-device video, firmware, recovery, hardware observations) |
 | [protocol-kipye-rev-d.md](protocol-kipye-rev-d.md) | Kipye Qiye 3.5" (4-byte ASCII-like commands, 64-byte pixel packets) |
 | [protocol-weact.md](protocol-weact.md) | WeAct Studio Display FS V1 3.5" and 0.96" (LE16 commands terminated by `0a`) |
-| [protocol-turing-usb.md](protocol-turing-usb.md) | Turing/TURZX USB models on VID 0x1CBE (DES-CBC command headers, PNG/JPEG frames, storage, H.264 streaming) |
+| [protocol-turing-usb.md](protocol-turing-usb.md) | Turing/TURZX USB models on VID 0x1CBE (DES-CBC command headers, PNG/JPEG frames, storage, H.264 streaming) and the desktop-mode HID companion 1A86:AD11 |
 | [protocol-wch.md](protocol-wch.md) | WinUSB panels on VID 0x43A8 (DES-ECB command packets, 480-in-512 byte blocks, BGR888 full frames) |
 | [pixel-formats.md](pixel-formats.md) | RGB565 LE/BE, BGR, BGRA, compressed 3-byte BGRA, row runs, run lists with the single-pixel flag, opacity (POSLEN) lists, diff encoders, rotation and native-address formulas |
 | [video.md](video.md) | On-device playback versus PC streaming per family, exact ffmpeg command lines, containers, rotation suffixes, device storage paths |
@@ -25,9 +25,6 @@ a bug: fix it, or fix the spec and say why in the commit message.
 | [sensors.md](sensors.md) | Unified sensor catalog, how each reference measures each metric, their measurement bugs, and Bezel's Linux/Windows strategy |
 | [ui-inventory.md](ui-inventory.md) | Feature inventory of both reference apps, UX critique, and the single-window design Bezel follows |
 | [runtime-artifacts.md](runtime-artifacts.md) | Vendor app log templates, a typical session timeline, config file layouts, `code.ini`, privacy notes |
-
-Sections titled `## TURZX additions` that contain only a `_Pending: ..._` line are placeholders for
-analysis that is still being consolidated. Do not implement against a placeholder.
 
 ## Method
 
@@ -43,7 +40,8 @@ Two independent sources were analysed.
    Facts are stated as behaviour ("the serial transport writes...", "the frame encoder emits..."). No
    code, no internal symbol names and no line references into that program are reproduced.
 
-No command was sent to a physical screen while producing this material.
+The static analysis sent no command to a physical screen. The facts tagged **hardware** come from the project's own
+tests on one Turing 8.8" rev C ([protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 19).
 
 The Python repository also ships golden files (`tests/library/lcd/golden/`, lines `write <hex>` / `read <n>` recorded by
 `tests/library/lcd/serial_mock.py`). They agree with this spec for revs A, B and D. The rev C golden files are stale
@@ -90,6 +88,6 @@ Each fact, table or vector carries one of these tags (per row, per section, or i
 | **verified** | Produced by running the reference code against a recording mock. Byte-exact for that code. |
 | **static** | Read from code (Python source or the vendor application) without executing it. Vectors marked "static, computed" were generated offline by applying a statically-read algorithm (for example DES with a documented key). |
 | **inferred** | A static conclusion that goes beyond what the code states (for example the meaning of a header field). Treat as a hypothesis. |
-| **hardware** | Confirmed on a real screen. **No fact in these documents has this tag yet.** |
+| **hardware** | Confirmed on a real screen. So far only the Turing 8.8" rev C observations in [protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 19 and [devices.md](devices.md) section 5.4. |
 
 "verified" means the reference implementation emits these bytes. It does not mean a screen accepts them.

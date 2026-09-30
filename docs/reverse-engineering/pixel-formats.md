@@ -26,8 +26,8 @@ v = ((R >> 3) << 11) | ((G >> 2) << 5) | (B >> 3)
 
 ## 2. BGR, 3 bytes per pixel
 
-`image_to_BGR` (`serialize.py:43-50`), **verified**: `[B, G, R]`, alpha dropped. Used by rev C partial updates on
-2.1"/2.8" and on ROM <= 88.
+`image_to_BGR` (`serialize.py:43-50`), **verified**: `[B, G, R]`, alpha dropped. Used by Python's rev C partial updates
+on 2.1"/2.8" and on ROM <= 88 (the vendor app sends compressed BGRA there instead, section 4).
 
 The WCH family also uses BGR888 ([protocol-wch.md](protocol-wch.md) section 7.1): GDI+ 24-bit locked bits, rows top
 to bottom, stride `(w * 3 + 3) & ~3` (no padding at the WCH resolutions). **static**.
@@ -35,14 +35,17 @@ to bottom, stride `(w * 3 + 3) & ~3` (no padding at the WCH resolutions). **stat
 ## 3. BGRA, 4 bytes per pixel
 
 `image_to_BGRA` (`serialize.py:53-59`), **verified**: converts to RGBA if needed (alpha 255 for RGB sources), bytes
-`[B, G, R, A]`. Used by rev C full frames and by rev C partial updates on 5"/8.8" with ROM > 88.
+`[B, G, R, A]`. Used by rev C full frames and by Python's rev C partial updates on 5"/8.8" with ROM > 88. The vendor
+app uses it for rev C full frames (0xC8 / 0xCA) and for partial run lists on its "large screens" (4", 6.5", 6.8", 8",
+8.8") with ROM >= 1.89 ([protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 11).
 
 The vendor application extracts frames with GDI+ `Format32bppArgb` locked bits: in memory `B, G, R, A`,
 non-premultiplied, top-down, row-major; stride assumed to be `width * 4`. **static**.
 
 ## 4. Compressed BGRA, 3 bytes per pixel
 
-Used by the vendor app's serial run-list encoders whenever a 3-byte pixel is emitted (**static**):
+Used by the vendor app's serial run-list encoders whenever a 3-byte pixel is emitted: rev C partial updates on every
+small screen (2.1"/2.8", 2.4", 2.8" square, 3.4", 5") and on large screens with ROM < 1.89 (**static**):
 
 ```
 a4    = A >> 4                      (0..15; some encoders force a4 = 15)
@@ -62,10 +65,10 @@ Worked examples (static, computed) for B=0x12, G=0x34, R=0x56:
 The Python helper `image_to_compressed_BGRA` (`serialize.py:63-74`, unused) writes `(G & 0xFC) | (a4 & 2)` for byte1,
 probably meant `a4 & 3`; for A = 0xFF it gives `13 36 56`. Bezel follows the vendor formula.
 
-Consequence for plain BGR on rev C: if a firmware interprets the low two bits of B and G as alpha, a plain BGR pixel is
-partially transparent unless those bits are set. An encoder that wants guaranteed-opaque 3-byte output must OR `0x03`
-into byte0 and byte1 (a4 = 15). Whether current rev C firmware reads 3-byte partial pixels as compressed BGRA is
-unconfirmed.
+Consequence for plain BGR on rev C: the vendor app sends every 3-byte partial pixel in this form, so rev C firmware
+reads the low two bits of B and G as alpha (static; not yet confirmed on hardware), and a plain BGR pixel is partially
+transparent unless those bits are set. An encoder that wants guaranteed-opaque 3-byte output must OR `0x03` into
+byte0 and byte1 (a4 = 15).
 
 ## 5. Rev C row runs (Python partial update)
 
@@ -97,8 +100,9 @@ Single-pixel record (count == 1):
 
 - A run that closes with count 1 is converted in place: byte0 gets `| 0x80`, the pixel bytes move left by 2 over the
   count field, and the write cursor goes back by 2.
-- Largest index 2^23 - 1 = 8,388,607 (enough for 480 x 1920 = 921,600). Largest run 65,000 pixels; on overflow the
-  encoder logs `cnt overflow:` and returns nothing, and the caller falls back to a full frame.
+- Largest index 2^23 - 1 = 8,388,607 (enough for 1080 x 2320 = 2,505,600). Largest run 65,000 pixels; on overflow the
+  encoder logs `cnt overflow:` and returns nothing. The vendor's caller then fails, reconnects and sends a full frame;
+  Bezel sends a full frame directly.
 - The Python rev C row record (section 5) is the same layout: a run per image row.
 
 ## 7. Diff encoders (vendor serial transport)
@@ -121,10 +125,10 @@ at the end: if in_run: write BE16 run_len (NO single-pixel conversion, even for 
 
 | Variant | Pixel | Selection in the vendor app |
 |---|---|---|
-| raw | 4 bytes `B G R A` | ROM version >= 1.89 |
-| compressed | 3 bytes (section 4) with `a4 = A >> 4` | ROM version < 1.89 |
+| raw | 4 bytes `B G R A` | large screen (4", 6.5", 6.8", 8", 8.8") and ROM version >= 1.89 |
+| compressed | 3 bytes (section 4) with `a4 = A >> 4` | every other rev C case (small screens, or ROM < 1.89) |
 
-The output buffer is sized to the frame length; a diff larger than the frame throws and the caller sends a full frame.
+The output buffer is sized to the frame length; a diff larger than the frame fails like an overflow (section 6).
 
 Worked example (static, computed). Frame 4 x 2 (8 pixels), previous frame all `00 00 00 00`; current frame changed at
 idx 1 = `01 02 03 ff`, idx 2 = `04 05 06 ff`, idx 5 = `07 08 09 ff`, idx 7 = `0a 0b 0c 80` (B G R A):
@@ -142,9 +146,10 @@ compressed (3-byte):
 
 ## 8. POSLEN opacity list (vendor serial transport)
 
-**static**. Sent with opcode 208 (0xD0) in the mode where a transparent theme layer is drawn over a background image or
-video that the device plays itself. It lists the runs of pixels whose alpha is **> 15**; the rest shows the device-side
-background. Records carry no pixel data:
+**static**. Used only on small rev C screens while the device plays a video under the theme: sent with opcode 208
+(0xD0), followed by `ef 69`, after a 0xCA full frame, and appended to 0xCC partials
+([protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 13.5). Large screens use per-pixel alpha instead. It lists
+the runs of pixels whose alpha is **> 15**; the rest shows the device-side video. Records carry no pixel data:
 
 ```
 for idx in 0 .. w*h-1:
@@ -176,9 +181,9 @@ None is called. A helper also classifies an image as "opaque" when fewer than 40
 
 | Family | Frame container |
 |---|---|
-| TUR_USB (0x1CBE) | PNG (RGBA, zlib level 9) with command 102; JPEG fallback with command 101 when the PNG exceeds 1 MiB ([protocol-turing-usb.md](protocol-turing-usb.md) section 5) |
+| TUR_USB (0x1CBE) | Python: PNG (RGBA, zlib level 9) with command 102, JPEG fallback with command 101 when the PNG exceeds 1 MiB. Vendor: JPEG quality 95 (command 101), or PNG with alpha (command 102) while a device-side video plays; frames over 1 MiB are dropped ([protocol-turing-usb.md](protocol-turing-usb.md) section 5) |
 | WCH (0x43A8) | raw BGR888 in 480-in-512 byte blocks |
-| rev C | raw BGRA full frames in 249+1 byte blocks; row runs / run lists for partial updates |
+| rev C | raw BGRA full frames in 249+1 byte blocks; row runs / run lists for partial updates; POSLEN lists on small screens with a device-side video |
 | rev A, B, D, WeAct | raw RGB565 |
 
 ## 11. Rotation and native-address formulas
@@ -190,10 +195,10 @@ stated; Pillow `rotate(n)` is counter-clockwise.
 |---|---|---|---|
 | rev A | device: opcode 0x79, value `orientation + 100`, with the new W/H | device | current-orientation pixels |
 | rev B | device: `cb 00` / `cb 01` | software: rotate 180, rectangle `x0 = W - x - w`, `y0 = H - y - h`, `x1 = W - x - 1`, `y1 = H - y - 1` | |
-| rev C | software, native address (table below) | software (FLIP_180 disabled) | native-orientation pixels |
+| rev C | software, native address (table below); the vendor also sends ROTATION 0x81 on large screens (effect unknown) | software (FLIP_180 disabled) | native-orientation pixels |
 | rev D | software: landscape = rotate 270 CCW (90 CW); window `x0 = 320 - y - h_orig`, `x1 = 320 - y - 1`, `y0 = x`, `y1 = x + w_orig - 1` | device: `43 47 00 00` | |
 | WeAct | device: `02 <0..3> 0a` | device | current-orientation pixels |
-| TUR_USB | software, whole-frame transpose; native = REVERSE_PORTRAIT: PORTRAIT `ROTATE_180`, LANDSCAPE `ROTATE_270` (90 CW), REVERSE_LANDSCAPE `ROTATE_90` (90 CCW) | software | native full frame |
+| TUR_USB | software, whole-frame transpose; native = REVERSE_PORTRAIT: PORTRAIT `ROTATE_180`, LANDSCAPE `ROTATE_270` (90 CW), REVERSE_LANDSCAPE `ROTATE_90` (90 CCW); the vendor also sends command 13 | software | native full frame |
 | WCH (vendor app) | software (rotation setting 0..3 applied to the composed frame) **and** command 0x56 | same | full frame at the table's W x H |
 
 Rev C native addresses (**verified** against the Python code):
@@ -211,5 +216,9 @@ Rev C native addresses (**verified** against the Python code):
 
 `address(r) = (row0 + r) * rowlen + col0` for image row `r`.
 
-The vendor app's frame rotation for serial panels (theme orientation combined with its rotation setting 0..3, applied
-with GDI+ `RotateFlip` to reach the native orientation) is part of the pending serial consolidation.
+Vendor app, rev C (**static**): the composed theme is rotated on the PC so the pixels sent are always in native
+orientation. On its portrait panels (2.4", 6.5", 6.8", 8", 8.8") a landscape theme (width > height) is turned 90°
+clockwise into the native buffer, and rotation setting 2 adds 180°; the effect of settings 1 and 3 on the PC-side
+image was not established. Other panels are sent as composed. On the 8.8" the 90° clockwise turn equals Python's
+LANDSCAPE transform above. The rotation setting is also sent to the device (0x81), whose effect on streamed frames is
+unknown.

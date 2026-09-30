@@ -68,7 +68,7 @@ function tauriBridge(invoke, tauri = {}) {
     deleteStored: (screen, path, confirmed) => invoke('delete_stored', { screen, path, confirmed }),
     playStored: (screen, path) => invoke('play_stored', { screen, path }),
     stopPlayback: (screen) => invoke('stop_playback', { screen }),
-    setBootMedia: (screen, path, confirmed) => invoke('set_boot_media', { screen, path, confirmed }),
+    setBootMedia: (screen, path, confirmed, brightness = null) => invoke('set_boot_media', { screen, path, confirmed, brightness }),
     onJobProgress: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(PROGRESS_EVENT, (e) => cb(e.payload)) : Promise.resolve(() => {})),
     onFileDrop: (cb) => onFileDrop(tauri, cb),
     // Files dropped in the webview carry no path: the system drop above does.

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { translator } from '../../src/i18n/index.js';
-import { baseName, errorMessage, formatBytes, progressParts, refusalText, storageFeatures, usedFraction } from '../../src/ui/storage.js';
+import { baseName, bootKeepsText, errorMessage, formatBytes, progressParts, refusalText, storageFeatures, usedFraction } from '../../src/ui/storage.js';
 import { createDemoBackend, demoKindOf, demoSuggestName, demoTurns, demoVideoName } from '../../src/demo-backend.js';
 import { DEMO_PICKED, DEMO_STORAGE, DEMO_VIDEO_THEME, SCENARIOS } from '../../src/demo-data.js';
 
@@ -63,6 +63,14 @@ test('storage errors are translated by code, others keep their text', () => {
   assert.equal(errorMessage(en, 'plain'), 'It did not work: plain');
   assert.equal(baseName('/home/me/Vídeos/clip.mp4'), 'clip.mp4');
   assert.equal(baseName('C:\\Users\\me\\clip.mp4'), 'clip.mp4');
+});
+
+test('the boot dialog names the brightness the screen starts with', () => {
+  const pt = translator('pt-BR');
+  assert.equal(bootKeepsText(pt, 40), 'Ela liga com brilho de 40%, o nível que você ajustou no Bezel, e nunca entra em repouso sozinha.');
+  assert.match(bootKeepsText(pt, null), /brilho padrão, cerca de 67%/);
+  assert.match(bootKeepsText(pt, undefined), /cerca de 67%/);
+  assert.equal(bootKeepsText(translator('en'), 0), 'It starts with brightness 0%, the level you set in Bezel, and never goes to sleep on its own.');
 });
 
 test('demo names, kinds and theme videos follow the core', () => {
@@ -150,8 +158,10 @@ test('demo playback, boot media and what live mode allows', async () => {
   await assert.rejects(demo.setBootMedia(KEY, logo, false), (e) => e.code === 'notConfirmed');
   await demo.setBootMedia(KEY, logo, true);
   assert.equal(demo.storageState().boot, logo);
-  await demo.setBootMedia(KEY, null, true);
+  assert.equal(demo.storageState().bootBrightness, null, 'the screen keeps its own');
+  await demo.setBootMedia(KEY, null, true, 40);
   assert.equal(demo.storageState().boot, null);
+  assert.equal(demo.storageState().bootBrightness, 40);
   await assert.rejects(demo.setBootMedia(KEY, 'internal/video/none.mp4', true), (e) => e.code === 'failed');
   await demo.setLive(true, KEY);
   await assert.rejects(demo.playStored(KEY, logo), (e) => e.code === 'live');

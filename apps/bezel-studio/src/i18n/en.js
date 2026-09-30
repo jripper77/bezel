@@ -170,6 +170,8 @@ export default {
   'storage.boot': 'Show “{name}” when the screen starts',
   'storage.bootAction': 'Show at start',
   'storage.bootHelp': 'What the screen shows on its own when it powers up, without Bezel. Drag a file from the list here, or use the power button next to it.',
+  'storage.bootKeeps': 'It starts with brightness {percent}%, the level you set in Bezel, and never goes to sleep on its own.',
+  'storage.bootKeepsDefault': 'It starts with its default brightness, about 67%, and never goes to sleep on its own. To choose another level, set the brightness under Settings first.',
   'storage.bootReset': 'The screen will show its default clock when it starts.',
   'storage.bootSet': 'The screen will show “{name}” when it starts.',
   'storage.bootTitle': 'At start',

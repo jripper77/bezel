@@ -170,8 +170,19 @@ test('the boot media asks first, files drop on a medium and TUR_USB keeps its ow
   await card.getByRole('button', { name: 'Mostrar “chuva.mp4” ao ligar a tela' }).click();
   const boot = page.getByRole('dialog', { name: 'Mostrar “chuva.mp4” ao ligar?' });
   await expect(boot).toContainText('fica gravada na tela');
+  // No brightness set in this session: the screen keeps its own default.
+  await expect(boot).toContainText('liga com o brilho padrão, cerca de 67%, e nunca entra em repouso sozinha');
   await boot.getByRole('button', { name: 'Mostrar ao ligar' }).click();
   await expect(toast(page)).toHaveText('A tela vai mostrar “chuva.mp4” ao ligar.');
+
+  // The brightness set under Ajustes is the one the screen starts with.
+  await page.getByRole('tab', { name: 'Ajustes' }).click();
+  await page.getByRole('slider', { name: 'Brilho' }).fill('40');
+  await page.getByRole('tab', { name: 'Armazenamento' }).click();
+  await slot.getByRole('button', { name: /relógio padrão/ }).click();
+  const reset = page.getByRole('dialog', { name: 'Voltar ao relógio padrão?' });
+  await expect(reset).toContainText('Ela liga com brilho de 40%, o nível que você ajustou no Bezel');
+  await reset.getByRole('button', { name: 'Cancelar' }).click();
 
   // A stored file dragged onto the slot asks the same.
   await dragTo(page, internal.getByText('logo.png', { exact: true }), slot);

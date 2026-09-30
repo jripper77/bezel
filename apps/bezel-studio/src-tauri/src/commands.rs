@@ -355,17 +355,20 @@ pub async fn stop_playback(state: State<'_, Shared>, screen: String) -> StorageR
     blocking(&state, move |b| b.stop_playback(&screen, now())).await
 }
 
-/// Sets the boot media (`None`: the built-in screen); `confirmed` comes from
-/// the dialog naming it.
+/// Sets the boot media (`None`: the built-in screen) and the brightness
+/// the screen starts with (`None`: the screen's own); `confirmed` comes from
+/// the dialog naming both.
 #[tauri::command]
 pub async fn set_boot_media(
     state: State<'_, Shared>,
     screen: String,
     path: Option<String>,
     confirmed: bool,
+    brightness: Option<u8>,
 ) -> StorageResult<()> {
     blocking(&state, move |b| {
-        b.set_boot_media(&screen, path.as_deref(), confirm_of(confirmed), now())
+        let confirm = confirm_of(confirmed);
+        b.set_boot_media(&screen, path.as_deref(), brightness, confirm, now())
     })
     .await
 }

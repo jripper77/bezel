@@ -30,6 +30,9 @@ const state = {
   location: null,
   // How the theme's video background reaches the live screen.
   liveVideo: null,
+  // The brightness set on each screen in this session (percent, by key):
+  // what the slider shows and what the boot media is set with.
+  brightness: {},
 };
 
 function toast(message) {
@@ -70,7 +73,7 @@ const library = createLibrary({
     refreshThemes: () => refreshThemes(),
     importTheme: () => importTheme(),
     addImage: () => addImage(),
-    setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
+    setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).then(() => { state.brightness[screen] = percent; }).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
     release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
     setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
     autostart: () => state.autostart,
@@ -87,6 +90,7 @@ const storage = createStoragePanel({
     screen: state.screens.find((s) => s.key === state.screen) ?? null,
     live: state.live,
     liveVideo: state.liveVideo,
+    brightness: state.brightness,
   }),
 });
 wireSubtabs(document.querySelector('#panel-screen .subtabs'), (name) => (name === 'storage' ? storage.show() : storage.hide()));
@@ -211,7 +215,7 @@ function renderScreenSelect() {
   else if (current && state.live && state.liveVideo?.state === 'missing') device = t('status.liveVideoMissing');
   else if (current) device = state.live ? t('status.live') : t(`screen.state.${current.state}`);
   $('status-device').textContent = device;
-  library.renderScreen(state.screens, state.screen, state.live);
+  library.renderScreen(state.screens, state.screen, state.live, state.brightness);
   storage.update();
 }
 

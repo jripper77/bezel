@@ -321,18 +321,28 @@ fn deleting_and_the_boot_media_need_the_dialogs_confirmation() {
     assert_eq!(err.code, "notConfirmed");
     let err = f
         .backend
-        .set_boot_media(KEY, Some(clip), Confirm::No, TIME)
+        .set_boot_media(KEY, Some(clip), Some(40), Confirm::No, TIME)
         .unwrap_err();
     assert_eq!(err.code, "notConfirmed");
     let err = f
         .backend
-        .set_boot_media(KEY, None, Confirm::No, TIME)
+        .set_boot_media(KEY, None, Some(40), Confirm::No, TIME)
         .unwrap_err();
     assert_eq!(err.code, "notConfirmed");
     assert!(f.writes().is_empty(), "nothing reached the screen");
+    assert!(
+        f.connector.log().brightness.is_empty(),
+        "not even the brightness"
+    );
+    let err = f
+        .backend
+        .set_boot_media(KEY, Some(clip), Some(101), Confirm::Yes, TIME)
+        .unwrap_err();
+    assert_eq!(err.code, "failed");
 
+    // The screen starts with the brightness set in the session.
     f.backend
-        .set_boot_media(KEY, Some(clip), Confirm::Yes, TIME)
+        .set_boot_media(KEY, Some(clip), Some(40), Confirm::Yes, TIME)
         .unwrap();
     let storage = f.storage();
     assert_eq!(storage.start_mode, Some(StartMode::Video));
@@ -340,10 +350,14 @@ fn deleting_and_the_boot_media_need_the_dialogs_confirmation() {
         storage.playback,
         Playback::Video(remote_path(clip), Repeat::Loop)
     );
+    let forty = Brightness::new(40).unwrap();
+    assert_eq!(f.connector.log().brightness, [forty]);
+    // None set: the link's level stays.
     f.backend
-        .set_boot_media(KEY, None, Confirm::Yes, TIME)
+        .set_boot_media(KEY, None, None, Confirm::Yes, TIME)
         .unwrap();
     assert_eq!(f.storage().start_mode, Some(StartMode::Default));
+    assert_eq!(f.connector.log().brightness, [forty]);
 
     f.backend
         .delete_stored(KEY, clip, Confirm::Yes, TIME)

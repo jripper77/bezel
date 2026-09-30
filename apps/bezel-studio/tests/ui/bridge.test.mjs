@@ -75,17 +75,19 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.playStored('k', 'internal/video/a.mp4');
   await bridge.stopPlayback('k');
   await bridge.setBootMedia('k', null, true);
+  await bridge.setBootMedia('k', 'internal/video/a.mp4', true, 40);
   assert.deepEqual(calls.map((c) => c[0]), [
     'list_screens', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
     'add_image', 'list_assets', 'list_fonts', 'get_autostart', 'set_autostart',
     'storage_overview', 'media_tools', 'locate_ffmpeg', 'pick_media', 'prepare_upload', 'prepare_theme_video',
-    'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media',
+    'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media', 'set_boot_media',
   ]);
   assert.deepEqual(calls[23][1], { screen: 'k', source: '/home/me/clip.mp4', medium: 'sd' });
   assert.deepEqual(calls[25][1], { ticket: 7, overwrite: true });
   assert.deepEqual(calls[27][1], { screen: 'k', path: 'internal/video/a.mp4', confirmed: true });
-  assert.deepEqual(calls[30][1], { screen: 'k', path: null, confirmed: true });
+  assert.deepEqual(calls[30][1], { screen: 'k', path: null, confirmed: true, brightness: null });
+  assert.deepEqual(calls[31][1], { screen: 'k', path: 'internal/video/a.mp4', confirmed: true, brightness: 40 });
   assert.equal(bridge.fileSource({ name: 'x.png' }), null, 'dropped files come with paths from Tauri');
   assert.deepEqual(calls[6][1], { on: true, screen: 'k' });
   assert.deepEqual(calls[7][1], { screen: 'k', percent: 40 });

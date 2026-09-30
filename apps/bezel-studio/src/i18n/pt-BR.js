@@ -170,6 +170,8 @@ export default {
   'storage.boot': 'Mostrar “{name}” ao ligar a tela',
   'storage.bootAction': 'Mostrar ao ligar',
   'storage.bootHelp': 'O que a tela mostra sozinha quando liga, sem o Bezel. Arraste um arquivo da lista para cá ou use o botão de ligar ao lado dele.',
+  'storage.bootKeeps': 'Ela liga com brilho de {percent}%, o nível que você ajustou no Bezel, e nunca entra em repouso sozinha.',
+  'storage.bootKeepsDefault': 'Ela liga com o brilho padrão, cerca de 67%, e nunca entra em repouso sozinha. Para escolher outro nível, ajuste o brilho em Ajustes antes.',
   'storage.bootReset': 'A tela vai mostrar o relógio padrão ao ligar.',
   'storage.bootSet': 'A tela vai mostrar “{name}” ao ligar.',
   'storage.bootTitle': 'Ao ligar',

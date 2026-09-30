@@ -254,7 +254,8 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   // -------------------------------------------------------------- screen --
   const autostartField = () => checkField(t('screen.autostart'), actions.autostart(), (on) => actions.setAutostart(on));
 
-  function renderScreen(screens, current, live) {
+  /** @param {Record<string, number>} brightness the level set on each screen in this session */
+  function renderScreen(screens, current, live, brightness = {}) {
     const root = $('screen-panel');
     if (!screens.length) {
       root.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }), autostartField());
@@ -262,7 +263,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
     }
     root.replaceChildren(autostartField(), ...screens.map((s) => {
       const model = s.models.length === 1 ? s.models[0] : null;
-      const slider = el('input', { type: 'range', min: 0, max: 100, step: 1, value: '70', 'aria-label': t('screen.brightness') });
+      const slider = el('input', { type: 'range', min: 0, max: 100, step: 1, value: String(brightness[s.key] ?? 70), 'aria-label': t('screen.brightness') });
       slider.addEventListener('change', () => actions.setBrightness(s.key, Number(slider.value)));
       return el('section', { class: 'screen-card', 'aria-label': model ? model.name : s.key }, [
         el('strong', { text: model ? model.name : s.models.map((m) => m.name).join(' / ') }),

@@ -128,7 +128,7 @@ function createDemoStorage(chosen, { delay, live, theme }) {
   const tools = { ready: chosen.ffmpeg !== false, configured: null };
   let tickets = 0;
   let job = null;
-  const state = { playback: null, boot: null };
+  const state = { playback: null, boot: null, bootBrightness: null };
 
   const refuse = (code, message) => Promise.reject(Object.assign(new Error(message), { code }));
   const screenOf = (key) => (chosen.screens ?? []).find((s) => s.key === key);
@@ -305,11 +305,12 @@ function createDemoStorage(chosen, { delay, live, theme }) {
       state.playback = null;
       return Promise.resolve();
     },
-    setBootMedia: (key, path, confirmed) => {
+    setBootMedia: (key, path, confirmed, brightness = null) => {
       if (limited(key)) return refuse('unsupported', 'this screen keeps its own boot media');
       if (!confirmed) return refuse('notConfirmed', 'the boot media needs confirmation');
       if (path && !(files.get(path) > 0)) return refuse('failed', `${path} is not stored on the screen`);
       state.boot = path;
+      if (brightness !== null) state.bootBrightness = brightness;
       if (path) state.playback = path;
       return Promise.resolve();
     },
@@ -318,7 +319,7 @@ function createDemoStorage(chosen, { delay, live, theme }) {
       return () => listeners.delete(cb);
     },
     videoOfTheme,
-    /** What the simulated screen plays and shows at power-up. */
+    /** What the simulated screen plays, shows at power-up and starts with. */
     storageState: () => ({ ...state, files: new Map(files) }),
   };
 }

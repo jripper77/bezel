@@ -70,6 +70,17 @@ export function progressParts(t, locale, p) {
   return { phase: t(`storage.phase.${p.phase}`), amount, fraction };
 }
 
+/**
+ * What the screen keeps with its boot media (rev C OPTIONS): the brightness
+ * it starts with, the level set in this session or its own default, and no
+ * sleep timer (D-2026-09-30-storage-video-5).
+ * @param {(k: string, p?: object) => string} t
+ * @param {number|null|undefined} brightness percent set in this session
+ */
+export function bootKeepsText(t, brightness) {
+  return Number.isInteger(brightness) ? t('storage.bootKeeps', { percent: brightness }) : t('storage.bootKeepsDefault');
+}
+
 /** One way a file differs from what the screen takes. */
 export function mismatchText(t, m) {
   const params = { found: m.found ?? t('storage.unknownSize'), expected: m.expected ?? '' };
@@ -364,22 +375,27 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     if (ok) await act(() => bridge.deleteStored(view.key, file.path, true), t('storage.deleted', { name: file.name }));
   }
 
+  // The brightness the dialog names is the one sent with the boot media.
+  const bootBrightness = () => context().brightness?.[view.key] ?? null;
+
   async function askBoot(file) {
+    const brightness = bootBrightness();
     const ok = await confirm({
       title: t('storage.confirmBootTitle', { name: file.name }),
-      body: [el('p', { text: t('storage.confirmBoot', { name: file.name }) })],
+      body: [el('p', { text: t('storage.confirmBoot', { name: file.name }) }), el('p', { text: bootKeepsText(t, brightness) })],
       action: t('storage.bootAction'),
     });
-    if (ok) await act(() => bridge.setBootMedia(view.key, file.path, true), t('storage.bootSet', { name: file.name }), { reload: false });
+    if (ok) await act(() => bridge.setBootMedia(view.key, file.path, true, brightness), t('storage.bootSet', { name: file.name }), { reload: false });
   }
 
   async function askBootDefault() {
+    const brightness = bootBrightness();
     const ok = await confirm({
       title: t('storage.confirmDefaultTitle'),
-      body: [el('p', { text: t('storage.confirmDefault') })],
+      body: [el('p', { text: t('storage.confirmDefault') }), el('p', { text: bootKeepsText(t, brightness) })],
       action: t('storage.defaultAction'),
     });
-    if (ok) await act(() => bridge.setBootMedia(view.key, null, true), t('storage.bootReset'), { reload: false });
+    if (ok) await act(() => bridge.setBootMedia(view.key, null, true, brightness), t('storage.bootReset'), { reload: false });
   }
 
   const play = (file) => act(() => bridge.playStored(view.key, file.path), t('storage.playing', { name: file.name }), { reload: false });

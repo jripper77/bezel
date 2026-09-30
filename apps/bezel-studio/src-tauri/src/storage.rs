@@ -31,7 +31,7 @@ use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::job::{CancelToken, Job, Progress};
 use bezel_core::domain::media::{ConvertOptions, MediaInfo, MediaKind, UploadProfile, cover_crop};
-use bezel_core::domain::screen::Confirm;
+use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::storage::{
     BootMedia, Medium, RemotePath, Repeat, StorageLocation, UploadAction,
 };
@@ -626,12 +626,16 @@ impl Backend {
     }
 
     /// Sets what the screen shows on its own after power-up: `path`, or the
-    /// built-in screen for `None`. `confirm` is the user's answer to the
-    /// dialog naming it (the choice persists on the screen).
+    /// built-in screen for `None`, and the brightness it starts with:
+    /// `brightness` (percent), the level the user set in this session, is
+    /// sent first; `None` leaves the link's (the screen's default on a link
+    /// opened for this). `confirm` is the user's answer to the dialog naming
+    /// both (the choice persists on the screen).
     pub fn set_boot_media(
         &self,
         screen: &str,
         path: Option<&str>,
+        brightness: Option<u8>,
         confirm: Confirm,
         time: LocalTime,
     ) -> StorageResult<()> {
@@ -639,8 +643,11 @@ impl Backend {
             Some(path) => BootMedia::File(remote(path)?),
             None => BootMedia::Default,
         };
+        let brightness = brightness
+            .map(|percent| Brightness::new(percent).ok_or_else(|| failed("brightness is 0 to 100")))
+            .transpose()?;
         self.with_screen(screen, Resume::Video, time, |link| {
-            storage::set_boot_media(link, &boot, None, confirm)
+            storage::set_boot_media(link, &boot, brightness, confirm)
         })
     }
 }

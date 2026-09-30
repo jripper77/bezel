@@ -15,7 +15,7 @@ pub const VERSION: &str = match option_env!("BEZEL_VERSION") {
 
 /// Control USB smart screens (Turing, TURZX and compatible) from the terminal.
 #[derive(Debug, Parser)]
-#[command(name = "bezel", version = VERSION, about, long_about = None)]
+#[command(name = "bezel", version = VERSION)]
 pub struct Cli {
     /// Use a simulated Turing 8.8" instead of the real USB bus (demos and tests).
     #[arg(long, global = true, hide = true)]

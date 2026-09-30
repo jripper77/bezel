@@ -1,0 +1,7 @@
+# Trivy exceptions for the SCA scan of the shared pipeline, which reads
+# Cargo.lock and package-lock.json. Each entry is an advisory already accepted
+# in .cargo/audit.toml, where the dependency path, why Bezel does not reach the
+# affected code and when to re-check are written. Re-check both files together.
+
+# glib 0.18.5, unsound VariantStrIter (RUSTSEC-2024-0429).
+GHSA-wrw7-89jp-8q8g

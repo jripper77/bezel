@@ -1,0 +1,123 @@
+name: CI
+
+# Bezel's CI is one call to the shared pipeline of slipalison/github-workflows
+# (pipeline.yml), the entry point every application repository uses. In
+# parallel it runs:
+#   versao     the next version from the Conventional Commits; a commit
+#              outside them fails the run
+#   qualidade  one job per component: fmt, `cargo audit`, clippy, the tests
+#              with the coverage floor, the release build and the packages
+#   seguranca  Gitleaks, TruffleHog, Semgrep, Trivy on the lockfiles, the SBOM,
+#              and CodeQL for Rust, JS/TS and these workflows
+#   sonar      Sonar analysis and its Quality Gate, with Rust and JS coverage
+# and then `Portao`, one check that fails when any of them failed. Only on
+# main, on a push or a manual run (never a pull request), and only after all
+# of them passed, `lancar` tags and publishes the GitHub Release with the
+# packages. There is no image and no deploy: with `imagem` and `app` empty the
+# pipeline skips both.
+#
+# PINNED TO A COMMIT, NOT A BRANCH (D-2026-09-30-foundation-2). The desktop-app
+# support of pipeline.yml (github-workflows #15) was merged into the stacked
+# branch `pacotes-tauri-release`, not into main. 71f8b07 is the commit
+# ddc-control runs, with the nested workflows pinned to it. Once #15 reaches
+# main this becomes @main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer commit on the same ref cancels the older run: the Windows job takes
+# tens of minutes without cache.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  esteira:
+    # A reusable workflow never gets more than the caller grants here.
+    permissions:
+      contents: write        # the tag and the release (lancar, main only)
+      packages: write        # asked statically by lancar.yml's skipped `alias` job
+      security-events: write # SARIF of the scans and of CodeQL
+      actions: read          # CodeQL
+    uses: slipalison/github-workflows/.github/workflows/pipeline.yml@71f8b07862f1a4c295f40d48173a2acf9edda3e8
+    with:
+      versao_inicial: "0.1.0"
+
+      # --------------------------------------------------------- quality --
+      # Tauri compiles several times per Rust job (clippy, llvm-cov, release)
+      # and once more to bundle; the limit only stops a hung job.
+      timeout_qualidade: 60
+      # One job per component, in parallel. The names are a contract: the
+      # release attaches the `pacotes-rust-*` artifacts.
+      #
+      # rust-linux: fmt, `cargo audit`, clippy -D warnings, tests under cargo
+      #   llvm-cov with the 80% line floor, the bezel-studio release binary,
+      #   and deb, rpm, AppImage of the studio plus the `bezel` CLI .tar.gz,
+      #   stamped with the version `versao` computed (Cargo.toml says 0.0.0).
+      #   ubuntu-22.04, not latest: the packages link against the glibc of the
+      #   system that builds them, and 24.04's would not run on Ubuntu 22.04,
+      #   Debian 12 or Mint 21.
+      #   apt packages: libwebkit2gtk-4.1-dev (Tauri's webview, with GTK and
+      #   GLib), libudev-dev (serialport's port enumeration), librsvg2-dev (the
+      #   AppImage's gtk plugin).
+      # rust-windows: the same steps on windows-latest except the audit, with
+      #   the MSI, the NSIS installer and the CLI .zip. Coverage 0: the floor
+      #   is measured on Linux.
+      # node-ui: `npm test` in apps/bezel-studio: node --test with the 80%
+      #   floor on the UI logic modules, then the Playwright + axe suite.
+      componentes: |
+        [
+          {"nome":"rust-linux","linguagem":"rust","versao":"1.98","cobertura":80,
+           "so":"ubuntu-22.04",
+           "pacotes_sistema":"libwebkit2gtk-4.1-dev libudev-dev librsvg2-dev",
+           "auditoria":true,"build_release":"bezel-studio",
+           "empacotar_tauri":true,"caminho_tauri":"apps/bezel-studio/src-tauri",
+           "binarios_extra":"bezel","carimbar_versao":true},
+          {"nome":"rust-windows","linguagem":"rust","versao":"1.98","so":"windows-latest",
+           "cobertura":0,"build_release":"bezel-studio",
+           "empacotar_tauri":true,"caminho_tauri":"apps/bezel-studio/src-tauri",
+           "binarios_extra":"bezel","carimbar_versao":true},
+          {"nome":"node-ui","linguagem":"node","versao":"24","caminho":"apps/bezel-studio",
+           "cobertura":80}
+        ]
+
+      # --------------------------------------------------------- release --
+      # Only the two Rust components that package: `pacotes-*` would also
+      # attach an artifact another job uploaded under that prefix, node-ui
+      # included, which runs third-party npm code.
+      artefatos_release: "pacotes-rust-*"
+      changelog: CHANGELOG.md
+
+      # -------------------------------------------------------- security --
+      # Public repository: CodeQL is free and its results land in the
+      # Security tab. No IaC to scan.
+      linguagens_codeql: '["rust","javascript-typescript","actions"]'
+
+      # ----------------------------------------------------------- sonar --
+      # Waived until the SonarQube Cloud project `slipalison_bezel` exists
+      # with Automatic Analysis OFF and the repository has the SONAR_TOKEN
+      # secret (D-2026-09-30-foundation-2). scripts/ci/sonar-coverage.sh and
+      # the parameters below are ready: to turn it on, replace sonar_dispensa
+      # with the block commented out underneath.
+      sonar_dispensa: "Projeto slipalison_bezel ainda nao criado no SonarQube Cloud nem secret SONAR_TOKEN no repositorio (D-2026-09-30-foundation-2)."
+      # sonar_projeto: slipalison_bezel
+      # sonar_linguagem: rust
+      # sonar_versao_linguagem: "1.98"
+      # sonar_pacotes_sistema: "libwebkit2gtk-4.1-dev libudev-dev"
+      # sonar_comando_testes: bash scripts/ci/sonar-coverage.sh
+      # sonar_parametros: |
+      #   sonar.sources=crates,apps/bezel-studio/src,apps/bezel-studio/src-tauri/src,apps/bezel-studio/src-tauri/build.rs
+      #   sonar.tests=crates,apps/bezel-studio/src-tauri/src,apps/bezel-studio/tests
+      #   sonar.exclusions=**/tests.rs,**/tests/**
+      #   sonar.test.inclusions=**/tests.rs,**/tests/**
+      #   sonar.rust.cargo.manifestPaths=Cargo.toml
+      #   sonar.rust.lcov.reportPaths=resultados/lcov.info
+      #   sonar.javascript.lcov.reportPaths=resultados/lcov-ui.info
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

@@ -1,0 +1,22 @@
+# cargo-audit policy. `cargo audit`, run from the repository root, reads this
+# file on its own. Every entry names the dependency path, why Bezel does not
+# reach the affected code, and when to re-check. To re-evaluate, delete an
+# entry and run `cargo audit`: an advisory no longer named means the entry is
+# stale. The CI's Trivy scan names one of these by GHSA id in .trivyignore;
+# keep both files together.
+
+[advisories]
+ignore = [
+    # proc-macro-error 1.0.4 — unmaintained. Path: glib-macros 0.18 and
+    # gtk3-macros 0.18 (proc-macros of the gtk-rs 0.18 stack webkit2gtk/tao/wry
+    # pull for Tauri on Linux). It only runs at compile time, inside rustc; no
+    # Bezel binary links it.
+    # Re-check when Tauri/wry move off gtk-rs 0.18 (gtk4 or glib >= 0.20).
+    "RUSTSEC-2024-0370",
+    # glib 0.18.5 — unsound `Iterator`/`DoubleEndedIterator` for
+    # `glib::VariantStrIter`. Path: gtk/gdk/webkit2gtk 0.18 -> glib, Linux
+    # target only (Tauri's webview and windowing). Bezel never calls
+    # `VariantStrIter`/`Variant::str_iter`.
+    # Re-check when Tauri/wry move to glib >= 0.20.
+    "RUSTSEC-2024-0429",
+]

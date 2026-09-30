@@ -1,0 +1,25 @@
+# Bezel: lets the logged-in user open USB smart screens without root.
+# One line per USB id of the supported-device catalog
+# (crates/bezel-core/src/domain/catalog.rs); a test keeps both in sync.
+# Serial screens are CDC-ACM ttys; the Turing USB (1cbe) and WCH (43a8)
+# families are raw USB devices.
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0525", ATTRS{idProduct}=="a4a7", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="5722", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ca21", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ca88", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="fe0c", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="0028", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="0046", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="0050", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="0080", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="0088", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="0092", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="0123", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1d6b", ATTRS{idProduct}=="0106", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1d6b", ATTRS{idProduct}=="0121", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="43a8", ATTRS{idProduct}=="0e5e", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="43a8", ATTRS{idProduct}=="0e61", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="43a8", ATTRS{idProduct}=="0e64", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="43a8", ATTRS{idProduct}=="0e6d", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="454d", ATTRS{idProduct}=="4e41", TAG+="uaccess"

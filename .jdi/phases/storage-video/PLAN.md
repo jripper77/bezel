@@ -54,7 +54,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - `ThemeRuntime`: tela com reprodução e o arquivo presente (GET_FILE_SIZE nas raízes, sem LIST_DIR nem upload) → PLAY_VIDEO loop=1 e `OnDevice`; ausente → pôster + estado `VideoMissing` (chamada "Enviar para a tela"); tela sem reprodução (WCH) → frames do `MediaTranscoder` ou pôster sem ffmpeg.
 - **Dependencies:** T-6.1
 - **Test:** `renderer::tests::device_video_background_renders_a_transparent_base`; `cargo test -p bezel-core -p bezel-render`
-- **Status:** pending
+- **Status:** completed (0756ce4; `crates/bezel-core/src/app/mod.rs` também mudou: só a reexportação dos tipos novos do runtime)
 
 ### Wave 3 (paralela: entradas e TUR_USB)
 

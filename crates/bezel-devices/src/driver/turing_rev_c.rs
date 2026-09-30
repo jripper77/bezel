@@ -10,19 +10,19 @@
 //!
 //! A cancelled upload has no abort in the protocol: after the UPLOAD_FILE
 //! header the firmware takes every byte as file data until it has the
-//! declared length, and only that length ends the data phase cleanly (spec
-//! § 19). A HELLO it answers after a cancel proves nothing: on the 8.8" the
-//! bytes still queued for its writer then went into the next file. So the
-//! recovery always sends the rest of the declared length as filler blocks
-//! first, then HELLO, then measures the partial file (declared size: the data
-//! sent, then filler) that the user is offered to delete.
+//! declared length (spec § 19). Bezel sends nothing more of that length
+//! after a cancel: completing it with filler hung the 8.8" until a USB
+//! replug (D-2026-09-30-release-polish-10). The recovery is HELLO (with its
+//! resync blocks), then GET_FILE_SIZE measures the partial file the user is
+//! offered to delete. Bytes the firmware's writer still queued may land in
+//! the next upload, whose size check (the core's) catches them.
 
 use std::time::Duration;
 
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::frame::{Frame, RGBA_BYTES};
 use bezel_core::domain::geometry::Orientation;
-use bezel_core::domain::job::{Job, JobPhase, Progress};
+use bezel_core::domain::job::Job;
 use bezel_core::domain::media::MediaKind;
 use bezel_core::domain::screen::{Brightness, ScreenIdentity};
 use bezel_core::domain::storage::{
@@ -104,10 +104,6 @@ const DEFAULT_STORED_BRIGHTNESS: u8 = 170;
 const OFF_POLLS: usize = 16;
 /// One of those reads.
 const OFF_POLL: Duration = Duration::from_millis(250);
-/// After the filler that completes a cancelled upload's data phase: reads
-/// of [`RECEIVED_POLL`] that wait for `file_rev_done` (the firmware wrote
-/// the rest and closed the file) before HELLO is asked.
-const FILLED_POLLS: usize = 10;
 
 /// How long a request waits for its reply, how many times it is sent and
 /// how many reply bytes are read.
@@ -151,65 +147,6 @@ const PLAY_IMAGE: Wait = Wait {
 
 /// The card's video folder, whose uploads get the short completion wait.
 const CARD_VIDEO: StorageLocation = StorageLocation::new(Medium::Card, MediaKind::Video);
-
-/// How far an upload's data phase got on the wire. After the header the
-/// firmware takes every byte as file data until it has the declared length
-/// and has no abort (spec § 19): whatever follows a cancel, a HELLO
-/// included, lands in the file until then, and only that length closes the
-/// file cleanly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct DataPhase {
-    /// Bytes of the file the UPLOAD_FILE header declared.
-    size: u64,
-    /// Wire bytes the UPLOAD_FILE header declared.
-    declared: u64,
-    /// Wire bytes sent since the header. A write the cancel cut short counts
-    /// whole, so the bytes still owed are never overestimated and the
-    /// filler never passes the declared length.
-    sent: u64,
-}
-
-impl DataPhase {
-    /// The data phase of a `size`-byte file, nothing sent yet.
-    fn of(size: u32) -> Self {
-        let size = u64::from(size);
-        Self {
-            size,
-            declared: proto::data_phase_len(size),
-            sent: 0,
-        }
-    }
-
-    /// `bytes` more went out.
-    fn after(self, bytes: u64) -> Self {
-        Self {
-            sent: self.sent.saturating_add(bytes),
-            ..self
-        }
-    }
-
-    /// Every declared byte went out.
-    fn finished(self) -> Self {
-        Self {
-            sent: self.declared,
-            ..self
-        }
-    }
-
-    /// Whole blocks the firmware still waits for: 0 once the declared length
-    /// went out (every write is whole blocks, so nothing is rounded away).
-    fn owed_blocks(self) -> u64 {
-        self.declared.saturating_sub(self.sent) / BLOCK as u64
-    }
-
-    /// Upload progress at this point: bytes of the file the screen got (the
-    /// data, then any filler), at most the file size.
-    fn progress(self) -> Progress {
-        let blocks = self.sent / BLOCK as u64;
-        let done = (blocks * proto::BLOCK_PAYLOAD as u64).min(self.size);
-        Progress::new(JobPhase::Upload, done, self.size)
-    }
-}
 
 /// A connected rev C screen.
 pub struct TuringRevC<W: Wire, P: Pause> {
@@ -410,14 +347,8 @@ impl<W: Wire, P: Pause> TuringRevC<W, P> {
 
     /// Waits for `file_rev_done` as the vendor does (spec § 13.4); without
     /// it the use case's size check decides. A cancel during the wait
-    /// recovers the link like a cancel between blocks (`phase` is finished:
-    /// no filler is owed).
-    fn await_received(
-        &mut self,
-        path: &RemotePath,
-        job: &mut Job<'_>,
-        phase: DataPhase,
-    ) -> Result<()> {
+    /// recovers the link like a cancel between blocks.
+    fn await_received(&mut self, path: &RemotePath, job: &Job<'_>) -> Result<()> {
         let wait = if path.location == CARD_VIDEO {
             RECEIVED_TIMEOUT_CARD_VIDEO
         } else {
@@ -431,7 +362,7 @@ impl<W: Wire, P: Pause> TuringRevC<W, P> {
         for round in 1..=rounds {
             for _ in 0..polls {
                 if job.is_cancelled() {
-                    return Err(self.recover_after_cancel(path, phase, job));
+                    return Err(self.recover_after_cancel(path));
                 }
                 let answer = self
                     .wire
@@ -449,23 +380,17 @@ impl<W: Wire, P: Pause> TuringRevC<W, P> {
         Ok(())
     }
 
-    /// After an interrupted upload (spec § 19). The firmware has no abort
-    /// and only the declared length ends its data phase cleanly, even when
-    /// it would answer a HELLO: the rest of `phase` goes out as filler
-    /// first ([`Self::complete_data_phase`]), then HELLO (with its resync
-    /// blocks) brings the link back and GET_FILE_SIZE measures what is
-    /// left, the declared size once filler went out. Never deletes.
-    fn recover_after_cancel(
-        &mut self,
-        path: &RemotePath,
-        phase: DataPhase,
-        job: &mut Job<'_>,
-    ) -> BezelError {
+    /// After an interrupted upload (spec § 19). Nothing more of the data
+    /// phase goes out: filler that completed the declared length hung the
+    /// 8.8" until a USB replug (D-2026-09-30-release-polish-10). HELLO (with
+    /// its resync blocks) brings the link back and GET_FILE_SIZE measures the
+    /// partial file, for the user to delete. When no HELLO is answered the
+    /// link is left for the next command, which wakes the screen. Bytes the
+    /// firmware's writer still queued may land in the next upload; its size
+    /// check catches them. Never deletes.
+    fn recover_after_cancel(&mut self, path: &RemotePath) -> BezelError {
         self.media_changed();
-        let back = self
-            .complete_data_phase(phase, job)
-            .and_then(|()| handshake(&mut self.wire, &self.pause));
-        if let Err(e) = back {
+        if let Err(e) = handshake(&mut self.wire, &self.pause) {
             tracing::warn!(error = %e, %path, "the screen did not come back after a cancelled upload");
             return BezelError::Timeout(format!(
                 "the screen after a cancelled upload; the next command reconnects it, then check {path} for a partial file"
@@ -475,68 +400,6 @@ impl<W: Wire, P: Pause> TuringRevC<W, P> {
             Ok(partial) => BezelError::Cancelled { partial },
             Err(e) => e,
         }
-    }
-
-    /// Completes `phase` when blocks of it are still owed: the filler, then
-    /// up to [`FILLED_POLLS`] reads for `file_rev_done`. Nothing when the
-    /// declared length went out (a cancel during the completion wait).
-    fn complete_data_phase(&mut self, phase: DataPhase, job: &mut Job<'_>) -> Result<()> {
-        if phase.owed_blocks() == 0 {
-            return Ok(());
-        }
-        self.send_filler(phase, job)?;
-        self.await_closed()
-    }
-
-    /// Sends the blocks `phase` still owes as filler (`2c` × 249 + `00`
-    /// each, the data-phase framing) in writes of [`UPLOAD_CHUNK_BLOCKS`].
-    ///
-    /// The trade-off: the filler lands in the partial file (reported through
-    /// GET_FILE_SIZE with the declared size, for the user to delete; never
-    /// deleted here), and sending it takes about as long as the rest of the
-    /// upload would have, bounded by the declared length. Every write
-    /// reports Upload progress from the cancel point towards the file size:
-    /// the counters stay bytes of the file the screen got, which the filler
-    /// completes, and the CLI and the studio already say the upload is being
-    /// cancelled, so a long filler reads as a cancel at work, not a hang. It
-    /// polls no token (the job is already cancelled): a write that fails
-    /// (screen unplugged, a write stalled for 10 s) stops it, and the CLI's
-    /// second Ctrl+C quits at once; either leaves the screen as a cancel
-    /// without filler would (the next connection wakes it; the next upload
-    /// may take stray bytes, which its size check catches).
-    fn send_filler(&mut self, mut phase: DataPhase, job: &mut Job<'_>) -> Result<()> {
-        let blocks = phase.owed_blocks();
-        tracing::info!(
-            blocks,
-            bytes = blocks * BLOCK as u64,
-            "cancelled upload: completing its declared length with filler"
-        );
-        let chunk = proto::filler_blocks(UPLOAD_CHUNK_BLOCKS);
-        while phase.owed_blocks() > 0 {
-            let n = phase.owed_blocks().min(UPLOAD_CHUNK_BLOCKS as u64) as usize;
-            let write = &chunk[..n * BLOCK];
-            self.send(write)?;
-            phase = phase.after(write.len() as u64);
-            job.report(phase.progress());
-        }
-        Ok(())
-    }
-
-    /// Waits (at most [`FILLED_POLLS`] reads) for `file_rev_done`: the
-    /// firmware wrote the completed file and closed it. Without it, the
-    /// HELLO that follows decides.
-    fn await_closed(&mut self) -> Result<()> {
-        for _ in 0..FILLED_POLLS {
-            let answer = self
-                .wire
-                .receive(REPLY_MAX, RECEIVED_POLL)
-                .map_err(io_err)?;
-            if String::from_utf8_lossy(&answer).contains(reply::RECEIVED) {
-                return Ok(());
-            }
-        }
-        tracing::debug!("no file_rev_done after the filler");
-        Ok(())
     }
 
     fn device_path(&self, path: &RemotePath) -> Result<String> {
@@ -628,6 +491,8 @@ impl<W: Wire, P: Pause> ScreenStorage for TuringRevC<W, P> {
     /// Spec § 13.4: STOP_VIDEO, STOP_MEDIA, LIST_DIR of the folder (creates
     /// it), UPLOAD_FILE until `create_success`, the data phase, then the
     /// wait for `file_rev_done`. The use case verifies with GET_FILE_SIZE.
+    /// A cancel ends the data phase where it is, without filler, then
+    /// recovers the link with HELLO and measures the partial file.
     fn upload(&mut self, path: &RemotePath, data: &[u8], job: &mut Job<'_>) -> Result<()> {
         let size = upload_size(data)?;
         let target = self.device_path(path)?;
@@ -640,24 +505,15 @@ impl<W: Wire, P: Pause> ScreenStorage for TuringRevC<W, P> {
         let what = format!("UPLOAD_FILE {target}");
         self.request(&header, CREATE, &what, has(reply::CREATED))?;
         tracing::info!(%target, size, "upload");
-        let phase = DataPhase::of(size);
         let wire = &mut self.wire;
-        // Wire bytes of a write that failed once the job was cancelled: the
-        // signal that cancelled it may have cut it after they left.
-        let mut cut = 0;
         let sent = send_in_chunks(data, UPLOAD_CHUNK, job, |chunk| {
-            let framed = proto::blocks(chunk);
-            wire.send(&framed).map_err(|e| {
-                cut = framed.len() as u64;
-                io_err(e)
-            })
+            wire.send(&proto::blocks(chunk)).map_err(io_err)
         })?;
         match sent {
-            Sent::All => self.await_received(path, job, phase.finished()),
+            Sent::All => self.await_received(path, job),
             Sent::Cancelled { accepted } => {
                 tracing::info!(%target, accepted, "upload cancelled");
-                let phase = phase.after(proto::data_phase_len(accepted) + cut);
-                Err(self.recover_after_cancel(path, phase, job))
+                Err(self.recover_after_cancel(path))
             }
         }
     }
@@ -779,12 +635,17 @@ mod tests {
     use super::*;
     use crate::driver::RealTime;
     use crate::wire::ScriptedWire;
+    use bezel_core::app::storage::{self, PreparedUpload};
     use bezel_core::domain::catalog::model_by_id;
     use bezel_core::domain::device::ModelId;
     use bezel_core::domain::frame::{Rect, Rgba};
-    use bezel_core::domain::job::CancelToken;
+    use bezel_core::domain::job::{CancelToken, Progress};
+    use bezel_core::domain::media::{
+        MediaFormat, MediaInfo, MediaTools, StreamSpec, TranscodeTarget,
+    };
     use bezel_core::domain::screen::Confirm;
-    use bezel_core::domain::storage::{BootMedia, Capacity, Operation};
+    use bezel_core::domain::storage::{BootMedia, Capacity, Operation, UploadAction, UploadPlan};
+    use bezel_core::ports::{MediaLocation, MediaTranscoder, VideoFrames};
 
     #[derive(Clone)]
     struct NoPause;
@@ -1167,39 +1028,34 @@ mod tests {
             ]
         );
 
-        // Cancelled after the first write: no more data; the rest of the
-        // declared length goes out as filler (reported as progress), then
-        // HELLO puts the link back and GET_FILE_SIZE measures the partial.
-        // Nothing is deleted.
+        // Cancelled after the first write: nothing more of the data phase
+        // goes out, no filler (D-2026-09-30-release-polish-10); HELLO puts
+        // the link back and GET_FILE_SIZE measures the partial. Nothing is
+        // deleted.
         let mut s = connected();
         let before = s.wire().sent.len();
+        let arrived = chunk.to_string();
         script(
             &mut s,
             &[
                 "media_stop",
                 "nodir-createdone",
                 "create_success",
-                "file_rev_done",
                 ROM_190,
-                &size,
+                &arrived,
             ],
         );
         let (result, progress) = run_upload(&mut s, &clip, &data, Some(1));
         assert_eq!(
             result,
             Err(BezelError::Cancelled {
-                partial: Some(total)
+                partial: Some(chunk)
             })
         );
         assert_eq!(
             progress,
-            [
-                (0, total),
-                (chunk, total),
-                (2 * chunk, total),
-                (total, total)
-            ],
-            "the filler moves the counters from the cancel point to the file size"
+            [(0, total), (chunk, total)],
+            "the counters stop at the cancel"
         );
         let sent = since(&s, before);
         assert_eq!(
@@ -1213,14 +1069,18 @@ mod tests {
                 op::FILE_SIZE
             ]
         );
-        let filler: Vec<usize> = sent.iter().filter(|w| is_filler(w)).map(Vec::len).collect();
-        assert_eq!(filler, [UPLOAD_CHUNK_BLOCKS * BLOCK, 5 * BLOCK]);
-        assert_eq!(sent.iter().filter(|w| !is_command(w)).count(), 3);
+        assert_eq!(sent[4], proto::blocks(&data[..UPLOAD_CHUNK]));
+        assert_eq!(sent[5], proto::hello(), "HELLO right after the data");
+        assert_eq!(
+            sent.iter().filter(|w| !is_command(w)).count(),
+            1,
+            "one data write, no filler"
+        );
         assert!(!s.streaming && s.last.is_none(), "the next frame is full");
 
-        // Cancelled before the first write, the header accepted: the whole
-        // declared length is filler. A screen that then finds no file
-        // leaves no partial to offer for deletion.
+        // Cancelled before the first write, the header accepted: not one
+        // data byte follows. A screen that then finds no file leaves no
+        // partial to offer for deletion.
         let mut s = connected();
         let before = s.wire().sent.len();
         script(
@@ -1229,7 +1089,6 @@ mod tests {
                 "media_stop",
                 "nodir-createdone",
                 "create_success",
-                "file_rev_done",
                 ROM_190,
                 "0",
             ],
@@ -1237,10 +1096,10 @@ mod tests {
         let (result, _) = run_upload(&mut s, &clip, &data, Some(0));
         assert_eq!(result, Err(BezelError::Cancelled { partial: None }));
         let sent = since(&s, before);
-        assert!(sent.iter().all(|w| is_command(w) || is_filler(w)));
+        assert!(sent.iter().all(|w| is_command(w)), "no data write");
         assert_eq!(
-            data_phase_bytes(sent, op::HELLO),
-            proto::data_phase_len(total)
+            commands(sent)[3..],
+            [op::UPLOAD_FILE, op::HELLO, op::FILE_SIZE]
         );
 
         // Cancelled before the header: nothing is sent at all.
@@ -1312,8 +1171,9 @@ mod tests {
             })
         );
 
-        // The screen answers neither `file_rev_done` after the filler (one
-        // block owed) nor HELLO: reconnect, then check for the partial.
+        // No HELLO is answered after the cancel: its tries with their
+        // resync blocks and nothing else, then the error that says the next
+        // command reconnects and which path to check for a partial file.
         let pauses = Pauses::default();
         let mut s = connected_with(&pauses, ROM_190, "turing-8.8");
         pauses.take();
@@ -1322,41 +1182,42 @@ mod tests {
             &mut s,
             &["media_stop", "nodir-createdone", "create_success"],
         );
-        let (result, _) = run_upload(&mut s, &clip, &test_file(UPLOAD_CHUNK + 1), Some(1));
-        let err = result.unwrap_err();
-        assert!(matches!(err, BezelError::Timeout(_)), "{err}");
-        assert!(err.to_string().contains("sd/video/clip.mp4"), "{err}");
+        let file = test_file(UPLOAD_CHUNK + 1);
+        let (result, _) = run_upload(&mut s, &clip, &file, Some(1));
+        assert_eq!(
+            result,
+            Err(BezelError::Timeout(
+                "the screen after a cancelled upload; the next command reconnects it, \
+                 then check sd/video/clip.mp4 for a partial file"
+                    .into()
+            ))
+        );
         let sent = since(&s, before);
-        let first_hello = sent
-            .iter()
-            .position(|w| is_command(w) && w[0] == op::HELLO)
-            .unwrap();
-        assert_eq!(sent[first_hello - 1], proto::filler_blocks(1));
-        let hellos = commands(sent)
-            .into_iter()
-            .filter(|o| *o == op::HELLO)
-            .count();
-        assert_eq!(hellos, HELLO_TRIES);
+        assert_eq!(sent[4], proto::blocks(&file[..UPLOAD_CHUNK]));
+        let round = [
+            proto::hello().to_vec(),
+            proto::start_display_block().to_vec(),
+        ];
+        let rounds: Vec<&[Vec<u8>]> = sent[5..].chunks(2).collect();
+        assert_eq!(rounds, vec![&round[..]; HELLO_TRIES]);
         let waits = pauses.take();
         assert_eq!(waits[0], STOP_VIDEO_SETTLE);
-        assert_eq!(
-            waits[1..],
-            [HELLO_RETRY_PAUSE; HELLO_TRIES],
-            "the wait after the filler reads, it does not pause"
-        );
-    }
+        assert_eq!(waits[1..], [HELLO_RETRY_PAUSE; HELLO_TRIES]);
 
-    /// A write of filler blocks: whole blocks of 249 × [`proto::FILLER`] and
-    /// a zero (a resync block ends in `2c`, a command carries the magic).
-    fn is_filler(write: &[u8]) -> bool {
-        !write.is_empty()
-            && write.len().is_multiple_of(BLOCK)
-            && write.chunks(BLOCK).all(|b| {
-                b[..proto::BLOCK_PAYLOAD]
-                    .iter()
-                    .all(|&x| x == proto::FILLER)
-                    && b[proto::BLOCK_PAYLOAD] == 0
-            })
+        // HELLO answered but GET_FILE_SIZE not: that error, as for any query.
+        let mut s = connected();
+        script(
+            &mut s,
+            &["media_stop", "nodir-createdone", "create_success", ROM_190],
+        );
+        let (result, _) = run_upload(&mut s, &clip, &file, Some(1));
+        let err = result.unwrap_err();
+        assert!(matches!(err, BezelError::Timeout(_)), "{err}");
+        assert!(
+            err.to_string()
+                .contains("GET_FILE_SIZE /mnt/SDCARD/video/clip.mp4"),
+            "{err}"
+        );
     }
 
     /// Wire bytes of `writes` from the first UPLOAD_FILE header (excluded)
@@ -1371,110 +1232,10 @@ mod tests {
             .sum()
     }
 
-    #[test]
-    fn a_cancel_completes_the_declared_length_before_hello() {
-        // Cancelled after the first write of a 3-write file. Whether or not
-        // the firmware would answer a HELLO now, only the declared length
-        // closes its file cleanly (spec § 19): filler first, then HELLO.
-        let mut s = connected();
-        let before = s.wire().sent.len();
-        let data = test_file(UPLOAD_CHUNK * 3 + 1000);
-        let size = data.len() as u64;
-        let declared = proto::data_phase_len(size);
-        let clip = path("sd/video/clip.mp4");
-        let stored = size.to_string();
-        script(
-            &mut s,
-            &[
-                "media_stop",
-                "nodir-createdone",
-                "create_success",
-                "file_rev_done",
-                ROM_190,
-                &stored,
-            ],
-        );
-        let (result, progress) = run_upload(&mut s, &clip, &data, Some(1));
-        // GET_FILE_SIZE finds the whole declared size: the partial file, its
-        // tail filler, for the user to delete (nothing deleted here).
-        assert_eq!(
-            result,
-            Err(BezelError::Cancelled {
-                partial: Some(size)
-            })
-        );
-        let chunk = UPLOAD_CHUNK as u64;
-        assert_eq!(
-            progress,
-            [
-                (0, size),
-                (chunk, size),
-                (2 * chunk, size),
-                (3 * chunk, size),
-                (size, size)
-            ],
-            "every filler write moves the counters on from the cancel point"
-        );
-        let sent = since(&s, before);
-        assert_eq!(
-            commands(sent),
-            [
-                op::STOP_VIDEO,
-                op::STOP_MEDIA,
-                op::LIST_DIR,
-                op::UPLOAD_FILE,
-                op::HELLO,
-                op::FILE_SIZE
-            ],
-            "no HELLO before the filler, one answered after it"
-        );
-        // After the header: the data write, filler up to exactly the
-        // declared length, then HELLO.
-        let header = sent
-            .iter()
-            .position(|w| is_command(w) && w[0] == op::UPLOAD_FILE)
-            .unwrap();
-        let whole = UPLOAD_CHUNK_BLOCKS * BLOCK;
-        let lens: Vec<usize> = sent[header + 1..header + 5].iter().map(Vec::len).collect();
-        assert_eq!(lens, [whole, whole, whole, 5 * BLOCK]);
-        assert!(sent[header + 2..header + 5].iter().all(|w| is_filler(w)));
-        assert_eq!(sent[header + 5], proto::hello());
-        assert_eq!(data_phase_bytes(sent, op::HELLO), declared);
-
-        // No `file_rev_done` within the wait after the filler: HELLO decides.
-        let mut s = connected();
-        let mut replies = vec!["media_stop", "nodir-createdone", "create_success"];
-        replies.extend([""; FILLED_POLLS]);
-        replies.extend([ROM_190, stored.as_str()]);
-        script(&mut s, &replies);
-        let (result, _) = run_upload(&mut s, &clip, &data, Some(1));
-        assert_eq!(
-            result,
-            Err(BezelError::Cancelled {
-                partial: Some(size)
-            })
-        );
-
-        // HELLO answered but GET_FILE_SIZE not: that error, as for any query.
-        let mut s = connected();
-        script(
-            &mut s,
-            &[
-                "media_stop",
-                "nodir-createdone",
-                "create_success",
-                "file_rev_done",
-                ROM_190,
-            ],
-        );
-        let (result, _) = run_upload(&mut s, &clip, &data, Some(1));
-        let err = result.unwrap_err();
-        assert!(matches!(err, BezelError::Timeout(_)), "{err}");
-        assert!(
-            err.to_string()
-                .contains("GET_FILE_SIZE /mnt/SDCARD/video/clip.mp4"),
-            "{err}"
-        );
+    /// Wire bytes of the data phase of a `size`-byte file: 250-byte blocks
+    /// of 249 file bytes.
+    fn wire_len(size: usize) -> usize {
+        size.div_ceil(proto::BLOCK_PAYLOAD) * BLOCK
     }
 
     /// What the modelled firmware does when the host waits for an answer in
@@ -1482,10 +1243,11 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Idle {
         /// Keeps waiting for the declared length: no HELLO is answered on
-        /// that link (the 8.8" before T-7.3).
+        /// that link, the next connection wakes the screen (the 8.8"'s
+        /// first cancelled run, spec § 19).
         Waits,
         /// Leaves the data phase: the next HELLO is answered, but what its
-        /// writer still queued goes into the next file (the 8.8" after T-7.3).
+        /// writer still queued goes into the next file (its later run).
         Leaves,
     }
 
@@ -1529,7 +1291,10 @@ mod tests {
     /// (`file_rev_done`). Its writer lags [`WRITER_QUEUE`] bytes behind:
     /// when a data phase ends any other way ([`Idle::Leaves`], or the wake of
     /// the next connection), the file keeps what was written and the queued
-    /// bytes go into the next file opened.
+    /// bytes go into the next file opened. DELETE_FILE removes a file. Not
+    /// modelled: the hang that completing a cancelled data phase with filler
+    /// caused (D-2026-09-30-release-polish-10); the tests check that the
+    /// driver sends none.
     struct Firmware {
         idle: Idle,
         /// Every write, in order.
@@ -1612,11 +1377,16 @@ mod tests {
                     self.receiving = Some(Receiving {
                         path: named(),
                         size: size as usize,
-                        owed: proto::data_phase_len(u64::from(size)) as usize,
+                        owed: wire_len(size as usize),
                         payload: Vec::new(),
                         block: Vec::new(),
                     });
                     reply::CREATED.to_string()
+                }
+                op::DELETE_FILE => {
+                    let target = named();
+                    self.files.retain(|(p, _)| *p != target);
+                    return;
                 }
                 _ => return,
             };
@@ -1691,110 +1461,190 @@ mod tests {
     }
 
     #[test]
-    fn the_firmware_model_reproduces_the_cancelled_upload_evidence() {
+    fn a_cancel_sends_no_filler_and_the_next_upload_fails_its_size_check() {
         let data = test_file(UPLOAD_CHUNK * 3 + 1000);
+        let clip = path("sd/video/clip.mp4");
         // The 7,444-byte PNG uploaded after the cancel on the 8.8".
         let png = test_file(7_444);
         let image = path("sd/image/logo.png");
+        // With a firmware that answers HELLO after a cancel and one that
+        // does not.
         for idle in [Idle::Leaves, Idle::Waits] {
-            // A cancel recovered the way T-7.3 did: part of the data phase,
-            // then HELLO first.
-            let mut fw = Firmware::new(idle);
-            fw.send(&proto::upload_file(CLIP, data.len() as u32).unwrap())
-                .unwrap();
-            fw.send(&proto::blocks(&data[..UPLOAD_CHUNK])).unwrap();
-            let hello = handshake(&mut fw, &NoPause);
-            if idle == Idle::Leaves {
-                // After T-7.3: the first HELLO was file data, the one after
-                // the resync block is answered...
-                assert!(hello.is_ok(), "{hello:?}");
-                assert_eq!(fw.commands, [op::UPLOAD_FILE, op::HELLO]);
-            } else {
-                // Before T-7.3: no HELLO is answered; the next connection
-                // wakes the screen.
-                assert!(matches!(hello, Err(BezelError::Timeout(_))), "{hello:?}");
-                assert_eq!(fw.commands, [op::UPLOAD_FILE]);
-                fw.wake();
-            }
-            // ...the partial is shorter than what the screen accepted...
-            let partial = fw.file(CLIP).unwrap().len();
-            assert!(partial < UPLOAD_CHUNK, "{idle:?}: {partial}");
-            assert_eq!(fw.queued.len(), WRITER_QUEUE);
-            // ...and the next upload takes the queued bytes: its size check
-            // fails.
-            let mut s = TuringRevC::connect(fw, &NoPause, &[m88()]).unwrap();
-            let (result, _) = run_upload(&mut s, &image, &png, None);
-            assert_eq!(result, Ok(()));
+            // Cancelled after the first write.
+            let mut s = TuringRevC::connect(Firmware::new(idle), &NoPause, &[m88()]).unwrap();
+            let (result, _) = run_upload(&mut s, &clip, &data, Some(1));
+            let fw = s.wire();
             assert_eq!(
-                s.size(&image).unwrap(),
-                Some((WRITER_QUEUE + png.len()) as u64),
+                data_phase_bytes(&fw.sent, op::HELLO),
+                wire_len(UPLOAD_CHUNK) as u64,
+                "{idle:?}: the data, then HELLO: no filler"
+            );
+            let mut s = match idle {
+                Idle::Leaves => {
+                    // The HELLO after the resync block is answered and the
+                    // partial measured: shorter than what the screen
+                    // accepted, the rest queued for its writer.
+                    let partial = fw.file(CLIP).unwrap().len();
+                    assert!(partial < UPLOAD_CHUNK, "{partial}");
+                    assert_eq!(
+                        result,
+                        Err(BezelError::Cancelled {
+                            partial: Some(partial as u64)
+                        })
+                    );
+                    assert_eq!(
+                        fw.commands[fw.commands.len() - 3..],
+                        [op::UPLOAD_FILE, op::HELLO, op::FILE_SIZE]
+                    );
+                    s
+                }
+                Idle::Waits => {
+                    // Every HELLO was file data: the reconnect error, then
+                    // the next connection wakes the screen.
+                    assert!(matches!(result, Err(BezelError::Timeout(_))), "{result:?}");
+                    assert_eq!(fw.commands.last(), Some(&op::UPLOAD_FILE));
+                    let mut fw = s.wire;
+                    fw.wake();
+                    TuringRevC::connect(fw, &NoPause, &[m88()]).unwrap()
+                }
+            };
+            let partial = s.size(&clip).unwrap();
+            assert!(
+                partial.is_some_and(|n| n < data.len() as u64),
+                "{idle:?}: a partial to delete, {partial:?}"
+            );
+            assert_eq!(s.wire().queued.len(), WRITER_QUEUE, "{idle:?}");
+
+            // The next upload takes the queued bytes: the core's size check
+            // fails and says what to do. Nothing is deleted for the user.
+            let stored = WRITER_QUEUE + png.len();
+            assert_eq!(
+                upload_as_the_core_does(&mut s, &image, &png),
+                Err(BezelError::Transport(format!(
+                    "sd/image/logo.png was stored with {stored} bytes, not the file's {}: \
+                     the stored size differs; delete it and send it again",
+                    png.len()
+                ))),
                 "{idle:?}"
             );
-            assert_eq!(s.wire().file(LOGO).unwrap()[WRITER_QUEUE..], png);
+            let fw = s.wire();
+            assert_eq!(fw.file(LOGO).unwrap()[WRITER_QUEUE..], png);
+            let destructive = [op::DELETE_FILE, op::RESTART, 0x82, op::SET_OPTIONS];
+            assert!(
+                fw.commands.iter().all(|o| !destructive.contains(o)),
+                "{idle:?}"
+            );
+
+            // Deleted and sent again, as the error says: exact.
+            storage::delete(&mut s, &image, Confirm::Yes).unwrap();
+            assert_eq!(
+                upload_as_the_core_does(&mut s, &image, &png),
+                Ok(png.len() as u64),
+                "{idle:?}"
+            );
+            assert_eq!(s.wire().file(LOGO), Some(png.as_slice()), "{idle:?}");
         }
     }
 
     #[test]
-    fn after_a_cancel_the_next_upload_is_exact() {
-        let data = test_file(UPLOAD_CHUNK * 3 + 1000);
-        let size = data.len() as u64;
+    fn a_cancel_while_the_screen_writes_keeps_the_file_whole() {
+        // The whole file went out: the firmware closes it, HELLO is answered
+        // at once and the next upload is exact.
+        let small = test_file(1000);
         let clip = path("sd/video/clip.mp4");
-        let png = test_file(7_444);
+        let png = test_file(700);
         let image = path("sd/image/logo.png");
-        // Cancelled before the first write, after it, and while the screen
-        // writes the whole file: `kept` bytes of the data reach the file.
-        let cancels = [(0, 0), (1, UPLOAD_CHUNK), (size, data.len())];
-        // With a firmware that would answer HELLO after a cancel and one
-        // that would not.
         for idle in [Idle::Leaves, Idle::Waits] {
-            for (cancel_at, kept) in cancels {
-                let case = format!("{idle:?}, cancelled at {cancel_at}");
-                let mut s = TuringRevC::connect(Firmware::new(idle), &NoPause, &[m88()]).unwrap();
-                let (result, progress) = run_upload(&mut s, &clip, &data, Some(cancel_at));
-                assert_eq!(
-                    result,
-                    Err(BezelError::Cancelled {
-                        partial: Some(size)
-                    }),
-                    "{case}"
-                );
-                assert_eq!(progress.last(), Some(&(size, size)), "{case}");
-                let fw = s.wire();
-                let partial = fw.file(CLIP).unwrap();
-                assert_eq!(partial[..kept], data[..kept], "{case}");
-                assert!(
-                    partial[kept..].iter().all(|&b| b == proto::FILLER),
-                    "{case}"
-                );
-                assert!(fw.receiving.is_none() && fw.queued.is_empty(), "{case}");
-                // The recovery's one HELLO was a command, answered at once.
-                assert_eq!(
-                    fw.commands[fw.commands.len() - 3..],
-                    [op::UPLOAD_FILE, op::HELLO, op::FILE_SIZE],
-                    "{case}"
-                );
-                let hellos = fw.sent.iter().filter(|w| w.as_slice() == proto::hello());
-                assert_eq!(
-                    hellos.count(),
-                    2,
-                    "{case}: the connect's and the recovery's"
-                );
-
-                let (result, _) = run_upload(&mut s, &image, &png, None);
-                assert_eq!(result, Ok(()), "{case}");
-                assert_eq!(s.size(&image).unwrap(), Some(png.len() as u64), "{case}");
-                assert_eq!(s.wire().file(LOGO), Some(png.as_slice()), "{case}");
-                let destructive = [op::DELETE_FILE, op::RESTART, 0x82, op::SET_OPTIONS];
-                assert!(
-                    s.wire().commands.iter().all(|o| !destructive.contains(o)),
-                    "{case}"
-                );
-            }
+            let mut s = TuringRevC::connect(Firmware::new(idle), &NoPause, &[m88()]).unwrap();
+            let (result, _) = run_upload(&mut s, &clip, &small, Some(1000));
+            assert_eq!(
+                result,
+                Err(BezelError::Cancelled {
+                    partial: Some(1000)
+                }),
+                "{idle:?}"
+            );
+            let fw = s.wire();
+            assert_eq!(
+                fw.commands[fw.commands.len() - 3..],
+                [op::UPLOAD_FILE, op::HELLO, op::FILE_SIZE]
+            );
+            assert_eq!(fw.file(CLIP), Some(small.as_slice()));
+            assert!(fw.queued.is_empty());
+            assert_eq!(
+                upload_as_the_core_does(&mut s, &image, &png),
+                Ok(png.len() as u64),
+                "{idle:?}"
+            );
         }
     }
 
-    /// How a [`BulkWire`] takes its writes longer than one packet (data and
-    /// filler), in order; later ones are taken.
+    /// The host side of the core's upload use case for one prepared file:
+    /// its bytes.
+    struct HostFile(Vec<u8>);
+
+    impl MediaTranscoder for HostFile {
+        fn tools(&mut self) -> MediaTools {
+            MediaTools::Missing {
+                install_hints: Vec::new(),
+            }
+        }
+
+        fn probe(&mut self, _: &MediaLocation) -> Result<MediaInfo> {
+            unreachable!("the upload comes prepared")
+        }
+
+        fn transcode(
+            &mut self,
+            _: &MediaLocation,
+            _: &TranscodeTarget,
+            _: &mut Job<'_>,
+        ) -> Result<MediaLocation> {
+            unreachable!("the file is sent as it is")
+        }
+
+        fn load(&mut self, _: &MediaLocation) -> Result<Vec<u8>> {
+            Ok(self.0.clone())
+        }
+
+        fn stream(&mut self, _: &MediaLocation, _: StreamSpec) -> Result<Box<dyn VideoFrames>> {
+            unreachable!("nothing is streamed")
+        }
+    }
+
+    /// Uploads `file` to `target` through the core's use case, as the CLI
+    /// and the studio do: sent, then its stored size checked. The bytes
+    /// stored, or the use case's error.
+    fn upload_as_the_core_does(
+        link: &mut dyn ScreenLink,
+        target: &RemotePath,
+        file: &[u8],
+    ) -> Result<u64> {
+        let bytes = file.len() as u64;
+        let prepared = PreparedUpload {
+            source: MediaLocation("logo.png".into()),
+            media: MediaInfo {
+                format: MediaFormat::Png,
+                bytes,
+                dimensions: None,
+                video: None,
+                has_audio: false,
+            },
+            plan: UploadPlan {
+                path: target.clone(),
+                action: UploadAction::AsIs { bytes },
+                replaces: None,
+            },
+        };
+        let token = CancelToken::new();
+        let mut sink = |_: Progress| {};
+        let mut job = Job::new(&token, &mut sink);
+        let mut host = HostFile(file.to_vec());
+        storage::upload(link, &mut host, &prepared, Confirm::No, &mut job).map(|u| u.bytes)
+    }
+
+    /// How a [`BulkWire`] takes its writes longer than one packet (the data
+    /// writes), in order; later ones are taken.
     #[derive(Debug, Clone, Copy)]
     enum Bulk {
         Taken,
@@ -1854,100 +1704,52 @@ mod tests {
 
     type BulkScreen = TuringRevC<BulkWire<Firmware>, NoPause>;
 
-    /// Uploads `data` to the card's videos of a [`Firmware`] behind a
-    /// [`BulkWire`] following `plan`, cancelled once `cancel_at` bytes were
-    /// reported (or by the wire).
-    fn bulk_upload(
-        idle: Idle,
-        plan: &[Bulk],
-        cancel_at: Option<u64>,
-        data: &[u8],
-    ) -> (Result<()>, BulkScreen) {
+    /// Uploads `data` to the card's videos of a [`Firmware`] that answers
+    /// HELLO after a cancel, behind a [`BulkWire`] following `plan` (only
+    /// the wire cancels).
+    fn bulk_upload(plan: &[Bulk], data: &[u8]) -> (Result<()>, BulkScreen) {
         let token = CancelToken::new();
         let wire = BulkWire {
-            inner: Firmware::new(idle),
+            inner: Firmware::new(Idle::Leaves),
             token: token.clone(),
             plan: plan.to_vec(),
             bulk: 0,
         };
         let mut s = TuringRevC::connect(wire, &NoPause, &[m88()]).unwrap();
-        let remote = token.clone();
-        let mut sink = |p: Progress| {
-            if cancel_at.is_some_and(|at| p.done >= at) {
-                remote.cancel();
-            }
-        };
+        let mut sink = |_: Progress| {};
         let mut job = Job::new(&token, &mut sink);
         let result = s.upload(&path("sd/video/clip.mp4"), data, &mut job);
         (result, s)
     }
 
     #[test]
-    fn a_write_the_cancel_cut_counts_whole_so_the_filler_stays_within_the_declared_length() {
+    fn a_write_the_cancel_cut_short_is_followed_by_hello_only() {
         let data = test_file(UPLOAD_CHUNK * 3 + 1000);
-        let size = data.len() as u64;
-        let declared = proto::data_phase_len(size);
-        let kept = 2 * UPLOAD_CHUNK;
-
-        // The cut write did reach the screen: the filler completes the file
-        // exactly, HELLO is a command again and the next upload is exact.
-        for idle in [Idle::Leaves, Idle::Waits] {
-            let plan = [Bulk::Taken, Bulk::CutAfterSending];
-            let (result, mut s) = bulk_upload(idle, &plan, None, &data);
-            assert_eq!(
-                result,
-                Err(BezelError::Cancelled {
-                    partial: Some(size)
-                }),
-                "{idle:?}"
-            );
+        // The cancel's signal cuts the second write after or before its
+        // bytes left: HELLO comes next either way, then the size query.
+        for (step, kept) in [
+            (Bulk::CutAfterSending, 2 * UPLOAD_CHUNK),
+            (Bulk::CutBeforeSending, UPLOAD_CHUNK),
+        ] {
+            let (result, s) = bulk_upload(&[Bulk::Taken, step], &data);
             let fw = &s.wire().inner;
-            assert_eq!(data_phase_bytes(&fw.sent, op::HELLO), declared);
-            let partial = fw.file(CLIP).unwrap();
-            assert_eq!(partial[..kept], data[..kept]);
-            assert!(partial[kept..].iter().all(|&b| b == proto::FILLER));
-            let next = test_file(700);
-            let (result, _) = run_upload(&mut s, &path("sd/video/next.mp4"), &next, None);
-            assert_eq!(result, Ok(()));
             assert_eq!(
-                s.wire().inner.file("/mnt/SDCARD/video/next.mp4"),
-                Some(next.as_slice())
+                data_phase_bytes(&fw.sent, op::HELLO),
+                wire_len(kept) as u64,
+                "{step:?}"
             );
+            let partial = fw.file(CLIP).map(|f| f.len() as u64);
+            assert!(
+                partial.is_some_and(|n| n < kept as u64),
+                "{step:?}: {partial:?}"
+            );
+            assert_eq!(result, Err(BezelError::Cancelled { partial }), "{step:?}");
         }
 
-        // It did not: the filler comes one write short and the firmware
-        // still waits, so it swallows the recovery's HELLOs as a cancel did
-        // before the filler (reconnect). The count never passes the
-        // declared length.
-        let plan = [Bulk::Taken, Bulk::CutBeforeSending];
-        let (result, s) = bulk_upload(Idle::Waits, &plan, None, &data);
-        let err = result.unwrap_err();
-        assert!(matches!(err, BezelError::Timeout(_)), "{err}");
-        assert!(err.to_string().contains("sd/video/clip.mp4"), "{err}");
-        let fw = &s.wire().inner;
-        let after_header = data_phase_bytes(&fw.sent, 0xFF);
-        assert!(after_header <= declared, "{after_header} > {declared}");
-        assert!(fw.receiving.is_some(), "still in the data phase");
-        assert_eq!(fw.commands.last(), Some(&op::UPLOAD_FILE));
-        assert_eq!(
-            commands(&fw.sent)
-                .iter()
-                .filter(|o| **o == op::HELLO)
-                .count(),
-            1 + HELLO_TRIES,
-            "the connect's, then one round after the filler"
-        );
-    }
-
-    #[test]
-    fn the_filler_stops_at_a_failed_write_and_is_never_sent_for_a_finished_data_phase() {
-        let data = test_file(UPLOAD_CHUNK * 3 + 1000);
-        // The screen is unplugged as the filler starts: the reconnect
-        // error; nothing, HELLO included, follows the failed write.
-        let plan = [Bulk::Taken, Bulk::Unplugged];
-        let (result, s) = bulk_upload(Idle::Waits, &plan, Some(1), &data);
-        let err = result.unwrap_err();
-        assert!(matches!(err, BezelError::Timeout(_)), "{err}");
+        // The screen is unplugged mid-upload, nothing cancelled: the
+        // write's error, and no recovery is tried.
+        let (result, s) = bulk_upload(&[Bulk::Taken, Bulk::Unplugged], &data);
+        assert_eq!(result, Err(BezelError::Transport("unplugged".into())));
         let fw = &s.wire().inner;
         assert_eq!(
             fw.sent.last(),
@@ -1962,27 +1764,6 @@ mod tests {
             1,
             "the connect's only"
         );
-
-        // Cancelled while the screen writes a file it got whole: nothing is
-        // owed, so no filler, and HELLO is answered at once.
-        let small = test_file(1000);
-        for idle in [Idle::Leaves, Idle::Waits] {
-            let (result, s) = bulk_upload(idle, &[], Some(1000), &small);
-            assert_eq!(
-                result,
-                Err(BezelError::Cancelled {
-                    partial: Some(1000)
-                }),
-                "{idle:?}"
-            );
-            let fw = &s.wire().inner;
-            assert!(!fw.sent.iter().any(|w| is_filler(w)));
-            assert_eq!(
-                fw.commands[fw.commands.len() - 3..],
-                [op::UPLOAD_FILE, op::HELLO, op::FILE_SIZE]
-            );
-            assert_eq!(fw.file(CLIP), Some(small.as_slice()));
-        }
     }
 
     #[test]

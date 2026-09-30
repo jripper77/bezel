@@ -10,6 +10,7 @@ import { createStoragePanel, wireSubtabs } from './ui/storage.js';
 import { el } from './ui/dom.js';
 import { askChoice } from './ui/dialog.js';
 import { createPreferences } from './ui/preferences.js';
+import { showAccessHelp } from './ui/udev.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
 import { errorText } from './messages.js';
@@ -53,8 +54,14 @@ function toast(message) {
   toast.timer = setTimeout(() => { box.hidden = true; }, 3500);
 }
 
-/** Shows why a command failed. */
-const fail = (e) => toast(errorText(t, e));
+/**
+ * Shows why a command failed; a port the system denied comes with the
+ * command that fixes it (Linux), in a dialog.
+ */
+function fail(e) {
+  if (e?.udevCommand) showAccessHelp(t, e, toast);
+  else toast(errorText(t, e));
+}
 
 // ------------------------------------------------------------ store ----
 const session = await bridge.session().catch(() => null);

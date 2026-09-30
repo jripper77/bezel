@@ -37,7 +37,7 @@ async fn blocking<T: Send + 'static>(
     work: impl FnOnce(&Backend) -> UiResult<T> + Send + 'static,
 ) -> UiResult<T> {
     let backend = Arc::clone(state);
-    tauri::async_runtime::spawn_blocking(move || work(&backend))
+    tauri::async_runtime::spawn_blocking(move || work(&backend).map_err(|e| backend.explain(e)))
         .await
         .map_err(UiError::system)?
 }

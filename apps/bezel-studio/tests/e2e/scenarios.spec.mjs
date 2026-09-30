@@ -439,3 +439,35 @@ test('the ping target and the MangoHud folder are set in the preferences', async
   await expectAccessible(page);
   expect(errors).toEqual([]);
 });
+
+test('a denied port shows the udev command to copy', async ({ page, context }) => {
+  const errors = watchErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/index.html?demo=denied');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  const live = page.getByRole('switch');
+  await live.click({ force: true });
+  const dialog = page.getByRole('dialog', { name: 'Deixar o Bezel abrir a tela' });
+  await expect(dialog).toContainText('O sistema não deixou o Bezel abrir /dev/ttyACM1 (Permission denied (os error 13)).');
+  const command = dialog.getByRole('group', { name: 'Comando que instala a regra do udev' });
+  await expect(command).toContainText('sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules');
+  await expect(dialog).toContainText('nunca roda este comando');
+  const copy = command.getByRole('button', { name: 'Copiar comando' });
+  await expect(copy).toBeFocused();
+  await expectAccessible(page);
+  await copy.click();
+  await expect(page.locator('#toast')).toHaveText('Comando copiado.');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^sudo install -m 644 .* && sudo udevadm trigger$/);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(live).not.toBeChecked();
+
+  // The storage tab says the same, with the command.
+  await page.getByRole('tab', { name: 'Tela' }).click();
+  await page.getByRole('tab', { name: 'Armazenamento' }).click();
+  const storage = page.locator('#storage-panel');
+  await expect(storage.getByRole('alert')).toContainText('O sistema não deixou o Bezel abrir /dev/ttyACM1');
+  await expect(storage.getByRole('group', { name: 'Comando que instala a regra do udev' })).toBeVisible();
+  await expectAccessible(page);
+  expect(errors).toEqual([]);
+});

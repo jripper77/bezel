@@ -193,3 +193,11 @@ test('a file stored with the wrong size fails its check and stays for a delete',
   );
   assert.equal(demo.storageState().files.get('internal/image/torto.png'), 255_990);
 });
+
+test('without the udev rule the demo denies the screen and names the fix', async () => {
+  const demo = createDemoBackend('denied', instant);
+  for (const call of [demo.setLive(true, KEY), demo.setBrightness(KEY, 50), demo.release(KEY), demo.storageOverview(KEY)]) {
+    await assert.rejects(call, (e) => e.code === 'accessDenied' && e.args.address === KEY && e.udevCommand.startsWith('sudo install -m 644 '));
+  }
+  await demo.setLive(false, null);
+});

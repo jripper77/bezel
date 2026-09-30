@@ -230,6 +230,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .notice .button-row { margin-top: 8px; }
 .notice .stored-files { margin: 6px 0 0; padding: 0; }
 .hints { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.udev-command { display: grid; gap: 6px; justify-items: start; margin: 8px 0; }
+.udev-command-text { display: block; width: 100%; padding: 8px 10px; border-radius: 8px; background: var(--surface-3); font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.8rem; overflow-wrap: anywhere; user-select: all; }
+.udev-dialog { width: min(560px, calc(100vw - 32px)); }
 .hints code { display: block; padding: 4px 8px; border-radius: 6px; background: var(--surface-3); font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.8rem; overflow-wrap: anywhere; user-select: all; }
 
 .storage-job { display: grid; gap: 6px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent-soft); }

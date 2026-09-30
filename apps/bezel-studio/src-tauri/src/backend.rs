@@ -35,6 +35,7 @@ use crate::storage::StorageState;
 pub use crate::studio::MAX_REFRESH;
 use crate::studio::{Delivery, Studio};
 use crate::texts::{Texts, language_slug, parse_language, texts};
+use crate::udev_help::UdevHelp;
 
 /// Largest file accepted as an image or theme, bytes.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -60,6 +61,8 @@ pub struct Backend {
     pub system_language: Language,
     /// Builds the sensors again when their options change.
     pub make_sensors: SensorFactory,
+    /// On Linux, the udev rule that fixes a denied port (`None` elsewhere).
+    pub udev: Option<UdevHelp>,
     /// Font families themes can use.
     pub fonts: Vec<String>,
     /// The editing session.
@@ -219,6 +222,18 @@ impl Backend {
     pub(crate) fn connect(&self, key: &str) -> UiResult<Box<dyn ScreenLink>> {
         let screen = self.find_screen(key)?;
         Ok(self.connector.connect(&screen)?)
+    }
+
+    /// `error` with what fixes it: the udev rule's install command for a
+    /// port the system denied (Linux).
+    pub fn explain(&self, error: UiError) -> UiError {
+        if error.code() != "accessDenied" {
+            return error;
+        }
+        match self.udev.as_ref().and_then(UdevHelp::command) {
+            Some(command) => error.with_udev_command(command),
+            None => error,
+        }
     }
 
     // -------------------------------------------------------- preferences --
@@ -712,6 +727,7 @@ mod tests {
             settings: SettingsFile::new(root.join("settings.json")),
             system_language: Language::English,
             make_sensors: Arc::new(|_| Box::new(FakeSensors::demo())),
+            udev: Some(UdevHelp::new(root.join("cache").join("60-bezel.rules"))),
             fonts: vec!["Inter".into()],
             studio: Session::new(studio),
             storage: StorageState::new(
@@ -833,6 +849,27 @@ mod tests {
         let settings = f.backend.settings.load();
         assert_eq!((settings.ping_host, settings.mangohud_dir), (None, None));
         assert_eq!(f.backend.preferences().ping_host, "8.8.8.8");
+    }
+
+    #[test]
+    fn a_denied_port_comes_with_the_udev_command() {
+        let f = fixture("denied");
+        let denied = UiError::from(bezel_core::BezelError::AccessDenied {
+            address: KEY.into(),
+            reason: "Permission denied (os error 13)".into(),
+        });
+        let explained = f.backend.explain(denied.clone());
+        let command = explained.udev_command().unwrap();
+        assert!(
+            command.contains("60-bezel.rules /etc/udev/rules.d/"),
+            "{command}"
+        );
+        assert!(f.root.join("cache").join("60-bezel.rules").is_file());
+        let other = f.backend.explain(UiError::new(ErrorCode::Busy));
+        assert_eq!(other.udev_command(), None, "only a denied port");
+        let mut elsewhere = fixture("denied-elsewhere");
+        elsewhere.backend.udev = None;
+        assert_eq!(elsewhere.backend.explain(denied).udev_command(), None);
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub mod storage;
 pub mod studio;
 pub mod texts;
 mod tray;
+pub mod udev_help;
 
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -44,6 +45,7 @@ use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
 use crate::storage::{MediaSetup, StorageState};
 use crate::studio::Studio;
+use crate::udev_help::UdevHelp;
 
 /// Label of the main window in `tauri.conf.json`.
 pub(crate) const MAIN_WINDOW: &str = "main";
@@ -289,6 +291,9 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         settings,
         system_language,
         make_sensors: sensors,
+        // Only Linux grants USB access through udev rules.
+        udev: cfg!(target_os = "linux")
+            .then(|| UdevHelp::new(cache.join(bezel_devices::udev::FILE_NAME))),
         fonts,
         studio: Session::new(studio),
         storage,

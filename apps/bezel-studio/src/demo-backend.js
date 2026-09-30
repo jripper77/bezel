@@ -1,6 +1,6 @@
 // An in-memory backend for demo mode: a simulated screen, sensors that move,
 // themes, media and an approximate renderer. Nothing here reaches hardware.
-import { DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_STORAGE, SCENARIOS } from './demo-data.js';
+import { DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
 import { DEMO_THEME } from './demo-theme.js';
 import { renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
@@ -82,6 +82,16 @@ export const DEMO_FOLDER = '/home/demo/mangohud';
 /** Whether `text` can name a host to ping, like the backend checks it. */
 export function demoIsHost(text) {
   return text.length <= 253 && /^[A-Za-z0-9:][A-Za-z0-9.:-]*$/.test(text);
+}
+
+/** The system refused to open `address` (the `denied` scenario). */
+export function demoDenied(address) {
+  const reason = 'Permission denied (os error 13)';
+  return Object.assign(new Error(`access denied to ${address}: ${reason}`), {
+    code: 'accessDenied',
+    args: { address, reason },
+    udevCommand: DEMO_UDEV_COMMAND,
+  });
 }
 
 /** Pause between two simulated progress reports, ms. */
@@ -257,6 +267,7 @@ function createDemoStorage(chosen, { delay, live, theme }) {
 
   return {
     storageOverview: (key) => {
+      if (chosen.denied) return Promise.reject(demoDenied(key));
       if (!screenOf(key)?.models.every((m) => m.capabilities.storage)) return refuse('unsupported', 'not supported: no storage', { detail: 'no storage' });
       if (job) return refuse('busy', 'a storage operation is using the screen');
       const folders = (card ? ['internal', 'sd'] : ['internal']).flatMap((medium) => ['image', 'video'].map((kind) => ({
@@ -406,12 +417,13 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       return Promise.resolve();
     },
     setLive: (on, screen) => {
+      if (on && chosen.denied) return Promise.reject(demoDenied(screen));
       live = on ? screen : null;
       if (live) remembered.set(live, theme.orientation);
       return Promise.resolve({ live });
     },
-    setBrightness: () => Promise.resolve(),
-    release: () => Promise.resolve(),
+    setBrightness: (screen) => (chosen.denied ? Promise.reject(demoDenied(screen)) : Promise.resolve()),
+    release: (screen) => (chosen.denied ? Promise.reject(demoDenied(screen)) : Promise.resolve()),
     saveTheme: (next, saveAs) => {
       theme = structuredClone(next);
       const location = `demo://${next.name}`;

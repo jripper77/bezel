@@ -263,6 +263,7 @@ fn fixture_with(name: &str, storage: FakeStorage, media: FakeMedia) -> Fixture {
         settings: SettingsFile::new(root.join("settings.json")),
         system_language: Language::English,
         make_sensors: Arc::new(|_| Box::new(FakeSensors::demo())),
+        udev: None,
         fonts: Vec::new(),
         studio: crate::backend::Session::new(studio),
         storage: StorageState::new(Box::new(media), root.join("scratch")),

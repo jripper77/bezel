@@ -8,6 +8,7 @@ import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { makeDraggable } from './dragdrop.js';
 import { errorText } from '../messages.js';
+import { udevCommand } from './udev.js';
 
 export const MEDIA = Object.freeze(['internal', 'sd']);
 export const KINDS = Object.freeze(['image', 'video']);
@@ -213,6 +214,9 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
   const busy = () => Boolean(view.job) || view.working;
   const bytes = (n) => formatBytes(n, locale());
 
+  /** A command's error as a notice (with the udev command when it fixes it). */
+  const errorNotice = (e) => ({ kind: 'error', text: errorText(t, e), command: e?.udevCommand ?? null });
+
   // ------------------------------------------------------------- loading --
   async function load() {
     const current = screen();
@@ -244,7 +248,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       await work();
       if (success) notify(success);
     } catch (e) {
-      view.notice = { kind: 'error', text: errorText(t, e) };
+      view.notice = errorNotice(e);
     }
     view.working = false;
     if (reload) await load();
@@ -257,7 +261,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     try {
       source = await bridge.pickMedia();
     } catch (e) {
-      view.notice = { kind: 'error', text: errorText(t, e) };
+      view.notice = errorNotice(e);
       renderNotices();
       return;
     }
@@ -282,7 +286,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     try {
       answer = await ask();
     } catch (e) {
-      view.notice = { kind: 'error', text: errorText(t, e) };
+      view.notice = errorNotice(e);
     }
     view.working = false;
     if (answer?.status === 'refused') view.notice = { kind: 'refused', name: label, refusal: answer };
@@ -336,7 +340,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       // partial file may remain (seen on the 8.8").
       view.notice = view.job?.cancelling && e?.code === 'timeout'
         ? { kind: 'error', text: t('storage.cancelledLost', { name: view.job.name }) }
-        : { kind: 'error', text: errorText(t, e), path: e?.code === 'sizeMismatch' ? e.args?.file : null };
+        : { ...errorNotice(e), path: e?.code === 'sizeMismatch' ? e.args?.file : null };
     }
     const { name } = view.job;
     view.job = null;
@@ -406,7 +410,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       view.notice = tools.rejected ? { kind: 'error', text: t('storage.ffmpegRejected', { path: tools.rejected }) } : null;
       if (tools.ready) notify(t('storage.ffmpegReady', { version: tools.version ?? '' }));
     } catch (e) {
-      view.notice = { kind: 'error', text: errorText(t, e) };
+      view.notice = errorNotice(e);
     }
     renderNotices();
   }
@@ -452,6 +456,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     }
     // A file stored with the wrong size is deleted on request, never on its own.
     const children = [el('p', { text: n.text })];
+    if (n.command) children.push(el('p', { text: t('udev.explain') }), udevCommand(t, n.command, notify));
     if (n.path && storageFeatures(screen()).remove) {
       const file = fileOf(n.path);
       children.push(el('div', { class: 'button-row' }, [
@@ -626,8 +631,10 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       return;
     }
     if (view.status === 'error') {
+      const command = view.error?.udevCommand;
       body.replaceChildren(
         el('p', { class: 'empty-note', role: 'alert', text: t('storage.loadError', { message: errorText(t, view.error) }) }),
+        ...(command ? [el('p', { class: 'hint', text: t('udev.explain') }), udevCommand(t, command, notify)] : []),
         el('div', { class: 'button-row' }, [el('button', { type: 'button', class: 'text-button', text: t('storage.retry'), onclick: load })]),
       );
       return;

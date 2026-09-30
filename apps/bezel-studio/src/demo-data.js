@@ -110,8 +110,11 @@ export const DEMO_VIDEO_THEME = Object.freeze({
   ],
 });
 
+/** The command the app shows to install its udev rule (Linux). */
+export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules && sudo udevadm control --reload && sudo udevadm trigger';
+
 /**
- * @type {Record<string, {screens?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, theme?: object}>}
+ * @type {Record<string, {screens?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, theme?: object, denied?: boolean}>}
  */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
@@ -121,4 +124,6 @@ export const SCENARIOS = Object.freeze({
   noffmpeg: { screens: [turing88], ffmpeg: false, card: false },
   video: { screens: [turing88], theme: DEMO_VIDEO_THEME },
   turzx: { screens: [turzx] },
+  // Linux without Bezel's udev rule: the screen is listed, opening it is denied.
+  denied: { screens: [turing88], denied: true },
 });

@@ -112,8 +112,8 @@ pub struct DeviceModel {
     pub id: ModelId,
     /// Marketing name.
     pub name: &'static str,
-    /// Diagonal in tenths of an inch (88 = 8.8").
-    pub diagonal_tenths: u16,
+    /// Diagonal in hundredths of an inch (880 = 8.8", 96 = 0.96").
+    pub diagonal_hundredths: u16,
     /// Panel size in portrait form (`width <= height`).
     pub panel: Size,
     /// Orientation in which the panel's framebuffer is laid out.
@@ -127,14 +127,14 @@ pub struct DeviceModel {
 }
 
 impl DeviceModel {
-    /// Diagonal formatted like `8.8"`.
+    /// Diagonal formatted like `8.8"`, `0.96"` or `5"`.
     pub fn diagonal(&self) -> String {
-        let whole = self.diagonal_tenths / 10;
-        let tenth = self.diagonal_tenths % 10;
-        if tenth == 0 {
-            format!("{whole}\"")
-        } else {
-            format!("{whole}.{tenth}\"")
+        let whole = self.diagonal_hundredths / 100;
+        let fraction = self.diagonal_hundredths % 100;
+        match fraction {
+            0 => format!("{whole}\""),
+            f if f % 10 == 0 => format!("{whole}.{}\"", f / 10),
+            f => format!("{whole}.{f:02}\""),
         }
     }
 }

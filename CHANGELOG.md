@@ -38,6 +38,12 @@ the Conventional Commits.
 - Bundled "Midnight" themes for the 8.8" (horizontal and vertical), 5", 3.5"
   (both ways) and 2.1"/2.8" round screens, with the Inter and JetBrains Mono
   fonts (SIL Open Font License 1.1); a theme can be named instead of a path.
+- Bezel Studio, the desktop app: a single window with a drag-and-drop theme
+  editor (widgets and sensors from the library onto a canvas that shows the
+  real renderer's frame; snapping, alignment, layers, undo/redo, pt-BR and
+  English, light and dark), vertical or horizontal themes with one click, live
+  mode on the screen that keeps running from the tray, start at login, the theme
+  library with bundled themes and import of other apps' themes.
 - Bezel Studio: a Storage tab in the Screen panel — usage bars for the internal
   flash and the memory card, files per folder, sending by drag-and-drop with a
   progress bar and Cancel, play/stop, and delete or the boot media behind a

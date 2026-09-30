@@ -11,6 +11,29 @@ rebrands — on Linux and Windows, from one app.
 > 8.8"; the studio's Storage tab awaits its hardware check); packaging and the
 > 1.0 release come next.
 
+## Bezel Studio
+
+`bezel-studio` (from the packages, or `scripts/install-local.sh`) is the app: one
+window to design themes and drive the screen.
+
+- **Design by dragging**: widgets (text, value, clock, image, shape, bar, ring,
+  needle, graph) and sensors from the library onto the canvas; move, resize with
+  snapping guides, align, layers, undo/redo. The canvas shows exactly what the
+  screen gets (the same renderer).
+- **Vertical or horizontal**: one click in the top bar turns the theme (the
+  layout follows: a vertical stack becomes a horizontal row), and *Rotate 180°*
+  when the cable comes out the other side.
+- **Live**: the switch shows the theme on the screen while you edit; closing the
+  window keeps it running from the tray. *Start with the computer* (Screen panel)
+  brings it back at login.
+- **Themes**: bundled ones for each screen size, your own library, and import of
+  the vendor app's `.turtheme` and turing-smart-screen-python themes.
+- **Screen panel**: brightness, and the *Storage* tab for the screen's internal
+  flash and memory card (send pictures and videos, play them, choose what the
+  screen shows at power-up).
+
+`BEZEL_FAKE=1 bezel-studio` opens it with a simulated 8.8" and demo sensors.
+
 ## Quick start
 
 ```bash

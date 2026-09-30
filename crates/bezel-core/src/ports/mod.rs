@@ -38,7 +38,8 @@ pub trait ScreenLink: Send {
     fn set_orientation(&mut self, orientation: Orientation) -> Result<()>;
     /// Shows `frame`, whose size must be the panel size in the current orientation.
     fn present(&mut self, frame: &Frame) -> Result<()>;
-    /// Turns the panel off until the next frame.
+    /// Turns the panel off. Some screens power down completely (a rev C
+    /// SoC leaves the bus); the next connection wakes them.
     fn screen_off(&mut self) -> Result<()>;
     /// Hands the screen back to its standalone mode (clock, stored media).
     fn release(&mut self) -> Result<()>;

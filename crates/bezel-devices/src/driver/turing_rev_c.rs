@@ -20,6 +20,11 @@ const HELLO_TRIES: usize = 3;
 const HELLO_RETRY_PAUSE: Duration = Duration::from_millis(1000);
 /// STOP_MEDIA polls while waiting for `media_stop`.
 const STOP_MEDIA_POLLS: usize = 20;
+/// After TURNOFF: reads that wait for the SoC to leave the bus (at most
+/// `OFF_POLLS` × `OFF_POLL`; a read error means it is gone).
+const OFF_POLLS: usize = 16;
+/// One of those reads.
+const OFF_POLL: Duration = Duration::from_millis(250);
 
 /// Pauses between protocol steps. The fake used in tests does not sleep.
 pub trait Pause: Send {
@@ -192,7 +197,15 @@ impl<W: Wire> ScreenLink for TuringRevC<W> {
 
     fn screen_off(&mut self) -> Result<()> {
         self.last = None;
-        self.send(&proto::simple(op::TURN_OFF))
+        self.send(&proto::simple(op::TURN_OFF))?;
+        // The SoC shuts down and leaves the bus; return once it is gone so
+        // the next command wakes it instead of racing its shutdown.
+        for _ in 0..OFF_POLLS {
+            if self.wire.receive(1, OFF_POLL).is_err() {
+                break;
+            }
+        }
+        Ok(())
     }
 
     fn release(&mut self) -> Result<()> {

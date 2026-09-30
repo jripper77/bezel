@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use bezel_core::domain::device::Family;
+use bezel_core::domain::device::{DeviceModel, Family};
 use bezel_core::domain::discovery::{Endpoint, Screen, UsbLocation, group_screens};
 use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink};
 use bezel_core::{BezelError, Result};
@@ -18,10 +18,15 @@ use crate::driver::xuanfang_rev_b::XuanFangRevB;
 use crate::usb::{Endpoints, UsbWire};
 use crate::wire::{Flow, SerialWire};
 
-/// How long a rev C SoC may take to boot after its MCU is poked.
-const WAKE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a rev C SoC may take to boot after its MCU is poked: about 11 s
+/// when it has slept a while, longer right after it shut down.
+const WAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Delay between wake attempts.
 const WAKE_STEP: Duration = Duration::from_secs(1);
+/// How long a rev C SoC that is shutting down may take to leave the bus.
+const LEAVE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Delay between checks that it left.
+const LEAVE_STEP: Duration = Duration::from_millis(250);
 
 /// Connects to real screens through the host's serial ports and USB.
 #[derive(Debug, Clone, Copy, Default)]
@@ -31,14 +36,7 @@ impl ScreenConnector for SystemConnector {
     fn connect(&self, screen: &Screen) -> Result<Box<dyn ScreenLink>> {
         let models = &screen.candidates;
         match screen.family {
-            Family::TuringRevC => {
-                let display = match &screen.display {
-                    Some(d) => d.clone(),
-                    None => wake_rev_c(screen)?,
-                };
-                let wire = open_serial(&display, Flow::None)?;
-                Ok(Box::new(TuringRevC::connect(wire, &RealTime, models)?))
-            }
+            Family::TuringRevC => connect_rev_c(screen, models),
             Family::TuringRevA => {
                 let wire = open_serial(display(screen)?, Flow::Hardware)?;
                 Ok(Box::new(TuringRevA::connect(wire, &RealTime, models)?))
@@ -64,6 +62,45 @@ impl ScreenConnector for SystemConnector {
                 Ok(Box::new(Wch::connect(wire, &RealTime, models)?))
             }
         }
+    }
+}
+
+fn open_rev_c(display: &Endpoint, models: &[&'static DeviceModel]) -> Result<Box<dyn ScreenLink>> {
+    let wire = open_serial(display, Flow::None)?;
+    Ok(Box::new(TuringRevC::connect(wire, &RealTime, models)?))
+}
+
+/// Opens a rev C screen, waking it when it sleeps. A display that fails its
+/// handshake with a transport error or a timeout is shutting down: the
+/// vendor app and turing-smart-screen-python send TURNOFF when they exit,
+/// and the SoC then leaves the bus. Wait for it to go, wake it, try again.
+fn connect_rev_c(screen: &Screen, models: &[&'static DeviceModel]) -> Result<Box<dyn ScreenLink>> {
+    let Some(display) = &screen.display else {
+        return open_rev_c(&wake_rev_c(screen)?, models);
+    };
+    match open_rev_c(display, models) {
+        Err(BezelError::Transport(reason) | BezelError::Timeout(reason))
+            if screen.wake.is_some() =>
+        {
+            tracing::debug!(%reason, "rev C handshake failed; waking the screen and retrying");
+            wait_until_gone(display);
+            open_rev_c(&wake_rev_c(screen)?, models)
+        }
+        other => other,
+    }
+}
+
+/// Waits (bounded) until `endpoint` is no longer connected.
+fn wait_until_gone(endpoint: &Endpoint) {
+    let started = Instant::now();
+    while started.elapsed() < LEAVE_TIMEOUT {
+        let present = SystemBus
+            .endpoints()
+            .is_ok_and(|all| all.iter().any(|e| e.address == endpoint.address));
+        if !present {
+            return;
+        }
+        std::thread::sleep(LEAVE_STEP);
     }
 }
 

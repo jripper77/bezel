@@ -547,7 +547,11 @@ mod tests {
         assert!(session.location.unwrap().ends_with("Wide.bezeltheme"));
         // Saving it writes a copy in the user folder, never over the bundled file.
         let saved = f.backend.save(&session.theme, None).unwrap();
-        assert!(saved.location.contains("/themes/"), "{}", saved.location);
+        assert!(
+            Path::new(&saved.location).starts_with(f.root.join("themes")),
+            "{}",
+            saved.location
+        );
     }
 
     #[test]

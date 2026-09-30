@@ -1,4 +1,4 @@
-//! Uptime and host name.
+//! Uptime, host name, and the output volume Bezel does not read yet.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -7,10 +7,7 @@ use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapsh
 
 use super::Roots;
 use super::fs::{read_error, read_text};
-use crate::provider::{Provider, describe, put};
-
-/// The machine's host name.
-pub(crate) const HOSTNAME: &str = "system.hostname";
+use crate::provider::{NOT_SUPPORTED_YET, Provider, describe, put};
 
 /// The system provider.
 pub(crate) struct System {
@@ -29,11 +26,18 @@ impl System {
             catalog: [
                 describe(keys::UPTIME, s, "Uptime", Quantity::Seconds, "/proc/uptime"),
                 describe(
-                    HOSTNAME,
+                    keys::HOSTNAME,
                     s,
                     "Host name",
                     Quantity::Text,
                     "/proc/sys/kernel/hostname",
+                ),
+                describe(
+                    keys::SYSTEM_VOLUME,
+                    s,
+                    "Output volume",
+                    Quantity::Percent,
+                    "none",
                 ),
             ]
             .into_iter()
@@ -65,7 +69,12 @@ impl Provider for System {
             Ok(name) => Reading::Text(name.trim().to_string()),
             Err(e) => Reading::Unavailable(read_error(&self.hostname, &e)),
         };
-        put(out, HOSTNAME, host);
+        put(out, keys::HOSTNAME, host);
+        put(
+            out,
+            keys::SYSTEM_VOLUME,
+            Reading::Unavailable(NOT_SUPPORTED_YET.into()),
+        );
     }
 }
 
@@ -81,7 +90,7 @@ mod tests {
         t.file("proc/uptime", "6900.09 156461.31\n")
             .file("proc/sys/kernel/hostname", "fedorakde\n");
         let mut sys = System::new(&Roots::new(t.path("sys"), t.path("proc")));
-        assert_eq!(sys.catalog().len(), 2);
+        assert_eq!(sys.catalog().len(), 3);
         let mut s = Snapshot::default();
         sys.sample(Instant::now(), &mut s);
         let get = |s: &Snapshot, k: &str| s.get(&SensorKey::new(k).unwrap());
@@ -89,6 +98,10 @@ mod tests {
         assert_eq!(
             get(&s, "system.hostname"),
             Reading::Text("fedorakde".into())
+        );
+        assert_eq!(
+            get(&s, keys::SYSTEM_VOLUME),
+            Reading::Unavailable("not supported yet".into())
         );
         t.file("proc/uptime", "soon\n");
         std::fs::remove_file(t.path("proc/sys/kernel/hostname")).unwrap();

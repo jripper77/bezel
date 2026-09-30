@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use bezel_core::domain::frame::Rgba;
 use bezel_core::domain::geometry::{Orientation, Size};
-use bezel_core::domain::sensor::{ByteUnits, DisplayFormat, SensorKey, TemperatureUnit};
+use bezel_core::domain::sensor::{ByteUnits, DisplayFormat, SensorKey, TemperatureUnit, keys};
 use bezel_core::domain::theme::{
     AssetRef, Background, Binding, BoxF, Cap, Direction, ElementKind, Fit, FontSpec, GraphStyle,
     HAlign, Paint, Segments, ShapeKind, TextContent, TextStyle, Theme, VAlign,
@@ -31,7 +31,15 @@ const DEFAULT_FONT: &str = "roboto-mono/RobotoMono-Regular.ttf";
 /// Largest image or font bundled.
 const MAX_FILE: u64 = 32 * 1024 * 1024;
 const MIB: f64 = 1024.0 * 1024.0;
-const NOT_MEASURED: &str = "Bezel does not measure this yet; the widget shows it as unavailable";
+/// The Python app's CPU fan percent, estimated from the RPM against a
+/// guessed maximum (sensors.md § 5, S3). Bezel does not guess it: the
+/// widget keeps this key, which reads unavailable, and the report says so.
+const CPU_FAN_PERCENT: &str = "cpu.fan.percent";
+const CPU_FAN_GUESSED: &str = "the Python app estimates this percent from the fan's RPM; \
+     Bezel measures the RPM (cpu.fan): rebind the widget to it and set its range";
+/// Not a sensor: `DATE` widgets become clock text, the key only fills the
+/// source record.
+const CLOCK: &str = "clock";
 
 /// Imports the theme folder `dir` (its `theme.yaml`).
 pub fn import_dir(dir: &Path) -> Result<Imported, String> {
@@ -247,47 +255,55 @@ fn source(path: &[String], widget: &str) -> Option<Source> {
     let clock = |date: bool| Source {
         clock: Some(date),
         chars: 12,
-        ..plain("clock")
+        ..plain(CLOCK)
     };
     Some(match (p.as_slice(), widget) {
-        (["CPU", "PERCENTAGE"], _) => plain("cpu.usage"),
-        (["CPU", "FREQUENCY"], _) => sized("cpu.frequency", 1000.0),
+        (["CPU", "PERCENTAGE"], _) => plain(keys::CPU_USAGE),
+        (["CPU", "FREQUENCY"], _) => sized(keys::CPU_FREQUENCY, 1000.0),
         (["CPU", "LOAD", n], _) => Source {
             decimals: None,
             ..plain(match *n {
-                "ONE" => "cpu.load.1",
-                "FIVE" => "cpu.load.5",
-                "FIFTEEN" => "cpu.load.15",
+                "ONE" => keys::CPU_LOAD_1,
+                "FIVE" => keys::CPU_LOAD_5,
+                "FIFTEEN" => keys::CPU_LOAD_15,
                 _ => return None,
             })
         },
-        (["CPU", "TEMPERATURE"], _) => plain("cpu.temperature"),
-        (["CPU", "FAN_SPEED"], _) => plain("cpu.fan.percent"),
-        (["GPU", "PERCENTAGE"], _) => plain("gpu.usage"),
-        (["GPU", "MEMORY_PERCENT"], _) => plain("gpu.memory.percent"),
-        (["GPU", "MEMORY"], _) if text => sized("gpu.memory.used", MIB),
-        (["GPU", "MEMORY"], _) => plain("gpu.memory.percent"),
-        (["GPU", "MEMORY_USED"], _) => sized("gpu.memory.used", MIB),
-        (["GPU", "MEMORY_TOTAL"], _) => sized("gpu.memory.total", MIB),
-        (["GPU", "TEMPERATURE"], _) => plain("gpu.temperature"),
-        (["GPU", "FPS"], _) => noted("gpu.fps", NOT_MEASURED),
-        (["GPU", "FAN_SPEED"], _) => plain("gpu.fan.percent"),
-        (["GPU", "FREQUENCY"], _) => sized("gpu.frequency", 1000.0),
-        (["MEMORY", "SWAP"], _) => plain("memory.swap.percent"),
-        (["MEMORY", "VIRTUAL"], "USED") => sized("memory.used", MIB),
-        (["MEMORY", "VIRTUAL"], "FREE") => sized("memory.available", MIB),
-        (["MEMORY", "VIRTUAL"], "TOTAL") => sized("memory.total", MIB),
-        (["MEMORY", "VIRTUAL"], _) => plain("memory.percent"),
-        (["DISK", "USED"], "TEXT") => decimal("disk./.used"),
-        (["DISK", "USED"], _) => plain("disk./.percent"),
-        (["DISK", "TOTAL"], _) => decimal("disk./.total"),
-        (["DISK", "FREE"], _) => decimal("disk./.free"),
+        (["CPU", "TEMPERATURE"], _) => plain(keys::CPU_TEMPERATURE),
+        (["CPU", "FAN_SPEED"], _) => Source {
+            note: Some(CPU_FAN_GUESSED),
+            ..plain(CPU_FAN_PERCENT)
+        },
+        (["GPU", "PERCENTAGE"], _) => plain(keys::GPU_USAGE),
+        (["GPU", "MEMORY_PERCENT"], _) => plain(keys::GPU_MEMORY_PERCENT),
+        (["GPU", "MEMORY"], _) if text => sized(keys::GPU_MEMORY_USED, MIB),
+        (["GPU", "MEMORY"], _) => plain(keys::GPU_MEMORY_PERCENT),
+        (["GPU", "MEMORY_USED"], _) => sized(keys::GPU_MEMORY_USED, MIB),
+        (["GPU", "MEMORY_TOTAL"], _) => sized(keys::GPU_MEMORY_TOTAL, MIB),
+        (["GPU", "TEMPERATURE"], _) => plain(keys::GPU_TEMPERATURE),
+        (["GPU", "FPS"], _) => Source {
+            decimals: None,
+            chars: 8,
+            ..plain(keys::GPU_FPS)
+        },
+        (["GPU", "FAN_SPEED"], _) => plain(keys::GPU_FAN),
+        (["GPU", "FREQUENCY"], _) => sized(keys::GPU_FREQUENCY, 1000.0),
+        (["MEMORY", "SWAP"], _) => plain(keys::SWAP_PERCENT),
+        (["MEMORY", "VIRTUAL"], "USED") => sized(keys::MEMORY_USED, MIB),
+        (["MEMORY", "VIRTUAL"], "FREE") => sized(keys::MEMORY_AVAILABLE, MIB),
+        (["MEMORY", "VIRTUAL"], "TOTAL") => sized(keys::MEMORY_TOTAL, MIB),
+        (["MEMORY", "VIRTUAL"], _) => plain(keys::MEMORY_PERCENT),
+        // psutil.disk_usage("/"): the root filesystem.
+        (["DISK", "USED"], "TEXT") => decimal(keys::ROOT_DISK_USED),
+        (["DISK", "USED"], _) => plain(keys::ROOT_DISK_PERCENT),
+        (["DISK", "TOTAL"], _) => decimal(keys::ROOT_DISK_TOTAL),
+        (["DISK", "FREE"], _) => decimal(keys::ROOT_DISK_FREE),
         (["NET", "WLO" | "ETH", metric], _) => sized(
             match *metric {
-                "UPLOAD" => "net.up",
-                "DOWNLOAD" => "net.down",
-                "UPLOADED" => "net.up.total",
-                "DOWNLOADED" => "net.down.total",
+                "UPLOAD" => keys::NET_UP,
+                "DOWNLOAD" => keys::NET_DOWN,
+                "UPLOADED" => keys::NET_UP_TOTAL,
+                "DOWNLOADED" => keys::NET_DOWN_TOTAL,
                 _ => return None,
             },
             1.0,
@@ -296,13 +312,17 @@ fn source(path: &[String], widget: &str) -> Option<Source> {
         (["DATE", "HOUR"], _) => clock(false),
         (["UPTIME", "SECONDS" | "FORMATTED"], _) => Source {
             chars: 10,
-            ..plain("system.uptime")
+            ..plain(keys::UPTIME)
         },
         (["WEATHER", what], _) => noted(
             &format!("weather.{}", what.to_ascii_lowercase()),
             "weather is not supported yet",
         ),
-        (["PING"], _) => noted("net.ping", NOT_MEASURED),
+        (["PING"], _) => Source {
+            decimals: None,
+            chars: 8,
+            ..plain(keys::NET_PING)
+        },
         (["CUSTOM", class], _) => noted(
             &format!("custom.{class}"),
             "custom Python data classes cannot run in Bezel",

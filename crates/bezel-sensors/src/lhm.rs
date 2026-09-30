@@ -2,7 +2,9 @@
 //! `root\LibreHardwareMonitor`) mapped to keys: every sensor as
 //! `lhm.<identifier>` (`/amdcpu/0/temperature/2` → `lhm.amdcpu.0.temperature.2`)
 //! plus `cpu.temperature`, `cpu.temperature.ccdN` and `cpu.power` picked by
-//! name from the CPU's own sensors.
+//! name from the CPU's own sensors, and `cpu.fan`, `fan.pump`, `fan.case1`,
+//! `fan.case2` and `cpu.voltage` picked by name with the same label rules as
+//! hwmon on Linux (D-2026-09-30-release-polish-5).
 //!
 //! LHM units: `Data` is GiB and `SmallData` MiB (binary, whatever the
 //! "GB"/"MB" labels say), `Throughput` B/s, `Frequency` Hz, `Clock` MHz.
@@ -15,7 +17,7 @@ use std::collections::HashMap;
 
 use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, keys};
 
-use crate::provider::{describe, slug};
+use crate::provider::{FanRole, cpu_core_voltage, describe, fan_role, optional_fan, slug};
 
 /// Shown for the LHM-backed keys when the namespace is missing.
 pub(crate) const HINT: &str = "run LibreHardwareMonitor (its WMI provider \
@@ -108,6 +110,27 @@ fn pick<'a>(rows: &'a [Row], sensor_type: &str, names: &[&str]) -> Option<&'a Ro
     })
 }
 
+/// The `nth` fan (0 = first) named for `role`, board and CPU fans only (a
+/// graphics card's fan is its own); for the CPU a plainly named fan before
+/// an optional header.
+fn fan(rows: &[Row], role: FanRole, nth: usize) -> Option<&Row> {
+    let mut fans: Vec<&Row> = rows
+        .iter()
+        .filter(|r| r.sensor_type == "Fan" && category(&r.identifier) != Category::Gpu)
+        .filter(|r| fan_role(&r.name) == Some(role))
+        .collect();
+    fans.sort_by_key(|r| optional_fan(&r.name));
+    fans.get(nth).copied()
+}
+
+/// The CPU core rail: the CPU's own sensor before the board's.
+fn cpu_voltage(rows: &[Row]) -> Option<&Row> {
+    rows.iter()
+        .filter(|r| r.sensor_type == "Voltage" && category(&r.identifier) != Category::Gpu)
+        .filter(|r| cpu_core_voltage(&r.name))
+        .min_by_key(|r| !is_cpu(r))
+}
+
 /// `CCD1 (Tdie)` → 1.
 fn ccd(row: &Row) -> Option<u32> {
     if !is_cpu(row) || row.sensor_type != "Temperature" {
@@ -129,6 +152,95 @@ enum Source {
     CpuPower,
     /// CCD `n` temperature.
     Ccd(u32),
+    /// A board fan or rail picked by name, and why it may be missing.
+    Picked(Pick, &'static str),
+}
+
+/// How a key picked by name finds its sensor among the rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    /// The `nth` fan named for a role.
+    Fan(FanRole, usize),
+    /// The CPU core rail.
+    CpuVoltage,
+}
+
+impl Pick {
+    /// The row the key reads now.
+    fn row(self, rows: &[Row]) -> Option<&Row> {
+        match self {
+            Pick::Fan(role, nth) => fan(rows, role, nth),
+            Pick::CpuVoltage => cpu_voltage(rows),
+        }
+    }
+}
+
+/// A key picked by name: its catalog entry and why it may be missing.
+struct Picked {
+    key: &'static str,
+    category: Category,
+    label: &'static str,
+    quantity: Quantity,
+    pick: Pick,
+    missing: &'static str,
+}
+
+const PICKED: [Picked; 5] = [
+    Picked {
+        key: keys::CPU_FAN,
+        category: Category::Cpu,
+        label: "CPU fan",
+        quantity: Quantity::Rpm,
+        pick: Pick::Fan(FanRole::Cpu, 0),
+        missing: "no LibreHardwareMonitor fan is named CPU",
+    },
+    Picked {
+        key: keys::CPU_VOLTAGE,
+        category: Category::Cpu,
+        label: "CPU core voltage",
+        quantity: Quantity::Volts,
+        pick: Pick::CpuVoltage,
+        missing: "no LibreHardwareMonitor voltage is named as the CPU core (Vcore)",
+    },
+    Picked {
+        key: keys::FAN_PUMP,
+        category: Category::Board,
+        label: "Pump",
+        quantity: Quantity::Rpm,
+        pick: Pick::Fan(FanRole::Pump, 0),
+        missing: "no LibreHardwareMonitor fan is named pump",
+    },
+    Picked {
+        key: keys::FAN_CASE_1,
+        category: Category::Board,
+        label: "Case fan 1",
+        quantity: Quantity::Rpm,
+        pick: Pick::Fan(FanRole::Case, 0),
+        missing: "no LibreHardwareMonitor fan is named chassis, case or system",
+    },
+    Picked {
+        key: keys::FAN_CASE_2,
+        category: Category::Board,
+        label: "Case fan 2",
+        quantity: Quantity::Rpm,
+        pick: Pick::Fan(FanRole::Case, 1),
+        missing: "no second LibreHardwareMonitor fan is named chassis, case or system",
+    },
+];
+
+/// Catalog entries of the keys picked by name, sourced from the sensor
+/// each one reads on the first query.
+fn picked_entries(rows: &[Row]) -> Vec<(SensorInfo, Source)> {
+    PICKED
+        .iter()
+        .filter_map(|p| {
+            let from = p.pick.row(rows).map_or("LibreHardwareMonitor".into(), |r| {
+                format!("LibreHardwareMonitor {}", r.name)
+            });
+            describe(p.key, p.category, p.label, p.quantity, from)
+                .map(|info| (info, Source::Picked(p.pick, p.missing)))
+        })
+        .collect()
 }
 
 /// The keys LHM provides on this machine, fixed at discovery.
@@ -179,6 +291,7 @@ impl Mapping {
             )
             .map(|i| (i, Source::CpuPower)),
         );
+        entries.extend(picked_entries(rows));
         for row in rows {
             let (quantity, scale) = unit(&row.sensor_type);
             let owner = hardware
@@ -249,6 +362,7 @@ impl Mapping {
                         1.0,
                         "LibreHardwareMonitor no longer reports it",
                     ),
+                    Source::Picked(pick, missing) => value(pick.row(rows), 1.0, missing),
                 };
                 (info.clone(), reading)
             })
@@ -343,7 +457,7 @@ mod tests {
         let rows = rows();
         let m = Mapping::discover(Some(&rows), &hardware());
         let catalog = m.catalog();
-        assert_eq!(catalog.len(), 4 + rows.len());
+        assert_eq!(catalog.len(), 4 + PICKED.len() + rows.len());
         let fan = catalog
             .iter()
             .find(|i| i.key.as_str() == "lhm.lpc.nct6798d.0.fan.1")
@@ -427,8 +541,19 @@ mod tests {
     #[test]
     fn without_lhm_the_well_known_keys_explain_how_to_get_them() {
         let m = Mapping::discover(None, &HashMap::new());
-        let keys: Vec<String> = m.catalog().iter().map(|i| i.key.to_string()).collect();
-        assert_eq!(keys, ["cpu.temperature", "cpu.power"]);
+        let listed: Vec<String> = m.catalog().iter().map(|i| i.key.to_string()).collect();
+        assert_eq!(
+            listed,
+            [
+                keys::CPU_TEMPERATURE,
+                keys::CPU_POWER,
+                keys::CPU_FAN,
+                keys::CPU_VOLTAGE,
+                keys::FAN_PUMP,
+                keys::FAN_CASE_1,
+                keys::FAN_CASE_2
+            ]
+        );
         let readings = m.readings(Err(HINT));
         assert!(
             readings
@@ -439,6 +564,64 @@ mod tests {
         assert!(
             matches!(&m.readings(Ok(&empty))[0].1, Reading::Unavailable(r) if r.contains("no CPU temperature"))
         );
+    }
+
+    #[test]
+    fn fans_and_the_cpu_rail_are_picked_by_name() {
+        let rows = vec![
+            row("/lpc/nct6798d/0/fan/0", "CPU Optional Fan", "Fan", 640.0),
+            row("/lpc/nct6798d/0/fan/1", "CPU Fan", "Fan", 1180.0),
+            row("/lpc/nct6798d/0/fan/2", "Chassis Fan #1", "Fan", 720.0),
+            row("/lpc/nct6798d/0/fan/3", "AIO Pump", "Fan", 2350.0),
+            row("/lpc/nct6798d/0/fan/4", "Chassis Fan #2", "Fan", f32::NAN),
+            row("/lpc/nct6798d/0/voltage/0", "Vcore", "Voltage", 1.28),
+            row("/amdcpu/0/voltage/2", "Core (SVI2 TFN)", "Voltage", 1.1),
+            row("/amdcpu/0/voltage/3", "SoC (SVI2 TFN)", "Voltage", 1.2),
+            row("/gpu-amd/0/fan/0", "CPU", "Fan", 1500.0),
+        ];
+        let m = Mapping::discover(Some(&rows), &HashMap::new());
+        assert_eq!(reading(&m, &rows, keys::CPU_FAN), Reading::Value(1180.0));
+        assert_eq!(reading(&m, &rows, keys::FAN_PUMP), Reading::Value(2350.0));
+        assert_eq!(reading(&m, &rows, keys::FAN_CASE_1), Reading::Value(720.0));
+        assert!(
+            matches!(reading(&m, &rows, keys::FAN_CASE_2), Reading::Unavailable(r) if r.contains("no value")),
+            "a NaN fan is unavailable, not zero"
+        );
+        let volts = reading(&m, &rows, keys::CPU_VOLTAGE).value().unwrap();
+        assert!((volts - 1.1).abs() < 1e-6, "the CPU's own rail: {volts}");
+        let info = |key: &str| {
+            m.catalog()
+                .into_iter()
+                .find(|i| i.key.as_str() == key)
+                .unwrap()
+        };
+        assert_eq!(info(keys::CPU_FAN).source, "LibreHardwareMonitor CPU Fan");
+        assert_eq!(info(keys::CPU_FAN).category, Category::Cpu);
+        assert_eq!(info(keys::FAN_PUMP).category, Category::Board);
+        assert_eq!(
+            info(keys::CPU_VOLTAGE).source,
+            "LibreHardwareMonitor Core (SVI2 TFN)"
+        );
+
+        // A board LHM does not know: fans are "Fan #n", nothing is named.
+        let bare = vec![row("/lpc/it8688e/0/fan/0", "Fan #1", "Fan", 900.0)];
+        let m = Mapping::discover(Some(&bare), &HashMap::new());
+        assert_eq!(info_source(&m, keys::FAN_PUMP), "LibreHardwareMonitor");
+        assert_eq!(
+            reading(&m, &bare, keys::FAN_PUMP),
+            Reading::Unavailable("no LibreHardwareMonitor fan is named pump".into())
+        );
+        assert!(
+            matches!(reading(&m, &bare, keys::CPU_VOLTAGE), Reading::Unavailable(r) if r.contains("Vcore"))
+        );
+    }
+
+    fn info_source(m: &Mapping, key: &str) -> String {
+        m.catalog()
+            .into_iter()
+            .find(|i| i.key.as_str() == key)
+            .map(|i| i.source)
+            .unwrap()
     }
 
     #[test]

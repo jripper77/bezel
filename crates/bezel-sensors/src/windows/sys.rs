@@ -1,7 +1,9 @@
 //! sysinfo-backed Windows providers: CPU usage and clocks, memory and page
 //! file, volumes, network interfaces, uptime and host name. Rates come from
 //! the cumulative counters over the real time between samples, like on
-//! Linux.
+//! Linux, and every key the Linux providers publish under the same name
+//! (`bezel_core::domain::sensor::keys`) is published here too, unavailable
+//! with the reason when Windows has no such value.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -11,12 +13,23 @@ use sysinfo::{
     DiskRefreshKind, Disks as SysDisks, MINIMUM_CPU_UPDATE_INTERVAL, Networks, System as SysSystem,
 };
 
-use crate::provider::{Provider, WARMING_UP, describe, percent, put, slug};
+use crate::provider::{
+    COUNTER_RESET, NOT_SUPPORTED_YET, Provider, WARMING_UP, describe, percent, put, slug,
+};
 
 /// Why a CPU clock is missing (sysinfo returns 0 when the query failed).
 const NO_CLOCK: &str = "Windows did not report the CPU clock";
 
 const TOO_SOON: &str = "sampled again too soon for Windows to measure CPU usage";
+
+const NO_LOAD_AVERAGE: &str = "Windows has no load average";
+
+/// The load-average keys, all unavailable on Windows.
+const LOAD: [(&str, &str); 3] = [
+    (keys::CPU_LOAD_1, "Load average (1 min)"),
+    (keys::CPU_LOAD_5, "Load average (5 min)"),
+    (keys::CPU_LOAD_15, "Load average (15 min)"),
+];
 
 /// CPU usage and clocks.
 pub(crate) struct Cpu {
@@ -42,15 +55,11 @@ impl Cpu {
                 Quantity::Megahertz,
                 src,
             ),
-            describe(
-                keys::CPU_LOAD_1,
-                c,
-                "Load average (1 min)",
-                Quantity::Number,
-                src,
-            ),
-            describe("cpu.name", c, "CPU model", Quantity::Text, src),
+            describe(keys::CPU_NAME, c, "CPU model", Quantity::Text, src),
         ];
+        for (key, label) in LOAD {
+            catalog.push(describe(key, c, label, Quantity::Number, src));
+        }
         for n in 0..cores {
             catalog.push(describe(
                 &format!("cpu.{n}.usage"),
@@ -118,18 +127,16 @@ impl Provider for Cpu {
             Reading::Value(total / clocked as f64)
         };
         put(out, keys::CPU_FREQUENCY, average);
-        put(
-            out,
-            keys::CPU_LOAD_1,
-            Reading::Unavailable("Windows has no load average".into()),
-        );
+        for (key, _) in LOAD {
+            put(out, key, Reading::Unavailable(NO_LOAD_AVERAGE.into()));
+        }
         let name = cpus
             .first()
             .map(|c| c.brand().trim().to_string())
             .filter(|b| !b.is_empty());
         put(
             out,
-            "cpu.name",
+            keys::CPU_NAME,
             name.map_or_else(
                 || Reading::Unavailable("no CPU brand".into()),
                 Reading::Text,
@@ -158,23 +165,24 @@ impl Memory {
                 Quantity::Percent,
                 src,
             ),
-            describe("memory.available", m, "RAM available", Quantity::Bytes, src),
             describe(
-                "memory.swap.used",
+                keys::MEMORY_AVAILABLE,
                 m,
-                "Page file used",
+                "RAM available",
                 Quantity::Bytes,
                 src,
             ),
             describe(
-                "memory.swap.total",
+                keys::MEMORY_AVAILABLE_PERCENT,
                 m,
-                "Page file total",
-                Quantity::Bytes,
+                "RAM available (percent)",
+                Quantity::Percent,
                 src,
             ),
+            describe(keys::SWAP_USED, m, "Page file used", Quantity::Bytes, src),
+            describe(keys::SWAP_TOTAL, m, "Page file total", Quantity::Bytes, src),
             describe(
-                "memory.swap.percent",
+                keys::SWAP_PERCENT,
                 m,
                 "Page file used (percent)",
                 Quantity::Percent,
@@ -204,14 +212,19 @@ impl Provider for Memory {
         put(out, keys::MEMORY_USED, Reading::Value(used));
         put(out, keys::MEMORY_TOTAL, Reading::Value(total));
         put(out, keys::MEMORY_PERCENT, percent(used, total, "RAM total"));
-        put(out, "memory.available", Reading::Value(available));
-        let swap_total = self.sys.total_swap() as f64;
-        let swap_used = self.sys.used_swap() as f64;
-        put(out, "memory.swap.used", Reading::Value(swap_used));
-        put(out, "memory.swap.total", Reading::Value(swap_total));
+        put(out, keys::MEMORY_AVAILABLE, Reading::Value(available));
         put(
             out,
-            "memory.swap.percent",
+            keys::MEMORY_AVAILABLE_PERCENT,
+            percent(available, total, "RAM total"),
+        );
+        let swap_total = self.sys.total_swap() as f64;
+        let swap_used = self.sys.used_swap() as f64;
+        put(out, keys::SWAP_USED, Reading::Value(swap_used));
+        put(out, keys::SWAP_TOTAL, Reading::Value(swap_total));
+        put(
+            out,
+            keys::SWAP_PERCENT,
             percent(swap_used, swap_total, "page file"),
         );
     }
@@ -357,7 +370,7 @@ impl Provider for Disks {
         let value = |v: Option<Option<f64>>| match v {
             None => Reading::Unavailable(WARMING_UP.into()),
             Some(Some(v)) => Reading::Value(v),
-            Some(None) => Reading::Unavailable("counter reset or no time elapsed".into()),
+            Some(None) => Reading::Unavailable(COUNTER_RESET.into()),
         };
         put(out, keys::DISK_READ, value(rates.map(|r| r.0)));
         put(out, keys::DISK_WRITE, value(rates.map(|r| r.1)));
@@ -416,6 +429,20 @@ impl Network {
                 Quantity::BytesPerSecond,
                 "sysinfo",
             ),
+            describe(
+                keys::NET_DOWN_TOTAL,
+                n,
+                "Downloaded since boot",
+                Quantity::Bytes,
+                "sysinfo",
+            ),
+            describe(
+                keys::NET_UP_TOTAL,
+                n,
+                "Uploaded since boot",
+                Quantity::Bytes,
+                "sysinfo",
+            ),
         ];
         let mut listed = Vec::new();
         for name in names {
@@ -435,6 +462,20 @@ impl Network {
                 n,
                 format!("{name} upload rate"),
                 Quantity::BytesPerSecond,
+                "sysinfo",
+            ));
+            catalog.push(describe(
+                &format!("net.{id}.down.total"),
+                n,
+                format!("{name} downloaded"),
+                Quantity::Bytes,
+                "sysinfo",
+            ));
+            catalog.push(describe(
+                &format!("net.{id}.up.total"),
+                n,
+                format!("{name} uploaded"),
+                Quantity::Bytes,
                 "sysinfo",
             ));
             listed.push((id, name));
@@ -475,7 +516,7 @@ impl Provider for Network {
         };
         let reading = |v: Option<f64>| {
             v.map_or_else(
-                || Reading::Unavailable("counter reset or no time elapsed".into()),
+                || Reading::Unavailable(COUNTER_RESET.into()),
                 Reading::Value,
             )
         };
@@ -493,18 +534,40 @@ impl Provider for Network {
             };
             put(out, &format!("net.{id}.down"), down);
             put(out, &format!("net.{id}.up"), up);
+            let (received, sent) = match current.get(name) {
+                Some(&(rx, tx)) => (Reading::Value(rx as f64), Reading::Value(tx as f64)),
+                None => (
+                    Reading::Unavailable(format!("{name} is gone")),
+                    Reading::Unavailable(format!("{name} is gone")),
+                ),
+            };
+            put(out, &format!("net.{id}.down.total"), received);
+            put(out, &format!("net.{id}.up.total"), sent);
         }
         let (mut down, mut up) = (Some(0.0), Some(0.0));
-        for name in current.keys().filter(|n| physical(n)) {
+        let (mut received, mut sent, mut members) = (0.0, 0.0, 0usize);
+        for (name, &(rx, tx)) in current.iter().filter(|(n, _)| physical(n)) {
+            received += rx as f64;
+            sent += tx as f64;
+            members += 1;
             if let Some((d, u)) = rates(name) {
                 down = down.zip(d).map(|(a, b)| a + b);
                 up = up.zip(u).map(|(a, b)| a + b);
             }
         }
+        let total = |v: f64| {
+            if members == 0 {
+                Reading::Unavailable("no physical network interface".into())
+            } else {
+                Reading::Value(v)
+            }
+        };
+        put(out, keys::NET_DOWN_TOTAL, total(received));
+        put(out, keys::NET_UP_TOTAL, total(sent));
         let summed = |v: Option<f64>| match (&previous, v) {
             (None, _) => Reading::Unavailable(WARMING_UP.into()),
             (_, Some(v)) => Reading::Value(v),
-            (_, None) => Reading::Unavailable("counter reset or no time elapsed".into()),
+            (_, None) => Reading::Unavailable(COUNTER_RESET.into()),
         };
         put(out, keys::NET_DOWN, summed(down));
         put(out, keys::NET_UP, summed(up));
@@ -512,7 +575,7 @@ impl Provider for Network {
     }
 }
 
-/// Uptime and host name.
+/// Uptime, host name, and the output volume Bezel does not read yet.
 pub(crate) struct System {
     catalog: Vec<SensorInfo>,
 }
@@ -522,7 +585,14 @@ impl System {
         let s = Category::System;
         let catalog = [
             describe(keys::UPTIME, s, "Uptime", Quantity::Seconds, "sysinfo"),
-            describe("system.hostname", s, "Host name", Quantity::Text, "sysinfo"),
+            describe(keys::HOSTNAME, s, "Host name", Quantity::Text, "sysinfo"),
+            describe(
+                keys::SYSTEM_VOLUME,
+                s,
+                "Output volume",
+                Quantity::Percent,
+                "none",
+            ),
         ]
         .into_iter()
         .flatten()
@@ -546,6 +616,11 @@ impl Provider for System {
             || Reading::Unavailable("no host name".into()),
             Reading::Text,
         );
-        put(out, "system.hostname", host);
+        put(out, keys::HOSTNAME, host);
+        put(
+            out,
+            keys::SYSTEM_VOLUME,
+            Reading::Unavailable(NOT_SUPPORTED_YET.into()),
+        );
     }
 }

@@ -1,10 +1,10 @@
 //! A scripted [`SensorSource`] for tests and demo mode.
 
 use bezel_core::Result;
-use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapshot};
+use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapshot, keys};
 use bezel_core::ports::SensorSource;
 
-use crate::provider::{WARMING_UP, describe};
+use crate::provider::{NOT_SUPPORTED_YET, WARMING_UP, describe};
 
 /// Replays a fixed catalog and a script of snapshots: each `sample` returns
 /// the next snapshot, and the last one repeats once the script runs out.
@@ -26,7 +26,8 @@ impl FakeSensors {
     }
 
     /// A plausible desktop: two samples, the first still warming up its
-    /// rates like a real source, the second with every value.
+    /// rates like a real source, the second with every value. It offers
+    /// every key imported themes use ([`keys::IMPORTED`]).
     pub fn demo() -> Self {
         let mut catalog = Vec::new();
         let mut first = Snapshot::default();
@@ -99,7 +100,7 @@ type DemoRow = (&'static str, Category, &'static str, Quantity, Demo, bool);
 
 const DEMO: &[DemoRow] = &[
     (
-        "cpu.usage",
+        keys::CPU_USAGE,
         Category::Cpu,
         "CPU usage",
         Quantity::Percent,
@@ -107,7 +108,7 @@ const DEMO: &[DemoRow] = &[
         true,
     ),
     (
-        "cpu.frequency",
+        keys::CPU_FREQUENCY,
         Category::Cpu,
         "CPU frequency (average)",
         Quantity::Megahertz,
@@ -115,7 +116,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "cpu.temperature",
+        keys::CPU_TEMPERATURE,
         Category::Cpu,
         "CPU temperature",
         Quantity::Celsius,
@@ -123,7 +124,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "cpu.power",
+        keys::CPU_POWER,
         Category::Cpu,
         "CPU package power",
         Quantity::Watts,
@@ -131,7 +132,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "cpu.load.1",
+        keys::CPU_LOAD_1,
         Category::Cpu,
         "Load average (1 min)",
         Quantity::Number,
@@ -139,7 +140,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "cpu.name",
+        keys::CPU_NAME,
         Category::Cpu,
         "CPU model",
         Quantity::Text,
@@ -147,7 +148,23 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "gpu.usage",
+        keys::CPU_FAN,
+        Category::Cpu,
+        "CPU fan",
+        Quantity::Rpm,
+        Demo::Value(1200.0),
+        false,
+    ),
+    (
+        keys::CPU_VOLTAGE,
+        Category::Cpu,
+        "CPU core voltage",
+        Quantity::Volts,
+        Demo::Value(1.104),
+        false,
+    ),
+    (
+        keys::GPU_USAGE,
         Category::Gpu,
         "GPU usage",
         Quantity::Percent,
@@ -155,7 +172,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "gpu.temperature",
+        keys::GPU_TEMPERATURE,
         Category::Gpu,
         "GPU temperature",
         Quantity::Celsius,
@@ -163,7 +180,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "gpu.memory.used",
+        keys::GPU_MEMORY_USED,
         Category::Gpu,
         "GPU memory used",
         Quantity::Bytes,
@@ -171,7 +188,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "gpu.power",
+        keys::GPU_POWER,
         Category::Gpu,
         "GPU power",
         Quantity::Watts,
@@ -179,7 +196,23 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "gpu.name",
+        keys::GPU_VOLTAGE,
+        Category::Gpu,
+        "GPU core voltage",
+        Quantity::Volts,
+        Demo::Unavailable("demo: GPU 0 does not report its core voltage"),
+        false,
+    ),
+    (
+        keys::GPU_FPS,
+        Category::Gpu,
+        "Game frame rate",
+        Quantity::Number,
+        Demo::Value(144.0),
+        false,
+    ),
+    (
+        keys::GPU_NAME,
         Category::Gpu,
         "GPU model",
         Quantity::Text,
@@ -187,7 +220,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "memory.used",
+        keys::MEMORY_USED,
         Category::Memory,
         "RAM used",
         Quantity::Bytes,
@@ -195,7 +228,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "memory.total",
+        keys::MEMORY_TOTAL,
         Category::Memory,
         "RAM total",
         Quantity::Bytes,
@@ -203,7 +236,7 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "memory.percent",
+        keys::MEMORY_PERCENT,
         Category::Memory,
         "RAM used (percent)",
         Quantity::Percent,
@@ -211,7 +244,15 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "disk.read",
+        keys::MEMORY_AVAILABLE_PERCENT,
+        Category::Memory,
+        "RAM available (percent)",
+        Quantity::Percent,
+        Demo::Value(81.25),
+        false,
+    ),
+    (
+        keys::DISK_READ,
         Category::Disk,
         "Disk read rate",
         Quantity::BytesPerSecond,
@@ -219,7 +260,7 @@ const DEMO: &[DemoRow] = &[
         true,
     ),
     (
-        "disk.write",
+        keys::DISK_WRITE,
         Category::Disk,
         "Disk write rate",
         Quantity::BytesPerSecond,
@@ -227,7 +268,7 @@ const DEMO: &[DemoRow] = &[
         true,
     ),
     (
-        "net.down",
+        keys::NET_DOWN,
         Category::Network,
         "Download rate",
         Quantity::BytesPerSecond,
@@ -235,7 +276,7 @@ const DEMO: &[DemoRow] = &[
         true,
     ),
     (
-        "net.up",
+        keys::NET_UP,
         Category::Network,
         "Upload rate",
         Quantity::BytesPerSecond,
@@ -243,15 +284,55 @@ const DEMO: &[DemoRow] = &[
         true,
     ),
     (
-        "hwmon.demo.fan1",
-        Category::Board,
-        "demo fan1",
-        Quantity::Rpm,
-        Demo::Value(1200.0),
+        keys::NET_DOWN_TOTAL,
+        Category::Network,
+        "Downloaded since boot",
+        Quantity::Bytes,
+        Demo::Value(3.2 * GIB),
         false,
     ),
     (
-        "system.uptime",
+        keys::NET_UP_TOTAL,
+        Category::Network,
+        "Uploaded since boot",
+        Quantity::Bytes,
+        Demo::Value(410.0 * MIB),
+        false,
+    ),
+    (
+        keys::NET_PING,
+        Category::Network,
+        "Ping",
+        Quantity::Number,
+        Demo::Value(12.0),
+        false,
+    ),
+    (
+        keys::FAN_PUMP,
+        Category::Board,
+        "Pump",
+        Quantity::Rpm,
+        Demo::Value(2400.0),
+        false,
+    ),
+    (
+        keys::FAN_CASE_1,
+        Category::Board,
+        "Case fan 1",
+        Quantity::Rpm,
+        Demo::Value(850.0),
+        false,
+    ),
+    (
+        keys::FAN_CASE_2,
+        Category::Board,
+        "Case fan 2",
+        Quantity::Rpm,
+        Demo::Unavailable("demo: no second hwmon fan is labelled chassis, case or system"),
+        false,
+    ),
+    (
+        keys::UPTIME,
         Category::System,
         "Uptime",
         Quantity::Seconds,
@@ -259,11 +340,19 @@ const DEMO: &[DemoRow] = &[
         false,
     ),
     (
-        "system.hostname",
+        keys::HOSTNAME,
         Category::System,
         "Host name",
         Quantity::Text,
         Demo::Text("bezel-demo"),
+        false,
+    ),
+    (
+        keys::SYSTEM_VOLUME,
+        Category::System,
+        "Output volume",
+        Quantity::Percent,
+        Demo::Unavailable(NOT_SUPPORTED_YET),
         false,
     ),
 ];
@@ -284,20 +373,39 @@ mod tests {
         assert_eq!(catalog.len(), DEMO.len());
         let first = fake.sample().unwrap();
         assert!(matches!(
-            first.get(&key("cpu.usage")),
+            first.get(&key(keys::CPU_USAGE)),
             Reading::Unavailable(_)
         ));
-        assert_eq!(first.get(&key("cpu.temperature")), Reading::Value(46.0));
+        assert_eq!(first.get(&key(keys::CPU_TEMPERATURE)), Reading::Value(46.0));
         let second = fake.sample().unwrap();
-        assert_eq!(second.get(&key("cpu.usage")), Reading::Value(12.5));
+        assert_eq!(second.get(&key(keys::CPU_USAGE)), Reading::Value(12.5));
         assert_eq!(
-            second.get(&key("gpu.name")),
+            second.get(&key(keys::GPU_NAME)),
             Reading::Text("Demo GPU".into())
         );
         assert_eq!(fake.sample().unwrap(), second);
         assert_eq!(fake.samples_taken(), 3);
         for info in &catalog {
             assert!(second.iter().any(|(k, _)| *k == info.key), "{}", info.key);
+        }
+    }
+
+    #[test]
+    fn demo_offers_every_imported_key() {
+        let catalog = FakeSensors::demo().catalog().unwrap();
+        for imported in keys::IMPORTED {
+            assert!(
+                catalog.iter().any(|i| i.key.as_str() == imported),
+                "{imported}"
+            );
+        }
+        for info in &catalog {
+            assert_eq!(
+                info.quantity,
+                bezel_core::domain::sensor::quantity_of(&info.key),
+                "{}: the demo and the key's own unit agree",
+                info.key
+            );
         }
     }
 

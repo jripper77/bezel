@@ -3,7 +3,9 @@
 //! Vendor providers report the GPUs they found; every GPU is then numbered
 //! by PCI address (`gpu.0.*`, `gpu.1.*`, stable across boots and vendors),
 //! and the well-known `gpu.usage`, `gpu.temperature`, ... repeat the primary
-//! GPU: the first discrete one, else the first integrated one.
+//! GPU: the first discrete one, else the first integrated one. Every
+//! well-known key is listed; one the primary GPU does not report (NVML has
+//! no voltage) reads as unavailable and says so.
 
 use std::time::Instant;
 
@@ -13,17 +15,71 @@ use bezel_core::domain::sensor::{
 
 use crate::provider::{Provider, describe, put};
 
-/// Per-GPU metrics repeated for the primary GPU: `(suffix, alias label)`.
-const PRIMARY: [(&str, &str); 9] = [
-    ("usage", "GPU usage"),
-    ("temperature", "GPU temperature"),
-    ("memory.used", "GPU memory used"),
-    ("memory.total", "GPU memory total"),
-    ("memory.percent", "GPU memory used (percent)"),
-    ("power", "GPU power"),
-    ("frequency", "GPU core clock"),
-    ("fan", "GPU fan"),
-    ("name", "GPU model"),
+/// A per-GPU metric repeated for the primary GPU: the well-known key, the
+/// per-GPU suffix (`gpu.<n>.<suffix>`), the label and what it measures (for
+/// the entry of a GPU that does not report it).
+struct Primary {
+    key: &'static str,
+    suffix: &'static str,
+    label: &'static str,
+    quantity: Quantity,
+}
+
+const fn primary(
+    key: &'static str,
+    suffix: &'static str,
+    label: &'static str,
+    quantity: Quantity,
+) -> Primary {
+    Primary {
+        key,
+        suffix,
+        label,
+        quantity,
+    }
+}
+
+const PRIMARY: [Primary; 10] = [
+    primary(keys::GPU_USAGE, "usage", "GPU usage", Quantity::Percent),
+    primary(
+        keys::GPU_TEMPERATURE,
+        "temperature",
+        "GPU temperature",
+        Quantity::Celsius,
+    ),
+    primary(
+        keys::GPU_MEMORY_USED,
+        "memory.used",
+        "GPU memory used",
+        Quantity::Bytes,
+    ),
+    primary(
+        keys::GPU_MEMORY_TOTAL,
+        "memory.total",
+        "GPU memory total",
+        Quantity::Bytes,
+    ),
+    primary(
+        keys::GPU_MEMORY_PERCENT,
+        "memory.percent",
+        "GPU memory used (percent)",
+        Quantity::Percent,
+    ),
+    primary(keys::GPU_POWER, "power", "GPU power", Quantity::Watts),
+    primary(
+        keys::GPU_FREQUENCY,
+        "frequency",
+        "GPU core clock",
+        Quantity::Megahertz,
+    ),
+    primary(
+        keys::GPU_VOLTAGE,
+        "voltage",
+        "GPU core voltage",
+        Quantity::Volts,
+    ),
+    primary(keys::GPU_FAN, "fan", "GPU fan", Quantity::Percent),
+    primary(keys::GPU_NAME, "name", "GPU model", Quantity::Text),
 ];
 
 /// Builds a GPU's provider once its number is known.
@@ -48,11 +104,21 @@ pub(crate) fn parse_pci(address: &str) -> Option<(u32, u32, u32, u32)> {
     Some((hex(domain)?, hex(bus)?, hex(device)?, hex(function)?))
 }
 
-/// A key that repeats another key's reading.
+/// A key that repeats another key's reading, or says why it cannot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Alias {
     pub(crate) key: SensorKey,
-    pub(crate) target: SensorKey,
+    pub(crate) target: Result<SensorKey, String>,
+}
+
+impl Alias {
+    /// The reading of the target in `snapshot`, or why there is none.
+    pub(crate) fn reading(&self, snapshot: &Snapshot) -> Reading {
+        match &self.target {
+            Ok(target) => snapshot.get(target),
+            Err(why) => Reading::Unavailable(why.clone()),
+        }
+    }
 }
 
 /// The numbered GPU providers, the primary aliases and their catalog entries.
@@ -81,19 +147,27 @@ pub(crate) fn number(mut found: Vec<FoundGpu>) -> Gpus {
     let targets = first.catalog();
     let mut aliases = Vec::new();
     let mut catalog = Vec::new();
-    for (suffix, label) in PRIMARY {
-        let target_key = format!("gpu.{primary}.{suffix}");
-        let Some(target) = targets.iter().find(|i| i.key.as_str() == target_key) else {
-            continue;
+    for metric in &PRIMARY {
+        let target_key = format!("gpu.{primary}.{}", metric.suffix);
+        let target = targets.iter().find(|i| i.key.as_str() == target_key);
+        let (quantity, source, target) = match target {
+            Some(t) => (
+                t.quantity,
+                format!("{} ({})", t.key, t.source),
+                Ok(t.key.clone()),
+            ),
+            None => {
+                let what = metric.label.trim_start_matches("GPU ");
+                let why = format!("GPU {primary} does not report its {what}");
+                (metric.quantity, target_key, Err(why))
+            }
         };
-        let alias_key = format!("gpu.{suffix}");
-        let source = format!("{} ({})", target.key, target.source);
-        let Some(info) = describe(&alias_key, Category::Gpu, label, target.quantity, source) else {
+        let Some(info) = describe(metric.key, Category::Gpu, metric.label, quantity, source) else {
             continue;
         };
         aliases.push(Alias {
             key: info.key.clone(),
-            target: target.key.clone(),
+            target,
         });
         catalog.push(info);
     }
@@ -109,32 +183,15 @@ struct NoGpu {
     catalog: Vec<SensorInfo>,
 }
 
-const NO_GPU: &str = "no GPU found (NVIDIA needs its driver's NVML; AMD needs amdgpu)";
+const NO_GPU: &str =
+    "no GPU found (NVIDIA needs its driver's NVML; AMD needs the amdgpu driver on Linux)";
 
 impl NoGpu {
     fn new() -> Self {
-        let g = Category::Gpu;
-        let catalog = [
-            describe(keys::GPU_USAGE, g, "GPU usage", Quantity::Percent, "none"),
-            describe(
-                keys::GPU_TEMPERATURE,
-                g,
-                "GPU temperature",
-                Quantity::Celsius,
-                "none",
-            ),
-            describe(
-                keys::GPU_MEMORY_USED,
-                g,
-                "GPU memory used",
-                Quantity::Bytes,
-                "none",
-            ),
-            describe(keys::GPU_POWER, g, "GPU power", Quantity::Watts, "none"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        let catalog = PRIMARY
+            .iter()
+            .filter_map(|m| describe(m.key, Category::Gpu, m.label, m.quantity, "none"))
+            .collect();
         Self { catalog }
     }
 }
@@ -232,26 +289,63 @@ mod tests {
         assert_eq!(sources, ["dgpu", "igpu", "dgpu"]);
         assert_eq!(gpus.providers[1].catalog()[0].label, "GPU 1 usage");
         assert_eq!(
-            gpus.aliases,
-            [
-                Alias {
-                    key: SensorKey::new("gpu.usage").unwrap(),
-                    target: SensorKey::new("gpu.0.usage").unwrap()
-                },
-                Alias {
-                    key: SensorKey::new("gpu.name").unwrap(),
-                    target: SensorKey::new("gpu.0.name").unwrap()
-                },
-            ]
+            gpus.aliases[0],
+            Alias {
+                key: SensorKey::new(keys::GPU_USAGE).unwrap(),
+                target: Ok(SensorKey::new("gpu.0.usage").unwrap())
+            }
         );
         assert_eq!(gpus.catalog[0].label, "GPU usage");
         assert_eq!(gpus.catalog[0].source, "gpu.0.usage (dgpu)");
+        let name = gpus
+            .aliases
+            .iter()
+            .find(|a| a.key.as_str() == keys::GPU_NAME);
+        assert_eq!(
+            name.map(|a| a.target.clone()),
+            Some(Ok(SensorKey::new("gpu.0.name").unwrap()))
+        );
+    }
+
+    #[test]
+    fn a_metric_the_primary_gpu_lacks_is_listed_and_explained() {
+        let gpus = number(vec![found(Some("0000:01:00.0"), false)]);
+        let listed: Vec<&str> = gpus.catalog.iter().map(|i| i.key.as_str()).collect();
+        let every: Vec<&str> = PRIMARY.iter().map(|m| m.key).collect();
+        assert_eq!(listed, every);
+        let voltage = gpus
+            .catalog
+            .iter()
+            .find(|i| i.key.as_str() == keys::GPU_VOLTAGE)
+            .unwrap();
+        assert_eq!(
+            (voltage.quantity, voltage.source.as_str()),
+            (Quantity::Volts, "gpu.0.voltage")
+        );
+        let mut out = Snapshot::default();
+        out.insert(SensorKey::new("gpu.0.usage").unwrap(), Reading::Value(7.0));
+        let reading = |key: &str| {
+            gpus.aliases
+                .iter()
+                .find(|a| a.key.as_str() == key)
+                .map(|a| a.reading(&out))
+        };
+        assert_eq!(reading(keys::GPU_USAGE), Some(Reading::Value(7.0)));
+        assert_eq!(
+            reading(keys::GPU_VOLTAGE),
+            Some(Reading::Unavailable(
+                "GPU 0 does not report its core voltage".into()
+            ))
+        );
     }
 
     #[test]
     fn an_integrated_gpu_is_primary_when_alone() {
         let gpus = number(vec![found(Some("0000:6a:00.0"), true)]);
-        assert_eq!(gpus.aliases[0].target.as_str(), "gpu.0.usage");
+        assert_eq!(
+            gpus.aliases[0].target,
+            Ok(SensorKey::new("gpu.0.usage").unwrap())
+        );
     }
 
     #[test]
@@ -261,9 +355,11 @@ mod tests {
         assert_eq!(gpus.providers.len(), 1);
         let mut out = Snapshot::default();
         gpus.providers[0].sample(Instant::now(), &mut out);
-        assert_eq!(out.len(), 4);
+        assert_eq!(out.len(), PRIMARY.len());
         let usage = out.get(&SensorKey::new(keys::GPU_USAGE).unwrap());
         assert_eq!(usage, Reading::Unavailable(NO_GPU.into()));
+        let voltage = out.get(&SensorKey::new(keys::GPU_VOLTAGE).unwrap());
+        assert_eq!(voltage, Reading::Unavailable(NO_GPU.into()));
     }
 
     #[test]

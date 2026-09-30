@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use bezel_core::domain::frame::Rgba;
 use bezel_core::domain::geometry::{Orientation, Size};
-use bezel_core::domain::sensor::{ByteUnits, DisplayFormat, SensorKey, TemperatureUnit};
+use bezel_core::domain::sensor::{ByteUnits, DisplayFormat, SensorKey, TemperatureUnit, keys};
 use bezel_core::domain::theme::{
     AssetRef, Background, Binding, BoxF, Cap, Direction, ElementKind, Fit, FontSpec, GraphStyle,
     HAlign, Paint, Segments, ShapeKind, TextContent, TextStyle, Theme, VAlign,
@@ -118,65 +118,68 @@ const fn spec(name: &'static str, key: &'static str, scale: f64, full: f64) -> S
 }
 
 const REBIND: &str = "the vendor app lets the user pick this sensor; rebind it in the editor";
-const NOT_MEASURED: &str = "Bezel does not measure this yet; the layer shows it as unavailable";
+const NOT_SUPPORTED: &str = "not supported yet; the layer shows it as unavailable";
 
 /// The vendor data names (sensors.md section 3) and their Bezel keys.
 const SENSORS: [Spec; 38] = [
-    spec("CPUTEMP", "cpu.temperature", 1.0, 100.0),
+    spec("CPUTEMP", keys::CPU_TEMPERATURE, 1.0, 100.0),
     Spec {
         decimals: None,
-        ..spec("CPUCLOCK", "cpu.frequency", 1.0, 6000.0)
+        ..spec("CPUCLOCK", keys::CPU_FREQUENCY, 1.0, 6000.0)
     },
     Spec {
         decimals: None,
-        ..spec("CPUCLOCK_G", "cpu.frequency", 1000.0, 6.0)
+        ..spec("CPUCLOCK_G", keys::CPU_FREQUENCY, 1000.0, 6.0)
     },
-    spec("CPULOAD", "cpu.usage", 1.0, 100.0),
-    spec("CPUPWR", "cpu.power", 1.0, 500.0),
-    spec("CPUFAN", "cpu.fan", 1.0, 8000.0),
+    spec("CPULOAD", keys::CPU_USAGE, 1.0, 100.0),
+    spec("CPUPWR", keys::CPU_POWER, 1.0, 500.0),
+    spec("CPUFAN", keys::CPU_FAN, 1.0, 8000.0),
     Spec {
         decimals: Some(2),
-        ..spec("CPUVOLTAGE", "cpu.voltage", 1.0, 100.0)
+        ..spec("CPUVOLTAGE", keys::CPU_VOLTAGE, 1.0, 100.0)
     },
-    spec("CPUMODEL", "cpu.name", 1.0, 100.0),
-    spec("GPUTEMP", "gpu.temperature", 1.0, 100.0),
+    spec("CPUMODEL", keys::CPU_NAME, 1.0, 100.0),
+    spec("GPUTEMP", keys::GPU_TEMPERATURE, 1.0, 100.0),
     Spec {
         decimals: None,
-        ..spec("GPUCLOCK", "gpu.frequency", 1.0, 6000.0)
-    },
-    Spec {
-        decimals: None,
-        ..spec("GPUCLOCK_G", "gpu.frequency", 1000.0, 6.0)
+        ..spec("GPUCLOCK", keys::GPU_FREQUENCY, 1.0, 6000.0)
     },
     Spec {
         decimals: None,
-        ..spec("GPURAMTOTAL", "gpu.memory.total", MIB, 100.0)
+        ..spec("GPUCLOCK_G", keys::GPU_FREQUENCY, 1000.0, 6.0)
     },
-    spec("GPURAMLOAD", "gpu.memory.percent", 1.0, 100.0),
     Spec {
         decimals: None,
-        ..spec("GPURAM", "gpu.memory.used", MIB, 100.0)
+        ..spec("GPURAMTOTAL", keys::GPU_MEMORY_TOTAL, MIB, 100.0)
     },
-    spec("GPULOAD", "gpu.usage", 1.0, 100.0),
-    spec("GPUPWR", "gpu.power", 1.0, 500.0),
-    spec("GPUFAN", "gpu.fan", 1.0, 8000.0),
+    spec("GPURAMLOAD", keys::GPU_MEMORY_PERCENT, 1.0, 100.0),
+    Spec {
+        decimals: None,
+        ..spec("GPURAM", keys::GPU_MEMORY_USED, MIB, 100.0)
+    },
+    spec("GPULOAD", keys::GPU_USAGE, 1.0, 100.0),
+    spec("GPUPWR", keys::GPU_POWER, 1.0, 500.0),
+    Spec {
+        note: Some("the vendor app shows the GPU fan in RPM; Bezel shows its duty in percent"),
+        ..spec("GPUFAN", keys::GPU_FAN, 1.0, 100.0)
+    },
     Spec {
         decimals: Some(2),
-        ..spec("GPUVOLTAGE", "gpu.voltage", 1.0, 100.0)
+        ..spec("GPUVOLTAGE", keys::GPU_VOLTAGE, 1.0, 100.0)
     },
-    spec("GPUMODEL", "gpu.name", 1.0, 100.0),
+    spec("GPUMODEL", keys::GPU_NAME, 1.0, 100.0),
     Spec {
         decimals: None,
-        ..spec("RAMVALID", "memory.available", MIB, 100.0)
+        ..spec("RAMVALID", keys::MEMORY_AVAILABLE, MIB, 100.0)
     },
-    spec("RAMLOAD", "memory.percent", 1.0, 100.0),
+    spec("RAMLOAD", keys::MEMORY_PERCENT, 1.0, 100.0),
     Spec {
         decimals: None,
-        ..spec("RAM", "memory.used", MIB, 100.0)
+        ..spec("RAM", keys::MEMORY_USED, MIB, 100.0)
     },
     Spec {
         decimals: None,
-        ..spec("RAMTOTAL", "memory.total", MIB, 100.0)
+        ..spec("RAMTOTAL", keys::MEMORY_TOTAL, MIB, 100.0)
     },
     Spec {
         note: Some("the memory \"model\" text has no Bezel equivalent"),
@@ -184,27 +187,27 @@ const SENSORS: [Spec; 38] = [
     },
     Spec {
         decimals: Some(1),
-        ..spec("RAM_GB", "memory.used", GIB, 100.0)
+        ..spec("RAM_GB", keys::MEMORY_USED, GIB, 100.0)
     },
     Spec {
         decimals: Some(1),
-        ..spec("RAMVALID_GB", "memory.available", GIB, 100.0)
+        ..spec("RAMVALID_GB", keys::MEMORY_AVAILABLE, GIB, 100.0)
     },
     Spec {
         decimals: Some(1),
-        ..spec("RAMTOTAL_GB", "memory.total", GIB, 100.0)
+        ..spec("RAMTOTAL_GB", keys::MEMORY_TOTAL, GIB, 100.0)
     },
     Spec {
         note: Some(REBIND),
-        ..spec("WATERPUMP", "fan.pump", 1.0, 8000.0)
+        ..spec("WATERPUMP", keys::FAN_PUMP, 1.0, 8000.0)
     },
     Spec {
         note: Some(REBIND),
-        ..spec("CASEFAN1", "fan.case1", 1.0, 8000.0)
+        ..spec("CASEFAN1", keys::FAN_CASE_1, 1.0, 8000.0)
     },
     Spec {
         note: Some(REBIND),
-        ..spec("CASEFAN2", "fan.case2", 1.0, 8000.0)
+        ..spec("CASEFAN2", keys::FAN_CASE_2, 1.0, 8000.0)
     },
     Spec {
         note: Some("Windows drive letters were kept; rebind the layer to a mount point"),
@@ -214,24 +217,21 @@ const SENSORS: [Spec; 38] = [
     spec("HDDUSED", "disk.{}.activity", 1.0, 100.0),
     Spec {
         decimals: None,
-        ..spec("UPSPEED", "net.up", 1024.0, 100.0)
+        ..spec("UPSPEED", keys::NET_UP, 1024.0, 100.0)
     },
     Spec {
         decimals: None,
-        ..spec("DOWNDSPEED", "net.down", 1024.0, 100.0)
+        ..spec("DOWNDSPEED", keys::NET_DOWN, 1024.0, 100.0)
     },
     Spec {
-        note: Some(NOT_MEASURED),
-        ..spec("Volume", "system.volume", 1.0, 100.0)
+        note: Some(NOT_SUPPORTED),
+        ..spec("Volume", keys::SYSTEM_VOLUME, 1.0, 100.0)
     },
     Spec {
         note: Some("the vendor weather service is not supported"),
         ..spec("Weather", "vendor.Weather", 1.0, 100.0)
     },
-    Spec {
-        note: Some(NOT_MEASURED),
-        ..spec("FPS", "gpu.fps", 1.0, 100.0)
-    },
+    spec("FPS", keys::GPU_FPS, 1.0, 100.0),
 ];
 
 /// A resolved vendor sensor.
@@ -770,8 +770,8 @@ impl Importer {
             })
         };
         match data {
-            "RAM" | "RAM_GB" => return percent("memory.percent"),
-            "RAMVALID" | "RAMVALID_GB" => return percent("memory.available.percent"),
+            "RAM" | "RAM_GB" => return percent(keys::MEMORY_PERCENT),
+            "RAMVALID" | "RAMVALID_GB" => return percent(keys::MEMORY_AVAILABLE_PERCENT),
             "TIME" | "DATE" | "DAY" | "APM" | "StaticText" => {
                 self.warn(format!(
                     "bars, rings, needles and charts bound to {data} are not supported; \

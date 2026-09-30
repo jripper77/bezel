@@ -1,5 +1,6 @@
 //! Network rates and totals from `/proc/net/dev`, per interface
-//! (`net.<iface>.down`) and summed (`net.down`).
+//! (`net.<iface>.down`, `net.<iface>.down.total`) and summed (`net.down`,
+//! `net.down.total`).
 //!
 //! The sum only counts physical interfaces (those with a `device` link in
 //! `/sys/class/net`): loopback, bridges, veth pairs, Docker, libvirt, VPN
@@ -14,12 +15,10 @@ use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapsh
 
 use super::Roots;
 use super::fs::{read_error, read_text};
-use crate::provider::{Provider, WARMING_UP, describe, put};
+use crate::provider::{COUNTER_RESET, Provider, WARMING_UP, describe, put};
 
-/// Bytes received by the summed interfaces since boot.
-pub(crate) const NET_DOWNLOADED: &str = "net.downloaded";
-/// Bytes sent by the summed interfaces since boot.
-pub(crate) const NET_UPLOADED: &str = "net.uploaded";
+/// Per-interface key suffixes: rates, then totals since the interface came up.
+const SUFFIXES: [&str; 4] = ["down", "up", "down.total", "up.total"];
 
 /// Name prefixes of virtual interfaces, never summed even with a device link.
 const VIRTUAL: [&str; 10] = [
@@ -101,14 +100,14 @@ impl Network {
                 summed,
             ),
             describe(
-                NET_DOWNLOADED,
+                keys::NET_DOWN_TOTAL,
                 n,
                 "Downloaded since boot",
                 Quantity::Bytes,
                 summed,
             ),
             describe(
-                NET_UPLOADED,
+                keys::NET_UP_TOTAL,
                 n,
                 "Uploaded since boot",
                 Quantity::Bytes,
@@ -136,14 +135,14 @@ impl Network {
                         src,
                     ),
                     describe(
-                        &format!("net.{iface}.downloaded"),
+                        &format!("net.{iface}.down.total"),
                         n,
                         format!("{iface} downloaded"),
                         Quantity::Bytes,
                         src,
                     ),
                     describe(
-                        &format!("net.{iface}.uploaded"),
+                        &format!("net.{iface}.up.total"),
                         n,
                         format!("{iface} uploaded"),
                         Quantity::Bytes,
@@ -205,7 +204,7 @@ impl Provider for Network {
             let as_rate =
                 |b: Option<u64>, c: u64| match b.zip(elapsed).and_then(|(b, e)| rate(b, c, e)) {
                     Some(r) => Reading::Value(r),
-                    None => Reading::Unavailable("counter reset or no time elapsed".into()),
+                    None => Reading::Unavailable(COUNTER_RESET.into()),
                 };
             let old = before.get(name);
             (as_rate(old.map(|o| o.0), rx), as_rate(old.map(|o| o.1), tx))
@@ -213,7 +212,7 @@ impl Provider for Network {
         for iface in &self.listed {
             let Some(&(rx, tx)) = current.get(iface) else {
                 let gone = format!("interface {iface} is gone");
-                for suffix in ["down", "up", "downloaded", "uploaded"] {
+                for suffix in SUFFIXES {
                     put(
                         out,
                         &format!("net.{iface}.{suffix}"),
@@ -223,18 +222,10 @@ impl Provider for Network {
                 continue;
             };
             let (down, up) = rates(iface, (rx, tx));
-            put(out, &format!("net.{iface}.down"), down);
-            put(out, &format!("net.{iface}.up"), up);
-            put(
-                out,
-                &format!("net.{iface}.downloaded"),
-                Reading::Value(rx as f64),
-            );
-            put(
-                out,
-                &format!("net.{iface}.uploaded"),
-                Reading::Value(tx as f64),
-            );
+            let totals = (Reading::Value(rx as f64), Reading::Value(tx as f64));
+            for (suffix, reading) in SUFFIXES.into_iter().zip([down, up, totals.0, totals.1]) {
+                put(out, &format!("net.{iface}.{suffix}"), reading);
+            }
         }
         let mut names: Vec<&String> = current.keys().collect();
         names.sort();
@@ -263,7 +254,7 @@ impl Provider for Network {
             (_, true, _) => Reading::Unavailable("no physical network interface".into()),
             (None, _, _) => Reading::Unavailable(WARMING_UP.into()),
             (_, _, Some(v)) => Reading::Value(v),
-            (_, _, None) => Reading::Unavailable("counter reset or no time elapsed".into()),
+            (_, _, None) => Reading::Unavailable(COUNTER_RESET.into()),
         };
         put(out, keys::NET_DOWN, summed(down));
         put(out, keys::NET_UP, summed(up));
@@ -274,8 +265,8 @@ impl Provider for Network {
                 Reading::Value(v)
             }
         };
-        put(out, NET_DOWNLOADED, total(rx_total));
-        put(out, NET_UPLOADED, total(tx_total));
+        put(out, keys::NET_DOWN_TOTAL, total(rx_total));
+        put(out, keys::NET_UP_TOTAL, total(tx_total));
         self.previous = Some((current, now));
     }
 }
@@ -349,7 +340,7 @@ mod tests {
             get(&first, "net.eno1.down"),
             Reading::Unavailable(WARMING_UP.into())
         );
-        assert_eq!(get(&first, "net.downloaded"), Reading::Value(1000.0));
+        assert_eq!(get(&first, keys::NET_DOWN_TOTAL), Reading::Value(1000.0));
         assert_eq!(first.len(), keys.len());
 
         // Half a second later: eno1 +2000/+500, wlp +1000/0, loopback and
@@ -369,11 +360,12 @@ mod tests {
         assert_eq!(get(&second, "net.eno1.up"), Reading::Value(1000.0));
         assert_eq!(get(&second, "net.down"), Reading::Value(6000.0));
         assert_eq!(get(&second, "net.up"), Reading::Value(1000.0));
-        assert_eq!(get(&second, "net.uploaded"), Reading::Value(600.0));
+        assert_eq!(get(&second, keys::NET_UP_TOTAL), Reading::Value(600.0));
         assert_eq!(
-            get(&second, "net.tailscale0.downloaded"),
+            get(&second, "net.tailscale0.down.total"),
             Reading::Value(9999.0)
         );
+        assert_eq!(get(&second, "net.eno1.up.total"), Reading::Value(600.0));
 
         // eno1's counter reset (driver reload): no negative or huge rate.
         t.file(
@@ -385,7 +377,10 @@ mod tests {
             get(&third, "net.eno1.down"),
             Reading::Unavailable(_)
         ));
-        assert!(matches!(get(&third, "net.down"), Reading::Unavailable(_)));
+        assert_eq!(
+            get(&third, "net.down"),
+            Reading::Unavailable(COUNTER_RESET.into())
+        );
         assert!(
             matches!(get(&third, "net.docker0.down"), Reading::Unavailable(r) if r.contains("gone"))
         );
@@ -401,7 +396,10 @@ mod tests {
         assert!(
             matches!(get(&s, "net.down"), Reading::Unavailable(r) if r.starts_with("no physical"))
         );
-        assert!(matches!(get(&s, "net.downloaded"), Reading::Unavailable(_)));
+        assert!(matches!(
+            get(&s, keys::NET_DOWN_TOTAL),
+            Reading::Unavailable(_)
+        ));
         // A USB NIC plugged in: summed from its second sample on.
         t.dir("sys/devices/usb0")
             .link("sys/class/net/enp0s1/device", "sys/devices/usb0");

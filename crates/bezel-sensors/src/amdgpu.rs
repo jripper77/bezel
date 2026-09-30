@@ -1,6 +1,8 @@
 //! AMD GPUs through the amdgpu driver's sysfs files: `gpu_busy_percent`,
 //! `mem_info_vram_used/total`, and the card's hwmon chip (edge, junction and
-//! memory temperatures, power, shader clock, fan).
+//! memory temperatures, power, shader clock, core voltage, fan). The hwmon
+//! files are converted and power is picked exactly like the hwmon provider
+//! does ([`Kind`], [`power_file`]).
 //!
 //! A card is integrated when the driver does not expose `mem_busy_percent`,
 //! which amdgpu hides on APUs. On an APU, `PPT` is the whole package's power
@@ -16,31 +18,32 @@ use bezel_core::domain::sensor::{Quantity, Reading, SensorInfo, Snapshot};
 use crate::gpu::{FoundGpu, GpuCatalog, parse_pci};
 use crate::linux::Roots;
 use crate::linux::fs::{read_int, read_text};
+use crate::linux::hwmon::{Kind, power_file};
 use crate::provider::{Provider, percent, put};
 
 const SLEEPING: &str = "the GPU is powered down (runtime suspend)";
 
-/// How a raw sysfs integer becomes the metric's unit.
+/// How a file's integer becomes the metric's value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Unit {
-    /// Already in the unit (percent, bytes, RPM).
-    Same,
-    /// m°C → °C.
-    Milli,
-    /// µW → W, Hz → MHz.
-    Micro,
-    /// PWM 0-255 → percent.
-    Pwm,
+    /// Already in the unit (`gpu_busy_percent`, VRAM bytes).
+    Raw(Quantity),
+    /// An hwmon attribute, converted like the hwmon provider does.
+    Hwmon(Kind),
 }
 
 impl Unit {
-    fn convert(self, raw: i64) -> f64 {
-        let raw = raw as f64;
+    fn quantity(self) -> Quantity {
         match self {
-            Unit::Same => raw,
-            Unit::Milli => raw / 1000.0,
-            Unit::Micro => raw / 1_000_000.0,
-            Unit::Pwm => raw * 100.0 / 255.0,
+            Unit::Raw(quantity) => quantity,
+            Unit::Hwmon(kind) => kind.quantity(),
+        }
+    }
+
+    fn convert(self, raw: i64) -> f64 {
+        match self {
+            Unit::Raw(_) => raw as f64,
+            Unit::Hwmon(kind) => kind.convert(raw),
         }
     }
 }
@@ -132,11 +135,12 @@ fn hwmon_dir(device: &Path) -> Option<PathBuf> {
     dirs.into_iter().next()
 }
 
-/// The hwmon temperature input labelled `label`.
-fn labelled_temperature(hwmon: &Path, label: &str) -> Option<PathBuf> {
-    (1..=8).find_map(|n| {
-        let text = read_text(&hwmon.join(format!("temp{n}_label"))).ok()?;
-        let input = hwmon.join(format!("temp{n}_input"));
+/// The hwmon input `<prefix>N_input` labelled `label` (`temp2_input` for
+/// `junction`, `in0_input` for `vddgfx`).
+fn labelled(hwmon: &Path, prefix: &str, label: &str) -> Option<PathBuf> {
+    (0..=8).find_map(|n| {
+        let text = read_text(&hwmon.join(format!("{prefix}{n}_label"))).ok()?;
+        let input = hwmon.join(format!("{prefix}{n}_input"));
         (text.trim() == label && input.exists()).then_some(input)
     })
 }
@@ -149,20 +153,67 @@ struct Builder {
 
 impl Builder {
     /// Adds `gpu.<n>.<suffix>` when `path` exists; tells whether it did.
-    fn add(
-        &mut self,
-        suffix: &'static str,
-        what: &str,
-        quantity: Quantity,
-        path: Option<PathBuf>,
-        unit: Unit,
-    ) -> bool {
+    fn add(&mut self, suffix: &'static str, what: &str, unit: Unit, path: Option<PathBuf>) -> bool {
         let Some(path) = path.filter(|p| p.exists()) else {
             return false;
         };
-        self.catalog.add(suffix, what, quantity);
+        self.catalog.add(suffix, what, unit.quantity());
         self.metrics.push(Metric { suffix, path, unit });
         true
+    }
+
+    /// Usage and VRAM, from the card's own files. On an APU, "VRAM" is
+    /// the BIOS carve-out of system RAM.
+    fn add_device(&mut self, device: &Path, integrated: bool) {
+        let vram = if integrated {
+            "VRAM carve-out"
+        } else {
+            "memory"
+        };
+        let file = |name: &str| Some(device.join(name));
+        let percent = Unit::Raw(Quantity::Percent);
+        self.add("usage", "usage", percent, file("gpu_busy_percent"));
+        let bytes = Unit::Raw(Quantity::Bytes);
+        let used = format!("{vram} used");
+        let used = self.add("memory.used", &used, bytes, file("mem_info_vram_used"));
+        let total = format!("{vram} total");
+        let total = self.add("memory.total", &total, bytes, file("mem_info_vram_total"));
+        if used && total {
+            let what = format!("{vram} used (percent)");
+            self.catalog.add("memory.percent", &what, Quantity::Percent);
+        }
+    }
+
+    /// Temperatures, power, clock, core voltage and fan from the card's
+    /// hwmon chip. On an APU, `PPT` is the whole package's power.
+    fn add_hwmon(&mut self, hwmon: &Path, integrated: bool) {
+        let file = |name: &str| Some(hwmon.join(name));
+        let celsius = Unit::Hwmon(Kind::Temp);
+        let edge = labelled(hwmon, "temp", "edge").or_else(|| file("temp1_input"));
+        self.add("temperature", "temperature (edge)", celsius, edge);
+        let junction = labelled(hwmon, "temp", "junction");
+        self.add(
+            "temperature.junction",
+            "junction temperature",
+            celsius,
+            junction,
+        );
+        let memory = labelled(hwmon, "temp", "mem");
+        self.add("temperature.memory", "memory temperature", celsius, memory);
+        let power = power_file(1, |f| hwmon.join(f).exists()).map(|f| hwmon.join(f));
+        let power_what = if integrated {
+            "package power (PPT, CPU included)"
+        } else {
+            "power"
+        };
+        self.add("power", power_what, Unit::Hwmon(Kind::Power), power);
+        let clock = file("freq1_input");
+        self.add("frequency", "core clock", Unit::Hwmon(Kind::Freq), clock);
+        let vddgfx = labelled(hwmon, "in", "vddgfx");
+        self.add("voltage", "core voltage", Unit::Hwmon(Kind::In), vddgfx);
+        self.add("fan", "fan", Unit::Hwmon(Kind::Pwm), file("pwm1"));
+        let rpm = file("fan1_input");
+        self.add("fan.rpm", "fan speed", Unit::Hwmon(Kind::Fan), rpm);
     }
 }
 
@@ -177,94 +228,14 @@ struct AmdGpu {
 
 impl AmdGpu {
     fn new(device: PathBuf, name: String, integrated: bool, index: usize) -> Self {
-        let hwmon = hwmon_dir(&device);
-        let on_hwmon = |file: &str| hwmon.as_ref().map(|h| h.join(file));
-        let temp = |label: &str| hwmon.as_ref().and_then(|h| labelled_temperature(h, label));
-        let vram = if integrated {
-            "VRAM carve-out"
-        } else {
-            "memory"
-        };
-        let power = on_hwmon("power1_average")
-            .filter(|p| p.exists())
-            .or_else(|| on_hwmon("power1_input"));
-        let power_what = if integrated {
-            "package power (PPT, CPU included)"
-        } else {
-            "power"
-        };
         let mut b = Builder {
             catalog: GpuCatalog::new(index, "amdgpu sysfs"),
             metrics: Vec::new(),
         };
-        let (c, m) = (Quantity::Celsius, Unit::Milli);
-        b.add(
-            "usage",
-            "usage",
-            Quantity::Percent,
-            Some(device.join("gpu_busy_percent")),
-            Unit::Same,
-        );
-        b.add(
-            "temperature",
-            "temperature (edge)",
-            c,
-            temp("edge").or_else(|| on_hwmon("temp1_input")),
-            m,
-        );
-        b.add(
-            "temperature.junction",
-            "junction temperature",
-            c,
-            temp("junction"),
-            m,
-        );
-        b.add(
-            "temperature.memory",
-            "memory temperature",
-            c,
-            temp("mem"),
-            m,
-        );
-        let used = format!("{vram} used");
-        let used = b.add(
-            "memory.used",
-            &used,
-            Quantity::Bytes,
-            Some(device.join("mem_info_vram_used")),
-            Unit::Same,
-        );
-        let total = format!("{vram} total");
-        let total = b.add(
-            "memory.total",
-            &total,
-            Quantity::Bytes,
-            Some(device.join("mem_info_vram_total")),
-            Unit::Same,
-        );
-        if used && total {
-            b.catalog.add(
-                "memory.percent",
-                &format!("{vram} used (percent)"),
-                Quantity::Percent,
-            );
+        b.add_device(&device, integrated);
+        if let Some(hwmon) = hwmon_dir(&device) {
+            b.add_hwmon(&hwmon, integrated);
         }
-        b.add("power", power_what, Quantity::Watts, power, Unit::Micro);
-        b.add(
-            "frequency",
-            "core clock",
-            Quantity::Megahertz,
-            on_hwmon("freq1_input"),
-            Unit::Micro,
-        );
-        b.add("fan", "fan", Quantity::Percent, on_hwmon("pwm1"), Unit::Pwm);
-        b.add(
-            "fan.rpm",
-            "fan speed",
-            Quantity::Rpm,
-            on_hwmon("fan1_input"),
-            Unit::Same,
-        );
         b.catalog.add("name", "model", Quantity::Text);
         Self {
             index,
@@ -351,6 +322,10 @@ mod tests {
             .file(&format!("{igpu}/hwmon/hwmon2/temp1_label"), "edge\n")
             .file(&format!("{igpu}/hwmon/hwmon2/power1_input"), "39660000\n")
             .file(&format!("{igpu}/hwmon/hwmon2/freq1_input"), "600000000\n")
+            .file(&format!("{igpu}/hwmon/hwmon2/in0_input"), "844\n")
+            .file(&format!("{igpu}/hwmon/hwmon2/in0_label"), "vddgfx\n")
+            .file(&format!("{igpu}/hwmon/hwmon2/in1_input"), "1235\n")
+            .file(&format!("{igpu}/hwmon/hwmon2/in1_label"), "vddnb\n")
             .link(&format!("{igpu}/driver"), "sys/bus/pci/drivers/amdgpu")
             .link("sys/class/drm/card1/device", igpu);
         let dgpu = "sys/devices/pci0000:00/0000:03:00.0";
@@ -407,7 +382,10 @@ mod tests {
             p.sample(Instant::now(), &mut out);
         }
         // 03:00.0 sorts first and is discrete: gpu.0, and the primary.
-        assert_eq!(gpus.aliases[0].target.as_str(), "gpu.0.usage");
+        assert_eq!(
+            gpus.aliases[0].target.as_ref().map(|k| k.as_str()),
+            Ok("gpu.0.usage")
+        );
         assert_eq!(get(&out, "gpu.0.usage"), Reading::Value(97.0));
         assert_eq!(get(&out, "gpu.0.temperature"), Reading::Value(61.0));
         assert_eq!(
@@ -434,6 +412,11 @@ mod tests {
         assert_eq!(get(&out, "gpu.1.power"), Reading::Value(39.66));
         assert_eq!(get(&out, "gpu.1.frequency"), Reading::Value(600.0));
         assert_eq!(
+            get(&out, "gpu.1.voltage"),
+            Reading::Value(0.844),
+            "vddgfx, not vddnb"
+        );
+        assert_eq!(
             get(&out, "gpu.1.name"),
             Reading::Text("AMD GPU 1002:164e".into())
         );
@@ -443,11 +426,17 @@ mod tests {
             .find(|i| i.key.as_str() == "gpu.1.power")
             .unwrap();
         assert_eq!(igpu_power.label, "GPU 1 package power (PPT, CPU included)");
-        assert!(
-            !catalog
-                .iter()
-                .any(|i| i.key.as_str() == "gpu.1.temperature.junction")
-        );
+        for missing in ["gpu.1.temperature.junction", "gpu.0.voltage"] {
+            assert!(
+                !catalog.iter().any(|i| i.key.as_str() == missing),
+                "{missing}"
+            );
+        }
+        let voltage = catalog
+            .iter()
+            .find(|i| i.key.as_str() == "gpu.1.voltage")
+            .unwrap();
+        assert_eq!(voltage.quantity, Quantity::Volts);
         assert_eq!(out.len(), catalog.len());
     }
 
@@ -494,6 +483,7 @@ mod tests {
             Reading::Unavailable("VRAM unreadable".into())
         );
         assert!(discover(&Roots::new("/nonexistent", "/nonexistent")).is_empty());
-        assert_eq!(Unit::Pwm.convert(255), 100.0);
+        assert_eq!(Unit::Hwmon(Kind::Pwm).convert(255), 100.0);
+        assert_eq!(Unit::Raw(Quantity::Bytes).convert(7), 7.0);
     }
 }

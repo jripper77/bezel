@@ -33,7 +33,9 @@ impl fmt::Display for SensorKey {
     }
 }
 
-/// Well-known keys every source tries to provide. Themes should prefer them.
+/// Well-known keys every source tries to provide, on every platform. Themes
+/// should prefer them. A source that cannot measure one on this machine
+/// still lists it and reads it as unavailable, with the reason.
 pub mod keys {
     /// Total CPU usage, percent.
     pub const CPU_USAGE: &str = "cpu.usage";
@@ -45,31 +47,108 @@ pub mod keys {
     pub const CPU_POWER: &str = "cpu.power";
     /// 1-minute load average (run-queue length, not a percentage).
     pub const CPU_LOAD_1: &str = "cpu.load.1";
+    /// 5-minute load average.
+    pub const CPU_LOAD_5: &str = "cpu.load.5";
+    /// 15-minute load average.
+    pub const CPU_LOAD_15: &str = "cpu.load.15";
+    /// Processor model name, text.
+    pub const CPU_NAME: &str = "cpu.name";
+    /// CPU fan speed (the fan whose label says CPU), RPM.
+    pub const CPU_FAN: &str = "cpu.fan";
+    /// CPU core voltage (the rail labelled Vcore or CPU core), V.
+    pub const CPU_VOLTAGE: &str = "cpu.voltage";
     /// Primary GPU usage, percent.
     pub const GPU_USAGE: &str = "gpu.usage";
     /// Primary GPU temperature, °C.
     pub const GPU_TEMPERATURE: &str = "gpu.temperature";
     /// Primary GPU memory used, bytes.
     pub const GPU_MEMORY_USED: &str = "gpu.memory.used";
+    /// Primary GPU memory size, bytes.
+    pub const GPU_MEMORY_TOTAL: &str = "gpu.memory.total";
+    /// Primary GPU memory used, percent.
+    pub const GPU_MEMORY_PERCENT: &str = "gpu.memory.percent";
     /// Primary GPU power, W.
     pub const GPU_POWER: &str = "gpu.power";
+    /// Primary GPU core clock, MHz.
+    pub const GPU_FREQUENCY: &str = "gpu.frequency";
+    /// Primary GPU fan duty, percent.
+    pub const GPU_FAN: &str = "gpu.fan";
+    /// Primary GPU core voltage, V.
+    pub const GPU_VOLTAGE: &str = "gpu.voltage";
+    /// Primary GPU model, text.
+    pub const GPU_NAME: &str = "gpu.name";
+    /// Frame rate of the game running now, frames per second.
+    pub const GPU_FPS: &str = "gpu.fps";
     /// RAM in use, bytes.
     pub const MEMORY_USED: &str = "memory.used";
     /// Total RAM, bytes.
     pub const MEMORY_TOTAL: &str = "memory.total";
     /// RAM in use, percent.
     pub const MEMORY_PERCENT: &str = "memory.percent";
+    /// RAM programs can still get without swapping, bytes.
+    pub const MEMORY_AVAILABLE: &str = "memory.available";
+    /// RAM programs can still get, percent of the total.
+    pub const MEMORY_AVAILABLE_PERCENT: &str = "memory.available.percent";
+    /// Swap (the page file on Windows) in use, bytes.
+    pub const SWAP_USED: &str = "memory.swap.used";
+    /// Swap size, bytes.
+    pub const SWAP_TOTAL: &str = "memory.swap.total";
+    /// Swap in use, percent.
+    pub const SWAP_PERCENT: &str = "memory.swap.percent";
+    /// Liquid-cooling pump speed (the fan whose label says pump), RPM.
+    pub const FAN_PUMP: &str = "fan.pump";
+    /// First case fan (labelled chassis, case or system), RPM.
+    pub const FAN_CASE_1: &str = "fan.case1";
+    /// Second case fan, RPM.
+    pub const FAN_CASE_2: &str = "fan.case2";
     /// Download rate of the physical interfaces (no loopback, bridges, VPNs or
     /// containers, whose traffic also crosses a physical NIC), bytes per second.
     pub const NET_DOWN: &str = "net.down";
     /// Upload rate of the physical interfaces, bytes per second.
     pub const NET_UP: &str = "net.up";
+    /// Bytes the physical interfaces received since they came up.
+    pub const NET_DOWN_TOTAL: &str = "net.down.total";
+    /// Bytes the physical interfaces sent since they came up.
+    pub const NET_UP_TOTAL: &str = "net.up.total";
+    /// Round trip to the configured host, milliseconds.
+    pub const NET_PING: &str = "net.ping";
     /// Disk read rate of all disks, bytes per second.
     pub const DISK_READ: &str = "disk.read";
     /// Disk write rate of all disks, bytes per second.
     pub const DISK_WRITE: &str = "disk.write";
+    /// Space used on the root filesystem (`disk.<mount>.used` of `/`), bytes.
+    pub const ROOT_DISK_USED: &str = "disk.root.used";
+    /// Size of the root filesystem, bytes.
+    pub const ROOT_DISK_TOTAL: &str = "disk.root.total";
+    /// Space free on the root filesystem, bytes.
+    pub const ROOT_DISK_FREE: &str = "disk.root.free";
+    /// Space used on the root filesystem, percent.
+    pub const ROOT_DISK_PERCENT: &str = "disk.root.percent";
     /// Time since boot, seconds.
     pub const UPTIME: &str = "system.uptime";
+    /// The machine's host name, text.
+    pub const HOSTNAME: &str = "system.hostname";
+    /// Output volume, percent. Not supported yet: always unavailable.
+    pub const SYSTEM_VOLUME: &str = "system.volume";
+
+    /// Keys themes imported from the vendor app (`.turtheme`) and from
+    /// turing-smart-screen-python bind to that Bezel's own themes did not
+    /// use before. Every source lists them, so an imported theme finds each
+    /// one measured, or unavailable with the reason.
+    pub const IMPORTED: [&str; 12] = [
+        CPU_FAN,
+        FAN_PUMP,
+        FAN_CASE_1,
+        FAN_CASE_2,
+        CPU_VOLTAGE,
+        GPU_VOLTAGE,
+        GPU_FPS,
+        NET_PING,
+        NET_DOWN_TOTAL,
+        NET_UP_TOTAL,
+        MEMORY_AVAILABLE_PERCENT,
+        SYSTEM_VOLUME,
+    ];
 }
 
 /// What a value measures; decides units and formatting.
@@ -188,20 +267,47 @@ pub struct SensorInfo {
 /// `disk.<mount>.used`, `net.<iface>.up`) by their segments.
 pub fn quantity_of(key: &SensorKey) -> Quantity {
     let k = key.as_str().to_ascii_lowercase();
-    match k.as_str() {
-        keys::CPU_USAGE | keys::GPU_USAGE | keys::MEMORY_PERCENT => Quantity::Percent,
-        keys::CPU_TEMPERATURE | keys::GPU_TEMPERATURE => Quantity::Celsius,
-        keys::CPU_FREQUENCY => Quantity::Megahertz,
-        keys::CPU_POWER | keys::GPU_POWER => Quantity::Watts,
-        keys::CPU_LOAD_1 => Quantity::Number,
-        keys::MEMORY_USED | keys::MEMORY_TOTAL | keys::GPU_MEMORY_USED => Quantity::Bytes,
-        keys::NET_DOWN | keys::NET_UP | keys::DISK_READ | keys::DISK_WRITE => {
-            Quantity::BytesPerSecond
-        }
-        keys::UPTIME => Quantity::Seconds,
-        _ => by_segments(&k),
-    }
+    WELL_KNOWN
+        .iter()
+        .find(|(known, _)| *known == k)
+        .map_or_else(|| by_segments(&k), |(_, quantity)| *quantity)
 }
+
+/// What the well-known keys measure, for those whose name alone would
+/// mislead (`gpu.fan` is a duty in percent, `fan.pump` a speed) or say
+/// nothing (`cpu.name`).
+const WELL_KNOWN: [(&str, Quantity); 30] = [
+    (keys::CPU_USAGE, Quantity::Percent),
+    (keys::GPU_USAGE, Quantity::Percent),
+    (keys::GPU_FAN, Quantity::Percent),
+    (keys::MEMORY_PERCENT, Quantity::Percent),
+    (keys::SYSTEM_VOLUME, Quantity::Percent),
+    (keys::CPU_TEMPERATURE, Quantity::Celsius),
+    (keys::GPU_TEMPERATURE, Quantity::Celsius),
+    (keys::CPU_FREQUENCY, Quantity::Megahertz),
+    (keys::CPU_POWER, Quantity::Watts),
+    (keys::GPU_POWER, Quantity::Watts),
+    (keys::CPU_VOLTAGE, Quantity::Volts),
+    (keys::GPU_VOLTAGE, Quantity::Volts),
+    (keys::CPU_FAN, Quantity::Rpm),
+    (keys::FAN_PUMP, Quantity::Rpm),
+    (keys::FAN_CASE_1, Quantity::Rpm),
+    (keys::FAN_CASE_2, Quantity::Rpm),
+    (keys::CPU_LOAD_1, Quantity::Number),
+    (keys::GPU_FPS, Quantity::Number),
+    (keys::NET_PING, Quantity::Number),
+    (keys::MEMORY_USED, Quantity::Bytes),
+    (keys::MEMORY_TOTAL, Quantity::Bytes),
+    (keys::GPU_MEMORY_USED, Quantity::Bytes),
+    (keys::NET_DOWN, Quantity::BytesPerSecond),
+    (keys::NET_UP, Quantity::BytesPerSecond),
+    (keys::DISK_READ, Quantity::BytesPerSecond),
+    (keys::DISK_WRITE, Quantity::BytesPerSecond),
+    (keys::UPTIME, Quantity::Seconds),
+    (keys::CPU_NAME, Quantity::Text),
+    (keys::GPU_NAME, Quantity::Text),
+    (keys::HOSTNAME, Quantity::Text),
+];
 
 fn by_segments(key: &str) -> Quantity {
     let first = key.split('.').next().unwrap_or_default();
@@ -480,6 +586,34 @@ mod tests {
         assert_eq!(q(keys::MEMORY_USED), Quantity::Bytes);
         assert_eq!(q(keys::NET_DOWN), Quantity::BytesPerSecond);
         assert_eq!(q(keys::UPTIME), Quantity::Seconds);
+    }
+
+    #[test]
+    fn imported_keys_have_their_units() {
+        assert_eq!(q(keys::CPU_FAN), Quantity::Rpm);
+        assert_eq!(q(keys::FAN_PUMP), Quantity::Rpm);
+        assert_eq!(q(keys::FAN_CASE_2), Quantity::Rpm);
+        assert_eq!(q(keys::GPU_FAN), Quantity::Percent, "a duty, not a speed");
+        assert_eq!(q(keys::CPU_VOLTAGE), Quantity::Volts);
+        assert_eq!(q(keys::GPU_VOLTAGE), Quantity::Volts);
+        assert_eq!(q(keys::GPU_FPS), Quantity::Number);
+        assert_eq!(q(keys::NET_PING), Quantity::Number);
+        assert_eq!(q(keys::NET_DOWN_TOTAL), Quantity::Bytes);
+        assert_eq!(q(keys::NET_UP_TOTAL), Quantity::Bytes);
+        assert_eq!(q(keys::MEMORY_AVAILABLE_PERCENT), Quantity::Percent);
+        assert_eq!(q(keys::SYSTEM_VOLUME), Quantity::Percent);
+        assert_eq!(q(keys::ROOT_DISK_USED), Quantity::Bytes);
+        assert_eq!(q(keys::ROOT_DISK_PERCENT), Quantity::Percent);
+        assert_eq!(q(keys::CPU_NAME), Quantity::Text);
+        assert_eq!(q(keys::HOSTNAME), Quantity::Text);
+        assert_eq!(
+            q("CPU.FAN"),
+            Quantity::Rpm,
+            "keys compare case-insensitively"
+        );
+        for key in keys::IMPORTED {
+            assert!(SensorKey::new(key).is_some(), "{key}");
+        }
     }
 
     #[test]

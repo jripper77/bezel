@@ -1,5 +1,7 @@
 //! Synthetic `.turtheme` streams built by hand with the NRBF test writer.
 
+use bezel_core::domain::sensor::keys;
+
 use super::*;
 use crate::import::nrbf::write::{Stream, Ty};
 use crate::import::test_png;
@@ -647,7 +649,7 @@ fn maps_every_layer_kind() {
     else {
         panic!()
     };
-    assert_eq!(binding.key, key("memory.available.percent"));
+    assert_eq!(binding.key, key(keys::MEMORY_AVAILABLE_PERCENT));
     assert_eq!(*direction, Direction::RightToLeft);
     assert_eq!(*track, None);
 
@@ -1006,4 +1008,37 @@ fn text_paint_needs_a_second_color_and_no_spacing() {
     assert_eq!(paint_of(with(2, known(35)), 1.5), Paint::Solid(Rgba::WHITE));
     assert_eq!(paint_of(with(2, empty()), 0.0), Paint::Solid(Rgba::WHITE));
     assert_eq!(paint_of(with(9, known(35)), 0.0), Paint::Solid(Rgba::WHITE));
+}
+
+#[test]
+fn imported_sensors_use_the_catalog_keys() {
+    let mut im = importer();
+    for (data, expected) in [
+        ("CPUFAN", keys::CPU_FAN),
+        ("CPUVOLTAGE", keys::CPU_VOLTAGE),
+        ("GPUVOLTAGE", keys::GPU_VOLTAGE),
+        ("WATERPUMP", keys::FAN_PUMP),
+        ("CASEFAN1", keys::FAN_CASE_1),
+        ("CASEFAN2", keys::FAN_CASE_2),
+        ("FPS", keys::GPU_FPS),
+        ("Volume", keys::SYSTEM_VOLUME),
+    ] {
+        let s = im.sensor(data, None, false).expect("sensor");
+        assert_eq!(s.key, key(expected), "{data}");
+    }
+    // The GPU fan is a duty: a full bar is 100 %, not the vendor's 8000 RPM.
+    let fan = im.sensor("GPUFAN", None, false).expect("sensor");
+    assert_eq!((fan.key, fan.max), (key(keys::GPU_FAN), 100.0));
+    assert!(has(
+        &im.b.report,
+        "GPUFAN: the vendor app shows the GPU fan in RPM"
+    ));
+    // FPS is measured now; the volume is not, and the report says so.
+    assert!(!has(&im.b.report, "FPS"), "{:?}", im.b.report.warnings);
+    assert!(
+        has(&im.b.report, "Volume: not supported yet"),
+        "{:?}",
+        im.b.report.warnings
+    );
+    assert!(!has(&im.b.report, "does not measure"));
 }

@@ -3,6 +3,8 @@
 
 use std::fs;
 
+use bezel_core::domain::sensor::keys;
+
 use super::*;
 use crate::import::{ImportReport, import_path, test_png};
 
@@ -369,7 +371,7 @@ fn imports_every_widget_kind() {
         ("CPU.LOAD.FIVE.TEXT", "cpu.load.5"),
         ("GPU.MEMORY.TEXT", "gpu.memory.used"),
         ("MEMORY.VIRTUAL.PERCENT_TEXT", "memory.percent"),
-        ("DISK.USED.TEXT", "disk./.used"),
+        ("DISK.USED.TEXT", "disk.root.used"),
         ("WEATHER.TEMPERATURE.TEXT", "weather.temperature"),
     ] {
         assert_eq!(sensor_key_of(&find(&theme, name).kind), Some(key), "{name}");
@@ -596,4 +598,47 @@ fn panels_colors_faces_and_date_patterns() {
     assert!(im.b.report.is_clean(), "{:?}", im.b.report.warnings);
     assert_eq!(im.cldr("HH:mm G", false), "%H:%M");
     assert!(has(&im.b.report, "field G"));
+}
+
+/// The key and whether the import report gets a note, for a `STATS` path.
+fn mapped(path: &[&str], widget: &str) -> Option<(String, bool)> {
+    let path: Vec<String> = path.iter().map(|p| (*p).to_string()).collect();
+    source(&path, widget).map(|s| (s.key, s.note.is_some()))
+}
+
+#[test]
+fn stats_bind_to_the_keys_bezel_publishes() {
+    let bound = |key: &str| Some((key.to_string(), false));
+    assert_eq!(mapped(&["PING"], "TEXT"), bound(keys::NET_PING));
+    assert_eq!(mapped(&["GPU", "FPS"], "TEXT"), bound(keys::GPU_FPS));
+    assert_eq!(
+        mapped(&["GPU", "FAN_SPEED"], "RADIAL"),
+        bound(keys::GPU_FAN)
+    );
+    assert_eq!(
+        mapped(&["NET", "ETH", "DOWNLOADED"], "TEXT"),
+        bound(keys::NET_DOWN_TOTAL)
+    );
+    assert_eq!(
+        mapped(&["NET", "WLO", "UPLOADED"], "TEXT"),
+        bound(keys::NET_UP_TOTAL)
+    );
+    assert_eq!(
+        mapped(&["DISK", "USED"], "GRAPH"),
+        bound(keys::ROOT_DISK_PERCENT)
+    );
+    assert_eq!(
+        mapped(&["DISK", "FREE"], "TEXT"),
+        bound(keys::ROOT_DISK_FREE)
+    );
+    assert_eq!(
+        mapped(&["MEMORY", "SWAP"], "TEXT"),
+        bound(keys::SWAP_PERCENT)
+    );
+    // A percent the Python app guesses from the RPM stays unmeasured, and
+    // the report says what to bind instead.
+    assert_eq!(
+        mapped(&["CPU", "FAN_SPEED"], "TEXT"),
+        Some(("cpu.fan.percent".to_string(), true))
+    );
 }

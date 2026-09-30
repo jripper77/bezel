@@ -8,6 +8,13 @@ use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Sensor
 /// Reason shown for a rate or usage before its second sample.
 pub(crate) const WARMING_UP: &str = "warming up: needs a second sample";
 
+/// Reason shown for a rate whose counter went backwards or did not advance
+/// in time (see [`bezel_core::domain::sensor::rate`]).
+pub(crate) const COUNTER_RESET: &str = "counter reset or no time elapsed";
+
+/// Reason shown for a key Bezel lists but does not measure yet.
+pub(crate) const NOT_SUPPORTED_YET: &str = "not supported yet";
+
 /// One family of sensors (CPU times, hwmon chips, one GPU, ...). Providers
 /// discover what they offer when they are built; `sample` then reads every
 /// sensor of that catalog, never more, and reports what it cannot read as
@@ -64,6 +71,60 @@ pub(crate) fn slug(text: &str) -> String {
     out
 }
 
+/// What a board fan cools, from its label (hwmon `fanN_label`,
+/// LibreHardwareMonitor's sensor name). The vendor app lets the user pick
+/// these fans; Bezel takes the one whose label says it, names that sensor in
+/// the catalog source, and reads the key as unavailable when no label does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FanRole {
+    /// `CPU Fan`, `CPU_OPT`, `Processor Fan`.
+    Cpu,
+    /// `AIO Pump`, `W_PUMP+`.
+    Pump,
+    /// `Chassis Fan 1`, `CHA_FAN2`, `SYS_FAN1`, `System Fan #3`.
+    Case,
+}
+
+/// The words of a label, slugged (`CPU_OPT` → `cpu`, `opt`).
+fn words(label: &str) -> Vec<String> {
+    slug(label).split('_').map(str::to_string).collect()
+}
+
+/// The role `label` names, if any. A pump header on the CPU (`CPU_PUMP`) is
+/// a pump.
+pub(crate) fn fan_role(label: &str) -> Option<FanRole> {
+    let words = words(label);
+    let starts = |prefix: &str| words.iter().any(|w| w.starts_with(prefix));
+    if starts("pump") {
+        Some(FanRole::Pump)
+    } else if starts("cpu") || starts("processor") {
+        Some(FanRole::Cpu)
+    } else if starts("cha") || starts("case") || starts("sys") {
+        Some(FanRole::Case)
+    } else {
+        None
+    }
+}
+
+/// True for an optional header (`CPU_OPT`, `CPU Optional`): a CPU fan
+/// labelled plainly is preferred to it.
+pub(crate) fn optional_fan(label: &str) -> bool {
+    words(label).iter().any(|w| w.starts_with("opt"))
+}
+
+/// True for the CPU core rail's label: `Vcore`, `CPU Core`, `SVI2_Core`
+/// (zenpower), `Core (SVI2 TFN)` (LibreHardwareMonitor on AMD),
+/// `VDDCR_CPU`. A VID is the voltage the CPU asks for, not a measurement,
+/// and SoC or northbridge rails are other rails.
+pub(crate) fn cpu_core_voltage(label: &str) -> bool {
+    let words = words(label);
+    let has = |word: &str| words.iter().any(|w| w == word);
+    if has("vid") || has("soc") || has("nb") {
+        return false;
+    }
+    has("vcore") || (has("core") && (has("cpu") || has("svi2"))) || (has("vddcr") && has("cpu"))
+}
+
 /// `part / whole` in percent; unavailable for an empty whole.
 pub(crate) fn percent(part: f64, whole: f64, what: &str) -> Reading {
     if whole > 0.0 {
@@ -108,6 +169,60 @@ mod tests {
         put(&mut out, "bad key", Reading::Value(1.0));
         put(&mut out, "good.key", Reading::Value(1.0));
         assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn fan_roles_come_from_the_label() {
+        for (label, role) in [
+            ("CPU Fan", Some(FanRole::Cpu)),
+            ("CPU_OPT", Some(FanRole::Cpu)),
+            ("cpufan", Some(FanRole::Cpu)),
+            ("Processor Fan", Some(FanRole::Cpu)),
+            ("AIO Pump", Some(FanRole::Pump)),
+            ("W_PUMP+", Some(FanRole::Pump)),
+            ("CPU_PUMP", Some(FanRole::Pump)),
+            ("Chassis Fan 1", Some(FanRole::Case)),
+            ("CHA_FAN2", Some(FanRole::Case)),
+            ("SYS_FAN1", Some(FanRole::Case)),
+            ("System Fan #3", Some(FanRole::Case)),
+            ("Case", Some(FanRole::Case)),
+            ("Fan #2", None),
+            ("fan1", None),
+            ("Water Flow", None),
+            ("Chipset", None),
+        ] {
+            assert_eq!(fan_role(label), role, "{label}");
+        }
+        assert!(optional_fan("CPU Optional"));
+        assert!(optional_fan("CPU_OPT"));
+        assert!(!optional_fan("CPU Fan"));
+    }
+
+    #[test]
+    fn the_cpu_core_rail_is_found_by_label() {
+        for label in [
+            "Vcore",
+            "CPU VCORE",
+            "CPU Core",
+            "CPU Core Voltage",
+            "SVI2_Core",
+            "Core (SVI2 TFN)",
+            "VDDCR_CPU",
+        ] {
+            assert!(cpu_core_voltage(label), "{label}");
+        }
+        for label in [
+            "SVI2_SoC",
+            "SoC (SVI2 TFN)",
+            "Core #1 VID",
+            "vddgfx",
+            "vddnb",
+            "+3.3V",
+            "in0",
+            "Core",
+        ] {
+            assert!(!cpu_core_voltage(label), "{label}");
+        }
     }
 
     #[test]

@@ -18,7 +18,7 @@ use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapsh
 
 use super::Roots;
 use super::fs::{read_error, read_text};
-use crate::provider::{Provider, WARMING_UP, describe, percent, put, slug};
+use crate::provider::{COUNTER_RESET, Provider, WARMING_UP, describe, percent, put, slug};
 
 const SECTOR: u64 = 512;
 
@@ -329,7 +329,7 @@ impl Disks {
             if listed {
                 let value = |v: Option<f64>| {
                     v.map_or_else(
-                        || Reading::Unavailable("counter reset or no time elapsed".into()),
+                        || Reading::Unavailable(COUNTER_RESET.into()),
                         Reading::Value,
                     )
                 };
@@ -354,7 +354,7 @@ impl Disks {
         let total = |v: Option<f64>| match (&previous, v) {
             (None, _) => Reading::Unavailable(WARMING_UP.into()),
             (_, Some(v)) => Reading::Value(v),
-            (_, None) => Reading::Unavailable("counter reset or no time elapsed".into()),
+            (_, None) => Reading::Unavailable(COUNTER_RESET.into()),
         };
         put(out, keys::DISK_READ, total(read));
         put(out, keys::DISK_WRITE, total(write));
@@ -493,7 +493,7 @@ mod tests {
         assert!(
             matches!(get(&fourth, "disk.write"), Reading::Unavailable(r) if r.contains("does not exist"))
         );
-        assert!(get(&fourth, "disk.root.total").value().is_some());
+        assert!(get(&fourth, keys::ROOT_DISK_TOTAL).value().is_some());
     }
 
     #[test]

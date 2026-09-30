@@ -1,5 +1,7 @@
-//! [`SystemSensors`]: the machine's real sensors behind the port.
+//! [`SystemSensors`]: the machine's real sensors behind the port, and the
+//! [`SensorOptions`] of the sources that take settings.
 
+use std::path::PathBuf;
 use std::time::Instant;
 
 use bezel_core::Result;
@@ -9,9 +11,34 @@ use bezel_core::ports::SensorSource;
 use crate::gpu::{Alias, FoundGpu, number};
 use crate::provider::Provider;
 
+/// Settings of the sources that take them (the studio's settings and the
+/// CLI's flags fill them in).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SensorOptions {
+    /// Host `net.ping` measures the round trip to.
+    pub ping_host: String,
+    /// Folder of MangoHud's CSV logs read for `gpu.fps` on Linux; `None`
+    /// means MangoHud's own `output_folder`.
+    pub mangohud_dir: Option<PathBuf>,
+}
+
+impl SensorOptions {
+    /// The default `ping_host`: a public resolver that answers ICMP and TCP.
+    pub const DEFAULT_PING_HOST: &str = "8.8.8.8";
+}
+
+impl Default for SensorOptions {
+    fn default() -> Self {
+        Self {
+            ping_host: Self::DEFAULT_PING_HOST.to_string(),
+            mangohud_dir: None,
+        }
+    }
+}
+
 /// Measures this machine by composing the platform's providers. Discovery
-/// happens once, in [`SystemSensors::new`]; the catalog is then fixed and
-/// every `sample` returns a reading (possibly unavailable) for each entry.
+/// happens once, when it is built; the catalog is then fixed and every
+/// `sample` returns a reading (possibly unavailable) for each entry.
 pub struct SystemSensors {
     providers: Vec<Box<dyn Provider>>,
     aliases: Vec<Alias>,
@@ -19,21 +46,24 @@ pub struct SystemSensors {
 }
 
 impl SystemSensors {
-    /// Discovers every sensor this machine offers. Never fails: whatever
-    /// cannot be read shows up as unavailable, with the reason.
+    /// Discovers every sensor this machine offers, with the default
+    /// [`SensorOptions`]. Never fails: whatever cannot be read shows up as
+    /// unavailable, with the reason.
     pub fn new() -> Self {
-        let (providers, gpus) = platform();
+        Self::with_options(SensorOptions::default())
+    }
+
+    /// Like [`SystemSensors::new`], with `options` for the sources that
+    /// take settings.
+    pub fn with_options(options: SensorOptions) -> Self {
+        let (providers, gpus) = platform(&options);
         Self::assemble(providers, gpus)
     }
 
-    /// Linux sensors read from other `/sys` and `/proc` trees (tests, or a
-    /// container that mounts the host's trees elsewhere). NVIDIA GPUs, which
-    /// come from NVML rather than sysfs, are not included.
-    #[cfg(target_os = "linux")]
-    pub fn with_roots(
-        sys: impl Into<std::path::PathBuf>,
-        proc: impl Into<std::path::PathBuf>,
-    ) -> Self {
+    /// Linux sensors read from fake `/sys` and `/proc` trees. NVIDIA GPUs,
+    /// which come from NVML rather than sysfs, are not included.
+    #[cfg(all(test, target_os = "linux"))]
+    fn with_roots(sys: impl Into<PathBuf>, proc: impl Into<PathBuf>) -> Self {
         let roots = crate::linux::Roots::new(sys, proc);
         Self::assemble(
             crate::linux::providers(&roots),
@@ -76,8 +106,10 @@ fn rank(key: &str) -> u8 {
     u8::from(second.chars().any(|c| c.is_ascii_digit()))
 }
 
+/// The platform's providers and GPUs. No provider takes `_options` yet;
+/// the ping and game-FPS sources will (D-2026-09-30-release-polish-4, -5).
 #[cfg(target_os = "linux")]
-fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+fn platform(_options: &SensorOptions) -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
     let roots = crate::linux::Roots::host();
     let mut gpus = crate::nvidia::discover();
     gpus.extend(crate::amdgpu::discover(&roots));
@@ -85,12 +117,12 @@ fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
 }
 
 #[cfg(windows)]
-fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+fn platform(_options: &SensorOptions) -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
     (crate::windows::providers(), crate::nvidia::discover())
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+fn platform(_options: &SensorOptions) -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
     (Vec::new(), crate::nvidia::discover())
 }
 
@@ -135,7 +167,7 @@ impl SensorSource for SystemSensors {
             }
         }
         for alias in &self.aliases {
-            let reading = out.get(&alias.target);
+            let reading = alias.reading(&out);
             out.insert(alias.key.clone(), reading);
         }
         Ok(out)
@@ -157,10 +189,17 @@ mod tests {
         assert_eq!(rank("nodots"), 0);
     }
 
+    #[test]
+    fn options_default_to_the_public_resolver() {
+        let options = SensorOptions::default();
+        assert_eq!(options.ping_host, "8.8.8.8");
+        assert_eq!(options.mangohud_dir, None);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn a_fake_machine_answers_for_every_catalog_entry() {
-        use bezel_core::domain::sensor::Category;
+        use bezel_core::domain::sensor::{Category, Reading, keys};
         let t = crate::testing::FakeTree::new("system");
         t.file("proc/stat", "cpu  1 0 1 8 0 0 0 0\ncpu0 1 0 1 8 0 0 0 0\n")
             .file("proc/meminfo", "MemTotal: 1024 kB\nMemAvailable: 512 kB\n")
@@ -174,7 +213,7 @@ mod tests {
             .link("sys/class/drm/card0/device", "sys/devices/card");
         let mut sensors = SystemSensors::with_roots(t.path("sys"), t.path("proc"));
         let catalog = sensors.catalog().unwrap();
-        assert_eq!(catalog[0].key.as_str(), "cpu.usage");
+        assert_eq!(catalog[0].key.as_str(), keys::CPU_USAGE);
         let categories: Vec<Category> = catalog.iter().map(|i| i.category).collect();
         let mut sorted = categories.clone();
         sorted.sort();
@@ -188,12 +227,19 @@ mod tests {
             );
         }
         assert_eq!(snapshot.len(), catalog.len());
-        let gpu = |k: &str| snapshot.get(&bezel_core::domain::sensor::SensorKey::new(k).unwrap());
-        assert_eq!(
-            gpu("gpu.0.usage"),
-            bezel_core::domain::sensor::Reading::Value(42.0)
-        );
-        assert_eq!(gpu("gpu.usage"), gpu("gpu.0.usage"));
+        let get = |k: &str| snapshot.get(&bezel_core::domain::sensor::SensorKey::new(k).unwrap());
+        assert_eq!(get("gpu.0.usage"), Reading::Value(42.0));
+        assert_eq!(get(keys::GPU_USAGE), get("gpu.0.usage"));
+        // Imported themes find their keys, measured or explained. Ping and
+        // game FPS come from their own sources.
+        let listed: Vec<&str> = catalog.iter().map(|i| i.key.as_str()).collect();
+        for key in keys::IMPORTED {
+            if key != keys::GPU_FPS && key != keys::NET_PING {
+                assert!(listed.contains(&key), "{key} not listed");
+            }
+        }
+        assert_eq!(get(keys::MEMORY_AVAILABLE_PERCENT), Reading::Value(50.0));
+        assert!(matches!(get(keys::GPU_VOLTAGE), Reading::Unavailable(r) if r.contains("voltage")));
     }
 
     /// The real machine, read-only: whatever it has, every catalog entry is

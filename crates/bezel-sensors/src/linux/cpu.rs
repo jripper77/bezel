@@ -14,13 +14,6 @@ use super::Roots;
 use super::fs::{read_error, read_text};
 use crate::provider::{Provider, WARMING_UP, describe, put};
 
-/// 5- and 15-minute load averages (the 1-minute key is in the core).
-pub(crate) const CPU_LOAD_5: &str = "cpu.load.5";
-/// 15-minute load average.
-pub(crate) const CPU_LOAD_15: &str = "cpu.load.15";
-/// Processor model name.
-pub(crate) const CPU_NAME: &str = "cpu.name";
-
 const TOO_SOON: &str = "less than one scheduler tick since the previous sample";
 
 /// Jiffies of one `/proc/stat` line: user, nice, system, idle, iowait, irq,
@@ -142,21 +135,21 @@ impl Cpu {
                 "/proc/loadavg",
             ),
             describe(
-                CPU_LOAD_5,
+                keys::CPU_LOAD_5,
                 Category::Cpu,
                 "Load average (5 min)",
                 Quantity::Number,
                 "/proc/loadavg",
             ),
             describe(
-                CPU_LOAD_15,
+                keys::CPU_LOAD_15,
                 Category::Cpu,
                 "Load average (15 min)",
                 Quantity::Number,
                 "/proc/loadavg",
             ),
             describe(
-                CPU_NAME,
+                keys::CPU_NAME,
                 Category::Cpu,
                 "CPU model",
                 Quantity::Text,
@@ -280,7 +273,7 @@ impl Cpu {
                     .then_some(v)
                     .ok_or_else(|| format!("unexpected content in {}", self.loadavg.display()))
             });
-        for (i, key) in [keys::CPU_LOAD_1, CPU_LOAD_5, CPU_LOAD_15]
+        for (i, key) in [keys::CPU_LOAD_1, keys::CPU_LOAD_5, keys::CPU_LOAD_15]
             .iter()
             .enumerate()
         {
@@ -306,7 +299,7 @@ impl Provider for Cpu {
             Some(name) => Reading::Text(name.clone()),
             None => Reading::Unavailable("no model name in /proc/cpuinfo".into()),
         };
-        put(out, CPU_NAME, name);
+        put(out, keys::CPU_NAME, name);
     }
 }
 

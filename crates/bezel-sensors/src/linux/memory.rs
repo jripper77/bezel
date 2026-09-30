@@ -12,23 +12,15 @@ use super::Roots;
 use super::fs::{read_error, read_text};
 use crate::provider::{Provider, describe, percent, put};
 
-/// RAM programs can still get, bytes.
-pub(crate) const MEMORY_AVAILABLE: &str = "memory.available";
-/// Swap in use, bytes.
-pub(crate) const SWAP_USED: &str = "memory.swap.used";
-/// Swap size, bytes.
-pub(crate) const SWAP_TOTAL: &str = "memory.swap.total";
-/// Swap in use, percent.
-pub(crate) const SWAP_PERCENT: &str = "memory.swap.percent";
-
-const ALL: [&str; 7] = [
+const ALL: [&str; 8] = [
     keys::MEMORY_USED,
     keys::MEMORY_TOTAL,
     keys::MEMORY_PERCENT,
-    MEMORY_AVAILABLE,
-    SWAP_USED,
-    SWAP_TOTAL,
-    SWAP_PERCENT,
+    keys::MEMORY_AVAILABLE,
+    keys::MEMORY_AVAILABLE_PERCENT,
+    keys::SWAP_USED,
+    keys::SWAP_TOTAL,
+    keys::SWAP_PERCENT,
 ];
 
 /// `field → bytes` for every `Name: <n> kB` line.
@@ -60,10 +52,11 @@ fn readings(info: &HashMap<&str, u64>) -> Vec<(&'static str, Reading)> {
     let used = total
         .clone()
         .and_then(|t| available.clone().map(|a| (t - a).max(0.0)));
-    let ram_percent = match (&used, &total) {
-        (Ok(u), Ok(t)) => percent(*u, *t, "MemTotal"),
+    let of_total = |part: &Result<f64, String>| match (part, &total) {
+        (Ok(p), Ok(t)) => percent(*p, *t, "MemTotal"),
         (Err(e), _) | (_, Err(e)) => Reading::Unavailable(e.clone()),
     };
+    let (ram_percent, available_percent) = (of_total(&used), of_total(&available));
     let swap_total = field("SwapTotal");
     let swap_used = swap_total
         .clone()
@@ -77,10 +70,11 @@ fn readings(info: &HashMap<&str, u64>) -> Vec<(&'static str, Reading)> {
         (keys::MEMORY_USED, value(used)),
         (keys::MEMORY_TOTAL, value(total)),
         (keys::MEMORY_PERCENT, ram_percent),
-        (MEMORY_AVAILABLE, value(available)),
-        (SWAP_USED, value(swap_used)),
-        (SWAP_TOTAL, value(swap_total)),
-        (SWAP_PERCENT, swap_percent),
+        (keys::MEMORY_AVAILABLE, value(available)),
+        (keys::MEMORY_AVAILABLE_PERCENT, available_percent),
+        (keys::SWAP_USED, value(swap_used)),
+        (keys::SWAP_TOTAL, value(swap_total)),
+        (keys::SWAP_PERCENT, swap_percent),
     ]
 }
 
@@ -105,11 +99,24 @@ impl Memory {
                 Quantity::Percent,
                 src,
             ),
-            describe(MEMORY_AVAILABLE, m, "RAM available", Quantity::Bytes, src),
-            describe(SWAP_USED, m, "Swap used", Quantity::Bytes, src),
-            describe(SWAP_TOTAL, m, "Swap total", Quantity::Bytes, src),
             describe(
-                SWAP_PERCENT,
+                keys::MEMORY_AVAILABLE,
+                m,
+                "RAM available",
+                Quantity::Bytes,
+                src,
+            ),
+            describe(
+                keys::MEMORY_AVAILABLE_PERCENT,
+                m,
+                "RAM available (percent)",
+                Quantity::Percent,
+                src,
+            ),
+            describe(keys::SWAP_USED, m, "Swap used", Quantity::Bytes, src),
+            describe(keys::SWAP_TOTAL, m, "Swap total", Quantity::Bytes, src),
+            describe(
+                keys::SWAP_PERCENT,
                 m,
                 "Swap used (percent)",
                 Quantity::Percent,
@@ -184,6 +191,10 @@ mod tests {
         assert_eq!(get(&s, "memory.used"), Reading::Value(12_142_112_768.0));
         let pct = get(&s, "memory.percent").value().unwrap();
         assert!((pct - 18.2567).abs() < 1e-3, "{pct}");
+        // `free`'s "available" column over its total.
+        let available = get(&s, keys::MEMORY_AVAILABLE_PERCENT).value().unwrap();
+        assert!((available - 81.7433).abs() < 1e-3, "{available}");
+        assert!((pct + available - 100.0).abs() < 1e-9);
         assert_eq!(get(&s, "memory.swap.used"), Reading::Value(2_147_483_648.0));
         let swap = get(&s, "memory.swap.percent").value().unwrap();
         assert!((swap - 25.0).abs() < 1e-3, "{swap}");
@@ -201,6 +212,9 @@ mod tests {
             matches!(get(&s, "memory.used"), Reading::Unavailable(r) if r.starts_with("MemAvailable"))
         );
         assert!(matches!(get(&s, "memory.percent"), Reading::Unavailable(_)));
+        assert!(
+            matches!(get(&s, keys::MEMORY_AVAILABLE_PERCENT), Reading::Unavailable(r) if r.starts_with("MemAvailable"))
+        );
         assert_eq!(
             get(&s, "memory.swap.percent"),
             Reading::Unavailable("no swap configured".into())

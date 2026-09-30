@@ -91,7 +91,7 @@ one must be made to the other.
 | 1a86:5722 | 3.5" 480 x 320 `35inchO` on the rev C transport | never discovered in V3.07 (no theme key for 480 x 320); Bezel treats 1a86:5722 as rev A / rev B / sleeping 5" (section 4) |
 | 7304:125f, 125f:7304 | 3.5" 640 x 480 and 320 x 240 (CA35) | not in the vendor's active list |
 | 1d6b:0321 | virtual 400x600, 850x600, 870x660, 730x650, 800x1400 | not in the vendor's active list |
-| 1a86:ad11 (INF also ad10, ad12, ad13) | a TUR_USB panel in desktop mode (Windows indirect display + HID) | display protocol not reversed ([protocol-turing-usb.md](protocol-turing-usb.md) section 10) |
+| 1a86:ad11 (INF also ad10, ad12, ad13) | a TUR_USB panel in desktop mode (Windows indirect display + HID) | display protocol not reversed; Bezel lists it and switches it back to USB monitor mode on request ([protocol-turing-usb.md](protocol-turing-usb.md) section 10) |
 
 ## 2. USB descriptors
 

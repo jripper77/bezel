@@ -333,8 +333,11 @@ The vendor can turn the 8" (0x0080), 8.8" (0x0088) and 5.2" (0x0050) into a Wind
   sends each frame as two bulk messages encoded as H.264 (FFmpeg with x264 or GPU encoders), MJPEG or an "RLX" format.
   The wire format was not reversed.
 
-Bezel does not support desktop mode: the catalog has no rule for 1a86:ad10-ad13, and command 150 is never sent
-implicitly (section 11).
+Bezel lists a panel in desktop mode (1a86:ad10-ad13, `bezel devices`: `desktop-mode`, "not validated on hardware")
+and offers only the switch back to USB monitor mode (`bezel monitor-mode --yes`, the studio behind a confirmation):
+the model query `aa 55 33` then the two `5f3759df` reports above, report id 0, 64 bytes. Nothing is sent to the HID
+device without that confirmation, listing is read-only, and command 150 (entering desktop mode) is never sent. Built
+from these bytes only: no one has run it on such a panel yet (D-2026-09-30-release-polish-8).
 
 ## 11. Disruptive commands and Bezel's policy
 

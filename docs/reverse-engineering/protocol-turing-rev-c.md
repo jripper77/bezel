@@ -492,6 +492,14 @@ GET_FILE_SIZE <path> must equal the file size
   padding using that size.
 - The vendor lower-cases names and accepts only `[A-Za-z0-9_.-]`; its device page uploads jpg/jpeg/bmp/png/gif/mp4/
   h264 and transcodes an MP4 of another resolution first ([video.md](video.md) section 3).
+- The data phase has no abort: after the header the firmware takes the next *declared-size* bytes as file content,
+  whatever they are (section 19). **Bezel's cancel recovery** (not vendor; hardware check pending): after a cancel it
+  sends HELLO with its resync blocks; if none is answered while part of the declared length is still owed (counting
+  every byte since the header, the unanswered HELLO/`2c` packets included, and a write the cancel interrupted as
+  delivered, so the total never exceeds the declared length), it sends the owed blocks as filler (`2c` x 249 + `00`
+  each), waits up to 10 reads of 1 s for `file_rev_done`, sends HELLO again and measures the file with GET_FILE_SIZE
+  (now the declared size: partial data, then filler), which is left for the user to delete. A HELLO answered at once
+  costs no filler.
 
 ### 13.5 Device-side video and the overlay
 
@@ -711,7 +719,7 @@ host, measured by the project.
 | Storage info | 0x64 on the 8.8": flash 65.9 MiB after the 512 KiB reserve; a 29.7 GiB FAT32 card reported in the TF fields |
 | Uploads | PNG and MP4 to `/mnt/UDISK/{img,video}` and `/mnt/SDCARD/{img,video}` accepted and verified with GET_FILE_SIZE; `create_success` and `file_rev_done` as in section 13.4 |
 | Playback | PLAY_VIDEO (loop) and PLAY_IMAGE answered; after playback a full frame (PRE_UPDATE_BITMAP + frame) is accepted (`full_png_sucess`); that the overlay's alpha shows the video through is still to be confirmed by eye |
-| Cancelled upload | stopping the data phase midway leaves the firmware waiting for the declared bytes: HELLO is not answered on that link, the next connection wakes it (~10 s); the first upload afterwards received about 191 KB of stray bytes (caught by the size check) and the card reported the cancelled file's size as still used after it was deleted |
+| Cancelled upload | stopping the data phase midway leaves the firmware waiting for the declared bytes: HELLO is not answered on that link, the next connection wakes it (~10 s); the first upload afterwards received about 191 KB of stray bytes (caught by the size check) and the card reported the cancelled file's size as still used after it was deleted (Bezel now completes the declared length, section 13.4) |
 | Host drain | writes of 64 KB to a card file can take longer than a 10 ms serial timeout to drain; a signal during the drain must not fail the write |
 
 Consequences: full frames have a text reply of their own; the partial round trip is far below the vendor's 1 Hz tick;

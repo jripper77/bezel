@@ -1,1 +1,0 @@
-- [device-protocols follow-up] REVIEW W1: make the rev C wake/retry path (connector.rs `connect_rev_c`, `wait_until_gone`, `wake_rev_c`) testable by injecting the bus and the serial opener instead of calling SystemBus/SerialWire directly (W2–W5 done in the refactor commit)

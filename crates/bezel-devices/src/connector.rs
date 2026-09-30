@@ -8,8 +8,12 @@ use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink};
 use bezel_core::{BezelError, Result};
 
 use crate::discovery::SystemBus;
+use crate::driver::kipye_rev_d::KipyeRevD;
+use crate::driver::turing_rev_a::TuringRevA;
 use crate::driver::turing_rev_c::{RealTime, TuringRevC};
-use crate::wire::SerialWire;
+use crate::driver::weact::WeAct;
+use crate::driver::xuanfang_rev_b::XuanFangRevB;
+use crate::wire::{Flow, SerialWire};
 
 /// How long a rev C SoC may take to boot after its MCU is poked.
 const WAKE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -22,18 +26,31 @@ pub struct SystemConnector;
 
 impl ScreenConnector for SystemConnector {
     fn connect(&self, screen: &Screen) -> Result<Box<dyn ScreenLink>> {
+        let models = &screen.candidates;
         match screen.family {
             Family::TuringRevC => {
                 let display = match &screen.display {
                     Some(d) => d.clone(),
                     None => wake_rev_c(screen)?,
                 };
-                let wire = open_serial(&display)?;
-                Ok(Box::new(TuringRevC::connect(
-                    wire,
-                    &RealTime,
-                    &screen.candidates,
-                )?))
+                let wire = open_serial(&display, Flow::None)?;
+                Ok(Box::new(TuringRevC::connect(wire, &RealTime, models)?))
+            }
+            Family::TuringRevA => {
+                let wire = open_serial(display(screen)?, Flow::Hardware)?;
+                Ok(Box::new(TuringRevA::connect(wire, &RealTime, models)?))
+            }
+            Family::XuanFangRevB => {
+                let wire = open_serial(display(screen)?, Flow::Hardware)?;
+                Ok(Box::new(XuanFangRevB::connect(wire, &RealTime, models)?))
+            }
+            Family::KipyeRevD => {
+                let wire = open_serial(display(screen)?, Flow::Hardware)?;
+                Ok(Box::new(KipyeRevD::connect(wire, &RealTime, models)?))
+            }
+            Family::WeAct => {
+                let wire = open_serial(display(screen)?, Flow::Hardware)?;
+                Ok(Box::new(WeAct::connect(wire, &RealTime, models)?))
             }
             other => Err(BezelError::Transport(format!(
                 "{} screens are not supported yet",
@@ -43,7 +60,15 @@ impl ScreenConnector for SystemConnector {
     }
 }
 
-fn open_serial(endpoint: &Endpoint) -> Result<SerialWire> {
+/// The display endpoint of a family without a wake companion.
+fn display(screen: &Screen) -> Result<&Endpoint> {
+    screen
+        .display
+        .as_ref()
+        .ok_or_else(|| BezelError::ScreenNotFound("screen without a display endpoint".into()))
+}
+
+fn open_serial(endpoint: &Endpoint, flow: Flow) -> Result<SerialWire> {
     let address = &endpoint.address.0;
     let holders = crate::busy::holders(address);
     if !holders.is_empty() {
@@ -52,7 +77,7 @@ fn open_serial(endpoint: &Endpoint) -> Result<SerialWire> {
             holders,
         });
     }
-    SerialWire::open(address).map_err(|e| access_error(address, &e))
+    SerialWire::open(address, flow).map_err(|e| access_error(address, &e))
 }
 
 /// Maps an open failure: permission problems get their own variant so the
@@ -84,7 +109,7 @@ fn wake_rev_c(screen: &Screen) -> Result<Endpoint> {
     let hub = wake.location.as_ref().and_then(UsbLocation::parent);
     let started = Instant::now();
     while started.elapsed() < WAKE_TIMEOUT {
-        if let Ok(port) = SerialWire::open(&wake.address.0) {
+        if let Ok(port) = SerialWire::open(&wake.address.0, Flow::None) {
             drop(port);
         }
         std::thread::sleep(WAKE_STEP);
@@ -125,15 +150,25 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_family_is_reported() {
-        let screen = Screen {
-            family: Family::WeAct,
-            candidates: vec![model_by_id(ModelId("weact-fs-3.5")).unwrap()],
-            display: Some(endpoint("/dev/null-weact")),
-            wake: None,
-        };
-        let err = SystemConnector.connect(&screen).err().unwrap();
-        assert!(err.to_string().contains("weact"));
+    fn every_serial_family_is_routed_and_missing_ports_fail_cleanly() {
+        for (family, model) in [
+            (Family::TuringRevA, "turing-3.5"),
+            (Family::XuanFangRevB, "xuanfang-3.5"),
+            (Family::KipyeRevD, "kipye-qiye-3.5"),
+            (Family::WeAct, "weact-fs-3.5"),
+        ] {
+            let mut screen = Screen {
+                family,
+                candidates: vec![model_by_id(ModelId(model)).unwrap()],
+                display: Some(endpoint("/dev/bezel-no-such-port")),
+                wake: None,
+            };
+            let err = SystemConnector.connect(&screen).err().unwrap();
+            assert!(matches!(err, BezelError::Transport(_)), "{family:?}: {err}");
+            screen.display = None;
+            let err = SystemConnector.connect(&screen).err().unwrap();
+            assert!(matches!(err, BezelError::ScreenNotFound(_)), "{family:?}");
+        }
     }
 
     #[test]

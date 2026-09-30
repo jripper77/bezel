@@ -20,20 +20,33 @@ pub trait Wire: Send {
     fn discard_input(&mut self) -> io::Result<()>;
 }
 
+/// Serial flow control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flow {
+    /// None (rev C, as the vendor app opens it).
+    None,
+    /// RTS/CTS (rev A/B/D and WeAct, as the Python reference opens them).
+    Hardware,
+}
+
 /// A CDC-ACM serial port.
 pub struct SerialWire {
     port: Box<dyn serialport::SerialPort>,
 }
 
 impl SerialWire {
-    /// Opens `path` the way the vendor app does: 115200 8N1, DTR and RTS on,
-    /// no flow control (the baud rate is only a SET_LINE_CODING value on CDC-ACM).
-    pub fn open(path: &str) -> io::Result<Self> {
+    /// Opens `path` at 115200 8N1 with DTR and RTS on (the baud rate is only a
+    /// SET_LINE_CODING value on CDC-ACM) and the given flow control.
+    pub fn open(path: &str, flow: Flow) -> io::Result<Self> {
+        let flow = match flow {
+            Flow::None => serialport::FlowControl::None,
+            Flow::Hardware => serialport::FlowControl::Hardware,
+        };
         let port = serialport::new(path, 115_200)
             .data_bits(serialport::DataBits::Eight)
             .parity(serialport::Parity::None)
             .stop_bits(serialport::StopBits::One)
-            .flow_control(serialport::FlowControl::None)
+            .flow_control(flow)
             .dtr_on_open(true)
             .timeout(Duration::from_millis(10))
             .open()
@@ -153,6 +166,7 @@ mod tests {
 
     #[test]
     fn opening_a_missing_port_fails_cleanly() {
-        assert!(SerialWire::open("/dev/bezel-no-such-port").is_err());
+        assert!(SerialWire::open("/dev/bezel-no-such-port", Flow::None).is_err());
+        assert!(SerialWire::open("/dev/bezel-no-such-port", Flow::Hardware).is_err());
     }
 }

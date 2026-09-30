@@ -1,0 +1,1 @@
+- [backlog 1.x] Windows: the system drive has no `disk.root.*` alias (C: is `disk.c.*`), so turing-smart-screen-python themes' disk widgets read as unavailable there; alias the drive holding %SystemRoot% as `disk.root` (T-7.2 note)

@@ -1,0 +1,27 @@
+[package]
+name = "bezel-cli"
+description = "Command-line driving adapter of Bezel: list, inspect and drive USB smart screens."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "bezel"
+path = "src/main.rs"
+
+[dependencies]
+bezel-core = { workspace = true }
+bezel-devices = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4.6.7", features = ["derive"] }
+anyhow = "1"
+
+[dev-dependencies]
+assert_cmd = "2"
+
+[lints]
+workspace = true

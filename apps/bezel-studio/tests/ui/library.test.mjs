@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { groupSensors } from '../../src/ui/library.js';
+import { axisOf, groupSensors, thumbScreen } from '../../src/ui/library.js';
 import { joinColor, splitColor } from '../../src/ui/fields.js';
 
 const catalog = [
@@ -28,4 +28,14 @@ test('colors split into rgb and alpha percent and join back', () => {
   assert.equal(joinColor('#FF8800', 80), '#ff8800cc');
   assert.equal(joinColor('#000000', 150), '#000000ff');
   assert.equal(joinColor('#000000', -5), '#00000000');
+});
+
+test('theme cards know vertical from horizontal and draw the screen shape', () => {
+  assert.equal(axisOf({ orientation: 'reverse-landscape', canvas: { width: 1920, height: 480 } }), 'horizontal');
+  assert.equal(axisOf({ orientation: 'portrait', canvas: { width: 480, height: 1920 } }), 'vertical');
+  assert.equal(axisOf({ canvas: { width: 800, height: 480 } }), 'horizontal', 'by shape without an orientation');
+  assert.equal(axisOf({ canvas: { width: 480, height: 480 } }), 'vertical');
+  assert.deepEqual(thumbScreen({ width: 480, height: 1920 }), { width: 15, height: 80 });
+  assert.deepEqual(thumbScreen({ width: 1920, height: 480 }), { width: 80, height: 26.7 });
+  assert.deepEqual(thumbScreen({ width: 480, height: 480 }), { width: 60, height: 80 });
 });

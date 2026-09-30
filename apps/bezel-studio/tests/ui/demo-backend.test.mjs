@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_SENSORS, createDemoBackend, demoFormat, demoValue } from '../../src/demo-backend.js';
+import { DEMO_SENSORS, createDemoBackend, demoFormat, demoOrientation, demoValue } from '../../src/demo-backend.js';
 
 const fixed = { now: () => 1000 };
 
@@ -39,12 +39,32 @@ test('saving, listing and opening themes', async () => {
   const names = (await demo.listThemes()).map((x) => x.name);
   assert.deepEqual(names, ['Demo', 'Mine']);
   assert.deepEqual((await demo.listThemes()).map((x) => x.bundled), [true, false]);
+  assert.deepEqual((await demo.listThemes()).map((x) => x.orientation), ['reverse-portrait', 'reverse-portrait']);
   assert.equal((await demo.openTheme('demo://Mine')).name, 'Mine');
   await assert.rejects(demo.openTheme('demo://nope'), /no theme/);
-  await demo.saveTheme({ ...theme, name: 'Mine' }, false);
+  await demo.saveTheme({ ...theme, name: 'Mine', orientation: 'landscape', canvas: { width: 1920, height: 480 } }, false);
   assert.equal((await demo.listThemes()).length, 2);
+  assert.equal((await demo.listThemes())[1].orientation, 'landscape', 'saving again updates the entry');
+  assert.equal((await demo.openTheme('demo://Mine')).orientation, 'landscape');
   assert.equal((await demo.newTheme()).elements.length, 0);
   assert.equal((await demo.newTheme('k', 'Novo')).name, 'Novo');
+});
+
+test('new themes: the orientation asked for, else the last one used with the screen, else by shape', async () => {
+  const demo = createDemoBackend('two', fixed);
+  const [big, small] = (await demo.listScreens()).map((s) => s.key);
+  const wide = await demo.newTheme(big, 'A');
+  assert.deepEqual([wide.orientation, wide.canvas], ['landscape', { width: 1920, height: 480 }], 'the 8.8" is a bar');
+  assert.equal((await demo.newTheme(small, 'B')).orientation, 'portrait', 'a square screen stays vertical');
+  const tall = await demo.newTheme(big, 'C', 'reverse-portrait');
+  assert.deepEqual([tall.orientation, tall.canvas], ['reverse-portrait', { width: 480, height: 1920 }]);
+  assert.equal((await demo.newTheme(big, 'D')).orientation, 'reverse-portrait', 'remembered for that screen');
+  await demo.setLive(true, small);
+  await demo.pushTheme({ ...tall, orientation: 'reverse-landscape' });
+  assert.equal((await demo.newTheme(small, 'E')).orientation, 'reverse-landscape', 'what was shown live');
+  assert.equal(demoOrientation(undefined, undefined), 'landscape');
+  assert.equal(demoOrientation({ width: 800, height: 480 }, undefined), 'portrait');
+  assert.equal(demoOrientation({ width: 320, height: 960 }, undefined), 'landscape');
 });
 
 test('images, live mode and fonts', async () => {

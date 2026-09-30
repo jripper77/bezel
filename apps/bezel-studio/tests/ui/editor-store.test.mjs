@@ -162,3 +162,50 @@ test('merge and layer labels', () => {
   assert.deepEqual(layerLabel(DEMO_THEME.elements[0]), { name: 'Clock', widget: 'clock' });
   assert.equal(commands.move(DEMO_THEME, { ids: [], dx: 0, dy: 0 }).theme.elements.length, 3);
 });
+
+test('setOrientation between vertical and horizontal re-lays the elements in one undo step', () => {
+  const s = createStore(DEMO_THEME);
+  s.select([2]);
+  s.dispatch('setOrientation', { orientation: 'reverse-landscape' });
+  const { theme, selection } = s.getState();
+  assert.equal(theme.orientation, 'reverse-landscape');
+  assert.deepEqual(theme.canvas, { width: 1920, height: 480 });
+  assert.deepEqual(theme.elements.map((e) => e.frame), [
+    { x: 760, y: 0, width: 400, height: 120 },
+    { x: 810, y: 0, width: 300, height: 300 },
+    { x: 740, y: 100, width: 440, height: 200 },
+  ], 'sizes kept, centers scaled, locked ones too, all inside');
+  for (const { frame: f } of theme.elements) {
+    assert.ok(f.x >= 0 && f.y >= 0 && f.x + f.width <= 1920 && f.y + f.height <= 480);
+  }
+  assert.deepEqual(selection, [2], 'the selection survives');
+  assert.equal(s.isDirty(), true);
+  s.undo();
+  assert.equal(s.getState().theme.orientation, 'reverse-portrait');
+  assert.deepEqual(s.getState().theme.canvas, DEMO_THEME.canvas);
+  assert.deepEqual(s.getState().theme.elements.map((e) => e.frame), DEMO_THEME.elements.map((e) => e.frame));
+  assert.equal(s.canUndo(), false, 'it was one step');
+  assert.equal(s.isDirty(), false);
+  s.redo();
+  assert.deepEqual(s.getState().theme.canvas, { width: 1920, height: 480 });
+});
+
+test('setOrientation turning 180° keeps the layout; the same or an unknown one changes nothing', () => {
+  const s = createStore(DEMO_THEME);
+  const layout = s.getState().theme.elements;
+  s.dispatch('setOrientation', { orientation: 'portrait' });
+  const turned = s.getState().theme;
+  assert.equal(turned.orientation, 'portrait');
+  assert.deepEqual(turned.canvas, DEMO_THEME.canvas);
+  assert.equal(turned.elements, layout, 'the layout is untouched');
+  const before = s.getState();
+  s.dispatch('setOrientation', { orientation: 'portrait' });
+  s.dispatch('setOrientation', { orientation: 'sideways' });
+  assert.equal(s.getState(), before);
+  s.undo();
+  assert.equal(s.getState().theme.orientation, 'reverse-portrait');
+  assert.equal(s.canUndo(), false);
+  const square = createStore({ ...DEMO_THEME, canvas: { width: 480, height: 480 }, elements: [] });
+  square.dispatch('setOrientation', { orientation: 'landscape' });
+  assert.deepEqual(square.getState().theme.canvas, { width: 480, height: 480 });
+});

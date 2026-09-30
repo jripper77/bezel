@@ -22,6 +22,21 @@
         <span class="visually-hidden" data-i18n="top.themeName"></span>
         <input id="theme-name" type="text" spellcheck="false" data-i18n-aria-label="top.themeName" />
       </label>
+      <div class="orientation-tools" role="group" data-i18n-aria-label="top.orientation">
+        <div class="segmented">
+          <button type="button" id="orient-vertical" aria-pressed="false" data-i18n-title="top.verticalHint">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="3" width="9" height="18" rx="2" /><path d="M11 18h2" /></svg>
+            <span data-i18n="axis.vertical"></span>
+          </button>
+          <button type="button" id="orient-horizontal" aria-pressed="false" data-i18n-title="top.horizontalHint">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7.5" width="18" height="9" rx="2" /><path d="M18 11v2" /></svg>
+            <span data-i18n="axis.horizontal"></span>
+          </button>
+        </div>
+        <button type="button" class="icon-button" id="orient-turn" aria-pressed="false" data-i18n-title="top.turnHint" data-i18n-aria-label="top.turn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
+        </button>
+      </div>
       <div class="toolbar" role="toolbar" data-i18n-aria-label="top.edit">
         <button type="button" class="icon-button" id="undo" data-i18n-title="top.undo" data-i18n-aria-label="top.undo">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" /></svg>
@@ -74,8 +89,15 @@
           <ul class="layer-list" id="layer-list"></ul>
         </section>
         <section class="panel" role="tabpanel" id="panel-themes" aria-labelledby="tab-themes" hidden>
-          <div class="button-row">
-            <button type="button" class="text-button" id="theme-new" data-i18n="themes.new"></button>
+          <div class="button-row pairs">
+            <button type="button" class="text-button" id="theme-new-vertical">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="3" width="9" height="18" rx="2" /><path d="M12 9v6M9 12h6" /></svg>
+              <span data-i18n="themes.newVertical"></span>
+            </button>
+            <button type="button" class="text-button" id="theme-new-horizontal">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7.5" width="18" height="9" rx="2" /><path d="M12 9v6M9 12h6" /></svg>
+              <span data-i18n="themes.newHorizontal"></span>
+            </button>
             <button type="button" class="text-button" id="theme-open" data-i18n="themes.open"></button>
             <button type="button" class="text-button" id="theme-import" data-i18n="themes.import"></button>
           </div>

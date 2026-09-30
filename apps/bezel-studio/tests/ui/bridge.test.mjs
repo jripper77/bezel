@@ -56,7 +56,7 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.saveTheme(theme, true);
   await bridge.listThemes();
   await bridge.openTheme('loc');
-  await bridge.newTheme('k');
+  await bridge.newTheme('k', 'Novo', 'landscape');
   await bridge.importTheme();
   await bridge.addImage();
   await bridge.assets();
@@ -71,6 +71,7 @@ test('tauri mode maps every call to its command', async () => {
   assert.deepEqual(calls[6][1], { on: true, screen: 'k' });
   assert.deepEqual(calls[7][1], { screen: 'k', percent: 40 });
   assert.deepEqual(calls[9][1], { theme, saveAs: true });
+  assert.deepEqual(calls[12][1], { screen: 'k', name: 'Novo', orientation: 'landscape' });
 });
 
 test('demo mode serves scenarios as copies', async () => {

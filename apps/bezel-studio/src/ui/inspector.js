@@ -5,6 +5,7 @@ import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { checkField, colorField, numberField, rangeField, segmented, selectField, textField } from './fields.js';
 import { createWidget, widgetOf } from '../editor/widgets.js';
+import { ORIENTATIONS } from '../editor/geometry.js';
 
 const BOUND = ['value', 'bar', 'ring', 'needle', 'graph'];
 const CLOCK_PATTERNS = ['%H:%M', '%H:%M:%S', '%I:%M %p', '%d/%m/%Y', '%A', '%a %d %b', '%B %Y'];
@@ -42,17 +43,11 @@ export function createInspector({ root, store, t, sensors }) {
   // --------------------------------------------------------------- theme --
   function themeForm(theme) {
     const bg = theme.background;
-    const swap = (o) => {
-      const landscape = (x) => x.includes('landscape');
-      const flip = landscape(o) !== landscape(theme.orientation);
-      const canvas = flip ? { width: theme.canvas.height, height: theme.canvas.width } : theme.canvas;
-      store.dispatch('setTheme', { patch: { orientation: o, canvas } });
-    };
     return [
       el('h2', { text: t('inspector.theme') }),
       textField(t('inspector.name'), theme.name, (v) => store.dispatch('setTheme', { patch: { name: v } })),
       el('p', { class: 'hint', text: t('inspector.canvas', { width: theme.canvas.width, height: theme.canvas.height }) }),
-      selectField(t('inspector.orientation'), theme.orientation, ['portrait', 'reverse-portrait', 'landscape', 'reverse-landscape'].map((o) => [o, t(`orientation.${o}`)]), swap),
+      selectField(t('inspector.orientation'), theme.orientation, ORIENTATIONS.map((o) => [o, t(`orientation.${o}`)]), (o) => store.dispatch('setOrientation', { orientation: o })),
       el('h3', { text: t('inspector.background') }),
       bg.type === 'color'
         ? colorField(t('inspector.color'), bg.color, (c) => store.dispatch('setTheme', { patch: { background: { type: 'color', color: c } } }))

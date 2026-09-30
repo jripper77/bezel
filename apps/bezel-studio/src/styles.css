@@ -43,7 +43,7 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--text); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+body { background: var(--bg); color: var(--text); display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
@@ -52,31 +52,47 @@ button, input, select { font: inherit; color: inherit; }
 .hint { color: var(--muted); font-size: 0.85rem; margin: 4px 0 10px; }
 
 /* --------------------------------------------------------------- topbar -- */
-.topbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.topbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
+/* Only the screen and the theme name give way when the window is narrow. */
+.topbar > * { flex: none; }
+.topbar > .spacer { flex: 1 1 0; }
 .brand { display: flex; align-items: center; gap: 8px; }
 .brand-name { font-weight: 700; font-size: 1.05rem; }
-.screen-chip { display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }
-.screen-chip select { border: 0; background: transparent; padding: 4px; max-width: 340px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.topbar > .screen-chip { display: flex; flex: 0 1 auto; min-width: 0; align-items: center; gap: 6px; padding: 2px 4px 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }
+.screen-chip select { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; padding: 4px; max-width: 300px; text-overflow: ellipsis; }
+.dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .dot.awake { background: var(--ok); }
 .dot.live { background: #22c55e; box-shadow: 0 0 0 3px rgb(34 197 94 / 25%); }
-.theme-name input { border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 6px 8px; font-weight: 600; min-width: 180px; }
+.topbar > .theme-name { flex: 0 1 170px; min-width: 100px; }
+.theme-name input { width: 100%; min-width: 0; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 6px 8px; font-weight: 600; }
 .theme-name input:hover, .theme-name input:focus { border-color: var(--border); background: var(--surface-2); }
 .toolbar { display: flex; gap: 4px; align-items: center; }
+
+/* Vertical | Horizontal and the 180° turn, next to the theme name. */
+.orientation-tools { display: flex; align-items: center; gap: 4px; }
+.orientation-tools .segmented { overflow: visible; border-radius: 8px; background: var(--surface-2); }
+.orientation-tools .segmented button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px 0 9px; background: transparent; color: var(--muted); font-weight: 600; }
+.orientation-tools .segmented button:first-child { border-radius: 7px 0 0 7px; }
+.orientation-tools .segmented button:last-child { border-radius: 0 7px 7px 0; border-left: 1px solid var(--border); }
+.orientation-tools .segmented button:hover { color: var(--text); }
+.orientation-tools .segmented button[aria-pressed="true"] { background: var(--accent-soft); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.orientation-tools .segmented button[aria-pressed="true"] svg { color: var(--accent); }
+.orientation-tools .segmented button:focus-visible { position: relative; z-index: 1; }
 
 .icon-button, .text-button, .primary-button, .chip-button {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; padding: 0 10px;
 }
 .icon-button { width: 32px; padding: 0; }
-.icon-button svg, .chip-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon-button svg, .chip-button svg, .text-button svg, .badge svg, .orientation-tools svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.text-button svg { width: 16px; height: 16px; }
 .icon-button:hover, .text-button:hover, .chip-button:hover { border-color: var(--accent); }
 .icon-button:disabled, .text-button:disabled { opacity: 0.45; cursor: default; }
 .primary-button { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; padding: 0 16px; }
 .primary-button.dirty::after { content: "•"; margin-left: 2px; }
 .icon-button[aria-pressed="true"], .chip-button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 
-.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; }
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; white-space: nowrap; }
 .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .switch .track { width: 38px; height: 22px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border); position: relative; }
 .switch .thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow); }
@@ -120,9 +136,17 @@ button, input, select { font: inherit; color: inherit; }
 .theme-grid { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .theme-card { width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); padding: 8px; cursor: pointer; text-align: left; display: grid; gap: 6px; }
 .theme-card:hover { border-color: var(--accent); }
-.theme-card .thumb { background: #000 center / contain no-repeat; border-radius: 6px; aspect-ratio: 3 / 4; }
+.theme-card .thumb { display: grid; place-items: center; aspect-ratio: 4 / 3; border-radius: 6px; background: var(--surface-3); }
+.theme-card .thumb-screen { display: block; border-radius: 3px; background: #000 center / cover no-repeat; box-shadow: 0 0 0 2px #1e293b; }
 .theme-card small { color: var(--muted); }
+.card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 5px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 0.75rem; font-weight: 600; }
+.badge svg { width: 14px; height: 14px; color: var(--accent); }
+
 .button-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.button-row.pairs { display: grid; grid-template-columns: 1fr 1fr; }
+.button-row.pairs .text-button { padding: 0 8px; gap: 4px; font-size: 0.9rem; white-space: nowrap; }
+.button-row.pairs .text-button svg { width: 14px; height: 14px; }
 
 .media-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .media-item { display: grid; grid-template-columns: 48px 1fr; gap: 8px; align-items: center; padding: 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
@@ -179,6 +203,14 @@ button, input, select { font: inherit; color: inherit; }
 .screen-card .meta { color: var(--muted); font-size: 0.85rem; }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 
+/* Narrow windows (the app allows 960 px): the brand and the orientation
+   labels go, the orientation names stay for screen readers and in tooltips. */
+@media (max-width: 1180px) {
+  .brand-name { display: none; }
+  .orientation-tools .segmented span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .orientation-tools .segmented button { padding: 0 9px; }
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .icon-button, .text-button, .widget-tile, .sensor-row, .theme-card, .switch .thumb { transition: border-color 120ms ease, background 120ms ease, left 120ms ease; }
+  .icon-button, .text-button, .widget-tile, .sensor-row, .theme-card, .switch .thumb, .orientation-tools .segmented button { transition: border-color 120ms ease, background 120ms ease, color 120ms ease, left 120ms ease; }
 }

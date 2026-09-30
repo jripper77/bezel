@@ -2,6 +2,7 @@
 import { applyTranslations, pickLocale, translator } from './i18n/index.js';
 import { createBridge } from './bridge.js';
 import { createStore } from './editor/store.js';
+import { isHorizontal, isTurned, orientationOf } from './editor/geometry.js';
 import { createCanvasView } from './ui/canvas.js';
 import { createLibrary } from './ui/library.js';
 import { createInspector } from './ui/inspector.js';
@@ -40,7 +41,9 @@ const errorText = (e) => e?.message ?? String(e);
 
 // ------------------------------------------------------------ store ----
 const session = await bridge.session().catch(() => null);
-const store = createStore(session?.theme ?? { schema: 1, name: 'Untitled', canvas: { width: 480, height: 1920 }, orientation: 'portrait', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] });
+// Without a session: a blank theme for the 8.8", horizontal like the backend's
+// default for bar-shaped screens.
+const store = createStore(session?.theme ?? { schema: 1, name: 'Untitled', canvas: { width: 1920, height: 480 }, orientation: 'landscape', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] });
 state.location = session?.location ?? null;
 
 const canvasView = createCanvasView({
@@ -60,7 +63,7 @@ const library = createLibrary({
   t,
   actions: {
     openTheme: (location) => openTheme(location),
-    newTheme: () => newTheme(),
+    newTheme: (axis) => newTheme(axis),
     refreshThemes: () => refreshThemes(),
     importTheme: () => importTheme(),
     addImage: () => addImage(),
@@ -110,6 +113,20 @@ function pushLive() {
   liveTimer = setTimeout(() => bridge.pushTheme(store.getState().theme).catch((e) => toast(t('toast.error', { message: errorText(e) }))), 150);
 }
 
+// The canvas is fitted again whenever the theme turns between vertical and
+// horizontal (a button, the inspector, undo or another theme).
+let shownAxis = null;
+
+function refreshOrientation(theme) {
+  const horizontal = isHorizontal(theme.orientation);
+  $('orient-vertical').setAttribute('aria-pressed', String(!horizontal));
+  $('orient-horizontal').setAttribute('aria-pressed', String(horizontal));
+  $('orient-turn').setAttribute('aria-pressed', String(isTurned(theme.orientation)));
+  const axis = horizontal ? 'horizontal' : 'vertical';
+  if (shownAxis !== null && axis !== shownAxis) canvasView.fit();
+  shownAxis = axis;
+}
+
 function refreshChrome(reason) {
   const { theme } = store.getState();
   $('undo').disabled = !store.canUndo();
@@ -118,6 +135,7 @@ function refreshChrome(reason) {
   $('save').classList.toggle('dirty', store.isDirty());
   $('status-main').textContent = store.isDirty() ? t('status.unsaved') : t('status.saved');
   canvasView.setCanvasSize(theme.canvas);
+  refreshOrientation(theme);
   canvasView.drawOverlay();
   library.renderLayers();
   inspector.render(state.assets);
@@ -258,9 +276,12 @@ async function openTheme(location) {
   }
 }
 
-async function newTheme() {
+// A new theme keeps the 180° turn of the edited one: it follows how the
+// screen is mounted.
+async function newTheme(axis) {
   try {
-    store.load(await bridge.newTheme(state.screen, t('themes.untitled')));
+    const orientation = orientationOf(axis, isTurned(store.getState().theme.orientation));
+    store.load(await bridge.newTheme(state.screen, t('themes.untitled'), orientation));
     state.location = null;
     await refreshAssets();
     canvasView.fit();
@@ -312,6 +333,14 @@ $('save').addEventListener('click', () => save());
 $('zoom-in').addEventListener('click', () => canvasView.setZoom(canvasView.zoom() * 1.25));
 $('zoom-out').addEventListener('click', () => canvasView.setZoom(canvasView.zoom() / 1.25));
 $('zoom-fit').addEventListener('click', () => canvasView.fit());
+// Vertical | Horizontal keep the 180° turn; the turn keeps the axis.
+function turnTheme(axis, turned) {
+  store.dispatch('setOrientation', { orientation: orientationOf(axis, turned) });
+}
+const orientation = () => store.getState().theme.orientation;
+$('orient-vertical').addEventListener('click', () => turnTheme('vertical', isTurned(orientation())));
+$('orient-horizontal').addEventListener('click', () => turnTheme('horizontal', isTurned(orientation())));
+$('orient-turn').addEventListener('click', () => turnTheme(isHorizontal(orientation()) ? 'horizontal' : 'vertical', !isTurned(orientation())));
 $('theme-name').addEventListener('change', (evt) => {
   const name = evt.target.value.trim();
   if (name) store.dispatch('setTheme', { patch: { name } });

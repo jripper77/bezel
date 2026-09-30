@@ -33,7 +33,7 @@ use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
 use tauri::{AppHandle, Manager, WindowEvent};
 
-use crate::backend::{Backend, DEFAULT_MODEL};
+use crate::backend::{Backend, DEFAULT_MODEL, UNTITLED, default_orientation};
 use crate::commands::Shared;
 use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
@@ -77,6 +77,9 @@ pub fn run() -> Result<(), tauri::Error> {
         )
         .setup(move |app| {
             let backend: Shared = Arc::new(compose(app.handle(), simulate)?);
+            // Before the window asks for it: the last theme, or a blank one
+            // for the connected screen.
+            backend.restore_theme();
             app.manage(Arc::clone(&backend));
             start_refresh_loop(backend);
             tray::create(app.handle())?;
@@ -155,11 +158,12 @@ fn adapters(simulate: bool) -> Adapters {
     }
 }
 
-/// A blank theme for the most common screen until one is opened.
+/// A blank theme for the most common screen (horizontal, like every
+/// bar-shaped one), until [`Backend::restore_theme`] picks the real one.
 fn starting_theme() -> Theme {
     match model_by_id(DEFAULT_MODEL) {
-        Some(m) => Theme::blank("Untitled", m.panel, m.native_orientation),
-        None => Theme::blank("Untitled", Size::new(480, 1920), Orientation::Portrait),
+        Some(m) => Theme::blank(UNTITLED, m.panel, default_orientation(m)),
+        None => Theme::blank(UNTITLED, Size::new(480, 1920), Orientation::Landscape),
     }
 }
 
@@ -203,8 +207,8 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     })
 }
 
-/// Reopens the last session, then samples and refreshes the live screen at
-/// the theme's pace, on its own thread for the life of the app.
+/// Shows the last live screen again, then samples and refreshes the live
+/// screen at the theme's pace, on its own thread for the life of the app.
 fn start_refresh_loop(backend: Shared) {
     let spawned = std::thread::Builder::new()
         .name("bezel-refresh".into())
@@ -212,7 +216,7 @@ fn start_refresh_loop(backend: Shared) {
             if let Err(e) = backend.studio().refresh_catalog() {
                 tracing::warn!("sensor catalog: {e}");
             }
-            backend.restore(clock::now());
+            backend.restore_live(clock::now());
             loop {
                 let wait = backend.tick(clock::now());
                 std::thread::sleep(Duration::from_secs_f32(wait));
@@ -270,9 +274,10 @@ mod tests {
     }
 
     #[test]
-    fn the_starting_theme_fits_the_88() {
+    fn the_starting_theme_fits_the_88_horizontally() {
         let theme = starting_theme();
-        assert_eq!(theme.canvas, Size::new(480, 1920));
+        assert_eq!(theme.canvas, Size::new(1920, 480));
+        assert_eq!(theme.orientation, Orientation::Landscape);
         assert!(theme.elements.is_empty());
     }
 }

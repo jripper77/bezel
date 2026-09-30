@@ -1,6 +1,7 @@
 // The editor in demo mode: it loads without console errors or serious
 // accessibility violations (light and dark projects), widgets and sensors
-// drag onto the canvas, and keyboard edits undo.
+// drag onto the canvas, keyboard edits undo, and the screen turns between
+// vertical and horizontal.
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -142,6 +143,100 @@ test('live mode and start at login', async ({ page }) => {
   await expect(autostart).toBeChecked();
   await page.getByRole('switch').click({ force: true });
   await expect(page.getByRole('switch')).not.toBeChecked();
+  await expectAccessible(page);
+  expect(errors).toEqual([]);
+});
+
+async function expectInside(page, inner, outer) {
+  const o = await page.locator(outer).boundingBox();
+  for (const b of await page.locator(inner).all()) {
+    const i = await b.boundingBox();
+    expect(i.x).toBeGreaterThanOrEqual(o.x - 1);
+    expect(i.y).toBeGreaterThanOrEqual(o.y - 1);
+    expect(i.x + i.width).toBeLessThanOrEqual(o.x + o.width + 1);
+    expect(i.y + i.height).toBeLessThanOrEqual(o.y + o.height + 1);
+  }
+}
+
+test('switch between vertical and horizontal', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  const group = page.getByRole('group', { name: 'Orientação da tela' });
+  const vertical = group.getByRole('button', { name: 'Vertical', exact: true });
+  const horizontal = group.getByRole('button', { name: 'Horizontal', exact: true });
+  const turn = group.getByRole('button', { name: 'Girar 180°' });
+  const orientation = page.locator('#inspector').getByRole('combobox', { name: 'Orientação' });
+  await expect(vertical).toHaveAttribute('aria-pressed', 'true');
+  await expect(horizontal).toHaveAttribute('aria-pressed', 'false');
+  await expect(turn).toHaveAttribute('aria-pressed', 'true');
+  await expect(orientation).toHaveValue('reverse-portrait');
+
+  await horizontal.click();
+  await expect(horizontal).toHaveAttribute('aria-pressed', 'true');
+  await expect(vertical).toHaveAttribute('aria-pressed', 'false');
+  await expect(turn).toHaveAttribute('aria-pressed', 'true');
+  await expect(orientation).toHaveValue('reverse-landscape');
+  await expect(page.locator('#inspector')).toContainText('Tela de 1920×480 pixels');
+  const wide = await page.locator('#canvas-box').boundingBox();
+  expect(wide.width).toBeGreaterThan(wide.height);
+  await page.keyboard.press('Control+a');
+  await expect(page.locator('.sel-box')).toHaveCount(3);
+  await expectInside(page, '.sel-box', '#canvas-box');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#status-main')).toHaveText('Alterações não salvas');
+  await expectAccessible(page);
+
+  // One undo step brings the vertical layout back.
+  await page.keyboard.press('Control+z');
+  await expect(vertical).toHaveAttribute('aria-pressed', 'true');
+  await expect(orientation).toHaveValue('reverse-portrait');
+  const tall = await page.locator('#canvas-box').boundingBox();
+  expect(tall.height).toBeGreaterThan(tall.width);
+  await expect(page.locator('#status-main')).toHaveText('Tudo salvo');
+  await expect(page.getByRole('button', { name: 'Desfazer (Ctrl+Z)' })).toBeDisabled();
+
+  // The 180° turn toggles, by mouse and by keyboard, and keeps the layout.
+  await turn.click();
+  await expect(turn).toHaveAttribute('aria-pressed', 'false');
+  await expect(orientation).toHaveValue('portrait');
+  await expect(page.locator('#inspector')).toContainText('Tela de 480×1920 pixels');
+  await turn.focus();
+  await page.keyboard.press('Space');
+  await expect(turn).toHaveAttribute('aria-pressed', 'true');
+  await expect(orientation).toHaveValue('reverse-portrait');
+
+  // The inspector's select is the same command.
+  await orientation.selectOption('landscape');
+  await expect(horizontal).toHaveAttribute('aria-pressed', 'true');
+  await expect(turn).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#inspector')).toContainText('Tela de 1920×480 pixels');
+  await expectAccessible(page);
+  expect(errors).toEqual([]);
+});
+
+test('new vertical and horizontal themes', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('tab', { name: 'Temas' }).click();
+  const cards = page.locator('#theme-grid .theme-card');
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText('Vertical');
+
+  await page.getByRole('button', { name: 'Novo horizontal' }).click();
+  await expect(page.locator('#theme-name')).toHaveValue('Sem título');
+  await expect(page.getByRole('button', { name: 'Horizontal', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const box = await page.locator('#canvas-box').boundingBox();
+  expect(box.width).toBeGreaterThan(box.height);
+  await page.keyboard.press('Control+s');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(1)).toContainText('Horizontal');
+  await expect(cards.nth(1)).toContainText('1920×480');
+
+  await page.getByRole('button', { name: 'Novo vertical' }).click();
+  await expect(page.getByRole('button', { name: 'Vertical', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#inspector')).toContainText('Tela de 480×1920 pixels');
   await expectAccessible(page);
   expect(errors).toEqual([]);
 });

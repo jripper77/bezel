@@ -3,6 +3,7 @@
 import { SCENARIOS } from './demo-data.js';
 import { DEMO_THEME } from './demo-theme.js';
 import { renderApprox } from './demo-render.js';
+import { isHorizontal } from './editor/geometry.js';
 
 /** Well-known demo sensors: key, category, label, quantity, base value, swing. */
 export const DEMO_SENSORS = Object.freeze([
@@ -49,6 +50,20 @@ export function demoValue(base, swing, t, seed) {
 }
 
 /**
+ * Orientation of a new theme when none is asked for, like the backend: the
+ * last one used with the screen, else horizontal for bar-shaped panels (long
+ * side at least twice the short one, like the 8.8" or no screen at all) and
+ * vertical otherwise.
+ * @param {{width:number, height:number}|undefined} model
+ * @param {string|undefined} remembered
+ */
+export function demoOrientation(model, remembered) {
+  if (remembered) return remembered;
+  if (!model) return 'landscape';
+  return Math.max(model.width, model.height) >= 2 * Math.min(model.width, model.height) ? 'landscape' : 'portrait';
+}
+
+/**
  * @param {string} scenario key of SCENARIOS
  * @param {{now?: () => number}} [clock]
  */
@@ -58,8 +73,11 @@ export function createDemoBackend(scenario, clock = {}) {
   let theme = structuredClone(DEMO_THEME);
   let live = false;
   let autostart = false;
-  const saved = [{ name: 'Demo', location: 'demo://Demo', canvas: DEMO_THEME.canvas }];
+  const saved = [{ location: 'demo://Demo', theme: structuredClone(DEMO_THEME) }];
   const images = [];
+  /** Screen key → last orientation shown on it or chosen for it. */
+  const remembered = new Map();
+  const modelOf = (key) => (chosen.screens ?? []).find((s) => s.key === key)?.models[0];
 
   return {
     listScreens: () => (chosen.error ? Promise.reject(new Error(chosen.error)) : Promise.resolve(structuredClone(chosen.screens))),
@@ -82,10 +100,12 @@ export function createDemoBackend(scenario, clock = {}) {
     },
     pushTheme: (next) => {
       theme = structuredClone(next);
+      if (live) remembered.set(live, theme.orientation);
       return Promise.resolve();
     },
     setLive: (on, screen) => {
       live = on ? screen : null;
+      if (live) remembered.set(live, theme.orientation);
       return Promise.resolve({ live });
     },
     setBrightness: () => Promise.resolve(),
@@ -93,15 +113,27 @@ export function createDemoBackend(scenario, clock = {}) {
     saveTheme: (next, saveAs) => {
       theme = structuredClone(next);
       const location = `demo://${next.name}`;
-      if (saveAs || !saved.some((s) => s.location === location)) saved.push({ name: next.name, location, canvas: next.canvas });
+      const at = saved.findIndex((s) => s.location === location);
+      if (saveAs || at < 0) saved.push({ location, theme: structuredClone(next) });
+      else saved[at].theme = structuredClone(next);
       return Promise.resolve({ location });
     },
-    listThemes: () => Promise.resolve(structuredClone(saved).map((s, i) => ({ ...s, bundled: i === 0 }))),
+    listThemes: () => Promise.resolve(saved.map((s, i) => ({
+      name: s.theme.name, location: s.location, canvas: { ...s.theme.canvas }, orientation: s.theme.orientation, bundled: i === 0,
+    }))),
     openTheme: (location) => {
       const found = saved.find((s) => s.location === location);
-      return found ? Promise.resolve(structuredClone({ ...DEMO_THEME, name: found.name })) : Promise.reject(new Error(`no theme at ${location}`));
+      return found ? Promise.resolve(structuredClone(found.theme)) : Promise.reject(new Error(`no theme at ${location}`));
     },
-    newTheme: (screen, name = 'Untitled') => Promise.resolve({ ...structuredClone(DEMO_THEME), name, elements: [] }),
+    newTheme: (screen, name = 'Untitled', orientation = null) => {
+      const model = modelOf(screen);
+      const chosenOrientation = orientation ?? demoOrientation(model, remembered.get(screen));
+      if (orientation && screen) remembered.set(screen, orientation);
+      const short = model ? Math.min(model.width, model.height) : 480;
+      const long = model ? Math.max(model.width, model.height) : 1920;
+      const canvas = isHorizontal(chosenOrientation) ? { width: long, height: short } : { width: short, height: long };
+      return Promise.resolve({ ...structuredClone(DEMO_THEME), name, orientation: chosenOrientation, canvas, elements: [] });
+    },
     importTheme: () => Promise.resolve(null),
     addImage: () => {
       const ref = `assets/image-${images.length + 1}.png`;

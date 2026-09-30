@@ -34,7 +34,7 @@ function tauriBridge(invoke) {
     saveTheme: (theme, saveAs) => invoke('save_theme', { theme, saveAs }),
     listThemes: () => invoke('list_themes'),
     openTheme: (location) => invoke('open_theme', { location }),
-    newTheme: (screen, name) => invoke('new_theme', { screen, name }),
+    newTheme: (screen, name, orientation) => invoke('new_theme', { screen, name, orientation }),
     importTheme: () => invoke('import_theme'),
     addImage: () => invoke('add_image'),
     assets: () => invoke('list_assets'),

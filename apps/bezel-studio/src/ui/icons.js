@@ -26,4 +26,6 @@ export const ICONS = Object.freeze({
   alignBottom: ['M4 20h16', 'M7 6h4v10H7z', 'M14 10h4v6h-4z'],
   distributeX: ['M4 4v16', 'M20 4v16', 'M10 8h4v8h-4z'],
   distributeY: ['M4 4h16', 'M4 20h16', 'M8 10h8v4H8z'],
+  vertical: ['M8 3h8v18H8z'],
+  horizontal: ['M3 8h18v8H3z'],
 });

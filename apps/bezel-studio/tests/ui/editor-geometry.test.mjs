@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boxFromPoints, contains, handlePoints, HANDLES, hitTest, intersects, marqueeSelect, MIN_SIZE, resize, roundBox, unionBox } from '../../src/editor/geometry.js';
+import { boxFromPoints, contains, handlePoints, HANDLES, hitTest, intersects, isHorizontal, isTurned, marqueeSelect, MIN_SIZE, ORIENTATIONS, orientationOf, relayoutBox, resize, roundBox, unionBox } from '../../src/editor/geometry.js';
 import { snapEdge, snapMove, SNAP_DISTANCE } from '../../src/editor/snap.js';
 import { boundKey, createWidget, defaultRange, textStyle, widgetOf, WIDGETS } from '../../src/editor/widgets.js';
 
@@ -79,4 +79,21 @@ test('every palette widget creates a valid kind sized to the canvas', () => {
   for (const q of ['megahertz', 'watts', 'rpm', 'percent']) assert.ok(defaultRange(q).max > 0);
   assert.equal(textStyle(20).align, 'left');
   assert.equal(createWidget('ring', canvas).kind.binding.key, 'cpu.usage', 'unbound defaults to cpu.usage');
+});
+
+test('orientations split into vertical/horizontal and turned or not', () => {
+  assert.deepEqual(ORIENTATIONS.filter(isHorizontal), ['landscape', 'reverse-landscape']);
+  assert.deepEqual(ORIENTATIONS.filter(isTurned), ['reverse-portrait', 'reverse-landscape']);
+  for (const o of ORIENTATIONS) assert.equal(orientationOf(isHorizontal(o) ? 'horizontal' : 'vertical', isTurned(o)), o);
+});
+
+test('relayoutBox keeps the size and the relative center, inside the new canvas', () => {
+  const tall = { width: 480, height: 1920 };
+  const wide = { width: 1920, height: 480 };
+  assert.deepEqual(relayoutBox(box(20, 700, 440, 200), tall, wide), box(740, 100, 440, 200));
+  assert.deepEqual(relayoutBox(box(40, 80, 400, 120), tall, wide), box(760, 0, 400, 120), 'pushed down inside');
+  assert.deepEqual(relayoutBox(box(0, 1800, 100, 120), tall, wide), box(150, 360, 100, 120), 'pushed up inside');
+  assert.deepEqual(relayoutBox(box(0, 0, 480, 1920), tall, wide), box(720, 0, 480, 1920), 'too tall starts at the top');
+  const back = relayoutBox(relayoutBox(box(90, 902, 300, 100), tall, wide), wide, tall);
+  assert.deepEqual(back, box(90, 902, 300, 100), 'a box that fits both ways comes back');
 });

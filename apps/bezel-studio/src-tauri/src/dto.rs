@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::{Endpoint, Screen, ScreenState};
+use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::sensor::{
     DisplayFormat, Quantities, Quantity, Reading, SensorInfo, Snapshot, format_reading,
 };
@@ -235,6 +236,8 @@ pub struct ThemeEntryDto {
     pub location: String,
     /// Canvas size.
     pub canvas: SizeDto,
+    /// `portrait`, `reverse-portrait`, `landscape` or `reverse-landscape`.
+    pub orientation: &'static str,
     /// Ships with the app.
     pub bundled: bool,
 }
@@ -248,9 +251,27 @@ impl From<&ThemeEntry> for ThemeEntryDto {
                 width: e.theme.canvas.width,
                 height: e.theme.canvas.height,
             },
+            orientation: orientation_slug(e.theme.orientation),
             bundled: e.bundled,
         }
     }
+}
+
+/// An orientation as `theme.json` and the UI spell it.
+pub fn orientation_slug(orientation: Orientation) -> &'static str {
+    match orientation {
+        Orientation::Portrait => "portrait",
+        Orientation::ReversePortrait => "reverse-portrait",
+        Orientation::Landscape => "landscape",
+        Orientation::ReverseLandscape => "reverse-landscape",
+    }
+}
+
+/// The orientation spelled `slug` (see [`orientation_slug`]).
+pub fn parse_orientation(slug: &str) -> Option<Orientation> {
+    Orientation::ALL
+        .into_iter()
+        .find(|o| orientation_slug(*o) == slug)
 }
 
 /// An asset of the edited theme.
@@ -304,6 +325,18 @@ mod tests {
         assert_eq!(json["models"][0]["hardwareValidated"], true);
         assert_eq!(json["models"][0]["capabilities"]["videoPlayback"], true);
         assert_eq!(json["wake"]["serial"], "CT88INCH");
+    }
+
+    #[test]
+    fn orientations_are_spelled_like_theme_json() {
+        use bezel_core::domain::geometry::Size;
+        use bezel_core::domain::theme::Theme;
+        for o in Orientation::ALL {
+            let dto = ThemeDto::from(&Theme::blank("T", Size::new(480, 1920), o));
+            assert_eq!(dto.orientation, orientation_slug(o));
+            assert_eq!(parse_orientation(orientation_slug(o)), Some(o));
+        }
+        assert_eq!(parse_orientation("sideways"), None);
     }
 
     #[test]

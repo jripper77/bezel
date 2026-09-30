@@ -13,11 +13,11 @@ use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
 
-use crate::backend::{Backend, UiResult};
+use crate::backend::{Backend, UNTITLED, UiResult};
 use crate::clock::now;
 use crate::dto::{
     AddedDto, AssetDto, ImportedDto, SampleDto, SavedDto, ScreenDto, SensorDto, SessionDto,
-    ThemeEntryDto,
+    ThemeEntryDto, parse_orientation,
 };
 use crate::media::IMAGE_EXTENSIONS;
 
@@ -144,15 +144,25 @@ pub async fn open_theme(state: State<'_, Shared>, location: String) -> UiResult<
     blocking(&state, move |b| b.open(&location)).await
 }
 
-/// Starts a blank theme sized for `screen`.
+/// Starts a blank theme sized for `screen`, in `orientation` (a theme.json
+/// name) or the one [`Backend::new_theme`] picks.
 #[tauri::command]
 pub async fn new_theme(
     state: State<'_, Shared>,
     screen: Option<String>,
     name: Option<String>,
+    orientation: Option<String>,
 ) -> UiResult<ThemeDto> {
+    let orientation = orientation
+        .as_deref()
+        .map(|o| parse_orientation(o).ok_or_else(|| format!("unknown orientation {o:?}")))
+        .transpose()?;
     blocking(&state, move |b| {
-        b.new_theme(screen.as_deref(), name.as_deref().unwrap_or("Untitled"))
+        b.new_theme(
+            screen.as_deref(),
+            name.as_deref().unwrap_or(UNTITLED),
+            orientation,
+        )
     })
     .await
 }

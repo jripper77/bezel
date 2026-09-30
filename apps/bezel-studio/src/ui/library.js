@@ -5,6 +5,7 @@ import { ICONS } from './icons.js';
 import { makeDraggable } from './dragdrop.js';
 import { checkField } from './fields.js';
 import { WIDGETS, widgetOf } from '../editor/widgets.js';
+import { isHorizontal } from '../editor/geometry.js';
 
 const CATEGORY_ORDER = ['cpu', 'gpu', 'memory', 'disk', 'network', 'board', 'system'];
 
@@ -19,6 +20,23 @@ export function groupSensors(catalog, filter = '') {
   }
   const rank = (c) => (CATEGORY_ORDER.includes(c) ? CATEGORY_ORDER.indexOf(c) : CATEGORY_ORDER.length);
   return [...groups.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]));
+}
+
+/**
+ * The miniature screen drawn in a theme card's 4:3 thumbnail: the canvas
+ * shape scaled into 80% of the box, as percentages of its width and height.
+ * @param {{width:number, height:number}} canvas
+ */
+export function thumbScreen(canvas) {
+  const scale = Math.min(3.2 / canvas.width, 2.4 / canvas.height);
+  const pct = (v) => Math.round(v * 1000) / 10;
+  return { width: pct((canvas.width * scale) / 4), height: pct((canvas.height * scale) / 3) };
+}
+
+/** `vertical` or `horizontal` for a theme entry (by orientation, else by shape). */
+export function axisOf(entry) {
+  if (entry.orientation) return isHorizontal(entry.orientation) ? 'horizontal' : 'vertical';
+  return entry.canvas.width > entry.canvas.height ? 'horizontal' : 'vertical';
 }
 
 /**
@@ -159,21 +177,34 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   }
 
   // -------------------------------------------------------------- themes --
+  function themeCard(th) {
+    const axis = axisOf(th);
+    const mini = thumbScreen(th.canvas);
+    const screen = { width: `${mini.width}%`, height: `${mini.height}%` };
+    if (th.thumbnail) screen.backgroundImage = `url(${th.thumbnail})`;
+    return el('li', {}, [
+      el('button', { type: 'button', class: 'theme-card', onclick: () => actions.openTheme(th.location) }, [
+        el('span', { class: 'thumb', 'aria-hidden': 'true' }, [el('span', { class: 'thumb-screen', style: screen })]),
+        el('strong', { text: th.name }),
+        el('span', { class: 'card-meta' }, [
+          el('span', { class: `badge ${axis}` }, [icon(ICONS[axis], 14), t(`axis.${axis}`)]),
+          el('small', { text: `${th.canvas.width}×${th.canvas.height}${th.bundled ? ` · ${t('themes.bundled')}` : ''}` }),
+        ]),
+      ]),
+    ]);
+  }
+
   function renderThemes(list) {
     const grid = $('theme-grid');
     if (!list.length) {
       grid.replaceChildren(el('li', { class: 'empty-note', text: t('themes.empty') }));
       return;
     }
-    grid.replaceChildren(...list.map((th) => el('li', {}, [
-      el('button', { type: 'button', class: 'theme-card', onclick: () => actions.openTheme(th.location) }, [
-        el('span', { class: 'thumb', style: th.thumbnail ? { backgroundImage: `url(${th.thumbnail})` } : {} }),
-        el('strong', { text: th.name }),
-        el('small', { text: `${th.canvas.width}×${th.canvas.height}${th.bundled ? ` · ${t('themes.bundled')}` : ''}` }),
-      ]),
-    ])));
+    grid.replaceChildren(...list.map(themeCard));
   }
-  $('theme-new').addEventListener('click', () => actions.newTheme());
+
+  $('theme-new-vertical').addEventListener('click', () => actions.newTheme('vertical'));
+  $('theme-new-horizontal').addEventListener('click', () => actions.newTheme('horizontal'));
   $('theme-open').addEventListener('click', () => actions.refreshThemes());
   $('theme-import').addEventListener('click', () => actions.importTheme());
 

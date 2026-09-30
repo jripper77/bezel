@@ -1,9 +1,14 @@
 //! What the app remembers between runs: the last theme and the screen that
-//! was showing it, so a start at login picks up where the user left off.
+//! was showing it, so a start at login picks up where the user left off, and
+//! how each screen is used (vertical or horizontal), for its next new theme.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use bezel_core::domain::geometry::Orientation;
 use serde::{Deserialize, Serialize};
+
+use crate::dto::{orientation_slug, parse_orientation};
 
 /// Remembered choices (`settings.json` in the app's config folder).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -13,6 +18,26 @@ pub struct Settings {
     pub last_theme: Option<String>,
     /// Key of the screen that was live when the app last changed it.
     pub live_screen: Option<String>,
+    /// The orientation last used with each screen (`portrait`, `landscape`…),
+    /// by screen key.
+    pub screen_orientations: BTreeMap<String, String>,
+}
+
+impl Settings {
+    /// The orientation last used with `screen`, if a valid one was stored.
+    pub fn orientation_for(&self, screen: &str) -> Option<Orientation> {
+        self.screen_orientations
+            .get(screen)
+            .and_then(|slug| parse_orientation(slug))
+    }
+
+    /// Remembers `orientation` as the one last used with `screen`.
+    pub fn remember_orientation(&mut self, screen: &str, orientation: Orientation) {
+        self.screen_orientations.insert(
+            screen.to_string(),
+            orientation_slug(orientation).to_string(),
+        );
+    }
 }
 
 /// Reads and writes [`Settings`] in one file.
@@ -74,10 +99,45 @@ mod tests {
             Settings {
                 last_theme: Some("/t.bezeltheme".into()),
                 live_screen: Some("/dev/ttyACM1".into()),
+                ..Settings::default()
             }
         );
         std::fs::write(file.path(), b"{ broken").unwrap();
         assert_eq!(file.load(), Settings::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remembers_the_orientation_of_each_screen() {
+        let dir = std::env::temp_dir().join(format!("bezel-orient-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = SettingsFile::new(dir.join("settings.json"));
+        assert_eq!(file.load().orientation_for("/dev/ttyACM1"), None);
+        file.update(|s| s.remember_orientation("/dev/ttyACM1", Orientation::Landscape));
+        file.update(|s| s.remember_orientation("COM3", Orientation::ReversePortrait));
+        file.update(|s| s.remember_orientation("/dev/ttyACM1", Orientation::ReverseLandscape));
+        let loaded = file.load();
+        assert_eq!(
+            loaded.orientation_for("/dev/ttyACM1"),
+            Some(Orientation::ReverseLandscape)
+        );
+        assert_eq!(
+            loaded.orientation_for("COM3"),
+            Some(Orientation::ReversePortrait)
+        );
+        let json = std::fs::read_to_string(file.path()).unwrap();
+        assert!(json.contains("\"screenOrientations\""), "{json}");
+        assert!(json.contains("\"reverse-landscape\""), "{json}");
+
+        // A file from an older version, or a value edited by hand, still loads.
+        std::fs::write(
+            file.path(),
+            br#"{"lastTheme": "/t.bezeltheme", "screenOrientations": {"k": "sideways"}}"#,
+        )
+        .unwrap();
+        let old = file.load();
+        assert_eq!(old.last_theme.as_deref(), Some("/t.bezeltheme"));
+        assert_eq!(old.orientation_for("k"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

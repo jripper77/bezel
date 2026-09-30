@@ -3,7 +3,7 @@
 // commands are pure functions returning a new theme, so history is just a
 // list of snapshots. A gesture (a drag) groups its commands into one step.
 
-import { roundBox, unionBox } from './geometry.js';
+import { ORIENTATIONS, isHorizontal, relayoutBox, roundBox, unionBox } from './geometry.js';
 import { createWidget, widgetOf } from './widgets.js';
 
 /** Most undo steps kept. */
@@ -90,6 +90,20 @@ export const commands = {
     const next = merge(theme, patch);
     if (patch.background) next.background = clone(patch.background);
     return { theme: next };
+  },
+
+  /**
+   * Turns the theme to `orientation`. Between vertical and horizontal the
+   * canvas swaps its sides and every element (locked ones too) keeps its
+   * size while its center keeps its relative place, inside the canvas; a 180°
+   * turn keeps the layout. One command, so one undo step.
+   */
+  setOrientation(theme, { orientation }) {
+    if (!ORIENTATIONS.includes(orientation) || orientation === theme.orientation) return { theme };
+    if (isHorizontal(orientation) === isHorizontal(theme.orientation)) return { theme: { ...theme, orientation } };
+    const canvas = { width: theme.canvas.height, height: theme.canvas.width };
+    const elements = theme.elements.map((e) => ({ ...e, frame: relayoutBox(e.frame, theme.canvas, canvas) }));
+    return { theme: { ...theme, orientation, canvas, elements } };
   },
 
   /** Moves one element to `index` in the z-order (0 = bottom). */

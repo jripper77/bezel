@@ -90,6 +90,40 @@ export function resize(b, handle, dx, dy, keepRatio = false) {
   return { x, y, width, height };
 }
 
+// ---------------------------------------------------------- orientation ----
+
+/** The theme.json orientations, in the order the inspector lists them. */
+export const ORIENTATIONS = Object.freeze(['portrait', 'reverse-portrait', 'landscape', 'reverse-landscape']);
+
+/** True for the two horizontal orientations (the canvas is wider than tall). */
+export const isHorizontal = (orientation) => orientation === 'landscape' || orientation === 'reverse-landscape';
+
+/** True for the two orientations turned 180° ("invertida"). */
+export const isTurned = (orientation) => orientation === 'reverse-portrait' || orientation === 'reverse-landscape';
+
+/**
+ * The orientation for a screen used vertically or horizontally, turned 180° or not.
+ * @param {'vertical' | 'horizontal'} axis
+ * @param {boolean} turned
+ */
+export function orientationOf(axis, turned) {
+  if (axis === 'horizontal') return turned ? 'reverse-landscape' : 'landscape';
+  return turned ? 'reverse-portrait' : 'portrait';
+}
+
+/**
+ * A box carried from canvas `from` to canvas `to`: it keeps its size, its
+ * center keeps its relative place (cx·W'/W, cy·H'/H), then it is pushed
+ * inside `to`. A box larger than `to` on an axis starts at 0 on that axis.
+ */
+export function relayoutBox(b, from, to) {
+  const place = (start, size, before, after) => {
+    const center = ((start + size / 2) * after) / before;
+    return Math.min(Math.max(Math.round(center - size / 2), 0), Math.max(Math.floor(after - size), 0));
+  };
+  return { ...b, x: place(b.x, b.width, from.width, to.width), y: place(b.y, b.height, from.height, to.height) };
+}
+
 /** Rounds a box to whole pixels (what the file stores after an edit). */
 export function roundBox(b) {
   const x = Math.round(b.x);

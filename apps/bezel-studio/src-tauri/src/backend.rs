@@ -6,8 +6,11 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bezel_core::app::{choose_screen, discover_screens};
+use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::clock::LocalTime;
+use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::Screen;
+use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::theme::Theme;
 use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink, ThemeLocation, ThemeStore};
@@ -64,6 +67,18 @@ fn theme_of(dto: &ThemeDto) -> UiResult<Theme> {
     Theme::try_from(dto).map_err(|e| e.0)
 }
 
+/// Orientation of a new theme for `model` when none was used with its screen
+/// yet: horizontal for bar-shaped panels (the long side at least twice the
+/// short one, like the 8.8"), else the model's native orientation.
+pub fn default_orientation(model: &DeviceModel) -> Orientation {
+    let panel = model.panel.portrait();
+    if u64::from(panel.height) >= 2 * u64::from(panel.width) {
+        Orientation::Landscape
+    } else {
+        model.native_orientation
+    }
+}
+
 fn read_file(path: &Path) -> UiResult<Vec<u8>> {
     let size = std::fs::metadata(path).map_err(text)?.len();
     if size > MAX_FILE_BYTES {
@@ -115,12 +130,25 @@ impl Backend {
         let key = screen.ok_or("no screen chosen")?;
         // Opening wakes the screen (seconds); the session stays usable meanwhile.
         let link = self.connect(key)?;
-        self.studio()
-            .go_live(key.to_string(), link, time)
-            .map_err(text)?;
-        self.settings
-            .update(|s| s.live_screen = Some(key.to_string()));
+        let orientation = {
+            let mut studio = self.studio();
+            studio.go_live(key.to_string(), link, time).map_err(text)?;
+            studio.theme().orientation
+        };
+        self.settings.update(|s| {
+            s.live_screen = Some(key.to_string());
+            s.remember_orientation(key, orientation);
+        });
         Ok(())
+    }
+
+    /// Remembers `orientation` as the last one used with `screen` (the file
+    /// is written only when it changes).
+    fn remember_orientation(&self, screen: &str, orientation: Orientation) {
+        if self.settings.load().orientation_for(screen) != Some(orientation) {
+            self.settings
+                .update(|s| s.remember_orientation(screen, orientation));
+        }
     }
 
     /// Sets a screen's brightness (through the live link when it is live).
@@ -202,12 +230,21 @@ impl Backend {
         studio.render(time).map(|f| frame_bytes(&f)).map_err(text)
     }
 
-    /// Takes the UI's theme and shows it on the live screen now.
+    /// Takes the UI's theme and shows it on the live screen now, in the
+    /// theme's orientation (remembered for that screen).
     pub fn push(&self, theme: &ThemeDto, time: LocalTime) -> UiResult<()> {
         let theme = theme_of(theme)?;
-        let mut studio = self.studio();
-        studio.set_theme(theme);
-        studio.present(time).map_err(text)
+        let orientation = theme.orientation;
+        let live = {
+            let mut studio = self.studio();
+            studio.set_theme(theme);
+            studio.present(time).map_err(text)?;
+            studio.live_key().map(str::to_string)
+        };
+        if let Some(key) = live {
+            self.remember_orientation(&key, orientation);
+        }
+        Ok(())
     }
 
     /// The library's themes.
@@ -249,14 +286,32 @@ impl Backend {
         })
     }
 
-    /// A blank theme sized for `screen` (or the 8.8" when none is known).
-    pub fn new_theme(&self, screen: Option<&str>, name: &str) -> UiResult<ThemeDto> {
+    /// A blank theme sized for `screen` (or the 8.8" when none is known) in
+    /// `orientation`, which is then remembered for that screen. Without one:
+    /// the orientation last used with the screen, else
+    /// [`default_orientation`].
+    pub fn new_theme(
+        &self,
+        screen: Option<&str>,
+        name: &str,
+        orientation: Option<Orientation>,
+    ) -> UiResult<ThemeDto> {
         let model = screen
             .and_then(|key| self.find_screen(key).ok())
             .and_then(|s| s.candidates.first().copied())
-            .or_else(|| bezel_core::domain::catalog::model_by_id(DEFAULT_MODEL))
+            .or_else(|| model_by_id(DEFAULT_MODEL))
             .ok_or("no model to size the theme")?;
-        let theme = Theme::blank(name, model.panel, model.native_orientation);
+        let orientation = match (orientation, screen) {
+            (Some(chosen), Some(key)) => {
+                self.remember_orientation(key, chosen);
+                chosen
+            }
+            (Some(chosen), None) => chosen,
+            (None, key) => key
+                .and_then(|k| self.settings.load().orientation_for(k))
+                .unwrap_or_else(|| default_orientation(model)),
+        };
+        let theme = Theme::blank(name, model.panel, orientation);
         let mut studio = self.studio();
         studio.start(theme, Default::default(), None);
         Ok(ThemeDto::from(studio.theme()))
@@ -315,17 +370,33 @@ impl Backend {
 
     // -------------------------------------------------------------- start --
 
-    /// Reopens the last theme and, when its screen is connected, shows it
-    /// live again. Failures leave a blank or demo theme and live mode off.
-    pub fn restore(&self, time: LocalTime) {
-        let settings = self.settings.load();
-        if let Some(last) = settings.last_theme.as_deref()
-            && let Err(e) = self.open(last)
-        {
-            tracing::warn!(theme = last, "last theme not reopened: {e}");
+    /// The theme the window starts with: the last one when it still opens,
+    /// else a blank one for the first connected screen (in the orientation
+    /// [`Self::new_theme`] picks for it).
+    pub fn restore_theme(&self) {
+        if let Some(last) = self.settings.load().last_theme {
+            match self.open(&last) {
+                Ok(_) => return,
+                Err(e) => tracing::warn!(theme = last, "last theme not reopened: {e}"),
+            }
         }
-        if let Some(key) = settings.live_screen.as_deref()
-            && let Err(e) = self.set_live(true, Some(key), time)
+        let screen = discover_screens(self.bus.as_ref())
+            .and_then(|screens| choose_screen(screens, None))
+            .ok();
+        let key = screen
+            .as_ref()
+            .and_then(Screen::address)
+            .map(|a| a.0.clone());
+        if let Err(e) = self.new_theme(key.as_deref(), UNTITLED, None) {
+            tracing::warn!("no starting theme: {e}");
+        }
+    }
+
+    /// Shows the theme live again on the screen that was live when the app
+    /// last ran, when it is connected. A failure leaves live mode off.
+    pub fn restore_live(&self, time: LocalTime) {
+        if let Some(key) = self.settings.load().live_screen
+            && let Err(e) = self.set_live(true, Some(&key), time)
         {
             tracing::warn!(screen = key, "live mode not restored: {e}");
         }
@@ -344,6 +415,9 @@ impl Backend {
             .clamp(MIN_REFRESH, MAX_REFRESH)
     }
 }
+
+/// Name of a theme started without one.
+pub const UNTITLED: &str = "Untitled";
 
 /// Model a new theme is sized for when no screen is connected.
 pub const DEFAULT_MODEL: bezel_core::domain::device::ModelId =
@@ -474,7 +548,10 @@ mod tests {
     #[test]
     fn themes_save_list_open_and_restore() {
         let f = fixture("themes");
-        let mut theme = f.backend.new_theme(Some(KEY), "Mine").unwrap();
+        let mut theme = f
+            .backend
+            .new_theme(Some(KEY), "Mine", Some(Orientation::ReversePortrait))
+            .unwrap();
         assert_eq!((theme.canvas.width, theme.canvas.height), (480, 1920));
         theme.refresh_seconds = 2.0;
         let saved = f.backend.save(&theme, None).unwrap();
@@ -488,25 +565,146 @@ mod tests {
         let listed = f.backend.themes();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "Mine");
+        assert_eq!(listed[0].orientation, "reverse-portrait");
 
-        f.backend.new_theme(None, "Other").unwrap();
+        f.backend.new_theme(None, "Other", None).unwrap();
         assert_eq!(
             f.backend.open(&saved.location).unwrap().refresh_seconds,
             2.0
         );
         assert!(f.backend.open("/nope.bezeltheme").is_err());
 
-        f.backend.new_theme(None, "Scratch").unwrap();
+        f.backend.new_theme(None, "Scratch", None).unwrap();
         f.backend
             .settings
             .update(|s| s.live_screen = Some(KEY.into()));
-        f.backend.restore(TIME);
+        f.backend.restore_theme();
+        f.backend.restore_live(TIME);
         assert_eq!(f.backend.session().theme.name, "Mine");
         assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
 
         let imported = f.backend.import(Path::new(&saved.location)).unwrap();
         assert_eq!(imported.theme.name, "Mine");
         assert_eq!(f.backend.session().location, None);
+    }
+
+    #[test]
+    fn new_themes_follow_the_screen_shape_then_the_last_orientation_used() {
+        let f = fixture("orientation");
+        let model = model_by_id(DEFAULT_MODEL).unwrap();
+        assert_eq!(
+            default_orientation(model),
+            Orientation::Landscape,
+            "8.8\" bar"
+        );
+        let square = model_by_id(bezel_core::domain::device::ModelId("turing-2.1")).unwrap();
+        assert_eq!(default_orientation(square), square.native_orientation);
+        let five = model_by_id(bezel_core::domain::device::ModelId("usbpcmonitor-5")).unwrap();
+        assert_eq!(
+            default_orientation(five),
+            Orientation::Portrait,
+            "5:3 is no bar"
+        );
+
+        let first = f.backend.new_theme(Some(KEY), "A", None).unwrap();
+        assert_eq!(first.orientation, "landscape");
+        assert_eq!((first.canvas.width, first.canvas.height), (1920, 480));
+        let chosen = f
+            .backend
+            .new_theme(Some(KEY), "B", Some(Orientation::ReversePortrait))
+            .unwrap();
+        assert_eq!((chosen.canvas.width, chosen.canvas.height), (480, 1920));
+        let next = f.backend.new_theme(Some(KEY), "C", None).unwrap();
+        assert_eq!(
+            next.orientation, "reverse-portrait",
+            "remembered for the screen"
+        );
+        let elsewhere = f.backend.new_theme(None, "D", None).unwrap();
+        assert_eq!(
+            elsewhere.orientation, "landscape",
+            "no screen: the 8.8\" rule"
+        );
+        let unplugged = f
+            .backend
+            .new_theme(Some("COM9"), "E", Some(Orientation::Portrait))
+            .unwrap();
+        assert_eq!(
+            (unplugged.canvas.width, unplugged.canvas.height),
+            (480, 1920)
+        );
+        assert_eq!(
+            f.backend.settings.load().orientation_for("COM9"),
+            Some(Orientation::Portrait)
+        );
+
+        // With no last theme the app starts with a blank theme for the first
+        // screen, in the orientation last used with it.
+        f.backend.restore_theme();
+        let start = f.backend.session();
+        assert_eq!(
+            (start.theme.name.as_str(), start.theme.orientation.as_str()),
+            (UNTITLED, "reverse-portrait")
+        );
+        assert_eq!(start.location, None);
+        f.backend
+            .settings
+            .update(|s| s.last_theme = Some("/gone.bezeltheme".into()));
+        f.backend.restore_theme();
+        assert_eq!(
+            f.backend.session().theme.name,
+            UNTITLED,
+            "an unreadable last theme"
+        );
+    }
+
+    #[test]
+    fn live_mode_follows_a_turn_to_the_other_orientation() {
+        let f = fixture("turn");
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        assert_eq!(
+            f.backend.settings.load().orientation_for(KEY),
+            Some(Orientation::ReversePortrait)
+        );
+        let mut wide = f.backend.session().theme;
+        wide.orientation = "landscape".into();
+        wide.canvas = bezel_themes::dto::SizeDto {
+            width: 1920,
+            height: 480,
+        };
+        f.backend.push(&wide, TIME).unwrap();
+        let log = f.connector.log();
+        assert_eq!(
+            log.orientations,
+            vec![Orientation::ReversePortrait, Orientation::Landscape]
+        );
+        assert_eq!(log.frames.len(), 2);
+        assert_eq!(log.frames[0].size(), Size::new(480, 1920));
+        assert_eq!(log.frames[1].size(), Size::new(1920, 480));
+        assert_eq!(
+            f.backend.settings.load().orientation_for(KEY),
+            Some(Orientation::Landscape)
+        );
+        assert_eq!(
+            f.backend
+                .new_theme(Some(KEY), "Next", None)
+                .unwrap()
+                .orientation,
+            "landscape"
+        );
+        // Not live: a push shows nothing and remembers nothing.
+        f.backend.set_live(false, None, TIME).unwrap();
+        let mut tall = wide.clone();
+        tall.orientation = "portrait".into();
+        tall.canvas = bezel_themes::dto::SizeDto {
+            width: 480,
+            height: 1920,
+        };
+        f.backend.push(&tall, TIME).unwrap();
+        assert_eq!(f.connector.log().frames.len(), 2);
+        assert_eq!(
+            f.backend.settings.load().orientation_for(KEY),
+            Some(Orientation::Landscape)
+        );
     }
 
     #[test]

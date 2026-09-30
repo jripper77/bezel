@@ -1,0 +1,22 @@
+[package]
+name = "bezel-render"
+description = "Driven adapter of Bezel that draws themes into frames: tiny-skia paths, cosmic-text shaping and image decoding."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+tracing = { workspace = true }
+tiny-skia = "0.12"
+cosmic-text = "0.19"
+# Named directly to build the font database (bundled fonts, no system scan in
+# tests); the same version cosmic-text uses, so no second copy is compiled.
+fontdb = "0.23"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+
+[lints]
+workspace = true

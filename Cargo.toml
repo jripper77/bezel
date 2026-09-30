@@ -4,6 +4,7 @@ members = [
     "crates/bezel-core",
     "crates/bezel-devices",
     "crates/bezel-sensors",
+    "crates/bezel-render",
     "crates/bezel-cli",
     "crates/bezel-themes",
     "apps/bezel-studio/src-tauri",

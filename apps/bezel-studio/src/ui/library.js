@@ -3,6 +3,7 @@
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { makeDraggable } from './dragdrop.js';
+import { checkField } from './fields.js';
 import { WIDGETS, widgetOf } from '../editor/widgets.js';
 
 const CATEGORY_ORDER = ['cpu', 'gpu', 'memory', 'disk', 'network', 'board', 'system'];
@@ -168,7 +169,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
       el('button', { type: 'button', class: 'theme-card', onclick: () => actions.openTheme(th.location) }, [
         el('span', { class: 'thumb', style: th.thumbnail ? { backgroundImage: `url(${th.thumbnail})` } : {} }),
         el('strong', { text: th.name }),
-        el('small', { text: `${th.canvas.width}×${th.canvas.height}` }),
+        el('small', { text: `${th.canvas.width}×${th.canvas.height}${th.bundled ? ` · ${t('themes.bundled')}` : ''}` }),
       ]),
     ])));
   }
@@ -201,13 +202,15 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   $('media-add').addEventListener('click', () => actions.addImage());
 
   // -------------------------------------------------------------- screen --
+  const autostartField = () => checkField(t('screen.autostart'), actions.autostart(), (on) => actions.setAutostart(on));
+
   function renderScreen(screens, current, live) {
     const root = $('screen-panel');
     if (!screens.length) {
-      root.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }));
+      root.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }), autostartField());
       return;
     }
-    root.replaceChildren(...screens.map((s) => {
+    root.replaceChildren(autostartField(), ...screens.map((s) => {
       const model = s.models.length === 1 ? s.models[0] : null;
       const slider = el('input', { type: 'range', min: 0, max: 100, step: 1, value: '70', 'aria-label': t('screen.brightness') });
       slider.addEventListener('change', () => actions.setBrightness(s.key, Number(slider.value)));

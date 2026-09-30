@@ -57,6 +57,7 @@ export function createDemoBackend(scenario, clock = {}) {
   const chosen = SCENARIOS[scenario] ?? SCENARIOS.turing88;
   let theme = structuredClone(DEMO_THEME);
   let live = false;
+  let autostart = false;
   const saved = [{ name: 'Demo', location: 'demo://Demo', canvas: DEMO_THEME.canvas }];
   const images = [];
 
@@ -71,7 +72,7 @@ export function createDemoBackend(scenario, clock = {}) {
         readings[key] = { value, display: demoFormat(value, quantity) };
       });
       readings['gpu.1.fan'] = { unavailable: 'no fan sensor', display: '—' };
-      return Promise.resolve({ sampleMillis: 3, readings });
+      return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError: null });
     },
     session: () => Promise.resolve({ theme: structuredClone(theme), location: saved[0].location }),
     render: (next) => {
@@ -83,8 +84,8 @@ export function createDemoBackend(scenario, clock = {}) {
       theme = structuredClone(next);
       return Promise.resolve();
     },
-    setLive: (on) => {
-      live = on;
+    setLive: (on, screen) => {
+      live = on ? screen : null;
       return Promise.resolve({ live });
     },
     setBrightness: () => Promise.resolve(),
@@ -95,12 +96,12 @@ export function createDemoBackend(scenario, clock = {}) {
       if (saveAs || !saved.some((s) => s.location === location)) saved.push({ name: next.name, location, canvas: next.canvas });
       return Promise.resolve({ location });
     },
-    listThemes: () => Promise.resolve(structuredClone(saved)),
+    listThemes: () => Promise.resolve(structuredClone(saved).map((s, i) => ({ ...s, bundled: i === 0 }))),
     openTheme: (location) => {
       const found = saved.find((s) => s.location === location);
       return found ? Promise.resolve(structuredClone({ ...DEMO_THEME, name: found.name })) : Promise.reject(new Error(`no theme at ${location}`));
     },
-    newTheme: () => Promise.resolve({ ...structuredClone(DEMO_THEME), name: 'Untitled', elements: [] }),
+    newTheme: (screen, name = 'Untitled') => Promise.resolve({ ...structuredClone(DEMO_THEME), name, elements: [] }),
     importTheme: () => Promise.resolve(null),
     addImage: () => {
       const ref = `assets/image-${images.length + 1}.png`;
@@ -109,6 +110,11 @@ export function createDemoBackend(scenario, clock = {}) {
     },
     assets: () => Promise.resolve(images.map((ref) => ({ ref, kind: 'image' }))),
     fonts: () => Promise.resolve(['Inter', 'JetBrains Mono']),
-    isLive: () => live,
+    getAutostart: () => Promise.resolve(autostart),
+    setAutostart: (on) => {
+      autostart = on;
+      return Promise.resolve();
+    },
+    isLive: () => Boolean(live),
   };
 }

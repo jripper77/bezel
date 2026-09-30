@@ -2,6 +2,29 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "The studio window listens to app events and invokes the app's own commands, each allowed by name.",
-  "windows": ["main"],
-  "permissions": ["core:event:default", "allow-list-screens"]
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:event:default",
+    "allow-list-screens",
+    "allow-sensor-catalog",
+    "allow-sample-sensors",
+    "allow-editor-session",
+    "allow-render-preview",
+    "allow-push-theme",
+    "allow-set-live",
+    "allow-set-brightness",
+    "allow-release-screen",
+    "allow-save-theme",
+    "allow-list-themes",
+    "allow-open-theme",
+    "allow-new-theme",
+    "allow-import-theme",
+    "allow-add-image",
+    "allow-list-assets",
+    "allow-list-fonts",
+    "allow-get-autostart",
+    "allow-set-autostart"
+  ]
 }

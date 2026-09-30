@@ -61,10 +61,12 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.addImage();
   await bridge.assets();
   await bridge.fonts();
+  await bridge.getAutostart();
+  await bridge.setAutostart(true);
   assert.deepEqual(calls.map((c) => c[0]), [
     'list_screens', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
-    'add_image', 'list_assets', 'list_fonts',
+    'add_image', 'list_assets', 'list_fonts', 'get_autostart', 'set_autostart',
   ]);
   assert.deepEqual(calls[6][1], { on: true, screen: 'k' });
   assert.deepEqual(calls[7][1], { screen: 'k', percent: 40 });

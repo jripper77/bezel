@@ -29,6 +29,7 @@ tracing = "0.1"
 bezel-core = { path = "crates/bezel-core" }
 bezel-devices = { path = "crates/bezel-devices" }
 bezel-sensors = { path = "crates/bezel-sensors" }
+bezel-render = { path = "crates/bezel-render" }
 bezel-themes = { path = "crates/bezel-themes" }
 
 [workspace.lints.rust]

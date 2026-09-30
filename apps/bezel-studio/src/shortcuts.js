@@ -11,7 +11,7 @@ const TYPING = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 export function shortcutFor(evt, focused) {
   const mod = evt.ctrlKey || evt.metaKey;
   const key = evt.key.length === 1 ? evt.key.toLowerCase() : evt.key;
-  if (mod && key === 's') return { type: 'save' };
+  if (mod && key === 's') return { type: evt.shiftKey ? 'saveAs' : 'save' };
   if (focused && (TYPING.has(focused.tagName) || focused.isContentEditable)) return null;
   if (mod && key === 'z') return { type: evt.shiftKey ? 'redo' : 'undo' };
   if (mod && key === 'y') return { type: 'redo' };

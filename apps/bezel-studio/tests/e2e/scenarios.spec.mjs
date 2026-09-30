@@ -128,3 +128,20 @@ test('without a screen, live mode explains itself', async ({ page }) => {
   await expect(page.locator('#status-device')).toContainText('permission denied');
   expect(errors).toEqual([]);
 });
+
+test('live mode and start at login', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('switch').click({ force: true });
+  await expect(page.getByRole('switch')).toBeChecked();
+  await expect(page.locator('#status-device')).toHaveText('ao vivo');
+  await page.getByRole('tab', { name: 'Tela' }).click();
+  const autostart = page.getByRole('checkbox', { name: /Iniciar com o computador/ });
+  await autostart.check();
+  await expect(autostart).toBeChecked();
+  await page.getByRole('switch').click({ force: true });
+  await expect(page.getByRole('switch')).not.toBeChecked();
+  await expectAccessible(page);
+  expect(errors).toEqual([]);
+});

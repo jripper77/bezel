@@ -4,7 +4,27 @@
 use std::process::ExitCode;
 
 /// Every `#[tauri::command]` the UI may invoke.
-const COMMANDS: &[&str] = &["list_screens"];
+const COMMANDS: &[&str] = &[
+    "list_screens",
+    "sensor_catalog",
+    "sample_sensors",
+    "editor_session",
+    "render_preview",
+    "push_theme",
+    "set_live",
+    "set_brightness",
+    "release_screen",
+    "save_theme",
+    "list_themes",
+    "open_theme",
+    "new_theme",
+    "import_theme",
+    "add_image",
+    "list_assets",
+    "list_fonts",
+    "get_autostart",
+    "set_autostart",
+];
 
 fn main() -> ExitCode {
     let manifest = tauri_build::AppManifest::new().commands(COMMANDS);

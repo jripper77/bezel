@@ -38,11 +38,13 @@ test('saving, listing and opening themes', async () => {
   assert.equal(location, 'demo://Mine');
   const names = (await demo.listThemes()).map((x) => x.name);
   assert.deepEqual(names, ['Demo', 'Mine']);
+  assert.deepEqual((await demo.listThemes()).map((x) => x.bundled), [true, false]);
   assert.equal((await demo.openTheme('demo://Mine')).name, 'Mine');
   await assert.rejects(demo.openTheme('demo://nope'), /no theme/);
   await demo.saveTheme({ ...theme, name: 'Mine' }, false);
   assert.equal((await demo.listThemes()).length, 2);
   assert.equal((await demo.newTheme()).elements.length, 0);
+  assert.equal((await demo.newTheme('k', 'Novo')).name, 'Novo');
 });
 
 test('images, live mode and fonts', async () => {
@@ -52,8 +54,12 @@ test('images, live mode and fonts', async () => {
   await demo.addImage();
   assert.deepEqual(await demo.assets(), [{ ref: 'assets/image-1.png', kind: 'image' }]);
   assert.equal(demo.isLive(), false);
-  await demo.setLive(true);
+  await demo.setLive(true, 'k');
   assert.equal(demo.isLive(), true);
+  assert.equal((await demo.sample()).live, 'k');
+  assert.equal(await demo.getAutostart(), false);
+  await demo.setAutostart(true);
+  assert.equal(await demo.getAutostart(), true);
   await demo.pushTheme({ name: 'pushed' });
   assert.equal((await demo.session()).theme.name, 'pushed');
   assert.ok((await demo.fonts()).includes('Inter'));

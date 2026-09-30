@@ -26,5 +26,6 @@ test('typing in a field keeps its keys, except save', () => {
   assert.equal(shortcutFor(key('Delete'), input), null);
   assert.equal(shortcutFor(key('z', { ctrlKey: true }), { tagName: 'DIV', isContentEditable: true }), null);
   assert.deepEqual(shortcutFor(key('s', { ctrlKey: true }), input), { type: 'save' });
+  assert.deepEqual(shortcutFor(key('S', { ctrlKey: true, shiftKey: true }), input), { type: 'saveAs' });
   assert.deepEqual(shortcutFor(key('Delete'), { tagName: 'BUTTON' }), { type: 'remove' });
 });

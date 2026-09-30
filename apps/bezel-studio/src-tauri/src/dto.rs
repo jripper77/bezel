@@ -1,8 +1,16 @@
 //! JSON shapes sent to the webview (camelCase, the UI's contract).
 
+use std::collections::BTreeMap;
+
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::{Endpoint, Screen, ScreenState};
+use bezel_core::domain::sensor::{
+    DisplayFormat, Quantities, Quantity, Reading, SensorInfo, Snapshot, format_reading,
+};
+use bezel_themes::dto::{SizeDto, ThemeDto};
 use serde::Serialize;
+
+use crate::library::ThemeEntry;
 
 /// One screen as the UI sees it.
 #[derive(Debug, Clone, Serialize)]
@@ -129,6 +137,159 @@ impl From<&Screen> for ScreenDto {
     }
 }
 
+/// A sensor of the catalog.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SensorDto {
+    /// Stable key.
+    pub key: String,
+    /// Category slug.
+    pub category: &'static str,
+    /// English label.
+    pub label: String,
+    /// Quantity slug.
+    pub quantity: &'static str,
+    /// Where the value comes from.
+    pub source: String,
+}
+
+impl From<&SensorInfo> for SensorDto {
+    fn from(s: &SensorInfo) -> Self {
+        Self {
+            key: s.key.to_string(),
+            category: s.category.slug(),
+            label: s.label.clone(),
+            quantity: s.quantity.slug(),
+            source: s.source.clone(),
+        }
+    }
+}
+
+/// One reading: `display` always, `value` for numbers, `unavailable` with
+/// the reason when the sensor cannot be read.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingDto {
+    /// The number, in the sensor's quantity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    /// Formatted text (`63°C`, `4.72 GHz`, `—`).
+    pub display: String,
+    /// Why there is no value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
+}
+
+/// The latest sample and the live screen's state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleDto {
+    /// Time the sample took, milliseconds.
+    pub sample_millis: f64,
+    /// Readings by key.
+    pub readings: BTreeMap<String, ReadingDto>,
+    /// Key of the screen showing the theme.
+    pub live: Option<String>,
+    /// Why the live screen stopped.
+    pub live_error: Option<String>,
+}
+
+impl SampleDto {
+    /// The readings of `snapshot`, formatted with the catalog's units.
+    pub fn readings(snapshot: &Snapshot, quantities: &Quantities) -> BTreeMap<String, ReadingDto> {
+        snapshot
+            .iter()
+            .map(|(key, reading)| {
+                let quantity = quantities.get(key).unwrap_or(Quantity::Number);
+                let dto = ReadingDto {
+                    value: reading.value(),
+                    display: format_reading(reading, quantity, DisplayFormat::default()),
+                    unavailable: match reading {
+                        Reading::Unavailable(why) => Some(why.clone()),
+                        _ => None,
+                    },
+                };
+                (key.to_string(), dto)
+            })
+            .collect()
+    }
+}
+
+/// The theme being edited.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDto {
+    /// The theme.
+    pub theme: ThemeDto,
+    /// Where it lives.
+    pub location: Option<String>,
+}
+
+/// A theme of the library.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeEntryDto {
+    /// Display name.
+    pub name: String,
+    /// Where it lives.
+    pub location: String,
+    /// Canvas size.
+    pub canvas: SizeDto,
+    /// Ships with the app.
+    pub bundled: bool,
+}
+
+impl From<&ThemeEntry> for ThemeEntryDto {
+    fn from(e: &ThemeEntry) -> Self {
+        Self {
+            name: e.theme.name.clone(),
+            location: e.location.0.clone(),
+            canvas: SizeDto {
+                width: e.theme.canvas.width,
+                height: e.theme.canvas.height,
+            },
+            bundled: e.bundled,
+        }
+    }
+}
+
+/// An asset of the edited theme.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetDto {
+    /// Reference used in the theme.
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// `image`, `font`, `video` or `other`.
+    pub kind: &'static str,
+    /// Small PNG preview of images.
+    pub data_url: Option<String>,
+}
+
+/// Where a theme was saved.
+#[derive(Debug, Clone, Serialize)]
+pub struct SavedDto {
+    /// The location.
+    pub location: String,
+}
+
+/// A theme imported from another app.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportedDto {
+    /// The converted theme (now the edited one).
+    pub theme: ThemeDto,
+    /// What had no equivalent.
+    pub warnings: Vec<String>,
+}
+
+/// An asset added to the theme.
+#[derive(Debug, Clone, Serialize)]
+pub struct AddedDto {
+    /// Its reference.
+    #[serde(rename = "ref")]
+    pub reference: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,5 +304,37 @@ mod tests {
         assert_eq!(json["models"][0]["hardwareValidated"], true);
         assert_eq!(json["models"][0]["capabilities"]["videoPlayback"], true);
         assert_eq!(json["wake"]["serial"], "CT88INCH");
+    }
+
+    #[test]
+    fn readings_use_the_catalog_units() {
+        use bezel_core::domain::sensor::{Category, SensorKey};
+        let key = SensorKey::new("hwmon.nvme0.composite").unwrap();
+        let other = SensorKey::new("x.y").unwrap();
+        let catalog = [SensorInfo {
+            key: key.clone(),
+            category: Category::Disk,
+            label: "NVMe".into(),
+            quantity: Quantity::Celsius,
+            source: "hwmon".into(),
+        }];
+        let mut snapshot = Snapshot::default();
+        snapshot.insert(key, Reading::Value(40.2));
+        snapshot.insert(other, Reading::Unavailable("gone".into()));
+        let readings = SampleDto::readings(&snapshot, &Quantities::from_catalog(&catalog));
+        assert_eq!(readings["hwmon.nvme0.composite"].display, "40°C");
+        assert_eq!(readings["x.y"].unavailable.as_deref(), Some("gone"));
+        let json = serde_json::to_value(SensorDto::from(&catalog[0])).unwrap();
+        assert_eq!(
+            (json["category"].as_str(), json["quantity"].as_str()),
+            (Some("disk"), Some("celsius"))
+        );
+        let asset = serde_json::to_value(AssetDto {
+            reference: "assets/a.png".into(),
+            kind: "image",
+            data_url: None,
+        })
+        .unwrap();
+        assert_eq!(asset["ref"], "assets/a.png");
     }
 }

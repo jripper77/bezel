@@ -21,6 +21,7 @@ const state = {
   screen: null,
   screenError: null,
   live: false,
+  autostart: false,
   catalog: [],
   fonts: ['Inter', 'JetBrains Mono', 'Roboto', 'Roboto Mono'],
   assets: [],
@@ -65,6 +66,8 @@ const library = createLibrary({
     addImage: () => addImage(),
     setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
     release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
+    setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
+    autostart: () => state.autostart,
   },
 });
 
@@ -149,6 +152,7 @@ async function sampleLoop() {
   try {
     const s = await bridge.sample();
     library.updateReadings(s.readings);
+    syncLive(s);
     $('status-sensors').textContent = t('status.sensors', { ms: Math.round(s.sampleMillis) });
   } catch {
     $('status-sensors').textContent = t('status.sensorsError');
@@ -183,6 +187,18 @@ async function refreshScreens() {
     state.screenError = errorText(e);
   }
   if (!state.screens.some((s) => s.key === state.screen)) state.screen = state.screens[0]?.key ?? null;
+  renderScreenSelect();
+}
+
+// The backend owns live mode: it restores it at start and stops it when the
+// screen fails; the switch follows what each sample reports.
+function syncLive(s) {
+  const live = Boolean(s.live);
+  if (live === state.live && (!live || s.live === state.screen)) return;
+  if (!live && state.live && s.liveError) toast(t('toast.liveStopped', { message: s.liveError }));
+  state.live = live;
+  if (live) state.screen = s.live;
+  $('live').checked = live;
   renderScreenSelect();
 }
 
@@ -244,7 +260,7 @@ async function openTheme(location) {
 
 async function newTheme() {
   try {
-    store.load(await bridge.newTheme(state.screen));
+    store.load(await bridge.newTheme(state.screen, t('themes.untitled')));
     state.location = null;
     await refreshAssets();
     canvasView.fit();
@@ -276,10 +292,11 @@ async function addImage() {
   }
 }
 
-async function save() {
+async function save(saveAs = false) {
   try {
-    const { location } = await bridge.saveTheme(store.getState().theme, false);
-    state.location = location;
+    const saved = await bridge.saveTheme(store.getState().theme, saveAs);
+    if (!saved) return;
+    state.location = saved.location;
     store.markSaved();
     toast(t('toast.saved'));
     refreshThemes();
@@ -291,7 +308,7 @@ async function save() {
 // ---------------------------------------------------------- chrome -----
 $('undo').addEventListener('click', () => store.undo());
 $('redo').addEventListener('click', () => store.redo());
-$('save').addEventListener('click', save);
+$('save').addEventListener('click', () => save());
 $('zoom-in').addEventListener('click', () => canvasView.setZoom(canvasView.zoom() * 1.25));
 $('zoom-out').addEventListener('click', () => canvasView.setZoom(canvasView.zoom() / 1.25));
 $('zoom-fit').addEventListener('click', () => canvasView.fit());
@@ -309,6 +326,7 @@ document.addEventListener('keydown', (evt) => {
     case 'undo': store.undo(); break;
     case 'redo': store.redo(); break;
     case 'save': save(); break;
+    case 'saveAs': save(true); break;
     case 'remove': if (ids.length) store.dispatch('remove', { ids }); break;
     case 'duplicate': if (ids.length) store.dispatch('duplicate', { ids }); break;
     case 'selectAll': store.select(store.getState().theme.elements.map((e) => e.id)); break;
@@ -323,6 +341,7 @@ library.renderWidgets();
 refreshChrome('load');
 canvasView.fit();
 await Promise.all([loadCatalog(), refreshScreens(), refreshThemes(), refreshAssets()]);
+bridge.getAutostart().then((on) => { state.autostart = on; renderScreenSelect(); }).catch(() => {});
 bridge.fonts().then((f) => { if (f?.length) state.fonts = f; }).catch(() => {});
 inspector.render(state.assets);
 sampleLoop();

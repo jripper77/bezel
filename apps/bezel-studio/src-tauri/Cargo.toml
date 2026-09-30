@@ -22,12 +22,22 @@ tauri-build = "2.7.0"
 [dependencies]
 bezel-core = { workspace = true }
 bezel-devices = { workspace = true }
+bezel-render = { workspace = true }
+bezel-sensors = { workspace = true }
+bezel-themes = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 # `custom-protocol` always: without it even `--release` is a Tauri dev build
 # that serves `devCsp` and expects a dev server (lesson from ddc-control).
-tauri = { version = "2.12.0", features = ["custom-protocol"] }
+tauri = { version = "2.12.0", features = ["custom-protocol", "tray-icon"] }
 tauri-plugin-single-instance = "2.5.0"
+tauri-plugin-dialog = "2.8.0"
+tauri-plugin-autostart = "2.6.0"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+sys-locale = "0.3.2"
+base64 = "0.22.1"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
 
 [lints]
 workspace = true

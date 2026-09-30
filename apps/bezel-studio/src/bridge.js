@@ -34,11 +34,13 @@ function tauriBridge(invoke) {
     saveTheme: (theme, saveAs) => invoke('save_theme', { theme, saveAs }),
     listThemes: () => invoke('list_themes'),
     openTheme: (location) => invoke('open_theme', { location }),
-    newTheme: (screen) => invoke('new_theme', { screen }),
+    newTheme: (screen, name) => invoke('new_theme', { screen, name }),
     importTheme: () => invoke('import_theme'),
     addImage: () => invoke('add_image'),
     assets: () => invoke('list_assets'),
     fonts: () => invoke('list_fonts'),
+    getAutostart: () => invoke('get_autostart'),
+    setAutostart: (on) => invoke('set_autostart', { on }),
   };
 }
 

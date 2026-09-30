@@ -31,6 +31,12 @@ bezel
 - Linux: permissão via regra udev `uaccess` para os VID:PID; Windows: usbser (CDC) e WinUSB para 0x1CBE/0x43A8.
 - CPU temp no Windows exige driver de kernel: via LibreHardwareMonitor (WMI) quando presente; nunca inventar valor — mostrar "indisponível".
 
+## Frontend
+- has_frontend: true (D-2026-09-30-studio-app-6)
+- App: `apps/bezel-studio/src` — HTML/CSS/JS ES modules sem bundler, embutidos pelo Tauri; ponte `bridge.js` (Tauri ou modo demo)
+- Testes: `cd apps/bezel-studio && npm test` (node --test com piso de 80% de linhas nos módulos de lógica; Playwright + axe em claro e escuro sobre o modo demo)
+- Regras: i18n pt-BR/en com paridade de chaves e nenhuma string fixa no JS; tokens de cor com claro/escuro; operável por teclado; `prefers-reduced-motion`; diálogos in-app (nunca `window.confirm`); CSP estrita
+
 ## Global constraints
 - Cobertura mínima 80% (linhas) em `crates/` e `apps/`
 - Conventional Commits, commits atômicos por task

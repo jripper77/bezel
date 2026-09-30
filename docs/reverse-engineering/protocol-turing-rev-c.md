@@ -493,16 +493,15 @@ GET_FILE_SIZE <path> must equal the file size
 - The vendor lower-cases names and accepts only `[A-Za-z0-9_.-]`; its device page uploads jpg/jpeg/bmp/png/gif/mp4/
   h264 and transcodes an MP4 of another resolution first ([video.md](video.md) section 3).
 - The data phase has no abort: after the header the firmware takes the next *declared-size* bytes as file content,
-  whatever they are, and only that length ends the data phase cleanly (section 19). A HELLO answered after a cancel
-  does not mean it ended: the bytes still queued for the firmware's writer then go into the next file. **Bezel's
-  cancel recovery** (not vendor; hardware check pending): right after a cancel, before any HELLO, it sends the owed
-  rest of the declared length as filler (`2c` x 249 + `00` per block, the data-phase framing; owed = declared minus
-  the wire bytes sent since the header, a write the cancel interrupted counted as delivered, so the total never
-  exceeds the declared length), waits up to 10 reads of 1 s for `file_rev_done`, then sends HELLO (with its resync
-  blocks) and measures the file with GET_FILE_SIZE: the declared size (the data sent, then filler), left for the user
-  to delete. With nothing owed (a cancel while waiting for `file_rev_done`) it goes straight to HELLO. A write that
-  fails stops the filler (screen unplugged or stalled); the link is then left for the next connection, as is a
-  second Ctrl+C in the CLI, which quits at once.
+  whatever they are (section 19). A HELLO answered after a cancel does not mean the data phase ended cleanly: the bytes
+  still queued for the firmware's writer then go into the next file. Completing the declared length is no way out
+  either: on the 8.8" a cancelled upload completed with filler hung the firmware until a USB replug (section 19).
+  **Bezel's cancel recovery** (not vendor; D-2026-09-30-release-polish-10): after a cancel it sends nothing more of the
+  data phase (no filler), then HELLO (with its resync blocks) and GET_FILE_SIZE, and reports the partial file for the
+  user to delete; nothing is deleted. A cancel while waiting for `file_rev_done` (the whole file sent) takes the same
+  path. When no HELLO is answered it reports that the next command reconnects the screen (the wake) and names the path
+  to check for a partial file. Stray bytes that reach the next upload make its GET_FILE_SIZE differ from the file size;
+  that upload then fails, saying to delete the file and send it again.
 
 ### 13.5 Device-side video and the overlay
 
@@ -722,7 +721,7 @@ host, measured by the project.
 | Storage info | 0x64 on the 8.8": flash 65.9 MiB after the 512 KiB reserve; a 29.7 GiB FAT32 card reported in the TF fields |
 | Uploads | PNG and MP4 to `/mnt/UDISK/{img,video}` and `/mnt/SDCARD/{img,video}` accepted and verified with GET_FILE_SIZE; `create_success` and `file_rev_done` as in section 13.4 |
 | Playback | PLAY_VIDEO (loop) and PLAY_IMAGE answered; after playback a full frame (PRE_UPDATE_BITMAP + frame) is accepted (`full_png_sucess`); that the overlay's alpha shows the video through is still to be confirmed by eye |
-| Cancelled upload | the data phase has no abort and only the declared length ends it cleanly. With HELLO sent right after a cancel: in one run no HELLO was answered on that link and the next connection woke the screen (~10 s); the first upload afterwards received about 191 KB of stray bytes (caught by the size check). In a later run (a 41,573,338-byte upload to `/mnt/SDCARD/video` cancelled after 13,641,216 bytes, ROM 1.90) the first HELLO went unanswered and the one after the resync block was answered, yet GET_FILE_SIZE reported 12.6 MiB (less than the bytes accepted) and the next upload, a 7,444-byte PNG to `/mnt/SDCARD/img`, was stored as 390,157 bytes: about 382 KB of the cancelled data, still queued for the firmware's writer, went into that file. The card also counted the partial's size as used, even after it was deleted, until the screen rebooted. Bezel now completes the declared length with filler before any HELLO (section 13.4) |
+| Cancelled upload | the data phase has no abort. With HELLO sent right after a cancel: in one run no HELLO was answered on that link and the next connection woke the screen (~10 s); the first upload afterwards received about 191 KB of stray bytes (caught by the size check). In a later run (a 41,573,338-byte upload to `/mnt/SDCARD/video` cancelled after 13,641,216 bytes, ROM 1.90) the first HELLO went unanswered and the one after the resync block was answered, yet GET_FILE_SIZE reported 12.6 MiB (less than the bytes accepted) and the next upload, a 7,444-byte PNG to `/mnt/SDCARD/img`, was stored as 390,157 bytes: about 382 KB of the cancelled data, still queued for the firmware's writer, went into that file. The card also counted the partial's size as used, even after it was deleted, until the screen rebooted. Completing the declared length hung the firmware: a 41.6 MB upload to the card cancelled after 16.6 MB, then right away the remaining 25 MB as filler blocks (`2c` x 249 + `00`); the firmware stopped reading after about 30.8 MB in all (data and filler), answered nothing and did not recover in 20 minutes; only a USB replug brought it back. A cancel without filler leaves a screen that reconnects on the next command and stray bytes that reach only the next upload, where the size check catches them, so Bezel sends no filler (section 13.4, D-2026-09-30-release-polish-10). Whether large fast uploads to the card can hang the firmware on their own (write pacing) is not known yet |
 | Host drain | writes of 64 KB to a card file can take longer than a 10 ms serial timeout to drain; a signal during the drain must not fail the write |
 
 Consequences: full frames have a text reply of their own; the partial round trip is far below the vendor's 1 Hz tick;

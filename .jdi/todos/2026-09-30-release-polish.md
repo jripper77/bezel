@@ -1,0 +1,5 @@
+- [backlog 1.x] Sign the releases (Authenticode for msi/nsis, GPG for deb/rpm/AppImage) when a certificate exists (D-2026-09-30-release-polish-2)
+- [backlog 1.x] system.volume sensor (PipeWire/PulseAudio, Core Audio) (D-2026-09-30-release-polish-5)
+- [backlog 1.x] Host-decoded video backgrounds in the studio for WCH, which shows the poster today (D-2026-09-30-release-polish-1)
+- [backlog 1.x] Split long functions (net.rs, disk.rs, amdgpu.rs, importers), NRBF tag constants, reasons for `let _` in windows/wmi.rs (D-2026-09-30-release-polish-9)
+- [release-polish] Repin the CI pipeline to @main if slipalison/github-workflows#15 reached main by release time; Sonar stays waived until the project and token exist (D-2026-09-30-foundation-2)

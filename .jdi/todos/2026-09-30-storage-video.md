@@ -1,5 +1,5 @@
-- [release-polish] Optional bundled/downloaded ffmpeg (checksum-pinned, LGPL build) once package size and licensing are reviewed (D-2026-09-30-storage-video-2)
-- [release-polish] Firmware update for rev C (/update.app + 0x84) and TUR_USB behind Confirm and a battery of pre-checks; destructive, not validated (D-2026-09-30-storage-video-5)
-- [release-polish] Guided SD card preparation: detect non-FAT32 hints and explain how to format on the PC; Bezel never formats (D-2026-09-30-storage-video-1)
-- [release-polish] Rev C boot logo (hidden vendor feature) and TUR_USB /usr/data/boot.jpg on hardware, when someone has the panel (D-2026-09-30-storage-video-5)
+- [backlog 1.x] Optional bundled/downloaded ffmpeg (checksum-pinned, LGPL build) once package size and licensing are reviewed (D-2026-09-30-storage-video-2)
+- [backlog 1.x] Firmware update for rev C (/update.app + 0x84) and TUR_USB behind Confirm and a battery of pre-checks; destructive, not validated (D-2026-09-30-storage-video-5)
+- [backlog 1.x] Guided SD card preparation: detect (only the text guide enters 1.0, D-2026-09-30-release-polish-7) non-FAT32 hints and explain how to format on the PC; Bezel never formats (D-2026-09-30-storage-video-1)
+- [backlog 1.x] Rev C boot logo (hidden vendor feature) and TUR_USB /usr/data/boot.jpg on hardware, when someone has the panel (D-2026-09-30-storage-video-5)
 - [backlog] Download or rename files on the device: no protocol command exists (rev C 13.3); revisit if a capture shows one

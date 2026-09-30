@@ -1,0 +1,82 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { boxFromPoints, contains, handlePoints, HANDLES, hitTest, intersects, marqueeSelect, MIN_SIZE, resize, roundBox, unionBox } from '../../src/editor/geometry.js';
+import { snapEdge, snapMove, SNAP_DISTANCE } from '../../src/editor/snap.js';
+import { boundKey, createWidget, defaultRange, textStyle, widgetOf, WIDGETS } from '../../src/editor/widgets.js';
+
+const box = (x, y, width, height) => ({ x, y, width, height });
+
+test('containment, intersection, marquee and union', () => {
+  assert.equal(contains(box(0, 0, 10, 10), 10, 10), true);
+  assert.equal(contains(box(0, 0, 10, 10), 11, 5), false);
+  assert.equal(intersects(box(0, 0, 10, 10), box(10, 10, 5, 5)), true);
+  assert.equal(intersects(box(0, 0, 10, 10), box(11, 0, 5, 5)), false);
+  assert.deepEqual(boxFromPoints(10, 20, 0, 5), box(0, 5, 10, 15));
+  assert.deepEqual(unionBox([box(0, 0, 10, 10), box(20, 5, 5, 30)]), box(0, 0, 25, 35));
+  assert.equal(unionBox([]), null);
+});
+
+test('hit test finds the topmost visible element', () => {
+  const els = [
+    { id: 1, frame: box(0, 0, 100, 100), visible: true },
+    { id: 2, frame: box(50, 50, 100, 100), visible: true },
+    { id: 3, frame: box(60, 60, 10, 10), visible: false },
+  ];
+  assert.equal(hitTest(els, 65, 65), 2);
+  assert.equal(hitTest(els, 10, 10), 1);
+  assert.equal(hitTest(els, 500, 500), null);
+  assert.deepEqual(marqueeSelect(els, box(55, 55, 20, 20)), [1, 2]);
+});
+
+test('resize from every handle keeps the opposite edge and a minimum size', () => {
+  const b = box(100, 100, 50, 40);
+  assert.deepEqual(resize(b, 'se', 10, 20), box(100, 100, 60, 60));
+  assert.deepEqual(resize(b, 'nw', 10, 10), box(110, 110, 40, 30));
+  assert.deepEqual(resize(b, 'w', 100, 0), box(150 - MIN_SIZE, 100, MIN_SIZE, 40));
+  assert.deepEqual(resize(b, 'n', 0, 100), box(100, 140 - MIN_SIZE, 50, MIN_SIZE));
+  assert.deepEqual(resize(b, 'e', -100, 0).width, MIN_SIZE);
+  assert.deepEqual(resize(b, 's', 0, -100).height, MIN_SIZE);
+  const ratio = resize(b, 'se', 50, 0, true);
+  assert.ok(Math.abs(ratio.width / ratio.height - 1.25) < 1e-9);
+  const nwRatio = resize(b, 'nw', -30, -10, true);
+  assert.equal(nwRatio.x + nwRatio.width, 150);
+  assert.equal(nwRatio.y + nwRatio.height, 140);
+  assert.deepEqual(resize(b, 'ne', 0, 0, true), b);
+  const pts = handlePoints(b);
+  assert.deepEqual(Object.keys(pts), HANDLES);
+  assert.deepEqual(pts.se, [150, 140]);
+  assert.deepEqual(roundBox(box(0.6, 0.4, 10.2, 1)), box(1, 0, 10, MIN_SIZE));
+});
+
+test('snapping pulls onto canvas and element lines and reports guides', () => {
+  const canvas = { width: 480, height: 1920 };
+  const others = [box(100, 500, 200, 100)];
+  const r = snapMove(box(3, 498, 50, 50), canvas, others);
+  assert.deepEqual(r.box, box(0, 500, 50, 50));
+  assert.deepEqual(r.guides, [{ axis: 'x', position: 0 }, { axis: 'y', position: 500 }]);
+  const centered = snapMove(box(214, 900, 50, 50), canvas, []);
+  assert.equal(centered.box.x, 215, 'center of the box onto the canvas center');
+  const free = snapMove(box(33, 777, 50, 50), canvas, []);
+  assert.deepEqual(free, { box: box(33, 777, 50, 50), guides: [] });
+  assert.deepEqual(snapEdge(297, 'x', canvas, others), { value: 300, guide: 300 });
+  assert.deepEqual(snapEdge(250, 'y', canvas, others), { value: 250, guide: null });
+  assert.equal(SNAP_DISTANCE, 6);
+});
+
+test('every palette widget creates a valid kind sized to the canvas', () => {
+  const canvas = { width: 480, height: 1920 };
+  for (const w of WIDGETS) {
+    const made = createWidget(w, canvas, { key: 'gpu.temperature', quantity: 'celsius' });
+    assert.ok(made.width > 0 && made.height > 0, w);
+    assert.ok(made.kind.type, w);
+    const el = { kind: made.kind };
+    assert.equal(widgetOf(el), w, w);
+    if (['value', 'bar', 'ring', 'needle', 'graph'].includes(w)) assert.equal(boundKey(el), 'gpu.temperature', w);
+  }
+  assert.equal(boundKey({ kind: { type: 'image' } }), null);
+  assert.throws(() => createWidget('nope', canvas), /unknown widget/);
+  assert.deepEqual(defaultRange('celsius'), { min: 20, max: 100 });
+  for (const q of ['megahertz', 'watts', 'rpm', 'percent']) assert.ok(defaultRange(q).max > 0);
+  assert.equal(textStyle(20).align, 'left');
+  assert.equal(createWidget('ring', canvas).kind.binding.key, 'cpu.usage', 'unbound defaults to cpu.usage');
+});

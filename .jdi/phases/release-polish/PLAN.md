@@ -66,7 +66,8 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
   - `net.ping` em thread própria: ICMP datagrama sem privilégio (`ping_group_range`, `socket2`), senão TCP 53/443; timeout = `Unavailable`; `sample()` < 50 ms com alvo mudo; `imported_keys_are_published` (catálogo de fixture ⊇ `keys::IMPORTED`). CLI: `--ping-host`, `--mangohud-dir`.
 - **Dependencies:** T-7.2, T-7.4
 - **Test:** `cargo test -p bezel-sensors fps::`, `-- ping:: imported_keys_are_published`; clippy `--target x86_64-pc-windows-gnu`
-- **Status:** pending
+- **Status:** completed (`d47feef`; FPS não validado com jogo real, fica para a T-7.8)
+- **Nota:** fora de `files_modified`, permitido pela invocação: `docs/reverse-engineering/sensors.md` § 8 (layout do RTSS, formato e busca de config do MangoHud, ping, com as fontes). O `unsafe` do RTSS inclui, além de abrir/mapear/copiar/liberar a memória, `GetTickCount` (relógio dos tempos do RTSS), no mesmo módulo `cfg(windows)` e com `allow` + `// SAFETY:` próprios; que o RTSS usa esse relógio é inferência (o SDK só diz "milissegundos"), a confirmar na T-7.8. `lib.rs` do bezel-sensors passa de `forbid` a `deny(unsafe_code)` para o `allow` local valer. `Command::Sensors` vira variante com campos (`args`, `settings`) para não tocar `sensors.rs`. Sem `MangoHud.conf`, o padrão é a pasta pessoal, como no MangoHud.
 
 #### T-7.6: Studio: i18n completo, mensagens por código e telas novas
 - **Specialist:** jdi-doer-bezel

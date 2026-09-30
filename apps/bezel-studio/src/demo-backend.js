@@ -74,6 +74,16 @@ export function demoOrientation(model, remembered) {
   return Math.max(model.width, model.height) >= 2 * Math.min(model.width, model.height) ? 'landscape' : 'portrait';
 }
 
+/** The host `net.ping` measures unless the user picks another. */
+export const DEMO_PING_HOST = '8.8.8.8';
+/** The folder the demo's folder picker returns. */
+export const DEMO_FOLDER = '/home/demo/mangohud';
+
+/** Whether `text` can name a host to ping, like the backend checks it. */
+export function demoIsHost(text) {
+  return text.length <= 253 && /^[A-Za-z0-9:][A-Za-z0-9.:-]*$/.test(text);
+}
+
 /** Pause between two simulated progress reports, ms. */
 export const DEMO_STEP_MS = 150;
 const CONVERT_STEPS = 8;
@@ -357,6 +367,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   // The language the user chose (`null`: the system's, from the browser).
   let language = null;
   const systemLanguage = pickLocale(hooks.languages ?? []);
+  const sensorOptions = { pingHost: null, mangohudDir: null };
   const closeListeners = new Set();
   const windowGoes = (state) => {
     windowState = state;
@@ -452,7 +463,26 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       else windowGoes('closed');
     },
     windowState: () => windowState,
-    preferences: () => Promise.resolve({ language, systemLanguage }),
+    preferences: () => Promise.resolve({
+      language,
+      systemLanguage,
+      pingHost: sensorOptions.pingHost ?? DEMO_PING_HOST,
+      defaultPingHost: DEMO_PING_HOST,
+      mangohudDir: sensorOptions.mangohudDir,
+      mangohud: true,
+    }),
+    setSensorOptions: (pingHost, mangohudDir) => {
+      const host = pingHost.trim();
+      if (host && !demoIsHost(host)) {
+        return Promise.reject(Object.assign(new Error(`"${host}" is not a host name or an IP address`), { code: 'invalidHost', args: { host } }));
+      }
+      if (mangohudDir !== null && !mangohudDir.startsWith('/')) {
+        return Promise.reject(Object.assign(new Error(`"${mangohudDir}" is not a folder`), { code: 'invalidFolder', args: { folder: mangohudDir } }));
+      }
+      Object.assign(sensorOptions, { pingHost: host && host !== DEMO_PING_HOST ? host : null, mangohudDir });
+      return Promise.resolve();
+    },
+    pickFolder: () => Promise.resolve(DEMO_FOLDER),
     setLanguage: (next) => {
       if (next !== null && !['pt-BR', 'en'].includes(next)) {
         return Promise.reject(Object.assign(new Error(`unknown language "${next}"`), { code: 'unknownLanguage', args: { language: next } }));

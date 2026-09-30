@@ -405,3 +405,37 @@ test('the language follows the system until one is chosen', async ({ page }) => 
   await expect(page.getByRole('tab', { name: 'Sensores' })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('the ping target and the MangoHud folder are set in the preferences', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('button', { name: 'Preferências' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Preferências' });
+  const host = dialog.getByRole('textbox', { name: 'Destino do ping (net.ping)' });
+  await expect(host).toHaveValue('8.8.8.8');
+
+  // A value that is no host is refused next to the field.
+  await host.fill('-c 5 host');
+  await host.press('Enter');
+  await expect(dialog.getByRole('alert')).toHaveText('“-c 5 host” não é um endereço IP nem um nome de host.');
+  await expect(host).toHaveAttribute('aria-invalid', 'true');
+  await expect(host).toHaveValue('-c 5 host');
+  await expect(host).toBeFocused();
+  await expectAccessible(page);
+  await host.fill('1.1.1.1');
+  await host.press('Enter');
+  await expect(page.locator('#toast')).toHaveText('Ajustes dos sensores salvos.');
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+
+  // The MangoHud folder: its own by default, a chosen one, and back.
+  const folder = dialog.getByRole('group', { name: 'Pasta dos registros do MangoHud (gpu.fps)' });
+  await expect(folder).toContainText('A pasta do próprio MangoHud');
+  await folder.getByRole('button', { name: 'Escolher pasta…' }).click();
+  await expect(folder).toContainText('/home/demo/mangohud');
+  await folder.getByRole('button', { name: 'Usar a do MangoHud' }).click();
+  await expect(folder).toContainText('A pasta do próprio MangoHud');
+  await expect(host).toHaveValue('1.1.1.1');
+  await expectAccessible(page);
+  expect(errors).toEqual([]);
+});

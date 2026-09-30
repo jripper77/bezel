@@ -304,7 +304,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .prefs-section + .prefs-section { border-top: 1px solid var(--border); padding-top: 12px; }
 .prefs-section h3 { margin: 4px 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .prefs-section .field select, .prefs-section .field input[type="text"] { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
-.prefs-section .hint { margin: 0; }
+.prefs-section .hint { margin: 0 0 8px; }
+.prefs-section .field { margin-bottom: 4px; }
+.prefs-section .folder-path { margin: 0; padding: 6px 8px; border-radius: 8px; background: var(--surface-3); font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.8rem; overflow-wrap: anywhere; }
+.prefs-section .folder-path.default { font-family: inherit; font-size: 0.85rem; color: var(--muted); }
+.prefs-section .button-row { margin-top: 4px; }
+.field-error { margin: 0; color: var(--danger); font-size: 0.85rem; font-weight: 600; }
+.field-error::before { content: "⚠ "; }
+input[aria-invalid="true"] { border-color: var(--danger) !important; }
 
 /* Narrow windows (the app allows 960 px): the brand and the orientation
    labels go, the orientation names stay for screen readers and in tooltips. */

@@ -311,6 +311,14 @@ pub struct PreferencesDto {
     pub language: Option<&'static str>,
     /// The system's language.
     pub system_language: &'static str,
+    /// The host `net.ping` measures.
+    pub ping_host: String,
+    /// The host `net.ping` measures unless the user picks another.
+    pub default_ping_host: &'static str,
+    /// The folder of MangoHud's logs; `None`: MangoHud's own.
+    pub mangohud_dir: Option<String>,
+    /// Whether `gpu.fps` reads MangoHud's logs on this system (Linux).
+    pub mangohud: bool,
 }
 
 /// A theme imported from another app.

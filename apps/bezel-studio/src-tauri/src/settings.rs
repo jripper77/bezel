@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use bezel_core::domain::clock::Language;
 use bezel_core::domain::geometry::Orientation;
+use bezel_sensors::SensorOptions;
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{orientation_slug, parse_orientation};
@@ -29,9 +30,23 @@ pub struct Settings {
     /// The language the user chose (`pt-BR` or `en`); without one the app
     /// follows the system's.
     pub language: Option<String>,
+    /// The host `net.ping` measures; without one, the sensors' default.
+    pub ping_host: Option<String>,
+    /// The folder of MangoHud's logs read for `gpu.fps`; without one,
+    /// MangoHud's own `output_folder`.
+    pub mangohud_dir: Option<String>,
 }
 
 impl Settings {
+    /// The options of the sensors that take settings.
+    pub fn sensor_options(&self) -> SensorOptions {
+        let defaults = SensorOptions::default();
+        SensorOptions {
+            ping_host: self.ping_host.clone().unwrap_or(defaults.ping_host),
+            mangohud_dir: self.mangohud_dir.as_ref().map(PathBuf::from),
+        }
+    }
+
     /// The language the user chose, if a valid one was stored.
     pub fn language(&self) -> Option<Language> {
         self.language.as_deref().and_then(parse_language)

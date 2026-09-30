@@ -79,6 +79,8 @@ error_codes! {
     ThemeMisfit = "themeMisfit"
         => "this theme is {theme} but the screen is {screen} in this orientation",
     UnknownLanguage = "unknownLanguage" => "unknown language \"{language}\"",
+    InvalidHost = "invalidHost" => "\"{host}\" is not a host name or an IP address",
+    InvalidFolder = "invalidFolder" => "\"{folder}\" is not a folder",
     System = "system" => "system error: {detail}",
 }
 

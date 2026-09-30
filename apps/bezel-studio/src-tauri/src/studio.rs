@@ -232,6 +232,13 @@ impl Studio {
 
     // ------------------------------------------------------------ sensors --
 
+    /// Measures with `sensors` from now on (its options changed), and reads
+    /// its catalog.
+    pub fn replace_sensors(&mut self, sensors: Box<dyn SensorSource>) -> Result<&[SensorInfo]> {
+        self.sensors = sensors;
+        self.refresh_catalog()
+    }
+
     /// Re-reads the sensor catalog (sensors come and go with hardware).
     pub fn refresh_catalog(&mut self) -> Result<&[SensorInfo]> {
         self.catalog = self.sensors.catalog()?;

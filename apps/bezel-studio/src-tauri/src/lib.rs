@@ -29,7 +29,7 @@ use std::time::Instant;
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::theme::Theme;
-use bezel_core::ports::{DeviceBus, ScreenConnector, SensorSource};
+use bezel_core::ports::{DeviceBus, ScreenConnector};
 use bezel_devices::fake::FakeStorage;
 use bezel_devices::{FakeBus, FakeConnector, SystemBus, SystemConnector};
 use bezel_media::FfmpegTranscoder;
@@ -38,7 +38,7 @@ use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
 use tauri::{AppHandle, Emitter as _, Manager, WindowEvent};
 
-use crate::backend::{Backend, DEFAULT_MODEL, Pacer, Session, default_orientation};
+use crate::backend::{Backend, DEFAULT_MODEL, Pacer, SensorFactory, Session, default_orientation};
 use crate::commands::{Shared, Unsaved};
 use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
@@ -184,6 +184,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::close_window,
             commands::preferences,
             commands::set_language,
+            commands::set_sensor_options,
+            commands::pick_folder,
         ])
         .run(tauri::generate_context!())
 }
@@ -203,7 +205,7 @@ pub(crate) fn show_main_window(app: &AppHandle) {
 struct Adapters {
     bus: Arc<dyn DeviceBus + Send + Sync>,
     connector: Arc<dyn ScreenConnector + Send + Sync>,
-    sensors: Box<dyn SensorSource>,
+    sensors: SensorFactory,
 }
 
 /// Usable bytes of the simulated screen's memory card (a 32 GB card).
@@ -216,13 +218,13 @@ fn adapters(simulate: bool) -> Adapters {
         Adapters {
             bus: Arc::new(FakeBus::turing_88()),
             connector: Arc::new(FakeConnector::with_storage(storage)),
-            sensors: Box::new(FakeSensors::demo()),
+            sensors: Arc::new(|_| Box::new(FakeSensors::demo())),
         }
     } else {
         Adapters {
             bus: Arc::new(SystemBus),
             connector: Arc::new(SystemConnector),
-            sensors: Box::new(SystemSensors::new()),
+            sensors: Arc::new(|options| Box::new(SystemSensors::with_options(options))),
         }
     }
 }
@@ -276,7 +278,8 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     );
     // Screens that cannot play videos get the theme's video decoded here by
     // the storage tab's converter.
-    let studio = Studio::new(sensors, Box::new(renderer), language, starting_theme())
+    let measured = sensors(settings.load().sensor_options());
+    let studio = Studio::new(measured, Box::new(renderer), language, starting_theme())
         .with_host_decoding(storage.shared_media(), cache.join("playing"));
     Ok(Backend {
         bus,
@@ -285,6 +288,7 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         library: ThemeLibrary::new(path.app_data_dir()?.join("themes"), bundled_theme_dirs(app)),
         settings,
         system_language,
+        make_sensors: sensors,
         fonts,
         studio: Session::new(studio),
         storage,
@@ -369,9 +373,10 @@ mod tests {
 
     #[test]
     fn simulated_adapters_have_the_turing_88_and_sensors() {
-        let mut a = adapters(true);
+        let a = adapters(true);
         assert_eq!(discover_screens(a.bus.as_ref()).unwrap().len(), 1);
-        assert!(!a.sensors.catalog().unwrap().is_empty());
+        let mut sensors = (a.sensors)(Default::default());
+        assert!(!sensors.catalog().unwrap().is_empty());
     }
 
     #[test]

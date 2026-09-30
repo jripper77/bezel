@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { LOCALES, applyTranslations, pickLocale, translator } from '../../src/i18n/index.js';
 import { WIDGETS } from '../../src/editor/widgets.js';
 import { LANGUAGES, languageOptions } from '../../src/ui/preferences.js';
-import { createDemoBackend } from '../../src/demo-backend.js';
+import { DEMO_FOLDER, createDemoBackend } from '../../src/demo-backend.js';
 
 const src = new URL('../../src/', import.meta.url);
 
@@ -82,11 +82,25 @@ test('the language choices name the system language and each language by its own
 
 test('the demo keeps the chosen language and follows the browser otherwise', async () => {
   const demo = createDemoBackend('turing88', {}, { languages: ['pt-BR', 'en'] });
-  assert.deepEqual(await demo.preferences(), { language: null, systemLanguage: 'pt-BR' });
+  const { language, systemLanguage } = await demo.preferences();
+  assert.deepEqual({ language, systemLanguage }, { language: null, systemLanguage: 'pt-BR' });
   await demo.setLanguage('en');
   assert.equal((await demo.preferences()).language, 'en');
   await assert.rejects(demo.setLanguage('de'), (e) => e.code === 'unknownLanguage' && e.args.language === 'de');
   await demo.setLanguage(null);
   assert.equal((await demo.preferences()).language, null);
   assert.equal((await createDemoBackend('turing88').preferences()).systemLanguage, 'en');
+});
+
+test('the demo checks and keeps the sensor options like the backend', async () => {
+  const demo = createDemoBackend('turing88');
+  const before = await demo.preferences();
+  assert.deepEqual([before.pingHost, before.defaultPingHost, before.mangohudDir, before.mangohud], ['8.8.8.8', '8.8.8.8', null, true]);
+  await demo.setSensorOptions(' 1.1.1.1 ', await demo.pickFolder());
+  const after = await demo.preferences();
+  assert.deepEqual([after.pingHost, after.mangohudDir], ['1.1.1.1', DEMO_FOLDER]);
+  await assert.rejects(demo.setSensorOptions('-c 5', null), (e) => e.code === 'invalidHost' && e.args.host === '-c 5');
+  await assert.rejects(demo.setSensorOptions('1.1.1.1', 'relative'), (e) => e.code === 'invalidFolder');
+  await demo.setSensorOptions('', null);
+  assert.equal((await demo.preferences()).pingHost, '8.8.8.8');
 });

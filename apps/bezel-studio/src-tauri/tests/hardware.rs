@@ -44,6 +44,7 @@ fn backend(scratch: &Path) -> Backend {
         library: ThemeLibrary::new(scratch.join("themes"), vec![themes]),
         settings: SettingsFile::new(scratch.join("settings.json")),
         system_language: language(),
+        make_sensors: Arc::new(|options| Box::new(SystemSensors::with_options(options))),
         fonts,
         studio: Session::new(Studio::new(
             Box::new(SystemSensors::new()),

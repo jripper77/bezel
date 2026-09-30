@@ -82,6 +82,8 @@ function tauriBridge(invoke, tauri = {}) {
     closeWindow: () => invoke('close_window'),
     preferences: () => invoke('preferences'),
     setLanguage: (language) => invoke('set_language', { language }),
+    setSensorOptions: (pingHost, mangohudDir) => invoke('set_sensor_options', { pingHost, mangohudDir }),
+    pickFolder: () => invoke('pick_folder'),
     onJobProgress: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(PROGRESS_EVENT, (e) => cb(e.payload)) : Promise.resolve(() => {})),
     onCloseRequested: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(CLOSE_EVENT, () => cb()) : Promise.resolve(() => {})),
     onFileDrop: (cb) => onFileDrop(tauri, cb),

@@ -305,6 +305,31 @@ pub fn set_language(
     Ok(())
 }
 
+/// Measures `net.ping` against `ping_host` and reads MangoHud's logs from
+/// `mangohud_dir` (`None`: MangoHud's own folder) from now on.
+#[tauri::command]
+pub async fn set_sensor_options(
+    state: State<'_, Shared>,
+    ping_host: String,
+    mangohud_dir: Option<String>,
+) -> UiResult<()> {
+    blocking(&state, move |b| {
+        b.set_sensor_options(&ping_host, mangohud_dir.as_deref())
+    })
+    .await
+}
+
+/// Asks for a folder. `None` when cancelled.
+#[tauri::command]
+pub async fn pick_folder<R: Runtime>(app: AppHandle<R>) -> UiResult<Option<String>> {
+    app.dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|p| p.into_path().map_err(UiError::system))
+        .transpose()
+        .map(|p| p.map(|p| p.display().to_string()))
+}
+
 // ------------------------------------------------------------- storage --
 
 /// Event carrying a running upload's progress ([`ProgressDto`]).

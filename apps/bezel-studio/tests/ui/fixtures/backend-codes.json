@@ -20,6 +20,12 @@
       "address",
       "holders"
     ],
+    "invalidFolder": [
+      "folder"
+    ],
+    "invalidHost": [
+      "host"
+    ],
     "invalidInput": [
       "detail"
     ],

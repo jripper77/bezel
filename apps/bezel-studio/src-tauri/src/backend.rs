@@ -14,7 +14,10 @@ use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::theme::Theme;
-use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink, ThemeLocation, ThemeStore};
+use bezel_core::ports::{
+    DeviceBus, ScreenConnector, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
+};
+use bezel_sensors::SensorOptions;
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::import::import_path;
 use bezel_themes::native::{is_native, native_location};
@@ -36,6 +39,10 @@ use crate::texts::{Texts, language_slug, parse_language, texts};
 /// Largest file accepted as an image or theme, bytes.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Builds the machine's sensors with their options (they take effect when
+/// the source is built).
+pub type SensorFactory = Arc<dyn Fn(SensorOptions) -> Box<dyn SensorSource> + Send + Sync>;
+
 /// The ports and state behind the window.
 pub struct Backend {
     /// Where screens are discovered.
@@ -51,6 +58,8 @@ pub struct Backend {
     /// The system's language, which the app follows unless the user chose
     /// another in the settings.
     pub system_language: Language,
+    /// Builds the sensors again when their options change.
+    pub make_sensors: SensorFactory,
     /// Font families themes can use.
     pub fonts: Vec<String>,
     /// The editing session.
@@ -146,6 +155,17 @@ pub fn default_orientation(model: &DeviceModel) -> Orientation {
     }
 }
 
+/// Whether `text` can name a host to ping: a name or an IPv4 or IPv6
+/// address (letters, digits, `.`, `-` and `:`), not an option.
+fn is_host(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 253
+        && !text.starts_with(['-', '.'])
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
+}
+
 fn read_file(path: &Path) -> UiResult<Vec<u8>> {
     let unreadable = |e| UiError::file(path.display(), e);
     let size = std::fs::metadata(path).map_err(unreadable)?.len();
@@ -218,10 +238,40 @@ impl Backend {
 
     /// What the preferences show.
     pub fn preferences(&self) -> PreferencesDto {
+        let settings = self.settings.load();
         PreferencesDto {
-            language: self.settings.load().language().map(language_slug),
+            language: settings.language().map(language_slug),
             system_language: language_slug(self.system_language),
+            ping_host: settings.sensor_options().ping_host,
+            default_ping_host: SensorOptions::DEFAULT_PING_HOST,
+            mangohud_dir: settings.mangohud_dir,
+            mangohud: cfg!(target_os = "linux"),
         }
+    }
+
+    /// Measures the round trip to `ping_host` (empty: the default) and reads
+    /// MangoHud's logs from `mangohud_dir` (`None`: MangoHud's own folder)
+    /// from now on, and remembers both. The sensors are built again with
+    /// them, outside the session's lock.
+    pub fn set_sensor_options(&self, ping_host: &str, mangohud_dir: Option<&str>) -> UiResult<()> {
+        let host = match ping_host.trim() {
+            "" | SensorOptions::DEFAULT_PING_HOST => None,
+            host if is_host(host) => Some(host.to_string()),
+            host => return Err(UiError::new(ErrorCode::InvalidHost).arg("host", host)),
+        };
+        let folder = mangohud_dir
+            .map(|dir| match Path::new(dir) {
+                path if path.is_absolute() && path.is_dir() => Ok(dir.to_string()),
+                _ => Err(UiError::new(ErrorCode::InvalidFolder).arg("folder", dir)),
+            })
+            .transpose()?;
+        self.settings.update(|s| {
+            s.ping_host = host;
+            s.mangohud_dir = folder;
+        });
+        let sensors = (self.make_sensors)(self.settings.load().sensor_options());
+        self.studio().replace_sensors(sensors)?;
+        Ok(())
     }
 
     /// Uses `language` (`pt-BR` or `en`) from now on, or the system's for
@@ -661,6 +711,7 @@ mod tests {
             library: ThemeLibrary::new(root.join("themes"), vec![]),
             settings: SettingsFile::new(root.join("settings.json")),
             system_language: Language::English,
+            make_sensors: Arc::new(|_| Box::new(FakeSensors::demo())),
             fonts: vec!["Inter".into()],
             studio: Session::new(studio),
             storage: StorageState::new(
@@ -735,6 +786,53 @@ mod tests {
         assert_eq!(f.backend.set_language(None).unwrap(), Language::English);
         assert_eq!(f.backend.preferences().language, None);
         assert_eq!(f.backend.studio().language(), Language::English);
+    }
+
+    #[test]
+    fn ping_host_and_mangohud_folder_are_checked_remembered_and_used() {
+        let f = fixture("sensor-options");
+        let prefs = f.backend.preferences();
+        assert_eq!(
+            (prefs.ping_host.as_str(), prefs.default_ping_host),
+            ("8.8.8.8", "8.8.8.8")
+        );
+        assert_eq!(prefs.mangohud_dir, None);
+        assert_eq!(prefs.mangohud, cfg!(target_os = "linux"));
+
+        let logs = f.root.join("mangohud");
+        std::fs::create_dir_all(&logs).unwrap();
+        let logs = logs.display().to_string();
+        f.backend
+            .set_sensor_options(" 1.1.1.1 ", Some(&logs))
+            .unwrap();
+        let prefs = f.backend.preferences();
+        assert_eq!(prefs.ping_host, "1.1.1.1");
+        assert_eq!(prefs.mangohud_dir.as_deref(), Some(logs.as_str()));
+        let options = f.backend.settings.load().sensor_options();
+        assert_eq!(options.mangohud_dir.as_deref(), Some(Path::new(&logs)));
+        assert!(
+            !f.backend.studio().catalog().is_empty(),
+            "the new sensors' catalog"
+        );
+
+        for (host, dir, code) in [
+            ("-c 5 x", None, "invalidHost"),
+            ("a b", None, "invalidHost"),
+            ("8.8.8.8", Some("relative/dir"), "invalidFolder"),
+            ("8.8.8.8", Some("/no/such/folder"), "invalidFolder"),
+        ] {
+            let error = f.backend.set_sensor_options(host, dir).unwrap_err();
+            assert_eq!(error.code(), code, "{host} {dir:?}");
+        }
+        assert_eq!(f.backend.preferences().ping_host, "1.1.1.1", "unchanged");
+        for host in ["dns.google", "2001:4860:4860::8888", "192.168.0.1"] {
+            assert!(is_host(host), "{host}");
+        }
+
+        f.backend.set_sensor_options("", None).unwrap();
+        let settings = f.backend.settings.load();
+        assert_eq!((settings.ping_host, settings.mangohud_dir), (None, None));
+        assert_eq!(f.backend.preferences().ping_host, "8.8.8.8");
     }
 
     #[test]

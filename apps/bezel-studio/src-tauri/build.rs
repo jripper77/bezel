@@ -40,6 +40,8 @@ const COMMANDS: &[&str] = &[
     "close_window",
     "preferences",
     "set_language",
+    "set_sensor_options",
+    "pick_folder",
 ];
 
 fn main() -> ExitCode {

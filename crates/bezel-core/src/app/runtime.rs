@@ -7,6 +7,7 @@ use crate::Result;
 use crate::domain::clock::{Language, LocalTime};
 use crate::domain::frame::Frame;
 use crate::domain::history::Histories;
+use crate::domain::sensor::Quantities;
 use crate::domain::theme::{AssetRef, Theme};
 use crate::ports::{FrameRenderer, RenderContext, ScreenLink, SensorSource};
 
@@ -16,6 +17,7 @@ pub struct ThemeRuntime {
     theme: Theme,
     assets: BTreeMap<AssetRef, Vec<u8>>,
     histories: Histories,
+    quantities: Quantities,
     language: Language,
 }
 
@@ -27,6 +29,7 @@ impl ThemeRuntime {
             theme,
             assets,
             histories,
+            quantities: Quantities::default(),
             language,
         }
     }
@@ -52,11 +55,18 @@ impl ThemeRuntime {
         renderer: &mut dyn FrameRenderer,
         time: LocalTime,
     ) -> Result<Frame> {
+        if self.quantities.is_empty() {
+            // Units of sensor text; a catalog failure only costs the units.
+            if let Ok(catalog) = sensors.catalog() {
+                self.quantities = Quantities::from_catalog(&catalog);
+            }
+        }
         let snapshot = sensors.sample()?;
         self.histories.push(&snapshot);
         let context = RenderContext {
             snapshot: &snapshot,
             histories: &self.histories,
+            quantities: &self.quantities,
             time,
             language: self.language,
         };

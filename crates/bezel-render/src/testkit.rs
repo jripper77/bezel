@@ -8,7 +8,10 @@ use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::frame::{Frame, Rgba};
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::history::Histories;
-use bezel_core::domain::sensor::{Reading, SensorKey, Snapshot};
+use bezel_core::domain::sensor::{Quantities, Reading, SensorKey, Snapshot};
+
+/// Tests format sensor text by the keys' well-known units.
+static NO_QUANTITIES: Quantities = Quantities::new();
 use bezel_core::domain::theme::{
     AssetRef, Background, BoxF, Element, ElementId, ElementKind, Theme,
 };
@@ -118,6 +121,7 @@ pub(crate) fn render(renderer: &mut SkiaRenderer, theme: &Theme, scene: &Scene) 
     let context = RenderContext {
         snapshot: &scene.snapshot,
         histories: &scene.histories,
+        quantities: &NO_QUANTITIES,
         time: scene.time,
         language: Language::English,
     };

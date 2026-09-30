@@ -7,7 +7,7 @@ use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
 use crate::domain::history::Histories;
 use crate::domain::screen::{Brightness, ScreenIdentity};
-use crate::domain::sensor::{SensorInfo, Snapshot};
+use crate::domain::sensor::{Quantities, SensorInfo, Snapshot};
 use crate::domain::theme::{AssetRef, Theme};
 use std::collections::BTreeMap;
 
@@ -60,6 +60,8 @@ pub struct RenderContext<'a> {
     pub snapshot: &'a Snapshot,
     /// Graph histories.
     pub histories: &'a Histories,
+    /// What each sensor measures (units of sensor text).
+    pub quantities: &'a Quantities,
     /// Local wall-clock time for clock elements.
     pub time: LocalTime,
     /// Language of day and month names.

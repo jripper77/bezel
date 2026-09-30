@@ -10,7 +10,7 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use bezel_core::domain::sensor::{
-    Category, DisplayFormat, Quantity, Reading, SensorInfo, Snapshot, format_reading,
+    Category, DisplayFormat, Reading, SensorInfo, Snapshot, format_reading,
 };
 use bezel_core::ports::SensorSource;
 use serde::Serialize;
@@ -32,37 +32,16 @@ pub enum WatchStyle {
     Append,
 }
 
-const CATEGORIES: [(Category, &str, &str); 7] = [
-    (Category::Cpu, "cpu", "CPU"),
-    (Category::Gpu, "gpu", "GPU"),
-    (Category::Memory, "memory", "Memory"),
-    (Category::Disk, "disk", "Disks"),
-    (Category::Network, "network", "Network"),
-    (Category::Board, "board", "Board"),
-    (Category::System, "system", "System"),
-];
-
-fn category_name(category: Category) -> &'static str {
-    CATEGORIES
-        .iter()
-        .find(|(c, _, _)| *c == category)
-        .map_or("other", |(_, name, _)| name)
-}
-
-fn quantity_name(quantity: Quantity) -> &'static str {
-    match quantity {
-        Quantity::Percent => "percent",
-        Quantity::Celsius => "celsius",
-        Quantity::Megahertz => "megahertz",
-        Quantity::Watts => "watts",
-        Quantity::Volts => "volts",
-        Quantity::Amperes => "amperes",
-        Quantity::Rpm => "rpm",
-        Quantity::Bytes => "bytes",
-        Quantity::BytesPerSecond => "bytesPerSecond",
-        Quantity::Seconds => "seconds",
-        Quantity::Number => "number",
-        Quantity::Text => "text",
+/// Table title of each category.
+fn title(category: Category) -> &'static str {
+    match category {
+        Category::Cpu => "CPU",
+        Category::Gpu => "GPU",
+        Category::Memory => "Memory",
+        Category::Disk => "Disks",
+        Category::Network => "Network",
+        Category::Board => "Board",
+        Category::System => "System",
     }
 }
 
@@ -100,9 +79,9 @@ fn sensor_dto<'a>(info: &'a SensorInfo, reading: Reading) -> SensorDto<'a> {
     };
     SensorDto {
         key: info.key.as_str(),
-        category: category_name(info.category),
+        category: info.category.slug(),
         label: &info.label,
-        quantity: quantity_name(info.quantity),
+        quantity: info.quantity.slug(),
         source: &info.source,
         value,
         text,
@@ -112,12 +91,12 @@ fn sensor_dto<'a>(info: &'a SensorInfo, reading: Reading) -> SensorDto<'a> {
 
 /// The catalog grouped by category in display order, catalog order within.
 fn grouped(catalog: &[SensorInfo]) -> Vec<(&'static str, Vec<&SensorInfo>)> {
-    CATEGORIES
+    Category::ALL
         .iter()
-        .map(|(category, _, title)| {
+        .map(|category| {
             let members: Vec<&SensorInfo> =
                 catalog.iter().filter(|i| i.category == *category).collect();
-            (*title, members)
+            (title(*category), members)
         })
         .filter(|(_, members)| !members.is_empty())
         .collect()
@@ -252,6 +231,7 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bezel_core::domain::sensor::Quantity;
     use bezel_sensors::FakeSensors;
 
     fn args(json: bool, watch: Option<f64>, count: Option<u64>, timing: bool) -> SensorsArgs {
@@ -356,8 +336,8 @@ mod tests {
             WatchStyle::Append,
         )
         .unwrap();
-        assert_eq!(category_name(Category::Board), "board");
-        assert_eq!(quantity_name(Quantity::Amperes), "amperes");
+        assert_eq!(Category::Board.slug(), "board");
+        assert_eq!(Quantity::Amperes.slug(), "amperes");
     }
 
     #[test]

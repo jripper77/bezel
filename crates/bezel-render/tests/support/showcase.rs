@@ -10,7 +10,10 @@ use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::frame::Rgba;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::history::Histories;
-use bezel_core::domain::sensor::{DisplayFormat, Reading, SensorKey, Snapshot, keys};
+use bezel_core::domain::sensor::{DisplayFormat, Quantities, Reading, SensorKey, Snapshot, keys};
+
+/// Tests format sensor text by the keys' well-known units.
+static NO_QUANTITIES: Quantities = Quantities::new();
 use bezel_core::domain::theme::{
     AssetRef, Background, Binding, BoxF, Cap, Direction, Element, ElementId, ElementKind, Fit,
     FontSpec, GraphStyle, HAlign, Paint, Segments, ShapeKind, TextContent, TextStyle, Theme,
@@ -450,6 +453,7 @@ impl Scene {
         RenderContext {
             snapshot: &self.snapshot,
             histories: &self.histories,
+            quantities: &NO_QUANTITIES,
             time: TIME,
             language: Language::English,
         }

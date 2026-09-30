@@ -100,6 +100,26 @@ pub enum Quantity {
     Text,
 }
 
+impl Quantity {
+    /// Stable lowercase name (`percent`, `bytesPerSecond`, …) for JSON and UIs.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Quantity::Percent => "percent",
+            Quantity::Celsius => "celsius",
+            Quantity::Megahertz => "megahertz",
+            Quantity::Watts => "watts",
+            Quantity::Volts => "volts",
+            Quantity::Amperes => "amperes",
+            Quantity::Rpm => "rpm",
+            Quantity::Bytes => "bytes",
+            Quantity::BytesPerSecond => "bytesPerSecond",
+            Quantity::Seconds => "seconds",
+            Quantity::Number => "number",
+            Quantity::Text => "text",
+        }
+    }
+}
+
 /// Grouping for the UI's sensor browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Category {
@@ -119,6 +139,32 @@ pub enum Category {
     System,
 }
 
+impl Category {
+    /// Every category, in display order.
+    pub const ALL: [Category; 7] = [
+        Category::Cpu,
+        Category::Gpu,
+        Category::Memory,
+        Category::Disk,
+        Category::Network,
+        Category::Board,
+        Category::System,
+    ];
+
+    /// Stable lowercase name (`cpu`, `gpu`, …) for JSON and UIs.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Category::Cpu => "cpu",
+            Category::Gpu => "gpu",
+            Category::Memory => "memory",
+            Category::Disk => "disk",
+            Category::Network => "network",
+            Category::Board => "board",
+            Category::System => "system",
+        }
+    }
+}
+
 /// A sensor this machine offers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SensorInfo {
@@ -132,6 +178,38 @@ pub struct SensorInfo {
     pub quantity: Quantity,
     /// Where the value comes from (e.g. `hwmon k10temp Tctl`, `NVML`).
     pub source: String,
+}
+
+/// What each sensor of a catalog measures, so a value bound in a theme is
+/// formatted with its real unit.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Quantities(BTreeMap<SensorKey, Quantity>);
+
+impl Quantities {
+    /// No entries (every unit then comes from the key's well-known name).
+    pub const fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    /// The quantities of `catalog`.
+    pub fn from_catalog(catalog: &[SensorInfo]) -> Self {
+        Self(
+            catalog
+                .iter()
+                .map(|s| (s.key.clone(), s.quantity))
+                .collect(),
+        )
+    }
+
+    /// What `key` measures, when the catalog has it.
+    pub fn get(&self, key: &SensorKey) -> Option<Quantity> {
+        self.0.get(key).copied()
+    }
+
+    /// True without entries.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// One measurement.

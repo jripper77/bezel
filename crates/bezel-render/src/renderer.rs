@@ -166,7 +166,11 @@ fn text_of(content: &TextContent, context: &RenderContext<'_>) -> String {
             suffix,
         } => {
             let reading = context.snapshot.get(key);
-            let value = format_reading(&reading, quantity_of(key), *format);
+            let quantity = context
+                .quantities
+                .get(key)
+                .unwrap_or_else(|| quantity_of(key));
+            let value = format_reading(&reading, quantity, *format);
             format!("{prefix}{value}{suffix}")
         }
         TextContent::Clock { pattern } => format_clock(pattern, &context.time, context.language),

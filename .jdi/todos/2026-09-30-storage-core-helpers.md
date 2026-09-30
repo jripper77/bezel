@@ -1,0 +1,1 @@
+- [storage-video follow-up] Move the studio's `fitting_options` (turn a video like the edited theme and cover-crop it) into the core next to `cover_crop`, so the CLI and the studio share one rule; and host-decoded video backgrounds in the studio for screens without device playback (WCH), which today show the poster

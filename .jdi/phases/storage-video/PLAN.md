@@ -33,7 +33,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - Boot reescreve 0x7D com o último brilho/sleep enviados, mudando só o startMode; `present` mantém o alfa por pixel (A=0 mostra o vídeo) em BGRA e no formato de 3 bytes; nenhum comando de armazenamento, 0x7D, 0x82 ou 0x84 sai implicitamente (teste). `FakeConnector` ganha armazenamento em memória da 8.8" para CLI e studio.
 - **Dependencies:** T-6.1
 - **Test:** `protocol::turing_rev_c::tests::storage_packets_match_the_reference_vectors`, `protocol::turing_rev_c::tests::storage_info_subtracts_the_reserved_flash_and_detects_the_card`, `driver::turing_rev_c::tests::upload_reports_progress_and_can_be_cancelled`
-- **Status:** completed (094a24b)
+- **Status:** completed (4dba6cc)
 
 #### T-6.3: Crate `bezel-media` (ffmpeg/ffprobe externos)
 - **Specialist:** jdi-doer-bezel
@@ -44,7 +44,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - `mp4`: parser mínimo de caixas decide se o MP4 já está no perfil (sobe sem converter); `stream`: pipe rawvideo RGBA → `Frame`s em loop, limitado ao fps pedido. Depende só de `bezel-core` (adapter não chama adapter); processos testados com um executável falso, sem exigir ffmpeg no CI.
 - **Dependencies:** T-6.1
 - **Test:** `transcode::tests::builds_the_vendor_argument_vector_for_rev_c`, `probe::tests::missing_ffmpeg_is_reported_not_fatal`; `cargo test -p bezel-media`
-- **Status:** completed (cbca731)
+- **Status:** completed (535e403)
 
 #### T-6.4: Fundo em vídeo: base transparente e runtime
 - **Specialist:** jdi-doer-bezel
@@ -54,7 +54,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - `ThemeRuntime`: tela com reprodução e o arquivo presente (GET_FILE_SIZE nas raízes, sem LIST_DIR nem upload) → PLAY_VIDEO loop=1 e `OnDevice`; ausente → pôster + estado `VideoMissing` (chamada "Enviar para a tela"); tela sem reprodução (WCH) → frames do `MediaTranscoder` ou pôster sem ffmpeg.
 - **Dependencies:** T-6.1
 - **Test:** `renderer::tests::device_video_background_renders_a_transparent_base`; `cargo test -p bezel-core -p bezel-render`
-- **Status:** completed (0756ce4; `crates/bezel-core/src/app/mod.rs` também mudou: só a reexportação dos tipos novos do runtime)
+- **Status:** completed (3957f14; `crates/bezel-core/src/app/mod.rs` também mudou: só a reexportação dos tipos novos do runtime)
 
 ### Wave 3 (paralela: entradas e TUR_USB)
 
@@ -64,7 +64,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
 - **Acceptance:** `ScreenStorage` com os comandos 100/99/38/39/110/113 (nunca 40/98), info em LE32 KiB, raízes TF do § 6; vetores golden; `hardware_validated=false`; boot logo `/usr/data/boot.jpg` (JPEG q95 ≤ 307200 B) só como vetor, sem comando exposto; reusa os auxiliares do `driver/mod.rs` (T-6.2), sem duplicar
 - **Dependencies:** T-6.2
 - **Test:** `cargo test -p bezel-devices --lib turing_usb`
-- **Status:** completed (fd28155; sem o 98, `size` = presença pelo LIST_DIR + bytes gravados pelo próprio link, arquivo alheio = `Unsupported`; `delete` (42) e `set_start_mode` (125) = `Unsupported`)
+- **Status:** completed (59a4e1f; sem o 98, `size` = presença pelo LIST_DIR + bytes gravados pelo próprio link, arquivo alheio = `Unsupported`; `delete` (42) e `set_start_mode` (125) = `Unsupported`)
 
 #### T-6.6: CLI `bezel storage`
 - **Specialist:** jdi-doer-bezel
@@ -75,7 +75,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - `bezel run` com tema de vídeo segue o `ThemeRuntime` (na tela / pôster com aviso / stream do PC).
 - **Dependencies:** T-6.2, T-6.3, T-6.4
 - **Test:** `storage::tests::rm_without_yes_is_refused`; `tests/storage.rs` com `--fake`
-- **Status:** completed (e0dc992; `README.md` e `CHANGELOG.md` também mudaram: seção `bezel storage` e linhas do Unreleased)
+- **Status:** completed (d327cef; `README.md` e `CHANGELOG.md` também mudaram: seção `bezel storage` e linhas do Unreleased)
 
 #### T-6.7: Studio: aba de armazenamento no painel "Tela"
 - **Specialist:** jdi-doer-bezel
@@ -86,7 +86,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - Modo demo emula armazenamento e progresso; Playwright em claro e escuro com axe sem violações sérias/críticas.
 - **Dependencies:** T-6.2, T-6.3, T-6.4
 - **Test:** Playwright "storage tab upload progress and confirmed delete"; `npm run test:unit`; `cargo test -p bezel-studio`
-- **Status:** completed (4e0bf03 backend, 377947d UI; fora do `files_modified`: `src-tauri/src/{studio,media}.rs`, `src/ui/icons.js`, `tests/ui/bridge.test.mjs`; `src/ui/library.js` não precisou mudar)
+- **Status:** completed (3d1842f backend, af98ba2 UI; fora do `files_modified`: `src-tauri/src/{studio,media}.rs`, `src/ui/icons.js`, `tests/ui/bridge.test.mjs`; `src/ui/library.js` não precisou mudar)
 
 ### Wave 4
 

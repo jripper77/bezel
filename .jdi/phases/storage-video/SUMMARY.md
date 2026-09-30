@@ -1,7 +1,7 @@
 # Phase 6: Armazenamento e vídeo — Summary  (slug: storage-video)
 
 **Status:** partial
-**Tasks:** 6/8 complete, 0 blocked (T-6.7 em andamento; T-6.8 parcial: CLI validada, studio e itens visuais pendentes)
+**Tasks:** 7/8 complete, 0 blocked (T-6.8 parcial: CLI validada na 8.8"; aba do studio e itens visuais/boot pendentes de confirmação humana)
 
 > Nota de processo: T-6.1 executada pelo `jdi-doer-bezel` no worktree `wt/sv-core` (a partir de `main`),
 > cherry-picked para a `main`.
@@ -79,6 +79,22 @@
   - `bezel run` com tema de vídeo chama `start_video`: vídeo na tela → loop com base transparente; ausente →
     pôster e o comando `bezel storage put …` exato; sem reprodução → decodificado no PC.
   - `--fake`: 8.8" simulada com arquivos de demonstração e cartão de 8 GiB.
+- T-6.7: aba de armazenamento do studio — `3d1842f` (backend) + `af98ba2` (UI)
+  - Backend (`src-tauri/src/storage.rs`): comandos de armazenamento com erros codificados (`unsupported`,
+    `busy`, `notConfirmed`…); uma operação por vez; com o Ao vivo o job pega o link emprestado da sessão
+    (quadros pausam, preview livre, quadro cheio ao devolver, vídeo do tema reiniciado após envio/apagar/boot);
+    sem Ao vivo abre e fecha a tela; `Confirm::Yes` só com a confirmação do diálogo; progresso pelo evento
+    Tauri `storage-progress`; ffmpeg por `MediaSetup` e `settings.ffmpegPath` ("Localizar ffmpeg…").
+  - Vídeo de fundo no Ao vivo: `start_video` → `Backdrop::OnDevice` quando a tela toca, pôster no preview;
+    `VideoMissing` → "Enviar para a tela" (girado como o tema e recortado em cover).
+  - UI (`src/ui/storage.js`): barras de uso flash/SD, listas por pasta, arrastar arquivo do sistema, resumo
+    antes de enviar, barra com Cancelar, Tocar/Parar, Apagar e Boot ("Ao ligar") atrás de `<dialog>` que
+    nomeia o arquivo; ffmpeg ausente e vídeo ausente explicados em linha; SD explica FAT32/MBR; TUR_USB sem
+    Apagar/Boot com o motivo visível; i18n pt-BR/en; modo demo simula tudo.
+  - Testes: 13 Rust (`storage/tests.rs`), 10 unitários de UI, 4 Playwright × claro/escuro com axe (inclui
+    "storage tab upload progress and confirmed delete").
+  - Fora do `files_modified`: `src-tauri/src/{studio,media}.rs`, `src/ui/icons.js`, `tests/ui/bridge.test.mjs`.
+  - Não implementado: vídeo decodificado no PC dentro do studio (WCH/telas sem armazenamento mostram o pôster).
 - Orquestrador (achados de hardware da T-6.8): `2743b4a` — escrita serial resistente a sinais (o flush do
   serialport desistia com "timeout for retrying flush reached" quando um sinal interrompia um esvaziamento
   de mais de 10 ms, derrubando qualquer upload) e escrita que falha após o cancelamento tratada como o
@@ -96,14 +112,15 @@
   `crates/bezel-cli/src/screen.rs`, `apps/bezel-studio/src-tauri/src/studio.rs`
 
 ## Tests
-- `cargo test --workspace --locked` na `main` após T-6.1..T-6.6 e as correções de hardware: 486 passando, 0 falhando, 6 ignorados (4 de ffmpeg real)
+- `cargo test --workspace --locked` na `main` com T-6.1..T-6.7: 499 passando, 0 falhando, 6 ignorados (4 de ffmpeg real); UI: 56 unitários, 24 Playwright
 - DoD: `domain::storage::tests::destructive_operations_require_confirm_yes` e
   `domain::storage::tests::preflight_rejects_bad_names_sizes_and_full_storage` → OK
 - DoD T-6.2: `protocol::turing_rev_c::tests::storage_packets_match_the_reference_vectors`,
   `...::storage_info_subtracts_the_reserved_flash_and_detects_the_card`,
   `driver::turing_rev_c::tests::upload_reports_progress_and_can_be_cancelled` → OK; DoD T-6.4:
   `renderer::tests::device_video_background_renders_a_transparent_base` → OK
-- DoD T-6.6: `storage::tests::rm_without_yes_is_refused` → OK
+- DoD T-6.6: `storage::tests::rm_without_yes_is_refused` → OK; DoD T-6.7: Playwright "storage tab upload
+  progress and confirmed delete" → OK
 - DoD T-6.3: `transcode::tests::builds_the_vendor_argument_vector_for_rev_c` e
   `probe::tests::missing_ffmpeg_is_reported_not_fatal` → OK
 - Coverage (`cargo llvm-cov`): `bezel-media` 90,82% (97,4% com os ignorados); `app/storage.rs` 99,42%, `domain/storage.rs` 99,31%, `domain/media.rs` 97,71%,

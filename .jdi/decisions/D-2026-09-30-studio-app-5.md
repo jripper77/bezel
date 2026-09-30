@@ -1,0 +1,1 @@
+D-2026-09-30-studio-app-5 (2026-09-30): frontend.has_frontend = true from this phase: the UI keeps a JS demo bridge for the browser, and Gate 7 runs the app Playwright + axe suite (critical paths: empty editor, drag a widget, bind a sensor, undo, theme gallery) in light and dark.

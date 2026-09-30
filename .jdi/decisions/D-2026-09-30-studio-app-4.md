@@ -1,0 +1,1 @@
+D-2026-09-30-studio-app-4 (2026-09-30): Live on device: with Live on, the backend runs the same ThemeRuntime as bezel run on a worker thread, and every committed edit swaps the theme in place (histories kept); closing the window keeps driving the screen from the tray until Quit; autostart through tauri-plugin-autostart.

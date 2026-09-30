@@ -1,0 +1,1 @@
+D-2026-09-30-studio-app-2 (2026-09-30): WYSIWYG: the canvas shows the frame rendered by the Rust renderer (raw RGBA through tauri::ipc::Response), the DOM draws only selection, handles and guides; renders are coalesced to at most 30 per second while dragging and the final one is exact.

@@ -266,6 +266,36 @@ pub struct ConvertOptions {
     pub tone: Tone,
 }
 
+/// The centered part of a `source` picture that, turned `quarter_turns`
+/// clockwise, fills `target` without distortion ("cover"): what a video of
+/// another shape keeps before it is scaled to the panel. `None` when the
+/// shapes already match (the vendor then only scales). Edges are even, as
+/// yuv420p needs.
+pub fn cover_crop(source: Size, quarter_turns: u8, target: Size) -> Option<Rect> {
+    let turned = if quarter_turns % 2 == 1 {
+        source.transposed()
+    } else {
+        source
+    };
+    let (sw, sh) = (u64::from(turned.width), u64::from(turned.height));
+    let (tw, th) = (u64::from(target.width), u64::from(target.height));
+    if sw == 0 || sh == 0 || tw == 0 || th == 0 || sw * th == sh * tw {
+        return None;
+    }
+    let even = |v: u64| u32::try_from(v & !1).unwrap_or(u32::MAX).max(2);
+    let (width, height) = if sw * th > sh * tw {
+        (even(sh * tw / th), even(sh))
+    } else {
+        (even(sw), even(sw * th / tw))
+    };
+    Some(Rect {
+        x: ((turned.width - width) / 2) & !1,
+        y: ((turned.height - height) / 2) & !1,
+        width,
+        height,
+    })
+}
+
 impl ConvertOptions {
     /// True when the options leave the picture as it is.
     pub fn is_identity(&self) -> bool {
@@ -501,6 +531,49 @@ impl UploadProfile {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn cover_crop_keeps_the_middle_of_another_shape() {
+        let panel = Size::new(480, 1920);
+        // A 1920x1080 landscape clip turned once for the 8.8": 1080x1920 after
+        // the turn, wider than 1:4, so the sides go.
+        assert_eq!(
+            cover_crop(Size::new(1920, 1080), 1, panel),
+            Some(Rect {
+                x: 300,
+                y: 0,
+                width: 480,
+                height: 1920
+            })
+        );
+        // Unturned 1920x1080 onto 480x1920: keep a 270x1080 column.
+        assert_eq!(
+            cover_crop(Size::new(1920, 1080), 0, panel),
+            Some(Rect {
+                x: 824,
+                y: 0,
+                width: 270,
+                height: 1080
+            })
+        );
+        // Taller than the panel: top and bottom go.
+        assert_eq!(
+            cover_crop(Size::new(480, 2400), 0, panel),
+            Some(Rect {
+                x: 0,
+                y: 240,
+                width: 480,
+                height: 1920
+            })
+        );
+        assert_eq!(
+            cover_crop(Size::new(960, 3840), 0, panel),
+            None,
+            "same shape: scale only"
+        );
+        assert_eq!(cover_crop(Size::new(1920, 480), 1, panel), None);
+        assert_eq!(cover_crop(Size::new(0, 10), 0, panel), None);
+    }
     use crate::domain::catalog::model_by_id;
     use crate::domain::device::ModelId;
 

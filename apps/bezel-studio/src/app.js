@@ -6,6 +6,7 @@ import { isHorizontal, isTurned, orientationOf } from './editor/geometry.js';
 import { createCanvasView } from './ui/canvas.js';
 import { createLibrary } from './ui/library.js';
 import { createInspector } from './ui/inspector.js';
+import { createStoragePanel, wireSubtabs } from './ui/storage.js';
 import { el } from './ui/dom.js';
 import { shortcutFor } from './shortcuts.js';
 
@@ -27,6 +28,8 @@ const state = {
   fonts: ['Inter', 'JetBrains Mono', 'Roboto', 'Roboto Mono'],
   assets: [],
   location: null,
+  // How the theme's video background reaches the live screen.
+  liveVideo: null,
 };
 
 function toast(message) {
@@ -73,6 +76,20 @@ const library = createLibrary({
     autostart: () => state.autostart,
   },
 });
+
+const storage = createStoragePanel({
+  root: $('storage-panel'),
+  t,
+  locale,
+  bridge,
+  notify: toast,
+  context: () => ({
+    screen: state.screens.find((s) => s.key === state.screen) ?? null,
+    live: state.live,
+    liveVideo: state.liveVideo,
+  }),
+});
+wireSubtabs(document.querySelector('#panel-screen .subtabs'), (name) => (name === 'storage' ? storage.show() : storage.hide()));
 
 const inspector = createInspector({
   root: $('inspector'),
@@ -191,9 +208,11 @@ function renderScreenSelect() {
   $('screen-dot').className = `dot${state.live ? ' live' : current?.state === 'awake' ? ' awake' : ''}`;
   let device = t('top.noScreen');
   if (state.screenError) device = t('status.devicesError', { message: state.screenError });
+  else if (current && state.live && state.liveVideo?.state === 'missing') device = t('status.liveVideoMissing');
   else if (current) device = state.live ? t('status.live') : t(`screen.state.${current.state}`);
   $('status-device').textContent = device;
   library.renderScreen(state.screens, state.screen, state.live);
+  storage.update();
 }
 
 async function refreshScreens() {
@@ -212,6 +231,11 @@ async function refreshScreens() {
 // screen fails; the switch follows what each sample reports.
 function syncLive(s) {
   const live = Boolean(s.live);
+  const video = s.video ?? null;
+  if ((video?.state ?? null) !== (state.liveVideo?.state ?? null)) {
+    state.liveVideo = video;
+    renderScreenSelect();
+  }
   if (live === state.live && (!live || s.live === state.screen)) return;
   if (!live && state.live && s.liveError) toast(t('toast.liveStopped', { message: s.liveError }));
   state.live = live;
@@ -352,6 +376,8 @@ $('theme-name').addEventListener('change', (evt) => {
 });
 
 document.addEventListener('keydown', (evt) => {
+  // Nothing acts behind a modal dialog, and Esc keeps closing it.
+  if (document.querySelector('dialog[open]')) return;
   const action = shortcutFor(evt, document.activeElement);
   if (!action) return;
   evt.preventDefault();

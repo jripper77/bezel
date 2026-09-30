@@ -30,4 +30,13 @@ export const ICONS = Object.freeze({
   horizontal: ['M3 8h18v8H3z'],
   warning: ['M12 3 2 21h20z', 'M12 10v5', 'M12 18h.01'],
   close: ['M6 6l12 12', 'M18 6 6 18'],
+  play: ['M7 4.5v15l12-7.5z'],
+  stop: ['M6 6h12v12H6z'],
+  power: ['M12 3v8', 'M6.3 6.3a8 8 0 1 0 11.4 0'],
+  upload: ['M12 16V4', 'M7 9l5-5 5 5', 'M4 16v4h16v-4'],
+  refresh: ['M20 12a8 8 0 1 1-2.34-5.66', 'M20 4v5h-5'],
+  film: ['M4 5h16v14H4z', 'M8 5v14', 'M16 5v14', 'M4 9h4', 'M4 15h4', 'M16 9h4', 'M16 15h4'],
+  card: ['M8 3h9l3 3v15H4V7z', 'M9 7v3', 'M12 7v3', 'M15 7v3'],
+  chip: ['M7 7h10v10H7z', 'M10 3v4', 'M14 3v4', 'M10 17v4', 'M14 17v4', 'M3 10h4', 'M3 14h4', 'M17 10h4', 'M17 14h4'],
+  info: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 11v6', 'M12 7.5h.01'],
 });

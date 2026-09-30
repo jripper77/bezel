@@ -37,10 +37,86 @@ const asleep21 = Object.freeze({
   wake: { address: 'COM3', usb: '1a86:ca21', serial: 'CT21INCH', manufacturer: 'Turing', product: 'UsbMonitor', location: null },
 });
 
-/** @type {Record<string, {screens?: object[], error?: string}>} */
+// A TURZX USB screen: it stores and plays files, but Bezel neither deletes
+// them nor sets its boot media (D-2026-09-30-storage-video-7).
+const turzx = Object.freeze({
+  key: '3-1.4',
+  state: 'awake',
+  family: 'turing-usb',
+  models: [
+    {
+      ...turing88.models[0],
+      id: 'turing-usb-2.1-round',
+      name: 'Turing 2.1" Round (USB)',
+      diagonal: '2.1"',
+      width: 480,
+      height: 480,
+      capabilities: { ...turing88.models[0].capabilities, partialUpdate: false },
+      hardwareValidated: false,
+    },
+  ],
+  display: { address: '3-1.4', usb: '1cbe:0088', serial: null, manufacturer: 'Turing', product: null, location: '3-1.4' },
+  wake: null,
+});
+
+/** What the demo screens store: sizes in bytes (internal already net of the reserve). */
+export const DEMO_STORAGE = Object.freeze({
+  internalTotal: 7_516_192_768,
+  cardTotal: 31_914_983_424,
+  files: Object.freeze([
+    ['internal/image/logo.png', 184_320],
+    ['internal/video/amd_90.mp4', 18_874_368],
+    ['sd/video/chuva.mp4', 67_108_864],
+  ]),
+});
+
+/**
+ * Local files the demo's file picker and drops know: size, and whether a
+ * video is already in the 8.8"'s profile (else it is converted).
+ */
+export const DEMO_LOCAL_FILES = Object.freeze({
+  'ferias.mp4': { size: 24_117_248, format: 'MP4', width: 1920, height: 1080, native: false },
+  'relogio.mp4': { size: 6_291_456, format: 'MP4', width: 480, height: 1920, native: true },
+  'foto.png': { size: 512_000, format: 'PNG', width: 1080, height: 1080 },
+});
+
+/** The file the demo's picker returns. */
+export const DEMO_PICKED = 'demo://ferias.mp4';
+
+/** A theme with a video background (the TURZX kind), for `?demo=video`. */
+export const DEMO_VIDEO_THEME = Object.freeze({
+  schema: 1,
+  name: 'Vídeo',
+  canvas: { width: 1920, height: 480 },
+  orientation: 'landscape',
+  refreshSeconds: 1,
+  background: { type: 'video', asset: 'assets/nebula.mp4' },
+  elements: [
+    {
+      id: 1,
+      name: 'Clock',
+      frame: { x: 1460, y: 150, width: 400, height: 180 },
+      opacity: 1,
+      visible: true,
+      locked: false,
+      kind: {
+        type: 'text',
+        content: { type: 'clock', pattern: '%H:%M' },
+        style: { font: { family: 'Inter', weight: 700, italic: false }, size: 140, paint: '#ffffffff', align: 'center', valign: 'middle', letterSpacing: 0 },
+      },
+    },
+  ],
+});
+
+/**
+ * @type {Record<string, {screens?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, theme?: object}>}
+ */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
   two: { screens: [turing88, asleep21] },
   empty: { screens: [] },
   error: { error: 'serial port enumeration: permission denied' },
+  noffmpeg: { screens: [turing88], ffmpeg: false, card: false },
+  video: { screens: [turing88], theme: DEMO_VIDEO_THEME },
+  turzx: { screens: [turzx] },
 });

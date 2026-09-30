@@ -63,15 +63,61 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.fonts();
   await bridge.getAutostart();
   await bridge.setAutostart(true);
+  await bridge.storageOverview('k');
+  await bridge.mediaTools();
+  await bridge.locateFfmpeg();
+  await bridge.pickMedia();
+  await bridge.prepareUpload('k', '/home/me/clip.mp4', 'sd');
+  await bridge.prepareThemeVideo('k');
+  await bridge.runUpload(7, true);
+  await bridge.cancelJob();
+  await bridge.deleteStored('k', 'internal/video/a.mp4', true);
+  await bridge.playStored('k', 'internal/video/a.mp4');
+  await bridge.stopPlayback('k');
+  await bridge.setBootMedia('k', null, true);
   assert.deepEqual(calls.map((c) => c[0]), [
     'list_screens', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
     'add_image', 'list_assets', 'list_fonts', 'get_autostart', 'set_autostart',
+    'storage_overview', 'media_tools', 'locate_ffmpeg', 'pick_media', 'prepare_upload', 'prepare_theme_video',
+    'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media',
   ]);
+  assert.deepEqual(calls[23][1], { screen: 'k', source: '/home/me/clip.mp4', medium: 'sd' });
+  assert.deepEqual(calls[25][1], { ticket: 7, overwrite: true });
+  assert.deepEqual(calls[27][1], { screen: 'k', path: 'internal/video/a.mp4', confirmed: true });
+  assert.deepEqual(calls[30][1], { screen: 'k', path: null, confirmed: true });
+  assert.equal(bridge.fileSource({ name: 'x.png' }), null, 'dropped files come with paths from Tauri');
   assert.deepEqual(calls[6][1], { on: true, screen: 'k' });
   assert.deepEqual(calls[7][1], { screen: 'k', percent: 40 });
   assert.deepEqual(calls[9][1], { theme, saveAs: true });
   assert.deepEqual(calls[12][1], { screen: 'k', name: 'Novo', orientation: 'landscape' });
+});
+
+test('tauri mode listens to upload progress and system file drops', async () => {
+  const listened = [];
+  const listen = async (name, cb) => {
+    listened.push(name);
+    cb({ payload: name === 'storage-progress' ? { phase: 'upload', done: 1, total: 2 } : { paths: ['/a.png'], position: { x: 1, y: 2 } } });
+    return () => {};
+  };
+  const invoke = async () => null;
+  const seen = [];
+  const bridge = createBridge({ ...page(), __TAURI__: { core: { invoke }, event: { listen } } });
+  await bridge.onJobProgress((p) => seen.push(p));
+  await bridge.onFileDrop((d) => seen.push(d));
+  assert.deepEqual(listened, ['storage-progress', 'tauri://drag-over', 'tauri://drag-drop', 'tauri://drag-leave']);
+  assert.deepEqual(seen[0], { phase: 'upload', done: 1, total: 2 });
+  assert.deepEqual(seen[2], { type: 'drop', paths: ['/a.png'], position: { x: 1, y: 2 } });
+
+  // The webview API, when the page has it, reports the drop itself.
+  const drops = [];
+  const webview = { onDragDropEvent: async (cb) => { cb({ payload: { type: 'leave' } }); return () => {}; } };
+  const withWebview = createBridge({ ...page(), __TAURI__: { core: { invoke }, webview: { getCurrentWebview: () => webview } } });
+  await withWebview.onFileDrop((d) => drops.push(d));
+  assert.deepEqual(drops, [{ type: 'leave' }]);
+  const bare = createBridge({ ...page(), __TAURI__: { core: { invoke } } });
+  assert.equal(typeof (await bare.onJobProgress(() => {})), 'function');
+  assert.equal(typeof (await bare.onFileDrop(() => {})), 'function');
 });
 
 test('demo mode serves scenarios as copies', async () => {

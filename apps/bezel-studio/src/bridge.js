@@ -15,7 +15,23 @@ export function parseFrame(buffer) {
   return { width, height, rgba };
 }
 
-function tauriBridge(invoke) {
+/** Event of a running upload's progress (`storage-progress` in the backend). */
+export const PROGRESS_EVENT = 'storage-progress';
+
+/**
+ * Subscribes to files dropped on the window from the system: Tauri owns the
+ * drag and reports the paths and the pointer (physical pixels).
+ */
+function onFileDrop(tauri, cb) {
+  const webview = tauri.webview?.getCurrentWebview?.();
+  if (webview?.onDragDropEvent) return webview.onDragDropEvent((e) => cb(e.payload));
+  const listen = tauri.event?.listen;
+  if (typeof listen !== 'function') return Promise.resolve(() => {});
+  const events = { 'tauri://drag-over': 'over', 'tauri://drag-drop': 'drop', 'tauri://drag-leave': 'leave' };
+  return Promise.all(Object.entries(events).map(([name, type]) => listen(name, (e) => cb({ type, ...e.payload }))));
+}
+
+function tauriBridge(invoke, tauri = {}) {
   return {
     mode: 'tauri',
     listScreens: () => invoke('list_screens'),
@@ -41,6 +57,22 @@ function tauriBridge(invoke) {
     fonts: () => invoke('list_fonts'),
     getAutostart: () => invoke('get_autostart'),
     setAutostart: (on) => invoke('set_autostart', { on }),
+    storageOverview: (screen) => invoke('storage_overview', { screen }),
+    mediaTools: () => invoke('media_tools'),
+    locateFfmpeg: () => invoke('locate_ffmpeg'),
+    pickMedia: () => invoke('pick_media'),
+    prepareUpload: (screen, source, medium) => invoke('prepare_upload', { screen, source, medium }),
+    prepareThemeVideo: (screen) => invoke('prepare_theme_video', { screen }),
+    runUpload: (ticket, overwrite) => invoke('run_upload', { ticket, overwrite }),
+    cancelJob: () => invoke('cancel_job'),
+    deleteStored: (screen, path, confirmed) => invoke('delete_stored', { screen, path, confirmed }),
+    playStored: (screen, path) => invoke('play_stored', { screen, path }),
+    stopPlayback: (screen) => invoke('stop_playback', { screen }),
+    setBootMedia: (screen, path, confirmed) => invoke('set_boot_media', { screen, path, confirmed }),
+    onJobProgress: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(PROGRESS_EVENT, (e) => cb(e.payload)) : Promise.resolve(() => {})),
+    onFileDrop: (cb) => onFileDrop(tauri, cb),
+    // Files dropped in the webview carry no path: the system drop above does.
+    fileSource: () => null,
   };
 }
 
@@ -50,7 +82,7 @@ function tauriBridge(invoke) {
  */
 export function createBridge(win) {
   const invoke = win.__TAURI__?.core?.invoke;
-  if (typeof invoke === 'function') return tauriBridge(invoke);
+  if (typeof invoke === 'function') return tauriBridge(invoke, win.__TAURI__);
   const local = ['localhost', '127.0.0.1'].includes(win.location.hostname);
   if (!local) {
     const fail = () => Promise.reject(new Error('no backend'));

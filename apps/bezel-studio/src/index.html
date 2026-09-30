@@ -111,7 +111,16 @@
           <ul class="media-list" id="media-list"></ul>
         </section>
         <section class="panel" role="tabpanel" id="panel-screen" aria-labelledby="tab-screen" hidden>
-          <div id="screen-panel"></div>
+          <div class="subtabs" role="tablist" data-i18n-aria-label="library.screen">
+            <button type="button" role="tab" id="subtab-device" aria-controls="screen-device" aria-selected="true" data-subtab="device" data-i18n="screen.settingsTab"></button>
+            <button type="button" role="tab" id="subtab-storage" aria-controls="screen-storage" aria-selected="false" tabindex="-1" data-subtab="storage" data-i18n="screen.storageTab"></button>
+          </div>
+          <div role="tabpanel" id="screen-device" aria-labelledby="subtab-device">
+            <div id="screen-panel"></div>
+          </div>
+          <div role="tabpanel" id="screen-storage" aria-labelledby="subtab-storage" hidden>
+            <div id="storage-panel" class="storage"></div>
+          </div>
         </section>
       </nav>
 

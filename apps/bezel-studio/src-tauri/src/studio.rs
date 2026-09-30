@@ -14,7 +14,7 @@ use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot};
 use bezel_core::domain::theme::{AssetRef, Theme};
 use bezel_core::ports::{
-    FrameRenderer, RenderContext, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
+    Backdrop, FrameRenderer, RenderContext, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
 };
 use bezel_core::{BezelError, Result};
 
@@ -195,6 +195,7 @@ impl Studio {
             quantities: &self.quantities,
             time,
             language: self.language,
+            backdrop: Backdrop::Poster,
         };
         self.renderer.render(&self.theme, &self.assets, context)
     }

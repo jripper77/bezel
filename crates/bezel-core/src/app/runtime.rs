@@ -9,7 +9,7 @@ use crate::domain::frame::Frame;
 use crate::domain::history::Histories;
 use crate::domain::sensor::Quantities;
 use crate::domain::theme::{AssetRef, Theme};
-use crate::ports::{FrameRenderer, RenderContext, ScreenLink, SensorSource};
+use crate::ports::{Backdrop, FrameRenderer, RenderContext, ScreenLink, SensorSource};
 
 /// A theme being shown.
 #[derive(Debug, Clone)]
@@ -69,6 +69,7 @@ impl ThemeRuntime {
             quantities: &self.quantities,
             time,
             language: self.language,
+            backdrop: Backdrop::Poster,
         };
         renderer.render(&self.theme, &self.assets, context)
     }

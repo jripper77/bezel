@@ -1,4 +1,5 @@
-//! Domain types: device catalog, geometry and discovery.
+//! Domain types: device catalog, geometry, discovery, themes, sensors,
+//! stored media and long-running jobs.
 
 pub mod catalog;
 pub mod clock;
@@ -8,7 +9,10 @@ pub mod error;
 pub mod frame;
 pub mod geometry;
 pub mod history;
+pub mod job;
+pub mod media;
 pub mod pattern;
 pub mod screen;
 pub mod sensor;
+pub mod storage;
 pub mod theme;

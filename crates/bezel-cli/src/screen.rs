@@ -14,7 +14,9 @@ use bezel_core::domain::pattern::test_pattern as pattern;
 use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::sensor::{Quantities, Snapshot};
 use bezel_core::domain::theme::{AssetRef, Background, Fit, Theme};
-use bezel_core::ports::{DeviceBus, FrameRenderer, RenderContext, ScreenConnector, ScreenLink};
+use bezel_core::ports::{
+    Backdrop, DeviceBus, FrameRenderer, RenderContext, ScreenConnector, ScreenLink,
+};
 
 use crate::Target;
 
@@ -165,6 +167,7 @@ where
         quantities: &quantities,
         time: NO_TIME,
         language: Language::English,
+        backdrop: Backdrop::Poster,
     };
     let frame = renderer.render(&theme, &assets, context)?;
     link.set_orientation(orientation)?;

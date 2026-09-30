@@ -19,7 +19,7 @@ use bezel_core::domain::theme::{
     FontSpec, GraphStyle, HAlign, Paint, Segments, ShapeKind, TextContent, TextStyle, Theme,
     VAlign,
 };
-use bezel_core::ports::RenderContext;
+use bezel_core::ports::{Backdrop, RenderContext};
 
 const MUTED: Rgba = Rgba::opaque(140, 150, 175);
 const CYAN: Rgba = Rgba::opaque(0, 229, 255);
@@ -456,6 +456,7 @@ impl Scene {
             quantities: &NO_QUANTITIES,
             time: TIME,
             language: Language::English,
+            backdrop: Backdrop::Poster,
         }
     }
 }

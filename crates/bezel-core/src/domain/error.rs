@@ -2,6 +2,8 @@
 
 use thiserror::Error;
 
+use super::storage::Refusal;
+
 /// Errors of the Bezel domain. Adapters map their own errors into these
 /// variants and never leak transport-specific error types through a port.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -35,4 +37,53 @@ pub enum BezelError {
     /// Any other transport-level failure.
     #[error("transport error: {0}")]
     Transport(String),
+    /// The screen or the host cannot do this (a screen without storage or
+    /// device-side playback, a media converter that is not installed).
+    #[error("not supported: {0}")]
+    Unsupported(String),
+    /// The user cancelled a long operation.
+    #[error("cancelled{}", partial_note(.partial))]
+    Cancelled {
+        /// Bytes of an incomplete file the job left on the screen; `None`
+        /// when it left none (or none could be found).
+        partial: Option<u64>,
+    },
+    /// A destructive or persistent operation came without `Confirm::Yes`;
+    /// nothing was sent. The text names the operation.
+    #[error("{0} needs confirmation")]
+    NotConfirmed(String),
+    /// A storage operation failed its preflight; nothing was converted, sent
+    /// or deleted.
+    #[error("refused: {0}")]
+    Refused(Refusal),
+}
+
+fn partial_note(partial: &Option<u64>) -> String {
+    partial
+        .map(|n| format!("; an incomplete file of {n} bytes remains on the screen"))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_errors_read_well() {
+        assert_eq!(
+            BezelError::Cancelled { partial: None }.to_string(),
+            "cancelled"
+        );
+        assert_eq!(
+            BezelError::Cancelled {
+                partial: Some(2490)
+            }
+            .to_string(),
+            "cancelled; an incomplete file of 2490 bytes remains on the screen"
+        );
+        assert_eq!(
+            BezelError::Unsupported("Turing 3.5\" has no storage".into()).to_string(),
+            "not supported: Turing 3.5\" has no storage"
+        );
+    }
 }

@@ -15,7 +15,7 @@ static NO_QUANTITIES: Quantities = Quantities::new();
 use bezel_core::domain::theme::{
     AssetRef, Background, BoxF, Element, ElementId, ElementKind, Theme,
 };
-use bezel_core::ports::{FrameRenderer, RenderContext};
+use bezel_core::ports::{Backdrop, FrameRenderer, RenderContext};
 use image::codecs::gif::GifEncoder;
 use image::{Delay, ImageFormat, RgbaImage};
 
@@ -124,6 +124,7 @@ pub(crate) fn render(renderer: &mut SkiaRenderer, theme: &Theme, scene: &Scene) 
         quantities: &NO_QUANTITIES,
         time: scene.time,
         language: Language::English,
+        backdrop: Backdrop::Poster,
     };
     renderer
         .render(theme, &scene.assets, context)

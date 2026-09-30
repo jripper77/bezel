@@ -44,7 +44,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - `mp4`: parser mínimo de caixas decide se o MP4 já está no perfil (sobe sem converter); `stream`: pipe rawvideo RGBA → `Frame`s em loop, limitado ao fps pedido. Depende só de `bezel-core` (adapter não chama adapter); processos testados com um executável falso, sem exigir ffmpeg no CI.
 - **Dependencies:** T-6.1
 - **Test:** `transcode::tests::builds_the_vendor_argument_vector_for_rev_c`, `probe::tests::missing_ffmpeg_is_reported_not_fatal`; `cargo test -p bezel-media`
-- **Status:** pending
+- **Status:** completed (cbca731)
 
 #### T-6.4: Fundo em vídeo: base transparente e runtime
 - **Specialist:** jdi-doer-bezel

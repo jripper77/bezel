@@ -1,0 +1,20 @@
+[package]
+name = "bezel-devices"
+description = "Driven adapters of Bezel for smart screens: discovery, transports and wire protocols."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+tracing = { workspace = true }
+# `usbportinfo-location` gives each port its bus and hub port chain, which is
+# how a rev C screen's MCU and SoC are grouped into one screen (D-2026-09-30-foundation-3).
+serialport = { version = "4.10.1", features = ["usbportinfo-location"] }
+nusb = "0.2.7"
+
+[lints]
+workspace = true

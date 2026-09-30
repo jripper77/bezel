@@ -258,6 +258,7 @@ fn fixture_with(name: &str, storage: FakeStorage, media: FakeMedia) -> Fixture {
     let backend = Backend {
         bus: Arc::new(FakeBus::turing_88()),
         connector: Arc::new(connector.clone()),
+        hid: Arc::new(bezel_devices::FakeHid::default()),
         store: Arc::new(FsThemeStore),
         library: ThemeLibrary::new(root.join("themes"), vec![]),
         settings: SettingsFile::new(root.join("settings.json")),

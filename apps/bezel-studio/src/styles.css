@@ -210,6 +210,11 @@ button, input, select { font: inherit; color: inherit; }
 
 .screen-card { display: grid; gap: 4px; padding: 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-2); margin-bottom: 10px; }
 .screen-card .meta { color: var(--muted); font-size: 0.85rem; }
+.screen-card .hint { margin: 2px 0; }
+.desktop-mode { display: grid; gap: 8px; margin: 12px 0 10px; }
+.desktop-mode h3 { margin: 4px 0 0; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.badge.not-validated { justify-self: start; border-color: var(--warn); color: var(--warn); }
+.badge.not-validated svg { color: var(--warn); }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 /* ------------------------------------------------ screen panel: subtabs -- */

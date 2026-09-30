@@ -164,7 +164,7 @@ test('demo playback, boot media and what live mode allows', async () => {
   await assert.rejects(demo.stopPlayback(KEY), (e) => e.code === 'live');
 
   const turzx = createDemoBackend('turzx', instant);
-  const [screen] = await turzx.listScreens();
+  const [screen] = (await turzx.listDevices()).screens;
   await assert.rejects(turzx.deleteStored(screen.key, logo, true), (e) => e.code === 'unsupported');
   await assert.rejects(turzx.setBootMedia(screen.key, logo, true), (e) => e.code === 'unsupported');
 });

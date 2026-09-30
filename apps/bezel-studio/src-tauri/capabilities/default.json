@@ -7,7 +7,8 @@
   ],
   "permissions": [
     "core:event:default",
-    "allow-list-screens",
+    "allow-list-devices",
+    "allow-leave-desktop-mode",
     "allow-sensor-catalog",
     "allow-sample-sensors",
     "allow-editor-session",

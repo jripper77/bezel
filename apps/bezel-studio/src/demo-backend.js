@@ -1,6 +1,6 @@
 // An in-memory backend for demo mode: a simulated screen, sensors that move,
 // themes, media and an approximate renderer. Nothing here reaches hardware.
-import { DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
+import { DEMO_BACK_FROM_DESKTOP, DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
 import { DEMO_THEME } from './demo-theme.js';
 import { renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
@@ -144,7 +144,7 @@ export function demoVideoName(theme) {
  * time and cancel, deletes, playback and the boot media, with the same
  * confirmations and refusals as the app.
  */
-function createDemoStorage(chosen, { delay, live, theme }) {
+function createDemoStorage(chosen, { delay, live, theme, screens }) {
   const card = chosen.card !== false;
   const files = new Map(DEMO_STORAGE.files.filter(([p]) => card || !p.startsWith('sd/')));
   const locals = new Map(Object.entries(DEMO_LOCAL_FILES).map(([name, f]) => [`demo://${name}`, { name, ...f }]));
@@ -157,7 +157,7 @@ function createDemoStorage(chosen, { delay, live, theme }) {
 
   // Errors like the app's: a code, its arguments and the English text.
   const refuse = (code, message, args = {}) => Promise.reject(Object.assign(new Error(message), { code, args }));
-  const screenOf = (key) => (chosen.screens ?? []).find((s) => s.key === key);
+  const screenOf = (key) => screens().find((s) => s.key === key);
   const limited = (key) => screenOf(key)?.family === 'turing-usb';
   const entry = (path, size = files.get(path) ?? null) => {
     const [medium, kind, name] = path.split('/');
@@ -368,14 +368,17 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const delay = clock.delay ?? ((ms) => new Promise((resolve) => { setTimeout(resolve, ms); }));
   const chosen = SCENARIOS[scenario] ?? SCENARIOS.turing88;
   let theme = structuredClone(chosen.theme ?? DEMO_THEME);
+  // What the bus lists: screens and panels in desktop mode (a panel
+  // switched back comes back as a screen).
+  const devices = { screens: [...(chosen.screens ?? [])], desktopMode: [...(chosen.desktopMode ?? [])] };
   let live = false;
   let autostart = false;
   const saved = [{ location: 'demo://Demo', theme: structuredClone(DEMO_THEME) }];
   const images = [];
   /** Screen key → last orientation shown on it or chosen for it. */
   const remembered = new Map();
-  const modelOf = (key) => (chosen.screens ?? []).find((s) => s.key === key)?.models[0];
-  const storage = createDemoStorage(chosen, { delay, live: () => live, theme: () => theme });
+  const modelOf = (key) => devices.screens.find((s) => s.key === key)?.models[0];
+  const storage = createDemoStorage(chosen, { delay, live: () => live, theme: () => theme, screens: () => devices.screens });
   const { videoOfTheme, ...storageApi } = storage;
   // The window, like the app: the close button hides it while a screen is
   // live, asks the UI when edits are unsaved, and closes it otherwise.
@@ -393,7 +396,18 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
 
   return {
     ...storageApi,
-    listScreens: () => (chosen.error ? Promise.reject(new Error(chosen.error)) : Promise.resolve(structuredClone(chosen.screens))),
+    listDevices: () => (chosen.error ? Promise.reject(new Error(chosen.error)) : Promise.resolve(structuredClone(devices))),
+    leaveDesktopMode: (key, confirmed) => {
+      const at = devices.desktopMode.findIndex((p) => p.key === key);
+      if (!confirmed) {
+        const message = 'switching a panel in desktop mode back to USB monitor mode (not validated on hardware) needs confirmation';
+        return Promise.reject(Object.assign(new Error(message), { code: 'notConfirmed', args: { detail: message } }));
+      }
+      if (at < 0) return Promise.reject(Object.assign(new Error(`screen not found: no panel in desktop mode at ${key}`), { code: 'screenNotFound', args: { screen: `no panel in desktop mode at ${key}` } }));
+      const [panel] = devices.desktopMode.splice(at, 1);
+      devices.screens.push(structuredClone(DEMO_BACK_FROM_DESKTOP));
+      return Promise.resolve({ model: panel.models[0].name });
+    },
     catalog: () => Promise.resolve(DEMO_SENSORS.map(([key, category, label, quantity]) => ({ key, category, label, quantity, source: 'demo' }))),
     sample: () => {
       const t = now();

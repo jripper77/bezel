@@ -52,7 +52,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   let themes = [];
   let media = [];
   let importReport = null;
-  let screenArgs = [[], null, false, {}];
+  let screenArgs = [[], null, false, {}, []];
 
   // ---------------------------------------------------------------- tabs --
   const tabs = [...document.querySelectorAll('.tabs [role="tab"]')];
@@ -263,15 +263,40 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   // -------------------------------------------------------------- screen --
   const autostartField = () => checkField(t('screen.autostart'), actions.autostart(), (on) => actions.setAutostart(on));
 
-  /** @param {Record<string, number>} brightness the level set on each screen in this session */
-  function renderScreen(screens, current, live, brightness = {}) {
-    screenArgs = [screens, current, live, brightness];
+  /**
+   * The panels the vendor app left in desktop mode: listed, labelled "not
+   * validated on hardware", and switched back only after a confirmation
+   * (D-2026-09-30-release-polish-8).
+   */
+  function desktopSection(panels) {
+    if (!panels.length) return null;
+    return el('section', { class: 'desktop-mode', 'aria-labelledby': 'desktop-mode-title' }, [
+      el('h3', { id: 'desktop-mode-title', text: t('desktop.title') }),
+      ...panels.map((p) => el('div', { class: 'screen-card', role: 'group', 'aria-label': t('desktop.cardLabel', { address: p.key }) }, [
+        el('strong', { text: t('desktop.name') }),
+        el('span', { class: 'meta', text: `${p.key} · ${p.usb}` }),
+        el('span', { class: 'badge not-validated' }, [icon(ICONS.warning, 14), t('desktop.notValidated')]),
+        el('p', { class: 'hint', text: t('desktop.hint') }),
+        el('p', { class: 'hint', text: t('desktop.models', { models: p.models.map((m) => m.name).join(', ') }) }),
+        el('div', { class: 'button-row' }, [
+          el('button', { type: 'button', class: 'text-button', text: t('desktop.leave'), onclick: () => actions.leaveDesktopMode(p) }),
+        ]),
+      ])),
+    ]);
+  }
+
+  /**
+   * @param {Record<string, number>} brightness the level set on each screen in this session
+   * @param {object[]} desktopMode the panels in desktop mode
+   */
+  function renderScreen(screens, current, live, brightness = {}, desktopMode = []) {
+    screenArgs = [screens, current, live, brightness, desktopMode];
     const root = $('screen-panel');
     if (!screens.length) {
-      root.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }), autostartField());
+      root.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }), autostartField(), ...[desktopSection(desktopMode)].filter(Boolean));
       return;
     }
-    root.replaceChildren(autostartField(), ...screens.map((s) => {
+    root.replaceChildren(autostartField(), ...[desktopSection(desktopMode)].filter(Boolean), ...screens.map((s) => {
       const model = s.models.length === 1 ? s.models[0] : null;
       const slider = el('input', { type: 'range', min: 0, max: 100, step: 1, value: String(brightness[s.key] ?? 70), 'aria-label': t('screen.brightness') });
       slider.addEventListener('change', () => actions.setBrightness(s.key, Number(slider.value)));

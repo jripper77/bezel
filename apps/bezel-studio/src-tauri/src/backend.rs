@@ -6,16 +6,16 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use bezel_core::app::{choose_screen, discover_screens};
+use bezel_core::app::{choose_screen, discover_devices, discover_screens, leave_desktop_mode};
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::geometry::Orientation;
-use bezel_core::domain::screen::Brightness;
+use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::theme::Theme;
 use bezel_core::ports::{
-    DeviceBus, ScreenConnector, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
+    DesktopModeHid, DeviceBus, ScreenConnector, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
 };
 use bezel_sensors::SensorOptions;
 use bezel_themes::dto::ThemeDto;
@@ -23,8 +23,8 @@ use bezel_themes::import::import_path;
 use bezel_themes::native::{is_native, native_location};
 
 use crate::dto::{
-    AddedDto, AssetDto, ImportedDto, LiveVideoDto, PreferencesDto, SampleDto, SavedDto, ScreenDto,
-    SensorDto, SessionDto, ThemeEntryDto,
+    AddedDto, AssetDto, DevicesDto, ImportedDto, LiveVideoDto, MonitorModeDto, PreferencesDto,
+    SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
 };
 use crate::library::ThemeLibrary;
 use crate::media::{kind_of, thumbnail_data_url};
@@ -50,6 +50,8 @@ pub struct Backend {
     pub bus: Arc<dyn DeviceBus + Send + Sync>,
     /// How screens are opened.
     pub connector: Arc<dyn ScreenConnector + Send + Sync>,
+    /// The HID interface of panels in desktop mode.
+    pub hid: Arc<dyn DesktopModeHid + Send + Sync>,
     /// Theme files.
     pub store: Arc<dyn ThemeStore + Send + Sync>,
     /// The theme folders.
@@ -307,10 +309,18 @@ impl Backend {
 
     // ------------------------------------------------------------ screens --
 
-    /// The connected screens.
-    pub fn screens(&self) -> UiResult<Vec<ScreenDto>> {
-        let screens = discover_screens(self.bus.as_ref())?;
-        Ok(screens.iter().map(ScreenDto::from).collect())
+    /// The connected screens and the panels in desktop mode (read-only).
+    pub fn devices(&self) -> UiResult<DevicesDto> {
+        Ok(DevicesDto::from(&discover_devices(self.bus.as_ref())?))
+    }
+
+    /// Switches the panel in desktop mode at `key` back to USB monitor mode
+    /// (D-2026-09-30-release-polish-8, not validated on hardware). Without
+    /// `Confirm::Yes` nothing is sent.
+    pub fn leave_desktop_mode(&self, key: &str, confirm: Confirm) -> UiResult<MonitorModeDto> {
+        let switched =
+            leave_desktop_mode(self.bus.as_ref(), self.hid.as_ref(), Some(key), confirm)?;
+        Ok(MonitorModeDto::from(&switched))
     }
 
     /// Starts (`screen` given) or stops showing the edited theme live.
@@ -677,7 +687,7 @@ mod tests {
     use super::*;
     use bezel_core::domain::geometry::{Orientation, Size};
     use bezel_core::domain::theme::MIN_REFRESH_SECONDS;
-    use bezel_devices::{FakeBus, FakeConnector};
+    use bezel_devices::{FakeBus, FakeConnector, FakeHid};
     use bezel_render::{SkiaRenderer, SystemFonts};
     use bezel_sensors::FakeSensors;
     use bezel_themes::FsThemeStore;
@@ -722,6 +732,7 @@ mod tests {
         let backend = Backend {
             bus: Arc::new(FakeBus::turing_88()),
             connector: Arc::new(connector.clone()),
+            hid: Arc::new(FakeHid::answering(0x88)),
             store: Arc::new(FsThemeStore),
             library: ThemeLibrary::new(root.join("themes"), vec![]),
             settings: SettingsFile::new(root.join("settings.json")),
@@ -873,6 +884,29 @@ mod tests {
     }
 
     #[test]
+    fn a_panel_in_desktop_mode_switches_back_only_when_confirmed() {
+        let mut f = fixture("desktop-mode");
+        let hid = FakeHid::answering(0x88);
+        f.backend.hid = Arc::new(hid.clone());
+        f.backend.bus = Arc::new(FakeBus::turing_88().and(FakeBus::desktop_mode()));
+        let found = f.backend.devices().unwrap();
+        assert_eq!((found.screens.len(), found.desktop_mode.len()), (1, 1));
+        let key = found.desktop_mode[0].key.clone();
+
+        let refused = f.backend.leave_desktop_mode(&key, Confirm::No).unwrap_err();
+        assert_eq!(refused.code(), "notConfirmed");
+        assert!(hid.calls().is_empty(), "nothing without Confirm::Yes");
+
+        let done = f.backend.leave_desktop_mode(&key, Confirm::Yes).unwrap();
+        assert_eq!(done.model, Some("Turing 8.8\" V1.x (USB)"));
+        assert_eq!(hid.calls().len(), 2, "the model query, then the switch");
+        let gone = f
+            .backend
+            .leave_desktop_mode("hid:/dev/hidraw9", Confirm::Yes);
+        assert_eq!(gone.unwrap_err().code(), "screenNotFound");
+    }
+
+    #[test]
     fn render_preview_returns_the_canvas_size() {
         let f = fixture("render");
         let theme = f.backend.session().theme;
@@ -887,7 +921,7 @@ mod tests {
     #[test]
     fn live_mode_shows_edits_and_is_remembered() {
         let f = fixture("live");
-        assert_eq!(f.backend.screens().unwrap().len(), 1);
+        assert_eq!(f.backend.devices().unwrap().screens.len(), 1);
         f.backend.set_live(true, Some(KEY), TIME).unwrap();
         assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
         let theme = f.backend.session().theme;

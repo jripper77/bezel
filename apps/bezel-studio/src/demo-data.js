@@ -59,6 +59,27 @@ const turzx = Object.freeze({
   wake: null,
 });
 
+// A Turing USB panel the vendor app left in Windows' desktop mode: listed
+// and switched back on request (not validated on hardware).
+const desktopPanel = Object.freeze({
+  key: 'hid:/dev/hidraw7',
+  usb: '1a86:ad11',
+  family: 'turing-usb',
+  models: [
+    { ...turing88.models[0], id: 'turing-usb-8.8', name: 'Turing 8.8" V1.x (USB)', hardwareValidated: false },
+    { ...turing88.models[0], id: 'turing-usb-5.2', name: 'Turing 5.2" (USB)', diagonal: '5.2"', width: 720, height: 1280, hardwareValidated: false },
+  ],
+  hardwareValidated: false,
+});
+
+/** The screen a panel in desktop mode comes back as. */
+export const DEMO_BACK_FROM_DESKTOP = Object.freeze({
+  ...turzx,
+  key: '3-1.6',
+  models: [{ ...desktopPanel.models[0], capabilities: { ...turzx.models[0].capabilities } }],
+  display: { ...turzx.display, address: '3-1.6', usb: '1cbe:0088', location: '3-1.6' },
+});
+
 /** What the demo screens store: sizes in bytes (internal already net of the reserve). */
 export const DEMO_STORAGE = Object.freeze({
   internalTotal: 7_516_192_768,
@@ -114,7 +135,7 @@ export const DEMO_VIDEO_THEME = Object.freeze({
 export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules && sudo udevadm control --reload && sudo udevadm trigger';
 
 /**
- * @type {Record<string, {screens?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, theme?: object, denied?: boolean}>}
+ * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, theme?: object, denied?: boolean}>}
  */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
@@ -126,4 +147,5 @@ export const SCENARIOS = Object.freeze({
   turzx: { screens: [turzx] },
   // Linux without Bezel's udev rule: the screen is listed, opening it is denied.
   denied: { screens: [turing88], denied: true },
+  desktop: { screens: [turing88], desktopMode: [desktopPanel] },
 });

@@ -471,3 +471,33 @@ test('a denied port shows the udev command to copy', async ({ page, context }) =
   await expectAccessible(page);
   expect(errors).toEqual([]);
 });
+
+test('a panel in desktop mode is labelled and switched back only after a dialog', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=desktop');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('tab', { name: 'Tela' }).click();
+  const panel = page.getByRole('group', { name: 'Painel em modo desktop em hid:/dev/hidraw7' });
+  await expect(panel).toContainText('Não validado no hardware');
+  await expect(panel).toContainText('Turing 8.8" V1.x (USB)');
+  await expectAccessible(page);
+
+  const leave = panel.getByRole('button', { name: 'Voltar ao modo de tela USB…' });
+  await leave.click();
+  const dialog = page.getByRole('dialog', { name: 'Voltar hid:/dev/hidraw7 ao modo de tela USB?' });
+  await expect(dialog).toContainText('não validou isso no hardware');
+  // Not validated: the safe answer has the focus.
+  await expect(dialog.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+  await expectAccessible(page);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(leave).toBeFocused();
+  await expect(panel).toBeVisible();
+
+  await leave.click();
+  await dialog.getByRole('button', { name: 'Voltar ao modo de tela' }).click();
+  await expect(page.locator('#toast')).toHaveText('O painel (Turing 8.8" V1.x (USB)) voltou ao modo de tela USB; ele aparece como tela em alguns segundos.');
+  await expect(panel).toHaveCount(0);
+  await expect(page.locator('#screen-select option')).toHaveCount(2);
+  expect(errors).toEqual([]);
+});

@@ -52,7 +52,7 @@ test('saving, listing and opening themes', async () => {
 
 test('new themes: the orientation asked for, else the last one used with the screen, else by shape', async () => {
   const demo = createDemoBackend('two', fixed);
-  const [big, small] = (await demo.listScreens()).map((s) => s.key);
+  const [big, small] = (await demo.listDevices()).screens.map((s) => s.key);
   const wide = await demo.newTheme(big, 'A');
   assert.deepEqual([wide.orientation, wide.canvas], ['landscape', { width: 1920, height: 480 }], 'the 8.8" is a bar');
   assert.equal((await demo.newTheme(small, 'B')).orientation, 'portrait', 'a square screen stays vertical');
@@ -69,7 +69,7 @@ test('new themes: the orientation asked for, else the last one used with the scr
 
 test('images, live mode and fonts', async () => {
   const demo = createDemoBackend('empty', fixed);
-  assert.deepEqual(await demo.listScreens(), []);
+  assert.deepEqual(await demo.listDevices(), { screens: [], desktopMode: [] });
   assert.deepEqual(await demo.assets(), []);
   await demo.addImage();
   assert.deepEqual(await demo.assets(), [{ ref: 'assets/image-1.png', kind: 'image' }]);
@@ -115,4 +115,18 @@ test('the window hides while live, asks over unsaved edits, else closes', async 
   assert.deepEqual(seen, ['hidden', 'hidden', 'closed', 'closed']);
   // Without hooks nothing breaks.
   await createDemoBackend('empty', fixed).closeWindow();
+});
+
+test('a panel in desktop mode is listed and switched back only when confirmed', async () => {
+  const demo = createDemoBackend('desktop', fixed);
+  const before = await demo.listDevices();
+  assert.equal(before.screens.length, 1);
+  const [panel] = before.desktopMode;
+  assert.equal(panel.hardwareValidated, false);
+  await assert.rejects(demo.leaveDesktopMode(panel.key, false), (e) => e.code === 'notConfirmed');
+  assert.equal((await demo.listDevices()).desktopMode.length, 1, 'nothing sent');
+  assert.deepEqual(await demo.leaveDesktopMode(panel.key, true), { model: 'Turing 8.8" V1.x (USB)' });
+  const after = await demo.listDevices();
+  assert.deepEqual([after.screens.length, after.desktopMode.length], [2, 0], 'back as a screen');
+  await assert.rejects(demo.leaveDesktopMode(panel.key, true), (e) => e.code === 'screenNotFound');
 });

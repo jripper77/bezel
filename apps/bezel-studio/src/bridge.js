@@ -43,7 +43,8 @@ function onFileDrop(tauri, cb) {
 function tauriBridge(invoke, tauri = {}) {
   return {
     mode: 'tauri',
-    listScreens: () => invoke('list_screens'),
+    listDevices: () => invoke('list_devices'),
+    leaveDesktopMode: (key, confirmed) => invoke('leave_desktop_mode', { key, confirmed }),
     catalog: () => invoke('sensor_catalog'),
     sample: () => invoke('sample_sensors'),
     session: () => invoke('editor_session'),

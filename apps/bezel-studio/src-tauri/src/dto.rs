@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use bezel_core::app::VideoState;
 use bezel_core::domain::device::DeviceModel;
-use bezel_core::domain::discovery::{Endpoint, Screen, ScreenState};
+use bezel_core::domain::discovery::{
+    DesktopModePanel, Discovery, Endpoint, MonitorModeSwitch, Screen, ScreenState,
+};
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::job::Progress;
 use bezel_core::domain::media::{MediaInfo, MediaTools, Mismatch};
@@ -139,6 +141,71 @@ impl From<&Screen> for ScreenDto {
             models: s.candidates.iter().map(|m| ModelDto::from(*m)).collect(),
             display: s.display.as_ref().map(EndpointDto::from),
             wake: s.wake.as_ref().map(EndpointDto::from),
+        }
+    }
+}
+
+/// A Turing USB panel the vendor app left in desktop mode: listed, and
+/// switched back to USB monitor mode on request (not validated on hardware).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopPanelDto {
+    /// Its HID interface's address: what `leave_desktop_mode` takes.
+    pub key: String,
+    /// `vid:pid` of the HID interface.
+    pub usb: String,
+    /// The family it belongs to once back in USB monitor mode.
+    pub family: &'static str,
+    /// The models it may be.
+    pub models: Vec<ModelDto>,
+    /// Always `false`: the switch was not validated on hardware
+    /// (D-2026-09-30-release-polish-8).
+    pub hardware_validated: bool,
+}
+
+impl From<&DesktopModePanel> for DesktopPanelDto {
+    fn from(p: &DesktopModePanel) -> Self {
+        Self {
+            key: p.address().0.clone(),
+            usb: p.hid.usb.to_string(),
+            family: DesktopModePanel::FAMILY.slug(),
+            models: p.candidates.iter().map(|m| ModelDto::from(*m)).collect(),
+            hardware_validated: DesktopModePanel::HARDWARE_VALIDATED,
+        }
+    }
+}
+
+/// What one enumeration found.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevicesDto {
+    /// The screens.
+    pub screens: Vec<ScreenDto>,
+    /// The panels in desktop mode.
+    pub desktop_mode: Vec<DesktopPanelDto>,
+}
+
+impl From<&Discovery> for DevicesDto {
+    fn from(d: &Discovery) -> Self {
+        Self {
+            screens: d.screens.iter().map(ScreenDto::from).collect(),
+            desktop_mode: d.desktop_mode.iter().map(DesktopPanelDto::from).collect(),
+        }
+    }
+}
+
+/// What a confirmed switch back to USB monitor mode did.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorModeDto {
+    /// The model the panel named, when it named a known one.
+    pub model: Option<&'static str>,
+}
+
+impl From<&MonitorModeSwitch> for MonitorModeDto {
+    fn from(s: &MonitorModeSwitch) -> Self {
+        Self {
+            model: s.model().map(|m| m.name),
         }
     }
 }
@@ -722,6 +789,21 @@ mod tests {
         assert_eq!(json["models"][0]["hardwareValidated"], true);
         assert_eq!(json["models"][0]["capabilities"]["videoPlayback"], true);
         assert_eq!(json["wake"]["serial"], "CT88INCH");
+    }
+
+    #[test]
+    fn panels_in_desktop_mode_are_listed_as_not_validated() {
+        use bezel_core::app::discover_devices;
+        let bus = FakeBus::turing_88().and(FakeBus::desktop_mode());
+        let json =
+            serde_json::to_value(DevicesDto::from(&discover_devices(&bus).unwrap())).unwrap();
+        assert_eq!(json["screens"].as_array().unwrap().len(), 1);
+        let panel = &json["desktopMode"][0];
+        assert_eq!(panel["key"], "hid:/dev/hidraw7");
+        assert_eq!(panel["usb"], "1a86:ad11");
+        assert_eq!(panel["family"], "turing-usb");
+        assert_eq!(panel["hardwareValidated"], false);
+        assert!(!panel["models"].as_array().unwrap().is_empty());
     }
 
     #[test]

@@ -30,9 +30,9 @@ use std::time::Instant;
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::theme::Theme;
-use bezel_core::ports::{DeviceBus, ScreenConnector};
+use bezel_core::ports::{DesktopModeHid, DeviceBus, ScreenConnector};
 use bezel_devices::fake::FakeStorage;
-use bezel_devices::{FakeBus, FakeConnector, SystemBus, SystemConnector};
+use bezel_devices::{FakeBus, FakeConnector, FakeHid, SystemBus, SystemConnector, SystemHid};
 use bezel_media::FfmpegTranscoder;
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
@@ -151,7 +151,8 @@ pub fn run() -> Result<(), tauri::Error> {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            commands::list_screens,
+            commands::list_devices,
+            commands::leave_desktop_mode,
             commands::sensor_catalog,
             commands::sample_sensors,
             commands::editor_session,
@@ -207,6 +208,7 @@ pub(crate) fn show_main_window(app: &AppHandle) {
 struct Adapters {
     bus: Arc<dyn DeviceBus + Send + Sync>,
     connector: Arc<dyn ScreenConnector + Send + Sync>,
+    hid: Arc<dyn DesktopModeHid + Send + Sync>,
     sensors: SensorFactory,
 }
 
@@ -220,12 +222,14 @@ fn adapters(simulate: bool) -> Adapters {
         Adapters {
             bus: Arc::new(FakeBus::turing_88()),
             connector: Arc::new(FakeConnector::with_storage(storage)),
+            hid: Arc::new(FakeHid::answering(0x88)),
             sensors: Arc::new(|_| Box::new(FakeSensors::demo())),
         }
     } else {
         Adapters {
             bus: Arc::new(SystemBus),
             connector: Arc::new(SystemConnector),
+            hid: Arc::new(SystemHid),
             sensors: Arc::new(|options| Box::new(SystemSensors::with_options(options))),
         }
     }
@@ -259,6 +263,7 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     let Adapters {
         bus,
         connector,
+        hid,
         sensors,
     } = adapters(simulate);
     // The bundled themes' fonts first, so previews match every machine.
@@ -286,6 +291,7 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     Ok(Backend {
         bus,
         connector,
+        hid,
         store: Arc::new(FsThemeStore),
         library: ThemeLibrary::new(path.app_data_dir()?.join("themes"), bundled_theme_dirs(app)),
         settings,

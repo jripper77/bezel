@@ -40,6 +40,7 @@ fn backend(scratch: &Path) -> Backend {
     Backend {
         bus: Arc::new(SystemBus),
         connector: Arc::new(SystemConnector),
+        hid: Arc::new(bezel_devices::SystemHid),
         store: Arc::new(FsThemeStore),
         library: ThemeLibrary::new(scratch.join("themes"), vec![themes]),
         settings: SettingsFile::new(scratch.join("settings.json")),
@@ -85,7 +86,7 @@ fn live_mode_turns_and_releases_on_the_real_screen() {
     let scratch = std::env::temp_dir().join(format!("bezel-hw-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);
     let b = backend(&scratch);
-    let screens = b.screens().expect("screens");
+    let screens = b.devices().expect("screens").screens;
     let key = screens.first().expect("a connected screen").key.clone();
     println!("screen {key}");
 

@@ -5,7 +5,8 @@ use std::process::ExitCode;
 
 /// Every `#[tauri::command]` the UI may invoke.
 const COMMANDS: &[&str] = &[
-    "list_screens",
+    "list_devices",
+    "leave_desktop_mode",
     "sensor_catalog",
     "sample_sensors",
     "editor_session",

@@ -19,9 +19,9 @@ use tauri_plugin_dialog::DialogExt as _;
 use crate::backend::Backend;
 use crate::clock::now;
 use crate::dto::{
-    AddedDto, AssetDto, ImportedDto, JobDto, MediaToolsDto, PreferencesDto, PrepareDto,
-    ProgressDto, SampleDto, SavedDto, ScreenDto, SensorDto, SessionDto, StorageDto, ThemeEntryDto,
-    parse_orientation,
+    AddedDto, AssetDto, DevicesDto, ImportedDto, JobDto, MediaToolsDto, MonitorModeDto,
+    PreferencesDto, PrepareDto, ProgressDto, SampleDto, SavedDto, SensorDto, SessionDto,
+    StorageDto, ThemeEntryDto, parse_orientation,
 };
 use crate::media::{IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
@@ -56,10 +56,25 @@ fn pick_file<R: Runtime>(
         .transpose()
 }
 
-/// Lists the connected screens (read-only).
+/// Lists the connected screens and the panels in desktop mode (read-only).
 #[tauri::command]
-pub async fn list_screens(state: State<'_, Shared>) -> UiResult<Vec<ScreenDto>> {
-    blocking(&state, Backend::screens).await
+pub async fn list_devices(state: State<'_, Shared>) -> UiResult<DevicesDto> {
+    blocking(&state, Backend::devices).await
+}
+
+/// Switches a panel in desktop mode back to USB monitor mode; `confirmed`
+/// comes from the dialog that names it and says it is not validated on
+/// hardware (D-2026-09-30-release-polish-8).
+#[tauri::command]
+pub async fn leave_desktop_mode(
+    state: State<'_, Shared>,
+    key: String,
+    confirmed: bool,
+) -> UiResult<MonitorModeDto> {
+    blocking(&state, move |b| {
+        b.leave_desktop_mode(&key, confirm_of(confirmed))
+    })
+    .await
 }
 
 /// The machine's sensors.

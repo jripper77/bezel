@@ -42,7 +42,7 @@ test('tauri mode maps every call to its command', async () => {
   const bridge = createBridge({ ...page(), __TAURI__: { core: { invoke } } });
   assert.equal(bridge.mode, 'tauri');
   const theme = { name: 'x' };
-  await bridge.listScreens();
+  await bridge.listDevices();
   await bridge.catalog();
   await bridge.sample();
   await bridge.session();
@@ -78,14 +78,23 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.setBootMedia('k', 'internal/video/a.mp4', true, 40);
   await bridge.setUnsaved(true);
   await bridge.closeWindow();
+  await bridge.preferences();
+  await bridge.setLanguage('en');
+  await bridge.setSensorOptions('1.1.1.1', null);
+  await bridge.pickFolder();
+  await bridge.leaveDesktopMode('hid:/dev/hidraw7', true);
   assert.deepEqual(calls.map((c) => c[0]), [
-    'list_screens', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
+    'list_devices', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
     'add_image', 'list_assets', 'list_fonts', 'get_autostart', 'set_autostart',
     'storage_overview', 'media_tools', 'locate_ffmpeg', 'pick_media', 'prepare_upload', 'prepare_theme_video',
     'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media', 'set_boot_media',
-    'set_unsaved', 'close_window',
+    'set_unsaved', 'close_window', 'preferences', 'set_language', 'set_sensor_options', 'pick_folder',
+    'leave_desktop_mode',
   ]);
+  assert.deepEqual(calls[35][1], { language: 'en' });
+  assert.deepEqual(calls[36][1], { pingHost: '1.1.1.1', mangohudDir: null });
+  assert.deepEqual(calls[38][1], { key: 'hid:/dev/hidraw7', confirmed: true });
   assert.deepEqual(calls[32][1], { unsaved: true });
   assert.deepEqual(calls[23][1], { screen: 'k', source: '/home/me/clip.mp4', medium: 'sd' });
   assert.deepEqual(calls[25][1], { ticket: 7, overwrite: true });
@@ -151,21 +160,30 @@ test('demo mode shows what the window does and takes the close button as an even
 test('demo mode serves scenarios as copies', async () => {
   const bridge = createBridge(page('?demo=two'));
   assert.equal(bridge.mode, 'demo');
-  const a = await bridge.listScreens();
+  const a = (await bridge.listDevices()).screens;
   a[0].key = 'mutated';
-  const b = await bridge.listScreens();
+  const b = (await bridge.listDevices()).screens;
   assert.equal(b.length, 2);
   assert.equal(b[0].key, '/dev/ttyACM1');
 });
 
 test('demo defaults to the Turing 8.8" and reports scenario errors', async () => {
-  assert.equal((await createBridge(page()).listScreens()).length, 1);
-  assert.equal((await createBridge(page('?demo=nope')).listScreens()).length, 1);
-  await assert.rejects(createBridge(page('?demo=error')).listScreens(), /permission denied/);
+  assert.equal((await createBridge(page()).listDevices()).screens.length, 1);
+  assert.equal((await createBridge(page('?demo=nope')).listDevices()).screens.length, 1);
+  await assert.rejects(createBridge(page('?demo=error')).listDevices(), /permission denied/);
 });
 
 test('outside localhost without Tauri there is no backend', async () => {
   const bridge = createBridge(page('', 'example.com'));
   assert.equal(bridge.mode, 'unavailable');
-  await assert.rejects(bridge.listScreens(), /no backend/);
+  await assert.rejects(bridge.listDevices(), /no backend/);
+});
+
+test('the demo serves every call the app does', () => {
+  const tauri = createBridge({ ...page(), __TAURI__: { core: { invoke: async () => null } } });
+  const demo = createBridge(page());
+  // Files dropped from the system reach only the app (Tauri owns that drag).
+  const appOnly = ['onFileDrop'];
+  const missing = Object.keys(tauri).filter((k) => typeof tauri[k] === 'function' && typeof demo[k] !== 'function' && !appOnly.includes(k));
+  assert.deepEqual(missing, []);
 });

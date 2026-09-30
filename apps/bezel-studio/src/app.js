@@ -6,8 +6,9 @@ import { isHorizontal, isTurned, orientationOf } from './editor/geometry.js';
 import { createCanvasView } from './ui/canvas.js';
 import { createLibrary } from './ui/library.js';
 import { createInspector } from './ui/inspector.js';
-import { createStoragePanel, wireSubtabs } from './ui/storage.js';
-import { el } from './ui/dom.js';
+import { createConfirm, createStoragePanel, wireSubtabs } from './ui/storage.js';
+import { el, icon } from './ui/dom.js';
+import { ICONS } from './ui/icons.js';
 import { askChoice } from './ui/dialog.js';
 import { createPreferences } from './ui/preferences.js';
 import { showAccessHelp } from './ui/udev.js';
@@ -31,6 +32,8 @@ applyTranslations(document, t);
 
 const state = {
   screens: [],
+  // Panels the vendor app left in desktop mode (not screens).
+  desktopMode: [],
   screen: null,
   screenError: null,
   live: false,
@@ -95,6 +98,7 @@ const library = createLibrary({
     release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => fail(e)),
     setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => fail(e)),
     autostart: () => state.autostart,
+    leaveDesktopMode: (panel) => leaveDesktopMode(panel),
   },
 });
 
@@ -235,16 +239,19 @@ function renderScreenSelect() {
   else if (current && state.live && state.liveVideo?.state === 'missing') device = t('status.liveVideoMissing');
   else if (current) device = state.live ? t('status.live') : t(`screen.state.${current.state}`);
   $('status-device').textContent = device;
-  library.renderScreen(state.screens, state.screen, state.live, state.brightness);
+  library.renderScreen(state.screens, state.screen, state.live, state.brightness, state.desktopMode);
   storage.update();
 }
 
 async function refreshScreens() {
   try {
-    state.screens = await bridge.listScreens();
+    const found = await bridge.listDevices();
+    state.screens = found.screens;
+    state.desktopMode = found.desktopMode ?? [];
     state.screenError = null;
   } catch (e) {
     state.screens = [];
+    state.desktopMode = [];
     state.screenError = e;
   }
   if (!state.screens.some((s) => s.key === state.screen)) state.screen = state.screens[0]?.key ?? null;
@@ -292,6 +299,31 @@ $('screen-select').addEventListener('change', (evt) => {
   renderScreenSelect();
 });
 $('live').addEventListener('change', (evt) => setLive(evt.target.checked));
+
+// A panel in desktop mode goes back to USB monitor mode only after a dialog
+// that names it and says the switch is not validated on hardware
+// (D-2026-09-30-release-polish-8).
+const confirmAction = createConfirm(t);
+
+async function leaveDesktopMode(panel) {
+  const ok = await confirmAction({
+    title: t('desktop.confirmTitle', { address: panel.key }),
+    body: [
+      el('p', { text: t('desktop.confirmBody') }),
+      el('p', { class: 'dialog-warning' }, [icon(ICONS.warning, 18), el('span', { text: t('desktop.confirmRisk') })]),
+    ],
+    action: t('desktop.confirmAction'),
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const done = await bridge.leaveDesktopMode(panel.key, true);
+    toast(done?.model ? t('desktop.doneModel', { model: done.model }) : t('desktop.done'));
+  } catch (e) {
+    fail(e);
+  }
+  await refreshScreens();
+}
 
 // ----------------------------------------------------------- themes ----
 async function refreshThemes() {

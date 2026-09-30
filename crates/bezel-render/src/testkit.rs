@@ -118,13 +118,23 @@ impl Scene {
 
 /// Renders `theme` in `scene`.
 pub(crate) fn render(renderer: &mut SkiaRenderer, theme: &Theme, scene: &Scene) -> Frame {
+    render_over(renderer, theme, scene, Backdrop::Poster)
+}
+
+/// Renders `theme` in `scene` with what a video background shows.
+pub(crate) fn render_over(
+    renderer: &mut SkiaRenderer,
+    theme: &Theme,
+    scene: &Scene,
+    backdrop: Backdrop<'_>,
+) -> Frame {
     let context = RenderContext {
         snapshot: &scene.snapshot,
         histories: &scene.histories,
         quantities: &NO_QUANTITIES,
         time: scene.time,
         language: Language::English,
-        backdrop: Backdrop::Poster,
+        backdrop,
     };
     renderer
         .render(theme, &scene.assets, context)

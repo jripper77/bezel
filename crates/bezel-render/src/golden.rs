@@ -11,9 +11,13 @@ use bezel_core::domain::theme::{
     HAlign, Paint, Segments, ShapeKind, TextContent, TextStyle, Theme, VAlign,
 };
 
+use bezel_core::domain::geometry::Size;
+use bezel_core::ports::Backdrop;
+
 use crate::SkiaRenderer;
 use crate::testkit::{
-    FAMILY, FONT, Scene, TIME, assert_px, close, count, element, gif, ink, png, px, render, theme,
+    FAMILY, FONT, Scene, TIME, assert_px, close, count, element, gif, ink, png, px, render,
+    render_over, theme,
 };
 
 const BLACK: Rgba = Rgba::BLACK;
@@ -31,7 +35,18 @@ const CLEAR: Rgba = Rgba {
 
 /// Renders and, when asked, dumps the frame for a human look.
 fn shot(r: &mut SkiaRenderer, name: &str, theme: &Theme, scene: &Scene) -> Frame {
-    let frame = render(r, theme, scene);
+    shot_over(r, name, theme, scene, Backdrop::Poster)
+}
+
+/// [`shot`] with what a video background shows.
+fn shot_over(
+    r: &mut SkiaRenderer,
+    name: &str,
+    theme: &Theme,
+    scene: &Scene,
+    backdrop: Backdrop<'_>,
+) -> Frame {
+    let frame = render_over(r, theme, scene, backdrop);
     if let Ok(dir) = std::env::var("BEZEL_GOLDEN_DUMP") {
         let size = frame.size();
         let image = image::RgbaImage::from_raw(size.width, size.height, frame.as_rgba().to_vec())
@@ -122,6 +137,62 @@ pub(crate) fn backgrounds(r: &mut SkiaRenderer) {
     assert_px(&f, 4, 4, Rgba::opaque(16, 17, 22), 0);
     let f = render(r, &theme(8, 8, image(Fit::Fill), vec![]), &Scene::empty());
     assert_eq!(count(&f, (0, 0, 8, 8), |p| p == CLEAR), 64, "missing image");
+    video_backdrops(r);
+}
+
+/// A video background played by the screen (a transparent base under the
+/// elements) and decoded on the host (its frame covers the canvas).
+fn video_backdrops(r: &mut SkiaRenderer) {
+    let scene = Scene::empty().asset("poster.png", png(2, 2, |_, _| GREEN));
+    let square = element(
+        BoxF::new(2.0, 2.0, 4.0, 4.0),
+        ElementKind::Shape {
+            shape: ShapeKind::Rect { radius: 0.0 },
+            fill: Some(solid(RED)),
+            stroke: None,
+        },
+    );
+    let t = theme(
+        8,
+        8,
+        Background::Video {
+            asset: AssetRef("clip.mp4".into()),
+            poster: Some(AssetRef("poster.png".into())),
+        },
+        vec![square],
+    );
+    let f = shot_over(r, "bg_video_on_device", &t, &scene, Backdrop::OnDevice);
+    assert_eq!(count(&f, (0, 0, 8, 8), |p| p == CLEAR), 48, "A = 0 around");
+    assert_eq!(count(&f, (2, 2, 6, 6), |p| p == RED), 16, "the element");
+
+    let still = Frame::filled(Size::new(8, 8), BLUE);
+    let f = shot_over(r, "bg_video_host", &t, &scene, Backdrop::Frame(&still));
+    assert_eq!(count(&f, (0, 0, 8, 8), |p| p == BLUE), 48);
+    assert_px(&f, 3, 3, RED, 0);
+
+    let wide = Frame::from_rgba(
+        Size::new(4, 2),
+        [RED, RED, BLUE, BLUE, RED, RED, BLUE, BLUE]
+            .iter()
+            .flat_map(|c| [c.r, c.g, c.b, c.a])
+            .collect(),
+    )
+    .expect("4x2");
+    let bare = theme(8, 8, t.background.clone(), vec![]);
+    let f = shot_over(
+        r,
+        "bg_video_host_cover",
+        &bare,
+        &scene,
+        Backdrop::Frame(&wide),
+    );
+    assert_px(&f, 0, 4, RED, 4);
+    assert_px(&f, 7, 4, BLUE, 4);
+    assert_eq!(count(&f, (0, 0, 8, 8), |p| p.a == 255), 64, "covered");
+
+    let empty = Frame::filled(Size::new(0, 0), BLUE);
+    let f = render_over(r, &bare, &scene, Backdrop::Frame(&empty));
+    assert_px(&f, 4, 4, Rgba::opaque(16, 17, 22), 0);
 }
 
 fn text(content: TextContent, style: TextStyle, frame: BoxF) -> bezel_core::domain::theme::Element {

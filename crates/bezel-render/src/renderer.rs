@@ -9,15 +9,17 @@ use bezel_core::domain::sensor::{format_reading, fraction};
 use bezel_core::domain::theme::{
     AssetRef, Background, Binding, BoxF, Element, ElementId, ElementKind, Fit, TextContent, Theme,
 };
-use bezel_core::ports::{FrameRenderer, RenderContext};
+use bezel_core::ports::{Backdrop, FrameRenderer, RenderContext};
 use bezel_core::{BezelError, Result};
+use image::RgbaImage;
+use image::imageops::{self, FilterType};
 use tiny_skia::{Color, IntRect, Pixmap, PixmapMut, Rect, Transform};
 
 use crate::composite::{self, Sprite, Target};
 use crate::diagnostics::Diagnostics;
 use crate::gauges::{self, BarStyle, NeedlePose, RingStyle};
 use crate::graph::{self, GraphSpec};
-use crate::images::ImageCache;
+use crate::images::{self, ImageCache};
 use crate::layer::Layer;
 use crate::paint;
 use crate::shape;
@@ -162,6 +164,37 @@ fn new_canvas(size: Size) -> Result<Pixmap> {
     Pixmap::new(size.width, size.height).ok_or_else(too_large)
 }
 
+/// Draws a frame of a host-decoded video over the whole canvas, cropped to
+/// the canvas shape when its own differs (like [`Fit::Cover`]). False when
+/// the frame is empty.
+fn draw_video_frame(canvas: &mut Pixmap, frame: &Frame) -> bool {
+    let size = frame.size();
+    if (size.width, size.height) == (canvas.width(), canvas.height()) {
+        let data = canvas.data_mut();
+        data.copy_from_slice(frame.as_rgba());
+        composite::premultiply(data);
+        return true;
+    }
+    let area = BoxF::new(0.0, 0.0, canvas.width() as f32, canvas.height() as f32);
+    let plan = images::plan(Fit::Cover, (size.width, size.height), area);
+    let pixels = RgbaImage::from_raw(size.width, size.height, frame.as_rgba().to_vec());
+    let (Some(plan), Some(mut pixels)) = (plan, pixels) else {
+        return false;
+    };
+    composite::premultiply(&mut pixels);
+    let (x, y, w, h) = plan.crop;
+    let view = imageops::crop_imm(&pixels, x, y, w, h);
+    let (width, height) = plan.size;
+    let mut scaled = imageops::resize(&*view, width, height, FilterType::CatmullRom).into_raw();
+    composite::clamp_premultiplied(&mut scaled);
+    let data = canvas.data_mut();
+    if scaled.len() != data.len() {
+        return false;
+    }
+    data.copy_from_slice(&scaled);
+    true
+}
+
 /// The fraction of a binding's range the current reading represents.
 fn value_fraction(binding: &Binding, context: &RenderContext<'_>) -> Option<f64> {
     let value = context.snapshot.get(&binding.key).value()?;
@@ -253,17 +286,32 @@ impl SkiaRenderer {
         assets: &BTreeMap<AssetRef, Vec<u8>>,
         context: &RenderContext<'_>,
     ) {
-        let (asset, fit) = match background {
-            Background::Color(color) => {
+        let (asset, fit) = match (background, context.backdrop) {
+            (Background::Color(color), _) => {
                 canvas.fill(paint::color(*color));
                 return;
             }
-            Background::Image { asset, fit } => (asset, *fit),
-            Background::Video {
-                poster: Some(poster),
-                ..
-            } => (poster, Fit::Cover),
-            Background::Video { poster: None, .. } => {
+            (Background::Image { asset, fit }, _) => (asset, *fit),
+            (Background::Video { .. }, Backdrop::OnDevice) => {
+                // The screen plays the video itself: the elements go on a
+                // base of A = 0, which lets the video show through.
+                canvas.fill(Color::TRANSPARENT);
+                return;
+            }
+            (Background::Video { .. }, Backdrop::Frame(frame)) => {
+                if !draw_video_frame(canvas, frame) {
+                    canvas.fill(paint::color(VIDEO_PLACEHOLDER));
+                }
+                return;
+            }
+            (
+                Background::Video {
+                    poster: Some(poster),
+                    ..
+                },
+                Backdrop::Poster,
+            ) => (poster, Fit::Cover),
+            (Background::Video { poster: None, .. }, Backdrop::Poster) => {
                 canvas.fill(paint::color(VIDEO_PLACEHOLDER));
                 return;
             }
@@ -530,6 +578,92 @@ fn draw_graph(layer: &mut Layer<'_>, element: &Element, context: &RenderContext<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::{self, Scene, count, element, png, px, render_over};
+    use bezel_core::domain::theme::{Paint, ShapeKind};
+
+    const CLEAR: Rgba = Rgba {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
+
+    fn rect(frame: BoxF, color: Rgba, opacity: f32) -> Element {
+        let mut e = element(
+            frame,
+            ElementKind::Shape {
+                shape: ShapeKind::Rect { radius: 0.0 },
+                fill: Some(Paint::solid(color)),
+                stroke: None,
+            },
+        );
+        e.opacity = opacity;
+        e
+    }
+
+    #[test]
+    fn device_video_background_renders_a_transparent_base() {
+        let mut r = testkit::renderer();
+        let green = Rgba::opaque(0, 255, 0);
+        let red = Rgba::opaque(255, 0, 0);
+        let white = Rgba::WHITE;
+        let scene = Scene::empty().asset("poster.png", png(2, 2, |_, _| green));
+        let disc = element(
+            BoxF::new(20.0, 0.0, 12.0, 12.0),
+            ElementKind::Shape {
+                shape: ShapeKind::Ellipse,
+                fill: Some(Paint::solid(white)),
+                stroke: None,
+            },
+        );
+        let elements = vec![
+            rect(BoxF::new(0.0, 0.0, 8.0, 8.0), red, 1.0),
+            rect(BoxF::new(10.0, 0.0, 8.0, 8.0), white, 0.5),
+            disc,
+        ];
+        let video = Background::Video {
+            asset: AssetRef("assets/clip.mp4".into()),
+            poster: Some(AssetRef("poster.png".into())),
+        };
+        let theme = testkit::theme(32, 16, video, elements.clone());
+
+        let overlay = render_over(&mut r, &theme, &scene, Backdrop::OnDevice);
+        assert_eq!(px(&overlay, 0, 12), CLEAR, "A = 0 lets the video show");
+        assert_eq!(count(&overlay, (0, 8, 20, 16), |p| p == CLEAR), 20 * 8);
+        assert_eq!(px(&overlay, 4, 4), red, "opaque elements hide the video");
+        assert_eq!(
+            px(&overlay, 14, 4),
+            Rgba { a: 128, ..white },
+            "straight alpha"
+        );
+        let edge = count(&overlay, (20, 0, 32, 12), |p| p.a > 0 && p.a < 255);
+        assert!(edge > 0, "anti-aliased edges keep their partial alpha");
+        let tinted = count(&overlay, (20, 0, 32, 12), |p| {
+            p.a > 0 && p.r.min(p.g).min(p.b) < 250
+        });
+        assert_eq!(tinted, 0, "partial pixels keep the element's color");
+
+        let poster = render_over(&mut r, &theme, &scene, Backdrop::Poster);
+        assert_eq!(px(&poster, 0, 12), green, "previews show the poster");
+        assert_eq!(px(&poster, 4, 4), red);
+
+        for background in [
+            Background::Color(Rgba::opaque(1, 2, 3)),
+            Background::Image {
+                asset: AssetRef("poster.png".into()),
+                fit: Fit::Fill,
+            },
+        ] {
+            let still = testkit::theme(32, 16, background, elements.clone());
+            let a = render_over(&mut r, &still, &scene, Backdrop::Poster);
+            let b = render_over(&mut r, &still, &scene, Backdrop::OnDevice);
+            assert_eq!(
+                a.as_rgba(),
+                b.as_rgba(),
+                "other backgrounds ignore the backdrop"
+            );
+        }
+    }
 
     #[test]
     fn opacity_maps_to_bytes() {

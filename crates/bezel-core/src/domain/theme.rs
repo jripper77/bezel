@@ -448,6 +448,14 @@ impl Theme {
         }
     }
 
+    /// Whether the theme fits a panel whose portrait size is `panel`: `None`
+    /// when its canvas is that panel turned the theme's way up, else that
+    /// size (the canvas a theme for this panel would have).
+    pub fn misfit(&self, panel: Size) -> Option<Size> {
+        let canvas = panel.in_orientation(self.orientation);
+        (canvas != self.canvas).then_some(canvas)
+    }
+
     /// The next free element id.
     pub fn next_id(&self) -> ElementId {
         ElementId(self.elements.iter().map(|e| e.id.0 + 1).max().unwrap_or(1))
@@ -659,6 +667,21 @@ mod tests {
         assert_eq!(b.center(), (65.0, 40.0));
         let bg = Theme::blank("x", Size::new(80, 160), Orientation::Portrait);
         assert!(bg.assets().is_empty());
+    }
+
+    #[test]
+    fn a_theme_fits_its_panel_turned_its_way_up() {
+        let panel = Size::new(480, 1920);
+        let landscape = Theme::blank("x", panel, Orientation::Landscape);
+        assert_eq!(landscape.misfit(panel), None);
+        let upside_down = Theme::blank("x", panel, Orientation::ReversePortrait);
+        assert_eq!(upside_down.misfit(panel), None);
+        assert_eq!(
+            landscape.misfit(Size::new(320, 480)),
+            Some(Size::new(480, 320))
+        );
+        let small = Theme::blank("x", Size::new(320, 480), Orientation::Portrait);
+        assert_eq!(small.misfit(panel), Some(panel));
     }
 
     #[test]

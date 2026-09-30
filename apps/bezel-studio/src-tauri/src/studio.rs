@@ -509,7 +509,7 @@ impl Studio {
         let Some(link) = live.slot.link() else {
             return Ok(None);
         };
-        let expected = link.identity().model.panel.in_orientation(orientation);
+        let panel = link.identity().model.panel;
         let video = live
             .host
             .as_ref()
@@ -517,7 +517,10 @@ impl Studio {
         let frame = self
             .runtime
             .render(self.renderer.as_mut(), time, video)
-            .and_then(|frame| fits(frame, expected));
+            .and_then(|frame| {
+                fits(self.runtime.theme(), panel)?;
+                Ok(frame)
+            });
         let frame = match frame {
             Ok(frame) => frame,
             Err(e) => {
@@ -607,17 +610,14 @@ impl Studio {
     }
 }
 
-/// `frame` when it has the size the screen expects.
-fn fits(frame: Frame, expected: Size) -> Result<Frame> {
-    if frame.size() == expected {
-        return Ok(frame);
-    }
+/// Refuses a theme that does not fit a panel whose portrait size is `panel`.
+fn fits(theme: &Theme, panel: Size) -> Result<()> {
+    let Some(expected) = theme.misfit(panel) else {
+        return Ok(());
+    };
     Err(BezelError::Transport(format!(
         "this theme is {}x{} but the screen is {}x{} in this orientation",
-        frame.size().width,
-        frame.size().height,
-        expected.width,
-        expected.height
+        theme.canvas.width, theme.canvas.height, expected.width, expected.height
     )))
 }
 

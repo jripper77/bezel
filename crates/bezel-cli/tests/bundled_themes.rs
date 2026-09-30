@@ -44,9 +44,7 @@ fn families(theme: &Theme) -> BTreeSet<String> {
 }
 
 fn fits_a_panel(theme: &Theme) -> bool {
-    MODELS
-        .iter()
-        .any(|m| m.panel.in_orientation(theme.orientation) == theme.canvas)
+    MODELS.iter().any(|m| theme.misfit(m.panel).is_none())
 }
 
 fn save_png(frame: &Frame, path: &Path) {

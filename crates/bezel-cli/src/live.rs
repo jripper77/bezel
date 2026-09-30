@@ -104,17 +104,17 @@ where
     let mut link = open_screen(bus, connector, target.screen.as_deref())
         .context("could not open the screen")?;
     let model = link.identity().model;
-    let panel = model.panel.in_orientation(theme.orientation);
-    anyhow::ensure!(
-        panel == theme.canvas,
-        "{} is made for a {}x{} canvas but the {} is {}x{} that way up; pick a theme for this screen",
-        theme.name,
-        theme.canvas.width,
-        theme.canvas.height,
-        model.name,
-        panel.width,
-        panel.height
-    );
+    if let Some(panel) = theme.misfit(model.panel) {
+        anyhow::bail!(
+            "{} is made for a {}x{} canvas but the {} is {}x{} that way up; pick a theme for this screen",
+            theme.name,
+            theme.canvas.width,
+            theme.canvas.height,
+            model.name,
+            panel.width,
+            panel.height
+        );
+    }
     link.set_orientation(theme.orientation)?;
     Ok(link)
 }

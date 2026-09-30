@@ -41,13 +41,19 @@
     "linux": {
       "deb": {
         "files": {
-          "/usr/lib/udev/rules.d/60-bezel.rules": "../../../packaging/linux/60-bezel.rules"
+          "/usr/bin/bezel": "../../../target/release/bezel",
+          "/usr/lib/udev/rules.d/60-bezel.rules": "../../../packaging/linux/60-bezel.rules",
+          "/usr/lib/systemd/user/bezel-run@.service": "../../../packaging/linux/bezel-run@.service",
+          "/usr/share/bezel/themes": "../../../themes/"
         },
         "postInstallScript": "../../../packaging/linux/postinstall.sh"
       },
       "rpm": {
         "files": {
-          "/usr/lib/udev/rules.d/60-bezel.rules": "../../../packaging/linux/60-bezel.rules"
+          "/usr/bin/bezel": "../../../target/release/bezel",
+          "/usr/lib/udev/rules.d/60-bezel.rules": "../../../packaging/linux/60-bezel.rules",
+          "/usr/lib/systemd/user/bezel-run@.service": "../../../packaging/linux/bezel-run@.service",
+          "/usr/share/bezel/themes": "../../../themes/"
         },
         "postInstallScript": "../../../packaging/linux/postinstall.sh"
       }

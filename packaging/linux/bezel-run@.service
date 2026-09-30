@@ -5,6 +5,10 @@
 #
 #   systemctl --user enable --now bezel-run@turing-8.8-horizontal
 #
+# The deb and rpm packages install it in /usr/lib/systemd/user with this
+# ExecStart; scripts/install-local.sh copies it to ~/.config/systemd/user and
+# points ExecStart at the `bezel` it installed.
+#
 # Stop other programs that drive the screen first (for example a
 # turing-smart-screen-python service): two programs on one port interleave
 # their packets, and bezel refuses a port another process holds.
@@ -13,7 +17,7 @@ Description=Bezel theme %i on the smart screen
 After=graphical-session.target
 
 [Service]
-ExecStart=%h/.local/bin/bezel run %i
+ExecStart=/usr/bin/bezel run %i
 # The screen may enumerate after login, or wake slowly: try again.
 Restart=on-failure
 RestartSec=5

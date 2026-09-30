@@ -54,7 +54,27 @@ mkdir -p "$(dirname "$themes_dir")"
 cp -r themes "$themes_dir"
 
 # The systemd user unit that runs a theme without a window (not enabled here).
-install -Dm644 packaging/linux/bezel-run@.service "$HOME/.config/systemd/user/bezel-run@.service"
+# The packaged unit starts /usr/bin/bezel; this one starts the `bezel` just
+# installed, as `%h/...` when it is under the home folder (systemd's home
+# specifier), so the unit stays right if the home folder moves.
+unit_dir="$HOME/.config/systemd/user"
+unit_bin="$bin_dir/bezel"
+case "$unit_bin" in
+  "$HOME"/*) unit_bin="%h/${unit_bin#"$HOME"/}" ;;
+esac
+# systemd splits ExecStart on spaces: a path with one goes quoted.
+case "$unit_bin" in
+  *" "*) unit_bin="\"$unit_bin\"" ;;
+esac
+unit_tmp="$(mktemp)"
+trap 'rm -f "$unit_tmp"' EXIT
+sed_bin=$(printf '%s' "$unit_bin" | sed 's/[&|\\]/\\&/g')
+sed "s|^ExecStart=/usr/bin/bezel |ExecStart=$sed_bin |" packaging/linux/bezel-run@.service > "$unit_tmp"
+if ! grep -qF "ExecStart=$unit_bin run %i" "$unit_tmp"; then
+  printf 'install-local: packaging/linux/bezel-run@.service has no "ExecStart=/usr/bin/bezel " line to point at %s\n' "$unit_bin" >&2
+  exit 1
+fi
+install -Dm644 "$unit_tmp" "$unit_dir/bezel-run@.service"
 systemctl --user daemon-reload >/dev/null 2>&1 || true
 
 icons_src=apps/bezel-studio/src-tauri/icons

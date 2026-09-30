@@ -360,7 +360,7 @@ function createDemoStorage(chosen, { delay, live, theme, screens }) {
 /**
  * @param {string} scenario key of SCENARIOS
  * @param {{now?: () => number, delay?: (ms: number) => Promise<void>}} [clock]
- * @param {{onWindow?: (state: 'hidden'|'closed') => void, languages?: readonly string[]}} [hooks]
+ * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, languages?: readonly string[]}} [hooks]
  *   what the window does, and the system's languages
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
@@ -389,6 +389,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const systemLanguage = pickLocale(hooks.languages ?? []);
   const sensorOptions = { pingHost: null, mangohudDir: null };
   const closeListeners = new Set();
+  const quitListeners = new Set();
   const windowGoes = (state) => {
     windowState = state;
     hooks.onWindow?.(state);
@@ -493,6 +494,23 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       if (live) windowGoes('hidden');
       else if (unsaved) for (const cb of closeListeners) cb();
       else windowGoes('closed');
+    },
+    quitApp: () => {
+      windowGoes('quit');
+      return Promise.resolve();
+    },
+    onQuitRequested: (cb) => {
+      quitListeners.add(cb);
+      return Promise.resolve(() => quitListeners.delete(cb));
+    },
+    /** The tray's Quit: over unsaved edits the window shows and the UI asks. */
+    requestQuit: () => {
+      if (!unsaved) {
+        windowGoes('quit');
+        return;
+      }
+      windowGoes('open');
+      for (const cb of quitListeners) cb();
     },
     windowState: () => windowState,
     preferences: () => Promise.resolve({

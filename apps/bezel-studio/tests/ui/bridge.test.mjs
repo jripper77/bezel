@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_CLOSE_EVENT, createBridge, parseFrame } from '../../src/bridge.js';
+import { DEMO_CLOSE_EVENT, DEMO_QUIT_EVENT, createBridge, parseFrame } from '../../src/bridge.js';
 
 const page = (search = '', hostname = 'localhost') => ({ location: { hostname, search } });
 
@@ -83,6 +83,7 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.setSensorOptions('1.1.1.1', null);
   await bridge.pickFolder();
   await bridge.leaveDesktopMode('hid:/dev/hidraw7', true);
+  await bridge.quitApp();
   assert.deepEqual(calls.map((c) => c[0]), [
     'list_devices', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
@@ -90,7 +91,7 @@ test('tauri mode maps every call to its command', async () => {
     'storage_overview', 'media_tools', 'locate_ffmpeg', 'pick_media', 'prepare_upload', 'prepare_theme_video',
     'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media', 'set_boot_media',
     'set_unsaved', 'close_window', 'preferences', 'set_language', 'set_sensor_options', 'pick_folder',
-    'leave_desktop_mode',
+    'leave_desktop_mode', 'quit_app',
   ]);
   assert.deepEqual(calls[35][1], { language: 'en' });
   assert.deepEqual(calls[36][1], { pingHost: '1.1.1.1', mangohudDir: null });
@@ -123,7 +124,9 @@ test('tauri mode listens to upload progress and system file drops', async () => 
   let asked = 0;
   await bridge.onCloseRequested(() => { asked += 1; });
   assert.equal(asked, 1);
-  assert.deepEqual(listened, ['storage-progress', 'tauri://drag-over', 'tauri://drag-drop', 'tauri://drag-leave', 'close-requested']);
+  await bridge.onQuitRequested(() => { asked += 1; });
+  assert.equal(asked, 2);
+  assert.deepEqual(listened, ['storage-progress', 'tauri://drag-over', 'tauri://drag-drop', 'tauri://drag-leave', 'close-requested', 'quit-requested']);
   assert.deepEqual(seen[0], { phase: 'upload', done: 1, total: 2 });
   assert.deepEqual(seen[2], { type: 'drop', paths: ['/a.png'], position: { x: 1, y: 2 } });
 
@@ -137,6 +140,7 @@ test('tauri mode listens to upload progress and system file drops', async () => 
   assert.equal(typeof (await bare.onJobProgress(() => {})), 'function');
   assert.equal(typeof (await bare.onFileDrop(() => {})), 'function');
   assert.equal(typeof (await bare.onCloseRequested(() => {})), 'function');
+  assert.equal(typeof (await bare.onQuitRequested(() => {})), 'function');
 });
 
 test('demo mode shows what the window does and takes the close button as an event', async () => {
@@ -155,6 +159,12 @@ test('demo mode shows what the window does and takes the close button as an even
   assert.equal(asked, 1, 'unsaved edits: the UI asks');
   await bridge.closeWindow();
   assert.equal(attributes['data-demo-window'], 'closed');
+  let quitting = 0;
+  await bridge.onQuitRequested(() => { quitting += 1; });
+  listeners[DEMO_QUIT_EVENT]();
+  assert.equal(quitting, 1, 'the tray Quit asks too');
+  await bridge.quitApp();
+  assert.equal(attributes['data-demo-window'], 'quit');
 });
 
 test('demo mode serves scenarios as copies', async () => {

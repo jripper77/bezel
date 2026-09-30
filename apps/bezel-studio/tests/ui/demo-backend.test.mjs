@@ -117,6 +117,25 @@ test('the window hides while live, asks over unsaved edits, else closes', async 
   await createDemoBackend('empty', fixed).closeWindow();
 });
 
+test('quitting from the tray shows the window and asks over unsaved edits', async () => {
+  const seen = [];
+  const demo = createDemoBackend('turing88', fixed, { onWindow: (state) => seen.push(state) });
+  const asked = [];
+  await demo.onQuitRequested(() => asked.push('asked'));
+  await demo.setLive(true, '/dev/ttyACM1');
+  await demo.setUnsaved(true);
+  demo.requestClose();
+  assert.equal(demo.windowState(), 'hidden', 'live: the window hides');
+  demo.requestQuit();
+  assert.deepEqual([demo.windowState(), asked], ['open', ['asked']], 'shown, and the UI asks');
+  await demo.quitApp();
+  assert.equal(demo.windowState(), 'quit');
+  const clean = createDemoBackend('turing88', fixed);
+  clean.requestQuit();
+  assert.equal(clean.windowState(), 'quit', 'nothing unsaved: it quits at once');
+  assert.deepEqual(seen, ['hidden', 'open', 'quit']);
+});
+
 test('a panel in desktop mode is listed and switched back only when confirmed', async () => {
   const demo = createDemoBackend('desktop', fixed);
   const before = await demo.listDevices();

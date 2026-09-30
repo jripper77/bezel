@@ -501,3 +501,39 @@ test('a panel in desktop mode is labelled and switched back only after a dialog'
   await expect(page.locator('#screen-select option')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
+
+test('quitting from the tray over unsaved edits shows the window and asks', async ({ page }) => {
+  const errors = watchErrors(page);
+  const html = page.locator('html');
+  const quit = () => page.evaluate(() => window.dispatchEvent(new Event('bezel-demo-quit')));
+  const dialog = page.getByRole('dialog', { name: 'Salvar as alterações?' });
+
+  // Nothing unsaved: the app ends at once.
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await quit();
+  await expect(html).toHaveAttribute('data-demo-window', 'quit');
+  await expect(dialog).toHaveCount(0);
+
+  // Live and hidden in the tray with unsaved edits: Quit shows the window
+  // and asks; Cancel keeps the app, Discard ends it.
+  await page.goto('/index.html?demo=turing88');
+  await page.getByRole('tab', { name: 'Camadas' }).click();
+  await page.getByRole('button', { name: /^CPU/ }).click();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('#status-main')).toHaveText('Alterações não salvas');
+  await page.getByRole('switch').click({ force: true });
+  await expect(page.getByRole('switch')).toBeChecked();
+  await page.evaluate(() => window.dispatchEvent(new Event('bezel-demo-close')));
+  await expect(html).toHaveAttribute('data-demo-window', 'hidden');
+  await quit();
+  await expect(html).toHaveAttribute('data-demo-window', 'open');
+  await expect(dialog).toBeVisible();
+  await expectAccessible(page);
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(html).toHaveAttribute('data-demo-window', 'open');
+  await quit();
+  await dialog.getByRole('button', { name: 'Descartar' }).click();
+  await expect(html).toHaveAttribute('data-demo-window', 'quit');
+  expect(errors).toEqual([]);
+});

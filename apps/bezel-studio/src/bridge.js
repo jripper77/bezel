@@ -28,6 +28,15 @@ export const CLOSE_EVENT = 'close-requested';
 export const DEMO_CLOSE_EVENT = 'bezel-demo-close';
 
 /**
+ * Event the app sends when the tray's Quit is chosen with unsaved edits:
+ * the UI asks, then calls `quitApp`.
+ */
+export const QUIT_EVENT = 'quit-requested';
+
+/** Demo mode: the window event that stands for the tray's Quit. */
+export const DEMO_QUIT_EVENT = 'bezel-demo-quit';
+
+/**
  * Subscribes to files dropped on the window from the system: Tauri owns the
  * drag and reports the paths and the pointer (physical pixels).
  */
@@ -81,12 +90,14 @@ function tauriBridge(invoke, tauri = {}) {
     setBootMedia: (screen, path, confirmed, brightness = null) => invoke('set_boot_media', { screen, path, confirmed, brightness }),
     setUnsaved: (unsaved) => invoke('set_unsaved', { unsaved }),
     closeWindow: () => invoke('close_window'),
+    quitApp: () => invoke('quit_app'),
     preferences: () => invoke('preferences'),
     setLanguage: (language) => invoke('set_language', { language }),
     setSensorOptions: (pingHost, mangohudDir) => invoke('set_sensor_options', { pingHost, mangohudDir }),
     pickFolder: () => invoke('pick_folder'),
     onJobProgress: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(PROGRESS_EVENT, (e) => cb(e.payload)) : Promise.resolve(() => {})),
     onCloseRequested: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(CLOSE_EVENT, () => cb()) : Promise.resolve(() => {})),
+    onQuitRequested: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(QUIT_EVENT, () => cb()) : Promise.resolve(() => {})),
     onFileDrop: (cb) => onFileDrop(tauri, cb),
     // Files dropped in the webview carry no path: the system drop above does.
     fileSource: () => null,
@@ -114,5 +125,6 @@ export function createBridge(win) {
     languages: win.navigator?.languages ?? [],
   });
   win.addEventListener?.(DEMO_CLOSE_EVENT, () => demo.requestClose());
+  win.addEventListener?.(DEMO_QUIT_EVENT, () => demo.requestQuit());
   return { mode: 'demo', ...demo };
 }

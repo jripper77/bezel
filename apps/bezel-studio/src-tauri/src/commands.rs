@@ -279,6 +279,12 @@ pub fn close_window<R: Runtime>(
     .map_err(UiError::system)
 }
 
+/// Ends the app once the UI settled its unsaved edits (the tray's Quit).
+#[tauri::command]
+pub fn quit_app<R: Runtime>(app: AppHandle<R>) {
+    app.exit(0);
+}
+
 /// Whether Bezel starts at login.
 #[tauri::command]
 pub fn get_autostart<R: Runtime>(app: AppHandle<R>) -> UiResult<bool> {

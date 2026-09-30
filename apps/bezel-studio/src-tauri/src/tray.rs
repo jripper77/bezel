@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter as _, Manager};
 
 use crate::clock::now;
-use crate::commands::Shared;
+use crate::commands::{Shared, Unsaved};
 use crate::texts::Texts;
 
 const SHOW: &str = "show";
@@ -53,6 +53,23 @@ fn hide_main_window(app: &AppHandle) {
         && let Err(e) = window.hide()
     {
         tracing::warn!("window not hidden: {e}");
+    }
+}
+
+/// Quits, unless edits are unsaved: then the window shows and the UI asks
+/// first (studio-app review W2). A UI that cannot be asked does not keep
+/// the app running.
+fn quit(app: &AppHandle) {
+    let unsaved = app.try_state::<Unsaved>().is_some_and(|u| u.get());
+    match crate::on_quit(unsaved) {
+        crate::OnQuit::Exit => app.exit(0),
+        crate::OnQuit::Ask => {
+            crate::show_main_window(app);
+            if let Err(e) = app.emit(crate::QUIT_EVENT, ()) {
+                tracing::warn!("unsaved edits not asked about before quitting: {e}");
+                app.exit(0);
+            }
+        }
     }
 }
 
@@ -142,7 +159,7 @@ pub(crate) fn create(app: &AppHandle, live: bool, text: &Texts) -> tauri::Result
             SHOW => crate::show_main_window(app),
             HIDE => hide_main_window(app),
             LIVE => toggle_live(app, &clicked),
-            QUIT => app.exit(0),
+            QUIT => quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

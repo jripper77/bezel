@@ -9,6 +9,7 @@
     "core:event:default",
     "allow-list-devices",
     "allow-leave-desktop-mode",
+    "allow-quit-app",
     "allow-sensor-catalog",
     "allow-sample-sensors",
     "allow-editor-session",

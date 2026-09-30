@@ -7,6 +7,7 @@ use std::process::ExitCode;
 const COMMANDS: &[&str] = &[
     "list_devices",
     "leave_desktop_mode",
+    "quit_app",
     "sensor_catalog",
     "sample_sensors",
     "editor_session",

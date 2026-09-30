@@ -441,6 +441,12 @@ bridge.onCloseRequested(async () => {
   if (await settleUnsaved()) await bridge.closeWindow().catch((e) => fail(e));
 }).catch(() => {});
 
+// The tray's Quit with unsaved edits: the window is shown, and the app ends
+// once the edits are saved or discarded.
+bridge.onQuitRequested(async () => {
+  if (await settleUnsaved()) await bridge.quitApp().catch((e) => fail(e));
+}).catch(() => {});
+
 // ---------------------------------------------------------- chrome -----
 $('undo').addEventListener('click', () => store.undo());
 $('redo').addEventListener('click', () => store.redo());

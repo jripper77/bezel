@@ -81,6 +81,26 @@ pub fn on_close(live: bool, unsaved: bool) -> OnClose {
     }
 }
 
+/// Event asking the UI to settle unsaved edits before the app quits (the
+/// tray's Quit); the UI then calls `quit_app`.
+pub const QUIT_EVENT: &str = "quit-requested";
+
+/// What the tray's Quit does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnQuit {
+    /// Edits are unsaved: the window shows and the UI asks (save, discard
+    /// or cancel), then quits the app itself.
+    Ask,
+    /// The app ends.
+    Exit,
+}
+
+/// What quitting does with edits `unsaved` (whether a screen is live or not:
+/// quitting ends the live mode too).
+pub fn on_quit(unsaved: bool) -> OnQuit {
+    if unsaved { OnQuit::Ask } else { OnQuit::Exit }
+}
+
 /// Argument of the start at login: open in the tray, without the window.
 pub const HIDDEN_ARG: &str = "--hidden";
 
@@ -153,6 +173,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .invoke_handler(tauri::generate_handler![
             commands::list_devices,
             commands::leave_desktop_mode,
+            commands::quit_app,
             commands::sensor_catalog,
             commands::sample_sensors,
             commands::editor_session,
@@ -396,6 +417,12 @@ mod tests {
         assert_eq!(on_close(true, true), OnClose::Hide, "the edits stay");
         assert_eq!(on_close(false, true), OnClose::Ask);
         assert_eq!(on_close(false, false), OnClose::Close);
+    }
+
+    #[test]
+    fn quitting_asks_over_unsaved_edits_only() {
+        assert_eq!(on_quit(true), OnQuit::Ask);
+        assert_eq!(on_quit(false), OnQuit::Exit);
     }
 
     #[test]

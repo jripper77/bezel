@@ -28,7 +28,7 @@ export default {
   'desktop.done': 'The panel went back to USB monitor mode; it shows up as a screen in a few seconds.',
   'desktop.doneModel': 'The panel ({model}) went back to USB monitor mode; it shows up as a screen in a few seconds.',
   'desktop.hint': 'The vendor’s Windows app left this panel in its desktop mode, where Bezel cannot draw on it. Bezel can switch it back to USB monitor mode.',
-  'desktop.leave': 'Switch back to USB monitor mode…',
+  'desktop.leave': 'Back to USB monitor mode…',
   'desktop.models': 'It may be: {models}',
   'desktop.name': 'Turing USB panel in desktop mode',
   'desktop.notValidated': 'Not validated on hardware',

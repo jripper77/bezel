@@ -1,7 +1,7 @@
 # Phase 6: Armazenamento e vídeo — Summary  (slug: storage-video)
 
 **Status:** partial
-**Tasks:** 3/8 complete, 0 blocked (T-6.3, T-6.5..T-6.8 pendentes)
+**Tasks:** 4/8 complete, 0 blocked (T-6.5..T-6.8 pendentes)
 
 > Nota de processo: T-6.1 executada pelo `jdi-doer-bezel` no worktree `wt/sv-core` (a partir de `main`),
 > cherry-picked para a `main`.
@@ -53,6 +53,21 @@
     Nome no dispositivo: `device_video_name` (asset + sufixo de giro + extensão do perfil).
   - Fora do `files_modified`: `crates/bezel-core/src/app/mod.rs` (reexportações).
 
+- T-6.3: crate `bezel-media` (adapter do `MediaTranscoder`, depende só de `bezel-core`) — `535e403`
+  - ffmpeg/ffprobe externos: caminho configurado (programa ou pasta) e depois o PATH; exige libx264 (o
+    `ffmpeg-free` do Fedora não serve); sem ferramenta utilizável, `MediaTools::Missing` com os comandos de
+    instalação do SO (RPM Fusion no Fedora, apt, winget), nunca pânico.
+  - `probe` nativo em Rust para MP4 (codec, tamanho, yuv420p pelo SPS, B-frames pelo `ctts`, fps, duração,
+    áudio) e imagens; o resto via ffprobe JSON ou `Unsupported`.
+  - `transcode`: vetor de argumentos com a cadeia do fornecedor (transpose, crop, scale+setsar, libx264 CRF 20,
+    `-r` opcional, `-an -pix_fmt yuv420p`; TUR_USB `bframes=0`, `eq` opcional), entradas/saídas como URLs
+    `file:`; progresso por `-progress pipe:1`; cancelar mata o processo e apaga a saída.
+  - `stream`: rawvideo RGBA em cover, fila de 2 frames, loop — o fallback de vídeo pelo PC.
+  - Fora do `files_modified`: `crates/bezel-media/src/process.rs` (processos comuns aos três módulos).
+  - 4 testes com ffmpeg real (`#[ignore]`) rodados localmente com ffmpeg 8.1.3 + libx264: 4/4.
+- Orquestrador: `cover_crop` no core (`d4130d1`) — um vídeo de outra proporção guarda o centro em vez de
+  esticar; usado pela CLI e pelo studio.
+
 ## Blocked tasks
 - nenhuma
 
@@ -63,14 +78,16 @@
   `crates/bezel-cli/src/screen.rs`, `apps/bezel-studio/src-tauri/src/studio.rs`
 
 ## Tests
-- `cargo test --workspace --locked` na `main` após T-6.1, T-6.4 e T-6.2: 416 passando, 0 falhando, 2 ignorados
+- `cargo test --workspace --locked` na `main` após T-6.1..T-6.4: 455 passando, 0 falhando, 6 ignorados (4 de ffmpeg real)
 - DoD: `domain::storage::tests::destructive_operations_require_confirm_yes` e
   `domain::storage::tests::preflight_rejects_bad_names_sizes_and_full_storage` → OK
 - DoD T-6.2: `protocol::turing_rev_c::tests::storage_packets_match_the_reference_vectors`,
   `...::storage_info_subtracts_the_reserved_flash_and_detects_the_card`,
   `driver::turing_rev_c::tests::upload_reports_progress_and_can_be_cancelled` → OK; DoD T-6.4:
   `renderer::tests::device_video_background_renders_a_transparent_base` → OK
-- Coverage (`cargo llvm-cov`): `app/storage.rs` 99,42%, `domain/storage.rs` 99,31%, `domain/media.rs` 97,71%,
+- DoD T-6.3: `transcode::tests::builds_the_vendor_argument_vector_for_rev_c` e
+  `probe::tests::missing_ffmpeg_is_reported_not_fatal` → OK
+- Coverage (`cargo llvm-cov`): `bezel-media` 90,82% (97,4% com os ignorados); `app/storage.rs` 99,42%, `domain/storage.rs` 99,31%, `domain/media.rs` 97,71%,
   `driver/turing_rev_c.rs` 97,87%, `protocol/turing_rev_c.rs` 98,49%, `app/runtime.rs` 95,31%,
   `renderer.rs` 96,10%; workspace 95,54% (medição da T-6.2)
 

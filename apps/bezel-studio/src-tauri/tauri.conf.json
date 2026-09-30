@@ -51,6 +51,9 @@
         },
         "postInstallScript": "../../../packaging/linux/postinstall.sh"
       }
+    },
+    "resources": {
+      "../../../themes/": "themes/"
     }
   }
 }

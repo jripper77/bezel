@@ -397,8 +397,25 @@ impl Backend {
             .as_ref()
             .and_then(Screen::address)
             .map(|a| a.0.clone());
-        if let Err(e) = self.new_theme(key.as_deref(), UNTITLED, None) {
-            tracing::warn!("no starting theme: {e}");
+        let blank = match self.new_theme(key.as_deref(), UNTITLED, None) {
+            Ok(theme) => theme,
+            Err(e) => {
+                tracing::warn!("no starting theme: {e}");
+                return;
+            }
+        };
+        // First run: a bundled theme made for this screen and orientation is a
+        // better start than an empty canvas (saving it writes a copy).
+        let fitting = self.library.list().into_iter().find(|e| {
+            e.bundled
+                && e.theme.canvas.width == blank.canvas.width
+                && e.theme.canvas.height == blank.canvas.height
+                && crate::dto::orientation_slug(e.theme.orientation) == blank.orientation
+        });
+        if let Some(entry) = fitting
+            && let Err(e) = self.open(&entry.location.0)
+        {
+            tracing::warn!(theme = entry.location.0, "bundled theme not opened: {e}");
         }
     }
 
@@ -498,6 +515,39 @@ mod tests {
             connector,
             root,
         }
+    }
+
+    #[test]
+    fn the_first_run_opens_the_bundled_theme_for_the_screen() {
+        let mut f = fixture("first-run");
+        let bundled = f.root.join("bundled");
+        for (name, size, orientation) in [
+            ("Wide", Size::new(480, 1920), Orientation::Landscape),
+            ("Tall", Size::new(480, 1920), Orientation::Portrait),
+            ("Small", Size::new(320, 480), Orientation::Landscape),
+        ] {
+            let at = ThemeLocation(
+                bundled
+                    .join(format!("{name}.bezeltheme"))
+                    .display()
+                    .to_string(),
+            );
+            FsThemeStore
+                .save(
+                    &at,
+                    &Theme::blank(name, size, orientation),
+                    &Default::default(),
+                )
+                .unwrap();
+        }
+        f.backend.library = ThemeLibrary::new(f.root.join("themes"), vec![bundled]);
+        f.backend.restore_theme();
+        let session = f.backend.session();
+        assert_eq!(session.theme.name, "Wide", "the 8.8\" starts horizontal");
+        assert!(session.location.unwrap().ends_with("Wide.bezeltheme"));
+        // Saving it writes a copy in the user folder, never over the bundled file.
+        let saved = f.backend.save(&session.theme, None).unwrap();
+        assert!(saved.location.contains("/themes/"), "{}", saved.location);
     }
 
     #[test]

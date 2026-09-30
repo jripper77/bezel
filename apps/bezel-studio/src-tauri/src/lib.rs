@@ -28,7 +28,7 @@ use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::theme::Theme;
 use bezel_core::ports::{DeviceBus, ScreenConnector, SensorSource};
 use bezel_devices::{FakeBus, FakeConnector, SystemBus, SystemConnector};
-use bezel_render::SkiaRenderer;
+use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
 use tauri::{AppHandle, Manager, WindowEvent};
@@ -187,7 +187,12 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         connector,
         sensors,
     } = adapters(simulate);
-    let renderer = SkiaRenderer::new();
+    // The bundled themes' fonts first, so previews match every machine.
+    let bundled_fonts = bundled_theme_dirs(app)
+        .iter()
+        .flat_map(|dir| font_files(&dir.join("fonts")))
+        .collect();
+    let renderer = SkiaRenderer::with_fonts(bundled_fonts, SystemFonts::Load);
     let fonts = renderer.font_families();
     let studio = Studio::new(
         sensors,

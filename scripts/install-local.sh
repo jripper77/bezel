@@ -46,6 +46,13 @@ cargo build --release --locked -p bezel -p bezel-studio
 install -Dm755 target/release/bezel "$bin_dir/bezel"
 install -Dm755 target/release/bezel-studio "$bin_dir/bezel-studio"
 
+# Bundled themes and their fonts, where both `bezel` and the studio look for
+# them (~/.local/share/bezel/themes); replaced whole so removed themes go too.
+themes_dir="$prefix/share/bezel/themes"
+rm -rf "$themes_dir"
+mkdir -p "$(dirname "$themes_dir")"
+cp -r themes "$themes_dir"
+
 icons_src=apps/bezel-studio/src-tauri/icons
 install -Dm644 "$icons_src/32x32.png" "$icons_dir/32x32/apps/bezel.png"
 install -Dm644 "$icons_src/64x64.png" "$icons_dir/64x64/apps/bezel.png"
@@ -74,8 +81,8 @@ EOF
 update-desktop-database "$apps_dir" >/dev/null 2>&1 || true
 gtk-update-icon-cache -q -t "$icons_dir" >/dev/null 2>&1 || true
 
-printf '\nInstalled Bezel %s:\n  %s\n  %s\n  %s\n' \
-  "$BEZEL_VERSION" "$bin_dir/bezel" "$bin_dir/bezel-studio" "$apps_dir/$app_id.desktop"
+printf '\nInstalled Bezel %s:\n  %s\n  %s\n  %s\n  %s\n' \
+  "$BEZEL_VERSION" "$bin_dir/bezel" "$bin_dir/bezel-studio" "$apps_dir/$app_id.desktop" "$themes_dir"
 "$bin_dir/bezel" --version
 
 if [ "$(uname -s)" = "Linux" ] && [ ! -f /etc/udev/rules.d/60-bezel.rules ] &&

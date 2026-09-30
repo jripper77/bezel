@@ -394,3 +394,57 @@ fn another_video_starts_over_and_one_no_longer_shown_is_stopped() {
     rt.start_video(screen.as_mut(), None).expect("again");
     assert_eq!(stops(), 2, "only what it played");
 }
+
+#[test]
+fn previews_keep_the_poster_while_the_screen_loops_the_video() {
+    let (_, mut screen) = turing_88(stored("internal/video/clip_90.mp4"));
+    let mut rt = runtime(video_theme("assets/clip.mp4"));
+    rt.start_video(screen.as_mut(), None).expect("start");
+    let mut r = Recorder::default();
+    rt.sample(&mut FakeSensors::default()).expect("sample");
+    rt.render(&mut r, TIME, Duration::ZERO).expect("screen");
+    rt.render_with(&mut r, TIME, Backdrop::Poster)
+        .expect("preview");
+    assert_eq!(r.seen, ["on-device", "poster"]);
+}
+
+#[test]
+fn a_forgotten_screen_leaves_the_poster_and_nothing_to_stop() {
+    let (first, mut screen) = turing_88(stored("internal/video/clip_90.mp4"));
+    let mut rt = runtime(video_theme("assets/clip.mp4"));
+    rt.start_video(screen.as_mut(), None).expect("start");
+    let sent = calls(&first);
+    rt.forget_screen();
+    assert_eq!(rt.video(), &VideoState::NotStarted);
+    assert_eq!(calls(&first), sent, "nothing sent to a closed screen");
+    let mut r = Recorder::default();
+    rt.frame(&mut FakeSensors::default(), &mut r, TIME)
+        .expect("frame");
+    assert_eq!(r.seen, ["poster"]);
+
+    // Another screen without the video is not told to stop the old loop.
+    let (second, mut other) = turing_88(FakeStorage::default());
+    let state = rt.start_video(other.as_mut(), None).expect("start");
+    assert!(matches!(state, VideoState::VideoMissing(_)));
+    assert!(!calls(&second).contains(&StorageCall::Stop));
+
+    // A host-decoded video stops decoding.
+    let (_, mut weact) = weact();
+    let mut media = Decoder::ready();
+    let host = HostVideo {
+        media: &mut media,
+        source: MediaLocation("clip.mp4".into()),
+        fps: 10,
+    };
+    rt.start_video(weact.as_mut(), Some(host)).expect("start");
+    assert_eq!(rt.video(), &VideoState::Host);
+    rt.forget_screen();
+    rt.render(&mut r, TIME, Duration::from_millis(50))
+        .expect("frame");
+    assert_eq!(r.seen, ["poster", "poster"]);
+
+    let plain = Theme::blank("plain", Size::new(480, 1920), Orientation::Landscape);
+    rt.replace(plain, BTreeMap::new());
+    rt.forget_screen();
+    assert_eq!(rt.video(), &VideoState::NoVideo);
+}

@@ -124,9 +124,9 @@ where
     Ok(link)
 }
 
-/// Pictures per second of a video background decoded on this computer (for
-/// screens that cannot play videos themselves); a slow link shows fewer.
-pub const HOST_VIDEO_FPS: u32 = 10;
+/// Pictures per second of a video background decoded on this computer (the
+/// core's pace for screens that cannot play videos themselves).
+pub use bezel_core::app::HOST_VIDEO_FPS;
 
 /// The theme's video file on this computer, for host decoding: the file in
 /// a theme folder, or a temporary copy of the asset (zipped and converted

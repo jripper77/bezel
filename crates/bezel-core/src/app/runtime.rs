@@ -9,6 +9,12 @@
 //! stored videos); or the poster. The runtime queries and plays stored files
 //! but never sends one: putting the video on the screen is an explicit user
 //! action ([`MissingVideo::upload_request`]).
+//!
+//! An editor drives the same runtime: it swaps every edit in place
+//! ([`ThemeRuntime::replace_theme`], histories kept), shows the readings of
+//! the last sample ([`ThemeRuntime::snapshot`]) and previews frames over the
+//! poster ([`ThemeRuntime::render_with`]) while the screen gets what
+//! [`ThemeRuntime::render`] draws for it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -21,7 +27,7 @@ use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
 use crate::domain::history::Histories;
 use crate::domain::media::{ConvertOptions, MediaKind, MediaTools, StreamSpec, UploadProfile};
-use crate::domain::sensor::{Quantities, Snapshot};
+use crate::domain::sensor::{Quantities, SensorInfo, Snapshot};
 use crate::domain::storage::{FileName, Medium, RemotePath, Repeat, StorageLocation};
 use crate::domain::theme::{AssetRef, Background, Theme};
 use crate::ports::{
@@ -88,6 +94,10 @@ impl MissingVideo {
     }
 }
 
+/// Pictures per second of a video background decoded on the host (for
+/// screens that cannot play videos themselves); a slow link shows fewer.
+pub const HOST_VIDEO_FPS: u32 = 10;
+
 /// Host decoding offered for screens that cannot play stored videos.
 pub struct HostVideo<'a> {
     /// Decodes the video.
@@ -125,14 +135,39 @@ pub fn device_video_name(asset: &AssetRef, quarter_turns: u8, profile: &UploadPr
     FileName::suggest(&format!("{stem}{turned}.{extension}"), extension)
 }
 
-/// A theme being shown.
-pub struct ThemeRuntime {
+/// What a frame is drawn from: the theme with its assets and the readings.
+struct Scene {
     theme: Theme,
     assets: BTreeMap<AssetRef, Vec<u8>>,
     histories: Histories,
     quantities: Quantities,
     snapshot: Snapshot,
     language: Language,
+}
+
+impl Scene {
+    /// Renders the theme from the last sample over `backdrop`.
+    fn draw(
+        &self,
+        renderer: &mut dyn FrameRenderer,
+        time: LocalTime,
+        backdrop: Backdrop<'_>,
+    ) -> Result<Frame> {
+        let context = RenderContext {
+            snapshot: &self.snapshot,
+            histories: &self.histories,
+            quantities: &self.quantities,
+            time,
+            language: self.language,
+            backdrop,
+        };
+        renderer.render(&self.theme, &self.assets, context)
+    }
+}
+
+/// A theme being shown.
+pub struct ThemeRuntime {
+    scene: Scene,
     video: VideoState,
     /// Pictures of the host-decoded video ([`VideoState::Host`]).
     host: Option<Box<dyn VideoFrames>>,
@@ -143,7 +178,7 @@ pub struct ThemeRuntime {
 impl fmt::Debug for ThemeRuntime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ThemeRuntime")
-            .field("theme", &self.theme.name)
+            .field("theme", &self.scene.theme.name)
             .field("video", &self.video)
             .finish_non_exhaustive()
     }
@@ -200,12 +235,14 @@ impl ThemeRuntime {
         let histories = Histories::new(&theme.history_lengths());
         let video = unstarted(&theme);
         Self {
-            theme,
-            assets,
-            histories,
-            quantities: Quantities::default(),
-            snapshot: Snapshot::default(),
-            language,
+            scene: Scene {
+                theme,
+                assets,
+                histories,
+                quantities: Quantities::default(),
+                snapshot: Snapshot::default(),
+                language,
+            },
             video,
             host: None,
             playing: None,
@@ -214,7 +251,18 @@ impl ThemeRuntime {
 
     /// The theme being shown.
     pub fn theme(&self) -> &Theme {
-        &self.theme
+        &self.scene.theme
+    }
+
+    /// The theme's asset bytes.
+    pub fn assets(&self) -> &BTreeMap<AssetRef, Vec<u8>> {
+        &self.scene.assets
+    }
+
+    /// Adds `asset` for the theme to use (new bytes for one it has replace
+    /// them); the other assets stay.
+    pub fn add_asset(&mut self, asset: AssetRef, bytes: Vec<u8>) {
+        self.scene.assets.insert(asset, bytes);
     }
 
     /// How the theme's video background is shown.
@@ -222,20 +270,51 @@ impl ThemeRuntime {
         &self.video
     }
 
+    /// The readings of the last [`Self::sample`] (empty before the first).
+    pub fn snapshot(&self) -> &Snapshot {
+        &self.scene.snapshot
+    }
+
+    /// What each sensor measures (the units of sensor text): from the last
+    /// [`Self::use_catalog`], else from the catalog read at the first sample.
+    pub fn quantities(&self) -> &Quantities {
+        &self.scene.quantities
+    }
+
+    /// Takes what each sensor measures from `catalog`, read again when
+    /// sensors come and go.
+    pub fn use_catalog(&mut self, catalog: &[SensorInfo]) {
+        self.scene.quantities = Quantities::from_catalog(catalog);
+    }
+
     /// Swaps in an edited theme, keeping the history of sensors still graphed.
     /// Another video (a different file or orientation) goes back to
     /// [`VideoState::NotStarted`] (or [`VideoState::NoVideo`]): start it
     /// again with [`Self::start_video`].
     pub fn replace(&mut self, theme: Theme, assets: BTreeMap<AssetRef, Vec<u8>>) {
+        self.scene.assets = assets;
+        self.replace_theme(theme);
+    }
+
+    /// [`Self::replace`] keeping the assets: an edit of the theme.
+    pub fn replace_theme(&mut self, theme: Theme) {
         let mut histories = Histories::new(&theme.history_lengths());
-        histories.adopt(&self.histories);
-        if video_of(&theme) != video_of(&self.theme) {
+        histories.adopt(&self.scene.histories);
+        if video_of(&theme) != video_of(&self.scene.theme) {
             self.video = unstarted(&theme);
             self.host = None;
         }
-        self.theme = theme;
-        self.assets = assets;
-        self.histories = histories;
+        self.scene.theme = theme;
+        self.scene.histories = histories;
+    }
+
+    /// Forgets the screen the video was started on (closed, handed back or
+    /// lost): frames show the poster again ([`VideoState::NotStarted`]) and
+    /// the host decoding stops. Nothing is sent: the screen is gone.
+    pub fn forget_screen(&mut self) {
+        self.video = unstarted(&self.scene.theme);
+        self.host = None;
+        self.playing = None;
     }
 
     /// Chooses how the theme's video reaches `screen` and starts it. Call it
@@ -258,8 +337,8 @@ impl ThemeRuntime {
         host: Option<HostVideo<'_>>,
     ) -> Result<&VideoState> {
         self.host = None;
-        self.video = unstarted(&self.theme);
-        let video = match video_of(&self.theme) {
+        self.video = unstarted(&self.scene.theme);
+        let video = match video_of(&self.scene.theme) {
             Some((asset, _)) => asset.clone(),
             None => {
                 self.stop_played(screen)?;
@@ -268,6 +347,7 @@ impl ThemeRuntime {
         };
         let model = screen.identity().model;
         let turns = self
+            .scene
             .theme
             .orientation
             .quarter_turns_to(model.native_orientation);
@@ -318,7 +398,7 @@ impl ThemeRuntime {
             return Ok(VideoState::NoConverter { install_hints });
         }
         let spec = StreamSpec {
-            size: self.theme.canvas,
+            size: self.scene.theme.canvas,
             fps: host.fps,
         };
         self.host = Some(host.media.stream(&host.source, spec)?);
@@ -338,15 +418,15 @@ impl ThemeRuntime {
     /// Samples the sensors and records the graph histories (once per
     /// `refresh_seconds`).
     pub fn sample(&mut self, sensors: &mut dyn SensorSource) -> Result<()> {
-        if self.quantities.is_empty() {
+        if self.scene.quantities.is_empty() {
             // Units of sensor text; a catalog failure only costs the units.
             if let Ok(catalog) = sensors.catalog() {
-                self.quantities = Quantities::from_catalog(&catalog);
+                self.use_catalog(&catalog);
             }
         }
         let snapshot = sensors.sample()?;
-        self.histories.push(&snapshot);
-        self.snapshot = snapshot;
+        self.scene.histories.push(&snapshot);
+        self.scene.snapshot = snapshot;
         Ok(())
     }
 
@@ -365,15 +445,18 @@ impl ThemeRuntime {
             (VideoState::Host, Some(frames)) => Backdrop::Frame(frames.frame_at(video)?),
             _ => Backdrop::Poster,
         };
-        let context = RenderContext {
-            snapshot: &self.snapshot,
-            histories: &self.histories,
-            quantities: &self.quantities,
-            time,
-            language: self.language,
-            backdrop,
-        };
-        renderer.render(&self.theme, &self.assets, context)
+        self.scene.draw(renderer, time, backdrop)
+    }
+
+    /// Renders one frame from the last sample over `backdrop`, whatever the
+    /// screen shows: an editor's preview passes [`Backdrop::Poster`].
+    pub fn render_with(
+        &self,
+        renderer: &mut dyn FrameRenderer,
+        time: LocalTime,
+        backdrop: Backdrop<'_>,
+    ) -> Result<Frame> {
+        self.scene.draw(renderer, time, backdrop)
     }
 
     /// Samples the sensors, records histories and renders one frame

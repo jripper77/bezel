@@ -92,7 +92,8 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
   - `docs/user/` e `docs/user/pt-BR/`: tópicos da D-7, Windows (usbser, WinUSB/Zadig, LHM elevado), sem assinatura/SmartScreen, `bezel udev-rules`, FPS, HID "não validado"; `check-docs.sh`: mesmos arquivos nos dois idiomas, links relativos válidos, sem segredos/caminhos privados, README sem "early development"; CHANGELOG `## [Unreleased]` da fase.
 - **Dependencies:** T-7.1..T-7.6
 - **Test:** `bash scripts/ci/check-packaging.sh && bash scripts/ci/check-docs.sh`
-- **Status:** pending
+- **Status:** completed (`8b1a2a1` empacotamento, `a5f5561` docs)
+- **Nota:** fora de `files_modified`, permitido pela invocação: `packaging/linux/postinstall.sh` (gatilho `hidraw`). Os deb/rpm também levam os temas em `/usr/share/bezel/themes` (o `/usr/bin/bezel` procura em `<exe>/../share/bezel/themes`; o recurso do Tauri fica em `/usr/lib/Bezel/themes`, que só o studio lê). A esteira @71f8b07 (qualidade.yml @af3ecb7) roda `cargo build -p bezel --release --locked` (`binarios_extra`) antes do `cargo tauri build`, no `target/` da raiz. Provado com deb e rpm construídos localmente (`cargo tauri build --bundles deb,rpm`, tauri-cli 2.12.0): `check-packaging.sh` passou nos dois, e o `bezel` extraído do rpm achou os temas e renderizou `turing-8.8-horizontal` com um `HOME` vazio. O `cargo tauri build` reescreve `tauri-build = "2.7.0"` no `Cargo.toml` do studio para a forma de tabela (equivalente; revertido aqui). O CHANGELOG já descreve a T-7.6 (idioma com override em Preferências, mensagens traduzidas, comando udev copiável, ping e MangoHud nas Preferências): conferir no merge. A instalação dos pacotes da CI fica para a T-7.8.
 
 ### Wave 4
 

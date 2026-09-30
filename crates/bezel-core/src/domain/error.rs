@@ -1,0 +1,26 @@
+//! The error type every port and use case speaks.
+
+use thiserror::Error;
+
+/// Errors of the Bezel domain. Adapters map their own errors into these
+/// variants and never leak transport-specific error types through a port.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum BezelError {
+    /// No connected screen matches the requested identity.
+    #[error("screen not found: {0}")]
+    ScreenNotFound(String),
+    /// The operating system refused access to a device (permissions, busy port).
+    #[error("access denied to {address}: {reason}")]
+    AccessDenied {
+        /// Opaque device address (port name or USB path).
+        address: String,
+        /// Human-readable reason reported by the adapter.
+        reason: String,
+    },
+    /// A device did not answer in time.
+    #[error("timeout talking to {0}")]
+    Timeout(String),
+    /// Any other transport-level failure.
+    #[error("transport error: {0}")]
+    Transport(String),
+}

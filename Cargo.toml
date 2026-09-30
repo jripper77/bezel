@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/bezel-core",
+    "crates/bezel-devices",
+    "crates/bezel-cli",
+
+]
+
+[workspace.package]
+# 0.0.0 on purpose: CI stamps the version it computes from the commits into
+# the release build and the packages (same scheme as ddc-control). A local
+# `--version` says 0.0.0 unless scripts/install-local.sh stamps it.
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/slipalison/bezel"
+authors = ["Alison Amorim"]
+
+[workspace.dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+bezel-core = { path = "crates/bezel-core" }
+bezel-devices = { path = "crates/bezel-devices" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "symbols"

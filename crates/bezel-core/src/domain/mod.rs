@@ -1,0 +1,7 @@
+//! Domain types: device catalog, geometry and discovery.
+
+pub mod catalog;
+pub mod device;
+pub mod discovery;
+pub mod error;
+pub mod geometry;

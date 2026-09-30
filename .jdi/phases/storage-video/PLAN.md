@@ -20,7 +20,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - Jobs: `Progress { phase: Convert|Upload|Verify, done, total }` e `CancelToken` (sem thread nem I/O no core); porta `MediaTranscoder` (disponibilidade, probe, transcode, stream de frames); `RenderContext.backdrop` (`Poster` | `OnDevice` | `Frame(&Frame)`), construtores atuais com `Poster` e nenhum pixel muda.
 - **Dependencies:** none
 - **Test:** `domain::storage::tests::destructive_operations_require_confirm_yes`, `domain::storage::tests::preflight_rejects_bad_names_sizes_and_full_storage`; `cargo test -p bezel-core`
-- **Status:** completed (cf987b2)
+- **Status:** completed (5e36061)
 
 ### Wave 2 (paralela: adapters, arquivos disjuntos)
 

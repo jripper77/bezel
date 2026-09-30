@@ -339,7 +339,12 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     try {
       result = await bridge.runUpload(prepared.ticket, Boolean(prepared.replaces));
     } catch (e) {
-      view.notice = { kind: 'error', text: errorMessage(t, e) };
+      // A cancel mid-transfer can leave the firmware waiting for the rest of
+      // the file: the link times out, the next operation reconnects, and a
+      // partial file may remain (seen on the 8.8").
+      view.notice = view.job?.cancelling && e?.code === 'timeout'
+        ? { kind: 'error', text: t('storage.cancelledLost', { name: view.job.name }) }
+        : { kind: 'error', text: errorMessage(t, e) };
     }
     const { name } = view.job;
     view.job = null;

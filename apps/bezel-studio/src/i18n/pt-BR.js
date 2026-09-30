@@ -178,6 +178,7 @@ export default {
   'storage.busy': 'Enquanto o envio não termina, as outras ações ficam em espera.',
   'storage.cancel': 'Cancelar envio',
   'storage.cancelled': 'Envio cancelado',
+  'storage.cancelledLost': 'Envio de “{name}” cancelado. A tela parou de responder e volta na próxima operação; depois atualize a lista e apague o arquivo incompleto, se ele aparecer.',
   'storage.cancelling': 'Cancelando…',
   'storage.candidates': 'Arquivos que você pode apagar para abrir espaço:',
   'storage.cardHelp': 'A tela lê cartões FAT32 com tabela de partição MBR. O Bezel não formata cartões: prepare o cartão no computador.',

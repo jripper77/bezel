@@ -178,6 +178,7 @@ export default {
   'storage.busy': 'Other actions wait until the upload ends.',
   'storage.cancel': 'Cancel upload',
   'storage.cancelled': 'Upload cancelled',
+  'storage.cancelledLost': 'Upload of “{name}” cancelled. The screen stopped answering and comes back on the next operation; then refresh the list and delete the incomplete file if it shows.',
   'storage.cancelling': 'Cancelling…',
   'storage.candidates': 'Files you may delete to make room:',
   'storage.cardHelp': 'The screen reads FAT32 cards with an MBR partition table. Bezel does not format cards: prepare the card on the computer.',

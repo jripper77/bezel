@@ -86,7 +86,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - Modo demo emula armazenamento e progresso; Playwright em claro e escuro com axe sem violações sérias/críticas.
 - **Dependencies:** T-6.2, T-6.3, T-6.4
 - **Test:** Playwright "storage tab upload progress and confirmed delete"; `npm run test:unit`; `cargo test -p bezel-studio`
-- **Status:** pending
+- **Status:** completed (4e0bf03 backend, 377947d UI; fora do `files_modified`: `src-tauri/src/{studio,media}.rs`, `src/ui/icons.js`, `tests/ui/bridge.test.mjs`; `src/ui/library.js` não precisou mudar)
 
 ### Wave 4
 

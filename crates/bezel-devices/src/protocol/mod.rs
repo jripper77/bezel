@@ -2,6 +2,7 @@
 //! drivers in `crate::driver` put them on a transport.
 
 pub mod kipye_rev_d;
+pub mod rgb565;
 pub mod turing_rev_a;
 pub mod turing_rev_c;
 pub mod turing_usb;

@@ -20,7 +20,7 @@ use bezel_core::ports::ScreenLink;
 use bezel_core::{BezelError, Result};
 use chrono::Timelike;
 
-use crate::driver::turing_rev_c::Pause;
+use crate::driver::{Pause, check_frame, io_err};
 use crate::protocol::turing_usb::{self as proto, Header, op};
 use crate::usb::Endpoints;
 use crate::wire::Wire;
@@ -71,10 +71,6 @@ pub struct TuringUsb<W: Wire, C: Clock = LocalClock> {
     level: Option<u8>,
     /// Turned off by `screen_off`; the next frame turns it back on.
     off: bool,
-}
-
-fn io_err(e: std::io::Error) -> BezelError {
-    BezelError::Transport(e.to_string())
 }
 
 /// One command: a single write of the packet and its payload, then the
@@ -165,16 +161,7 @@ impl<W: Wire, C: Clock> TuringUsb<W, C> {
 
     fn native(&self, frame: &Frame) -> Result<Frame> {
         let model = self.identity.model;
-        let expected = model.panel.in_orientation(self.orientation);
-        if frame.size() != expected {
-            return Err(BezelError::Transport(format!(
-                "frame is {}x{}, the screen expects {}x{} in this orientation",
-                frame.size().width,
-                frame.size().height,
-                expected.width,
-                expected.height
-            )));
-        }
+        check_frame(model, self.orientation, frame)?;
         let turns = self.orientation.quarter_turns_to(model.native_orientation);
         Ok(frame.rotated(turns))
     }
@@ -267,7 +254,7 @@ fn pick_model(candidates: &[&'static DeviceModel]) -> Result<&'static DeviceMode
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::driver::turing_rev_c::RealTime;
+    use crate::driver::RealTime;
     use crate::wire::ScriptedWire;
     use bezel_core::domain::catalog::model_by_id;
     use bezel_core::domain::device::ModelId;

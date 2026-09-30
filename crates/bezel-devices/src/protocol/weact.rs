@@ -8,7 +8,7 @@
 //!
 //! This module is pure: it only builds and parses bytes.
 
-use bezel_core::domain::frame::{RGBA_BYTES, Rect};
+use bezel_core::domain::frame::Rect;
 use bezel_core::domain::geometry::{Orientation, Size};
 
 /// Last byte of every command.
@@ -158,20 +158,7 @@ pub fn data_chunk_len(canvas: Size) -> usize {
     (canvas.width as usize * 4).max(1)
 }
 
-/// One colour as RGB565: `(R >> 3) << 11 | (G >> 2) << 5 | B >> 3`.
-pub fn rgb565(r: u8, g: u8, b: u8) -> u16 {
-    (u16::from(r >> 3) << 11) | (u16::from(g >> 2) << 5) | u16::from(b >> 3)
-}
-
-/// RGBA8 pixels as RGB565 little-endian, row-major. Alpha is ignored, as in
-/// the reference (no compositing).
-pub fn rgb565_le(rgba: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(rgba.len() / 2);
-    for px in rgba.as_chunks::<RGBA_BYTES>().0 {
-        out.extend_from_slice(&rgb565(px[0], px[1], px[2]).to_le_bytes());
-    }
-    out
-}
+pub use super::rgb565::{le as rgb565_le, pack as rgb565};
 
 /// ENABLE_HUMITURE_REPORT (3.5" only): a report every `period_ms`, or none
 /// for 0. `None` for periods the device refuses (1..500 ms), which the

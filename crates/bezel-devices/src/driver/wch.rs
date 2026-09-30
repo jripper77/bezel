@@ -15,7 +15,7 @@ use bezel_core::domain::screen::{Brightness, ScreenIdentity};
 use bezel_core::ports::ScreenLink;
 use bezel_core::{BezelError, Result};
 
-use crate::driver::turing_rev_c::Pause;
+use crate::driver::{Pause, check_frame, io_err};
 use crate::protocol::wch::{self as proto, Panel, Version, op};
 use crate::usb::Endpoints;
 use crate::wire::Wire;
@@ -51,10 +51,6 @@ pub struct Wch<W: Wire, P: Pause> {
     level: Option<u8>,
     /// Turned off by `screen_off`; the next frame turns it back on.
     off: bool,
-}
-
-fn io_err(e: std::io::Error) -> BezelError {
-    BezelError::Transport(e.to_string())
 }
 
 /// One command: drop stale input, write the packet, wait 1 ms and read the
@@ -147,16 +143,7 @@ impl<W: Wire, P: Pause> Wch<W, P> {
 
     fn native(&self, frame: &Frame) -> Result<Frame> {
         let model = self.identity.model;
-        let expected = model.panel.in_orientation(self.orientation);
-        if frame.size() != expected {
-            return Err(BezelError::Transport(format!(
-                "frame is {}x{}, the screen expects {}x{} in this orientation",
-                frame.size().width,
-                frame.size().height,
-                expected.width,
-                expected.height
-            )));
-        }
+        check_frame(model, self.orientation, frame)?;
         let turns = self.orientation.quarter_turns_to(model.native_orientation);
         Ok(frame.rotated(turns))
     }
@@ -259,7 +246,7 @@ fn pick_model(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::driver::turing_rev_c::RealTime;
+    use crate::driver::RealTime;
     use crate::wire::ScriptedWire;
     use bezel_core::domain::catalog::model_by_id;
     use bezel_core::domain::frame::{Rect, Rgba};

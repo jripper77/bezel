@@ -10,7 +10,7 @@
 //! This module is pure: it only builds and parses bytes.
 
 use bezel_core::domain::device::ModelId;
-use bezel_core::domain::frame::{RGBA_BYTES, Rect};
+use bezel_core::domain::frame::Rect;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::screen::Brightness;
 
@@ -22,8 +22,7 @@ pub const ORIENTATION_LEN: usize = 16;
 pub const MAX_COORD: u32 = 0x3FF;
 /// Bytes read back after HELLO.
 pub const HELLO_REPLY_LEN: usize = 6;
-/// Bytes per RGB565 pixel.
-pub const PIXEL_BYTES: usize = 2;
+pub use super::rgb565::PIXEL_BYTES;
 
 /// Opcodes (`lcd_comm_rev_a.py:32-47`).
 pub mod op {
@@ -143,19 +142,7 @@ pub fn display_bitmap(rect: Rect) -> Option<[u8; COMMAND_LEN]> {
     )
 }
 
-/// RGB565 of one pixel; the caller drops alpha, as the reference does.
-pub const fn rgb565(r: u8, g: u8, b: u8) -> u16 {
-    ((r as u16 >> 3) << 11) | ((g as u16 >> 2) << 5) | (b as u16 >> 3)
-}
-
-/// RGBA8 → RGB565 little-endian, pixel order kept (row-major, top-left first).
-pub fn rgb565_le(rgba: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(rgba.len() / RGBA_BYTES * PIXEL_BYTES);
-    for px in rgba.as_chunks::<RGBA_BYTES>().0 {
-        out.extend_from_slice(&rgb565(px[0], px[1], px[2]).to_le_bytes());
-    }
-    out
-}
+pub use super::rgb565::{le as rgb565_le, pack as rgb565};
 
 /// Bytes per data write: four display rows of the current-orientation width.
 pub const fn chunk_len(width: u32) -> usize {

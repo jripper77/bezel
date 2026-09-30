@@ -8,9 +8,10 @@ use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink};
 use bezel_core::{BezelError, Result};
 
 use crate::discovery::SystemBus;
+use crate::driver::RealTime;
 use crate::driver::kipye_rev_d::KipyeRevD;
 use crate::driver::turing_rev_a::TuringRevA;
-use crate::driver::turing_rev_c::{RealTime, TuringRevC};
+use crate::driver::turing_rev_c::TuringRevC;
 use crate::driver::turing_usb::{self, TuringUsb};
 use crate::driver::wch::{self, Wch};
 use crate::driver::weact::WeAct;

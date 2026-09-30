@@ -9,11 +9,14 @@ use bezel_core::domain::screen::{Brightness, ScreenIdentity};
 use bezel_core::ports::ScreenLink;
 use bezel_core::{BezelError, Result};
 
+use crate::driver::{Pause, check_frame, io_err};
 use crate::protocol::turing_rev_c::{self as proto, Hello, PixelFormat, Status, op};
 use crate::wire::Wire;
 
 /// How long the device may take to answer HELLO or QUERY_STATUS.
 const REPLY_TIMEOUT: Duration = Duration::from_millis(1000);
+/// Longest reply read at once (HELLO, status and media answers are short).
+const REPLY_MAX: usize = 1024;
 /// HELLO attempts before giving up.
 const HELLO_TRIES: usize = 3;
 /// Pause between failed HELLO attempts (after a resync block).
@@ -26,22 +29,6 @@ const OFF_POLLS: usize = 16;
 /// One of those reads.
 const OFF_POLL: Duration = Duration::from_millis(250);
 
-/// Pauses between protocol steps. The fake used in tests does not sleep.
-pub trait Pause: Send {
-    /// Waits `d`.
-    fn pause(&self, d: Duration);
-}
-
-/// Real time.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct RealTime;
-
-impl Pause for RealTime {
-    fn pause(&self, d: Duration) {
-        std::thread::sleep(d);
-    }
-}
-
 /// A connected rev C screen.
 pub struct TuringRevC<W: Wire> {
     wire: W,
@@ -50,10 +37,6 @@ pub struct TuringRevC<W: Wire> {
     orientation: Orientation,
     last: Option<Vec<u8>>,
     seq: u32,
-}
-
-fn io_err(e: std::io::Error) -> BezelError {
-    BezelError::Transport(e.to_string())
 }
 
 impl<W: Wire> TuringRevC<W> {
@@ -98,7 +81,10 @@ impl<W: Wire> TuringRevC<W> {
         self.send(&proto::simple(op::STOP_VIDEO))?;
         for _ in 0..STOP_MEDIA_POLLS {
             self.send(&proto::simple(op::STOP_MEDIA))?;
-            let reply = self.wire.receive(1024, REPLY_TIMEOUT).map_err(io_err)?;
+            let reply = self
+                .wire
+                .receive(REPLY_MAX, REPLY_TIMEOUT)
+                .map_err(io_err)?;
             if String::from_utf8_lossy(&reply).contains("media_stop") {
                 return Ok(());
             }
@@ -110,16 +96,7 @@ impl<W: Wire> TuringRevC<W> {
 
     fn native(&self, frame: &Frame) -> Result<Vec<u8>> {
         let model = self.identity.model;
-        let expected = model.panel.in_orientation(self.orientation);
-        if frame.size() != expected {
-            return Err(BezelError::Transport(format!(
-                "frame is {}x{}, the screen expects {}x{} in this orientation",
-                frame.size().width,
-                frame.size().height,
-                expected.width,
-                expected.height
-            )));
-        }
+        check_frame(model, self.orientation, frame)?;
         let turns = self.orientation.quarter_turns_to(model.native_orientation);
         Ok(rgba_to_bgra(frame.rotated(turns).as_rgba()))
     }
@@ -132,7 +109,7 @@ impl<W: Wire> TuringRevC<W> {
         // pollute the next reply.
         let after = self
             .wire
-            .receive(1024, Duration::from_millis(50))
+            .receive(REPLY_MAX, Duration::from_millis(50))
             .map_err(io_err)?;
         tracing::debug!(bytes = bgra.len(), reply = %String::from_utf8_lossy(&after), "full frame");
         self.last = Some(bgra);
@@ -152,7 +129,10 @@ impl<W: Wire> TuringRevC<W> {
     /// QUERY_STATUS round-trip; `true` when the device asks for a full frame.
     fn needs_full_frame(&mut self) -> Result<bool> {
         self.send(&proto::simple(op::QUERY_STATUS))?;
-        let reply = self.wire.receive(1024, REPLY_TIMEOUT).map_err(io_err)?;
+        let reply = self
+            .wire
+            .receive(REPLY_MAX, REPLY_TIMEOUT)
+            .map_err(io_err)?;
         let status = Status::parse(&reply);
         tracing::debug!(reply = %String::from_utf8_lossy(&reply).trim_end_matches('\0'), seq = self.seq, "QUERY_STATUS");
         Ok(status.is_some_and(|s| s.need_resend))
@@ -218,7 +198,7 @@ fn handshake<W: Wire, P: Pause>(wire: &mut W, pause: &P) -> Result<Hello> {
     wire.discard_input().map_err(io_err)?;
     for attempt in 0..HELLO_TRIES {
         wire.send(&proto::hello()).map_err(io_err)?;
-        let reply = wire.receive(1024, REPLY_TIMEOUT).map_err(io_err)?;
+        let reply = wire.receive(REPLY_MAX, REPLY_TIMEOUT).map_err(io_err)?;
         if let Some(hello) = Hello::parse(&reply) {
             return Ok(hello);
         }
@@ -257,6 +237,7 @@ pub fn rgba_to_bgra(rgba: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::driver::RealTime;
     use crate::wire::ScriptedWire;
     use bezel_core::domain::catalog::model_by_id;
     use bezel_core::domain::device::ModelId;

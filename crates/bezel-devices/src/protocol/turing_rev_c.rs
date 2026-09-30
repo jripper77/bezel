@@ -256,10 +256,6 @@ fn push_run(out: &mut Vec<u8>, start: usize, pixels: &[u8], format: PixelFormat)
     }
 }
 
-/// The run list sent when nothing changed: one dummy single-pixel record, as
-/// the vendor app does every tick (the firmware tolerates the short record).
-pub const NO_CHANGE: [u8; 6] = [0x80, 0, 0, 0, 0, 0];
-
 /// A parsed HELLO answer, e.g. `chs_88inch.dev1_rom1.90`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hello {

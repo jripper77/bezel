@@ -8,7 +8,7 @@
 //!
 //! This module is pure: it only builds bytes.
 
-use bezel_core::domain::frame::{RGBA_BYTES, Rect};
+use bezel_core::domain::frame::Rect;
 use bezel_core::domain::geometry::Orientation;
 
 /// Size of a pixel data packet on the wire.
@@ -134,20 +134,7 @@ pub fn block_write(w: Window) -> [u8; 10] {
     out
 }
 
-/// One colour as RGB565: `(R >> 3) << 11 | (G >> 2) << 5 | B >> 3`.
-pub fn rgb565(r: u8, g: u8, b: u8) -> u16 {
-    (u16::from(r >> 3) << 11) | (u16::from(g >> 2) << 5) | u16::from(b >> 3)
-}
-
-/// RGBA8 pixels as RGB565 big-endian, row-major. Alpha is ignored, as in the
-/// reference (no compositing).
-pub fn rgb565_be(rgba: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(rgba.len() / 2);
-    for px in rgba.as_chunks::<RGBA_BYTES>().0 {
-        out.extend_from_slice(&rgb565(px[0], px[1], px[2]).to_be_bytes());
-    }
-    out
-}
+pub use super::rgb565::{be as rgb565_be, pack as rgb565};
 
 /// The pixel data phase: `P` and 63 bytes per packet, the last one shorter.
 /// Packets are concatenated; each starts on a 64-byte boundary.

@@ -10,11 +10,9 @@
 //! This module is pure: it only builds and parses bytes.
 
 use bezel_core::domain::device::ModelId;
-use bezel_core::domain::frame::{RGBA_BYTES, Rect};
+use bezel_core::domain::frame::Rect;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::screen::Brightness;
-
-use super::turing_rev_a::rgb565;
 
 /// Size of every command.
 pub const PACKET_LEN: usize = 10;
@@ -26,8 +24,7 @@ pub const HELLO_REPLY_LEN: usize = 10;
 pub const HELLO_PAYLOAD: [u8; 5] = *b"HELLO";
 /// Byte 6 of a HELLO answer that carries a sub-revision in byte 7.
 pub const VERSION_MARK: u8 = 0x0A;
-/// Bytes per RGB565 pixel.
-pub const PIXEL_BYTES: usize = 2;
+pub use super::rgb565::PIXEL_BYTES;
 /// Portrait panel size of every rev B variant.
 pub const PANEL: Size = Size::new(320, 480);
 
@@ -131,20 +128,14 @@ pub fn display_bitmap(
     Some(fixed(op::DISPLAY_BITMAP, &payload))
 }
 
-/// RGBA8 → RGB565 big-endian, row-major; `rotate_180` emits the pixels in
-/// reverse order, which is the image turned 180°. Alpha is ignored.
+/// A rectangle as big-endian RGB565, pixel order reversed when the panel is
+/// driven turned 180°.
 pub fn rgb565_be(rgba: &[u8], rotate_180: bool) -> Vec<u8> {
-    let pixels = rgba.as_chunks::<RGBA_BYTES>().0;
-    let mut out = Vec::with_capacity(pixels.len() * PIXEL_BYTES);
-    let mut push = |px: &[u8; RGBA_BYTES]| {
-        out.extend_from_slice(&rgb565(px[0], px[1], px[2]).to_be_bytes());
-    };
     if rotate_180 {
-        pixels.iter().rev().for_each(&mut push);
+        super::rgb565::be_reversed(rgba)
     } else {
-        pixels.iter().for_each(&mut push);
+        super::rgb565::be(rgba)
     }
-    out
 }
 
 /// Bytes per data write: four display rows of the current-orientation width.

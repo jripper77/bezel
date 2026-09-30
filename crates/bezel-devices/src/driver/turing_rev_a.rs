@@ -14,7 +14,7 @@ use bezel_core::domain::screen::{Brightness, ScreenIdentity};
 use bezel_core::ports::ScreenLink;
 use bezel_core::{BezelError, Result};
 
-use crate::driver::turing_rev_c::Pause;
+use crate::driver::{Pause, check_frame, io_err};
 use crate::protocol::turing_rev_a::{self as proto, SubRevision};
 use crate::wire::Wire;
 
@@ -33,10 +33,6 @@ pub struct TuringRevA<W: Wire> {
     needs_screen_on: bool,
     /// The frame the panel shows; `None` forces the next frame to be full.
     last: Option<Frame>,
-}
-
-fn io_err(e: std::io::Error) -> BezelError {
-    BezelError::Transport(e.to_string())
 }
 
 impl<W: Wire> TuringRevA<W> {
@@ -107,17 +103,7 @@ impl<W: Wire> TuringRevA<W> {
     }
 
     fn check_size(&self, frame: &Frame) -> Result<()> {
-        let expected = self.identity.model.panel.in_orientation(self.orientation);
-        if frame.size() == expected {
-            return Ok(());
-        }
-        Err(BezelError::Transport(format!(
-            "frame is {}x{}, the screen expects {}x{} in this orientation",
-            frame.size().width,
-            frame.size().height,
-            expected.width,
-            expected.height
-        )))
+        check_frame(self.identity.model, self.orientation, frame)
     }
 
     /// One DISPLAY_BITMAP: header, then the pixels in four-row chunks, sent

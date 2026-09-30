@@ -30,7 +30,7 @@ use bezel_core::domain::screen::{Brightness, ScreenIdentity};
 use bezel_core::ports::ScreenLink;
 use bezel_core::{BezelError, Result};
 
-use crate::driver::turing_rev_c::Pause;
+use crate::driver::{Pause, check_frame_size, io_err};
 use crate::protocol::weact as proto;
 use crate::wire::Wire;
 
@@ -54,10 +54,6 @@ pub struct WeAct<W: Wire> {
     brightness: Option<u8>,
     /// Off by `screen_off`; the next frame restores the backlight.
     dark: bool,
-}
-
-fn io_err(e: std::io::Error) -> BezelError {
-    BezelError::Transport(e.to_string())
 }
 
 impl<W: Wire> WeAct<W> {
@@ -146,15 +142,7 @@ impl<W: Wire> ScreenLink for WeAct<W> {
 
     fn present(&mut self, frame: &Frame) -> Result<()> {
         let canvas = self.canvas();
-        if frame.size() != canvas {
-            return Err(BezelError::Transport(format!(
-                "frame is {}x{}, the screen expects {}x{} in this orientation",
-                frame.size().width,
-                frame.size().height,
-                canvas.width,
-                canvas.height
-            )));
-        }
+        check_frame_size(frame, canvas)?;
         if self.dark {
             self.backlight(self.brightness.unwrap_or(WAKE_PERCENT))?;
             self.dark = false;

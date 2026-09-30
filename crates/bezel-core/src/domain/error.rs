@@ -28,6 +28,10 @@ pub enum BezelError {
     /// A device did not answer in time.
     #[error("timeout talking to {0}")]
     Timeout(String),
+    /// Something the caller passed that the device or format cannot take
+    /// (a frame of the wrong size, a theme that does not fit).
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
     /// Any other transport-level failure.
     #[error("transport error: {0}")]
     Transport(String),

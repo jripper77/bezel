@@ -313,6 +313,7 @@ dependencies = [
  "assert_cmd",
  "bezel-core",
  "bezel-devices",
+ "bezel-sensors",
  "clap",
  "serde",
  "serde_json",

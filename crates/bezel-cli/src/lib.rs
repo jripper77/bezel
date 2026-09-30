@@ -1,13 +1,19 @@
 //! Command-line driving adapter of Bezel. `main.rs` is the composition root;
-//! everything here is testable against any [`DeviceBus`] and [`ScreenConnector`].
+//! everything here is testable against any [`DeviceBus`], [`ScreenConnector`]
+//! and [`SensorSource`](bezel_core::ports::SensorSource).
 #![forbid(unsafe_code)]
 
 mod devices;
 mod screen;
+mod sensors;
+
+use std::time::Duration;
 
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::ports::{DeviceBus, ScreenConnector};
 use clap::{Parser, Subcommand, ValueEnum};
+
+pub use sensors::{WatchStyle, run as run_sensors};
 
 /// Product version: the one CI or `scripts/install-local.sh` stamped, else the crate's.
 pub const VERSION: &str = match option_env!("BEZEL_VERSION") {
@@ -19,7 +25,8 @@ pub const VERSION: &str = match option_env!("BEZEL_VERSION") {
 #[derive(Debug, Parser)]
 #[command(name = "bezel", version = VERSION)]
 pub struct Cli {
-    /// Use a simulated Turing 8.8" instead of the real USB bus (demos and tests).
+    /// Use simulated hardware instead of the real machine: a Turing 8.8"
+    /// screen and demo sensor values (demos and tests).
     #[arg(long, global = true, hide = true)]
     pub fake: bool,
 
@@ -64,6 +71,24 @@ impl From<OrientationArg> for Orientation {
     }
 }
 
+/// Options of `bezel sensors`.
+#[derive(Debug, Clone, clap::Args)]
+pub struct SensorsArgs {
+    /// Print JSON instead of a table (one document per line with --watch).
+    #[arg(long)]
+    pub json: bool,
+    /// Refresh every SECS seconds (fractions allowed, at least 0.25) until
+    /// interrupted.
+    #[arg(long, value_name = "SECS", value_parser = sensors::parse_interval)]
+    pub watch: Option<Duration>,
+    /// Stop after N refreshes of --watch.
+    #[arg(long, value_name = "N", requires = "watch")]
+    pub count: Option<u64>,
+    /// Report how long one sample of every sensor took (JSON: sampleMillis).
+    #[arg(long)]
+    pub timing: bool,
+}
+
 /// Subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -105,6 +130,10 @@ pub enum Command {
         #[command(flatten)]
         target: Target,
     },
+    /// Show the machine's sensors: CPU, GPU, memory, disks, network, board.
+    /// Rates and usages are measured between two samples 250 ms apart, so
+    /// the first output takes a quarter of a second.
+    Sensors(SensorsArgs),
 }
 
 /// Runs a parsed command and returns what should be printed on stdout.
@@ -132,5 +161,37 @@ where
             screen::brightness(bus, connector, target, *percent)
         }
         Command::Release { target } => screen::release(bus, connector, target),
+        // Streams its output and needs a sensor source: see `run_sensors`.
+        Command::Sensors(_) => anyhow::bail!("`sensors` runs through run_sensors"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bezel_devices::{FakeBus, FakeConnector};
+
+    fn run_args(args: &[&str]) -> anyhow::Result<String> {
+        let cli = Cli::try_parse_from(args)?;
+        run(&cli, &FakeBus::turing_88(), &FakeConnector::default())
+    }
+
+    #[test]
+    fn run_dispatches_screen_commands_and_leaves_sensors_to_run_sensors() {
+        let listed = run_args(&["bezel", "--fake", "devices"]).unwrap();
+        assert!(listed.starts_with("1. Turing"), "{listed}");
+        let err = run_args(&["bezel", "--fake", "sensors"]).unwrap_err();
+        assert!(err.to_string().contains("run_sensors"), "{err}");
+        assert!(
+            run_args(&["bezel", "sensors", "--count", "2"]).is_err(),
+            "--count needs --watch"
+        );
+        let cli =
+            Cli::try_parse_from(["bezel", "sensors", "--watch", "0.5", "--count", "3"]).unwrap();
+        let Command::Sensors(args) = cli.command else {
+            unreachable!("parsed as sensors")
+        };
+        assert_eq!(args.watch, Some(Duration::from_millis(500)));
+        assert_eq!(args.count, Some(3));
     }
 }

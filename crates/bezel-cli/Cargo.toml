@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 bezel-core = { workspace = true }
 bezel-devices = { workspace = true }
+bezel-sensors = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4.6.7", features = ["derive"] }

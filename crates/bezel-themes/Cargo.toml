@@ -12,6 +12,7 @@ authors.workspace = true
 bezel-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
 tracing = { workspace = true }
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 

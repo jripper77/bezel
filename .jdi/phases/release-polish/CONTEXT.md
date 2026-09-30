@@ -4,7 +4,7 @@
 Empacotamento deb/rpm/AppImage/msi/nsis com udev, i18n pt-BR/en completo, documentação de usuário, FPS de jogos e release 1.0.
 
 ## Locked decisions
-- D-1: entram no 1.0 empacotamento, i18n, docs, FPS, chaves de sensor dos temas importados, HID desktop mode (listar + voltar), cancelamento rev C, refatorações do core; ficam no backlog firmware, boot logo, ffmpeg baixado, vídeo no host (WCH), system.volume.
+- D-1: entram no 1.0 empacotamento, i18n, docs, FPS, chaves de sensor dos temas importados, HID desktop mode (listar + voltar), cancelamento rev C, refatorações do core; ficam no backlog firmware, boot logo, ffmpeg baixado, system.volume (vídeo no host para WCH entrou no 1.0: D-2026-09-30-studio-app-7).
 - D-2: 1.0.0 sai de um commit final `feat!` com rodapé `BREAKING CHANGE:` depois de todo DoD Manual das fases 1-6 confirmado na 8.8"; sem assinatura (SmartScreen documentado); conferir a tag v1.0.0, senão usar o input de versão da esteira.
 - D-3: AppImage/CLI/fonte: `bezel udev-rules` imprime a regra e o comando sudo (o app nunca eleva; o studio mostra o comando quando a porta é negada); `bezel-run@.service` vai nos deb/rpm; Windows: usbser, WinUSB (Zadig) para 0x1CBE/0x43A8 e LibreHardwareMonitor para temperatura CPU, só documentados.
 - D-4: FPS `gpu.fps` somente leitura: Windows lê a memória compartilhada do RTSS; Linux lê o CSV mais novo do MangoHud. Fixtures golden, `hardware_validated=false`. Fonte ausente ou leitura com mais de 3 s = Unavailable com motivo de como ativar; nunca 0 nem último valor; 0 fps de fonte viva é 0.

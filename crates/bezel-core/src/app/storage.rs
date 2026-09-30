@@ -28,14 +28,51 @@ fn profile_of(link: &dyn ScreenLink) -> Result<UploadProfile> {
         .ok_or_else(|| BezelError::Unsupported(format!("{} stores no media", model.name)))
 }
 
+/// What a size query found at a path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Presence {
+    /// Nothing is stored there.
+    Absent,
+    /// A file is stored there: its size in bytes, when the screen can tell.
+    Stored(Option<u64>),
+}
+
+impl Presence {
+    /// Reads the answer of [`ScreenStorage::size`]: `Unsupported` means a
+    /// file is there whose size the screen cannot report (TUR_USB files
+    /// Bezel did not write, D-2026-09-30-storage-video-7).
+    pub(crate) fn from_size(answer: Result<Option<u64>>) -> Result<Self> {
+        match answer {
+            Ok(Some(bytes)) => Ok(Self::Stored(Some(bytes))),
+            Ok(None) => Ok(Self::Absent),
+            Err(BezelError::Unsupported(_)) => Ok(Self::Stored(None)),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The size of a stored file, when known.
+    pub(crate) fn size(self) -> Option<u64> {
+        match self {
+            Self::Stored(size) => size,
+            Self::Absent => None,
+        }
+    }
+}
+
+/// Asks the screen what is stored at `path` (a size query).
+pub(crate) fn presence(storage: &mut dyn ScreenStorage, path: &RemotePath) -> Result<Presence> {
+    Presence::from_size(storage.size(path))
+}
+
 /// Capacity and use of the screen's internal flash and memory card.
 pub fn info(link: &mut dyn ScreenLink) -> Result<StorageInfo> {
     storage_of(link)?.info()
 }
 
-/// The files in `location` with their sizes (one size query per file). A
-/// card folder is listed only when a card is present
-/// (`Refused(NoCard)` otherwise), because listing creates the folder.
+/// The files in `location` with their sizes (one size query per file; a
+/// file whose size the screen cannot report is listed with none). A card
+/// folder is listed only when a card is present (`Refused(NoCard)`
+/// otherwise), because listing creates the folder.
 pub fn list(link: &mut dyn ScreenLink, location: StorageLocation) -> Result<Vec<FileEntry>> {
     let storage = storage_of(link)?;
     if location.medium == Medium::Card && storage.info()?.card.is_none() {
@@ -46,7 +83,7 @@ pub fn list(link: &mut dyn ScreenLink, location: StorageLocation) -> Result<Vec<
         .into_iter()
         .map(|name| {
             let path = RemotePath::new(location, name);
-            let size = storage.size(&path)?;
+            let size = presence(storage, &path)?.size();
             Ok(FileEntry { path, size })
         })
         .collect()
@@ -138,7 +175,7 @@ pub fn upload(
     }
     let profile = profile_of(link)?;
     let storage = storage_of(link)?;
-    if confirm == Confirm::No && storage.size(path)?.is_some() {
+    if confirm == Confirm::No && presence(storage, path)? != Presence::Absent {
         Confirmed::require(confirm, &overwrite)?;
     }
     let (source, bytes) = match &prepared.plan.action {
@@ -178,7 +215,7 @@ fn checked(
     match preflight(check, profile, &info, &stored) {
         Ok(mut plan) => {
             if let Some(entry) = &mut plan.replaces {
-                entry.size = storage.size(&entry.path)?;
+                entry.size = presence(storage, &entry.path)?.size();
             }
             Ok(plan)
         }
@@ -220,7 +257,7 @@ fn with_sizes(storage: &mut dyn ScreenStorage, entries: Vec<FileEntry>) -> Resul
     entries
         .into_iter()
         .map(|entry| {
-            let size = storage.size(&entry.path)?;
+            let size = presence(storage, &entry.path)?.size();
             Ok(FileEntry { size, ..entry })
         })
         .collect()
@@ -280,9 +317,9 @@ pub fn delete(link: &mut dyn ScreenLink, path: &RemotePath, confirm: Confirm) ->
 }
 
 fn ensure_stored(storage: &mut dyn ScreenStorage, path: &RemotePath) -> Result<()> {
-    match storage.size(path)? {
-        Some(_) => Ok(()),
-        None => Err(BezelError::InvalidInput(format!(
+    match presence(storage, path)? {
+        Presence::Stored(_) => Ok(()),
+        Presence::Absent => Err(BezelError::InvalidInput(format!(
             "{path} is not stored on the screen"
         ))),
     }
@@ -347,4 +384,25 @@ pub fn suggest_name(
     media: &MediaInfo,
 ) -> Result<Option<FileName>> {
     Ok(profile_of(link)?.suggest_name(host_name, media))
+}
+
+#[cfg(test)]
+mod tests {
+    //! The use cases run through the adapters' fakes in `tests/storage.rs`;
+    //! here only what needs no port.
+
+    use super::*;
+
+    #[test]
+    fn unknown_size_counts_as_present() {
+        let unknown = Presence::from_size(Err(BezelError::Unsupported("no size".into())));
+        assert_eq!(unknown, Ok(Presence::Stored(None)));
+        assert_eq!(unknown.map(Presence::size), Ok(None));
+        let known = Presence::from_size(Ok(Some(12)));
+        assert_eq!(known.map(Presence::size), Ok(Some(12)));
+        assert_eq!(Presence::from_size(Ok(None)), Ok(Presence::Absent));
+        assert_eq!(Presence::Absent.size(), None);
+        let lost = BezelError::Timeout("the screen".into());
+        assert_eq!(Presence::from_size(Err(lost.clone())), Err(lost));
+    }
 }

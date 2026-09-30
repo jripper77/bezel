@@ -111,7 +111,10 @@ pub trait ScreenStorage {
 
     /// Size of a stored file in bytes; `None` when it is absent (the screens
     /// answer 0 for an absent file, so an empty file also reads as absent).
-    /// A query: never creates anything.
+    /// `BezelError::Unsupported` means a file is stored at `path` but the
+    /// screen cannot report its size (TUR_USB files Bezel did not write,
+    /// D-2026-09-30-storage-video-7): the use cases take it as present with
+    /// an unknown size. A query: never creates anything.
     fn size(&mut self, path: &RemotePath) -> Result<Option<u64>>;
 
     /// Writes `data` to `path`, creating the file or replacing it (callers

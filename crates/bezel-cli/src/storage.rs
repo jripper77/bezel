@@ -774,8 +774,9 @@ fn explain(error: BezelError) -> anyhow::Error {
 
 /// A use-case error as the user reads it. What this screen cannot do is a
 /// plain "does not support" line (screens without storage; TUR_USB answers
-/// `Unsupported` for delete, boot, playing once and the size of files Bezel
-/// did not write, D-2026-09-30-storage-video-7); refusals are explained.
+/// `Unsupported` for delete, boot and playing once,
+/// D-2026-09-30-storage-video-7; files whose size it cannot report are
+/// listed and played as present); refusals are explained.
 fn screen_error(what: &'static str) -> impl Fn(BezelError) -> anyhow::Error {
     move |error| match error {
         BezelError::Unsupported(reason) => {

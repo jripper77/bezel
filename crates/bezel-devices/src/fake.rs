@@ -4,7 +4,7 @@
 //! files and device-side playback ([`FakeStorage`]). [`FakeHid`] stands for
 //! the HID interface of a panel in desktop mode.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bezel_core::domain::device::{Family, Transport, UsbId};
@@ -268,6 +268,10 @@ pub struct FakeStorage {
     /// Bytes every upload loses at its end (0: none), like a transfer the
     /// screen stored short: its stored size then fails verification.
     pub short_by: usize,
+    /// Stored files whose size a query cannot report, like the files a
+    /// TUR_USB screen holds that Bezel did not write: the query answers
+    /// `Unsupported` until an upload replaces the file.
+    pub size_unknown: BTreeSet<RemotePath>,
 }
 
 impl Default for FakeStorage {
@@ -280,6 +284,7 @@ impl Default for FakeStorage {
             start_mode: None,
             calls: Vec::new(),
             short_by: 0,
+            size_unknown: BTreeSet::new(),
         }
     }
 }
@@ -297,6 +302,13 @@ impl FakeStorage {
         self
     }
 
+    /// With a stored file whose size a query cannot report
+    /// ([`Self::size_unknown`]).
+    pub fn with_file_of_unknown_size(mut self, path: RemotePath, data: Vec<u8>) -> Self {
+        self.size_unknown.insert(path.clone());
+        self.with_file(path, data)
+    }
+
     /// Capacity and use, as `ScreenStorage::info` reports them.
     pub fn info(&self) -> StorageInfo {
         StorageInfo {
@@ -309,6 +321,17 @@ impl FakeStorage {
     pub fn size(&self, path: &RemotePath) -> Option<u64> {
         let bytes = self.files.get(path).map_or(0, Vec::len) as u64;
         (bytes > 0).then_some(bytes)
+    }
+
+    /// What a size query answers: [`Self::size`], or `Unsupported` for a
+    /// stored file of [`Self::size_unknown`].
+    fn size_query(&self, path: &RemotePath) -> Result<Option<u64>> {
+        if self.size_unknown.contains(path) && self.files.contains_key(path) {
+            return Err(BezelError::Unsupported(format!(
+                "the simulated screen cannot report the size of {path}"
+            )));
+        }
+        Ok(self.size(path))
     }
 
     fn capacity(&self, medium: Medium, total: u64) -> Capacity {
@@ -341,6 +364,7 @@ impl FakeStorage {
             )));
         }
         self.playback = Playback::Idle;
+        self.size_unknown.remove(path);
         self.files.insert(path.clone(), Vec::with_capacity(bytes));
         Ok(())
     }
@@ -503,7 +527,7 @@ impl ScreenStorage for FakeScreen {
     }
 
     fn size(&mut self, path: &RemotePath) -> Result<Option<u64>> {
-        Ok(self.store(StorageCall::Size(path.clone()), |s| s.size(path)))
+        self.store(StorageCall::Size(path.clone()), |s| s.size_query(path))
     }
 
     /// Accepts the data in chunks of [`FAKE_UPLOAD_CHUNK`] bytes, reporting
@@ -528,7 +552,10 @@ impl ScreenStorage for FakeScreen {
     }
 
     fn delete(&mut self, path: &RemotePath, _confirmed: Confirmed) -> Result<()> {
-        self.store(StorageCall::Delete(path.clone()), |s| s.files.remove(path));
+        self.store(StorageCall::Delete(path.clone()), |s| {
+            s.size_unknown.remove(path);
+            s.files.remove(path)
+        });
         Ok(())
     }
 
@@ -806,6 +833,27 @@ mod tests {
         result.unwrap();
         assert_eq!(storage.size(&clip).unwrap(), Some(3));
         assert_eq!(connector.log().storage.files[&clip], [1, 2, 3]);
+    }
+
+    #[test]
+    fn fake_files_of_unknown_size_answer_unsupported_until_replaced() {
+        let (old, gone) = (remote("internal/video/old.mp4"), remote("sd/image/a.png"));
+        let connector = FakeConnector::with_storage(
+            FakeStorage::default()
+                .with_card(1 << 20)
+                .with_file_of_unknown_size(old.clone(), vec![7; 10])
+                .with_file_of_unknown_size(gone.clone(), vec![7; 10]),
+        );
+        let mut link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
+        let storage = link.storage().unwrap();
+        let unknown = storage.size(&old).unwrap_err();
+        assert!(matches!(unknown, BezelError::Unsupported(_)), "{unknown}");
+        let (result, _) = upload(storage, &old, &[1, 2, 3], None);
+        result.unwrap();
+        assert_eq!(storage.size(&old).unwrap(), Some(3));
+        storage.delete(&gone, confirmed()).unwrap();
+        assert_eq!(storage.size(&gone).unwrap(), None);
+        assert!(connector.log().storage.size_unknown.is_empty());
     }
 
     #[test]

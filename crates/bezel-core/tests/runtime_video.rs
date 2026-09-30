@@ -219,6 +219,26 @@ fn a_stored_video_is_looped_once_and_frames_become_overlays() {
 }
 
 #[test]
+fn a_stored_video_of_unknown_size_is_looped() {
+    // A TUR_USB screen cannot report the size of a file Bezel did not write
+    // (D-2026-09-30-storage-video-7): it is there all the same.
+    let clip = path("internal/video/clip_90.mp4");
+    let storage = FakeStorage::default().with_file_of_unknown_size(clip.clone(), vec![7; 1000]);
+    let (connector, mut screen) = turing_88(storage);
+    let mut rt = runtime(video_theme("assets/Clip.MP4"));
+    let state = rt.start_video(screen.as_mut(), None).expect("start");
+    assert_eq!(state, &VideoState::OnDevice(clip.clone()));
+    assert_eq!(
+        calls(&connector),
+        [
+            StorageCall::Info,
+            StorageCall::Size(clip.clone()),
+            StorageCall::PlayVideo(clip, Repeat::Loop),
+        ]
+    );
+}
+
+#[test]
 fn the_card_is_searched_after_the_flash() {
     let (connector, mut screen) = turing_88(stored("sd/video/clip_90.mp4").with_card(CARD));
     let mut rt = runtime(video_theme("assets/Clip.MP4"));

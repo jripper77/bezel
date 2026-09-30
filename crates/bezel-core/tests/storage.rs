@@ -411,6 +411,78 @@ fn replacing_deleting_and_the_boot_slot_need_confirmation() {
 }
 
 #[test]
+fn files_of_unknown_size_are_present() {
+    // A TUR_USB screen cannot report the size of a file Bezel did not write
+    // (D-2026-09-30-storage-video-7): it is listed without a size, plays,
+    // can be the boot media and is replaced only with Yes.
+    let clip = remote("internal/video/clip.mp4");
+    let connector = FakeConnector::with_storage(
+        FakeStorage::default().with_file_of_unknown_size(clip.clone(), vec![9; 10]),
+    );
+    let mut link = open(&connector);
+    let unknown = FileEntry {
+        path: clip.clone(),
+        size: None,
+    };
+    let listed = storage::list(link.as_mut(), clip.location).expect("lists");
+    assert_eq!(listed, std::slice::from_ref(&unknown));
+    storage::play(link.as_mut(), &clip, Repeat::Loop).expect("plays");
+    let boot = BootMedia::File(clip.clone());
+    storage::set_boot_media(link.as_mut(), &boot, None, Confirm::Yes).expect("boots it");
+
+    let mut files = LocalFiles::new().with_clip("clip.mp4", 3000);
+    let prepared = prepare(link.as_mut(), &mut files, "clip.mp4");
+    assert_eq!(prepared.plan.replaces, Some(unknown));
+    let (refused, _) = upload(
+        link.as_mut(),
+        &mut files,
+        &prepared,
+        Confirm::No,
+        Cancel::Never,
+    );
+    assert!(
+        matches!(refused, Err(BezelError::NotConfirmed(_))),
+        "{refused:?}"
+    );
+    // Prepared while the screen held nothing: still not replaced without Yes.
+    let before = prepare(
+        open(&FakeConnector::default()).as_mut(),
+        &mut files,
+        "clip.mp4",
+    );
+    assert_eq!(before.plan.replaces, None);
+    let (refused, _) = upload(
+        link.as_mut(),
+        &mut files,
+        &before,
+        Confirm::No,
+        Cancel::Never,
+    );
+    assert!(
+        matches!(refused, Err(BezelError::NotConfirmed(_))),
+        "{refused:?}"
+    );
+    let uploads = |c: &FakeConnector| {
+        let writes = writes(c);
+        writes
+            .into_iter()
+            .filter(|w| matches!(w, StorageCall::Upload(..)))
+            .count()
+    };
+    assert_eq!(uploads(&connector), 0, "nothing sent without Yes");
+
+    let (replaced, _) = upload(
+        link.as_mut(),
+        &mut files,
+        &prepared,
+        Confirm::Yes,
+        Cancel::Never,
+    );
+    assert_eq!(replaced.expect("replaces").bytes, 3000);
+    assert_eq!(connector.log().storage.size(&clip), Some(3000));
+}
+
+#[test]
 fn a_video_off_profile_is_converted_then_checked_again() {
     let connector = FakeConnector::default();
     let mut link = open(&connector);

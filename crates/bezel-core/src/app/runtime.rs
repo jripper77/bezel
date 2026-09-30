@@ -21,7 +21,7 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::Result;
-use crate::app::storage::UploadRequest;
+use crate::app::storage::{Presence, UploadRequest, presence};
 use crate::domain::clock::{Language, LocalTime};
 use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
@@ -209,7 +209,8 @@ enum Lookup {
 }
 
 /// Looks for `name` in the internal and (with a card) the card video folder
-/// with size queries only: listing a folder creates it.
+/// with size queries only: listing a folder creates it. A file whose size
+/// the screen cannot report is there.
 fn find_video(storage: &mut dyn ScreenStorage, name: FileName) -> Result<Lookup> {
     let card = storage.info()?.card.is_some();
     let media: &[Medium] = if card {
@@ -220,7 +221,7 @@ fn find_video(storage: &mut dyn ScreenStorage, name: FileName) -> Result<Lookup>
     let at = |medium| StorageLocation::new(medium, MediaKind::Video);
     for medium in media {
         let path = RemotePath::new(at(*medium), name.clone());
-        if storage.size(&path)?.is_some() {
+        if presence(storage, &path)? != Presence::Absent {
             return Ok(Lookup::Stored(path));
         }
     }

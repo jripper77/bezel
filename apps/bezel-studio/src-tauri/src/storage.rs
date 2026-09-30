@@ -640,7 +640,7 @@ impl Backend {
             None => BootMedia::Default,
         };
         self.with_screen(screen, Resume::Video, time, |link| {
-            storage::set_boot_media(link, &boot, confirm)
+            storage::set_boot_media(link, &boot, None, confirm)
         })
     }
 }

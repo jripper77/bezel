@@ -984,11 +984,11 @@ fn boot_summary(args: &BootArgs) -> String {
 
 /// `bezel storage boot --yes`.
 fn boot(link: &mut dyn ScreenLink, args: &BootArgs) -> anyhow::Result<String> {
-    if let Some(level) = args.brightness {
-        let level = Brightness::new(level).context("brightness is 0-100")?;
-        link.set_brightness(level)?;
-    }
-    usecase::set_boot_media(link, &args.media, Confirm::Yes)
+    let brightness = args
+        .brightness
+        .map(|level| Brightness::new(level).context("brightness is 0-100"))
+        .transpose()?;
+    usecase::set_boot_media(link, &args.media, brightness, Confirm::Yes)
         .map_err(screen_error("changing the boot media"))?;
     let screen = link.identity().model.name;
     let what = match &args.media {

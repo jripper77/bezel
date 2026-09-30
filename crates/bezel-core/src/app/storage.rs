@@ -7,7 +7,7 @@
 
 use crate::domain::job::{Job, JobPhase, Progress};
 use crate::domain::media::{ConvertOptions, Converter, MediaInfo, MediaKind, UploadProfile};
-use crate::domain::screen::Confirm;
+use crate::domain::screen::{Brightness, Confirm};
 use crate::domain::storage::{
     BootMedia, Confirmed, FileEntry, FileName, Medium, Operation, Refusal, RemotePath, Repeat,
     StorageInfo, StorageLocation, UploadAction, UploadCheck, UploadPlan, preflight,
@@ -288,12 +288,17 @@ fn ensure_stored(storage: &mut dyn ScreenStorage, path: &RemotePath) -> Result<(
     }
 }
 
-fn play_stored(storage: &mut dyn ScreenStorage, path: &RemotePath, repeat: Repeat) -> Result<()> {
-    ensure_stored(storage, path)?;
+/// Plays `path` as its folder says: a video with `repeat`, an image.
+fn start_playing(storage: &mut dyn ScreenStorage, path: &RemotePath, repeat: Repeat) -> Result<()> {
     match path.location.kind {
         MediaKind::Video => storage.play_video(path, repeat),
         MediaKind::Image => storage.play_image(path),
     }
+}
+
+fn play_stored(storage: &mut dyn ScreenStorage, path: &RemotePath, repeat: Repeat) -> Result<()> {
+    ensure_stored(storage, path)?;
+    start_playing(storage, path, repeat)
 }
 
 /// Plays a stored file on the screen (videos with `repeat`; images ignore it).
@@ -309,12 +314,28 @@ pub fn stop(link: &mut dyn ScreenLink) -> Result<()> {
 /// Sets what the screen shows on its own after power-up: a stored file is
 /// played (videos loop) so the firmware picks it, then the start mode is
 /// written; both under one `Confirm::Yes` (D-2026-09-30-storage-video-5).
-/// With `Confirm::No` the port is not called.
-pub fn set_boot_media(link: &mut dyn ScreenLink, boot: &BootMedia, confirm: Confirm) -> Result<()> {
+///
+/// The screen keeps the backlight level it boots with alongside the start
+/// mode: `brightness` is set first, so it boots with that level (`None`
+/// keeps the one the link last set). With `Confirm::No` the port is not
+/// called; a file that is not stored is refused before anything is sent.
+pub fn set_boot_media(
+    link: &mut dyn ScreenLink,
+    boot: &BootMedia,
+    brightness: Option<Brightness>,
+    confirm: Confirm,
+) -> Result<()> {
     let confirmed = Confirmed::require(confirm, &Operation::Boot(boot.clone()))?;
     let storage = storage_of(link)?;
     if let BootMedia::File(path) = boot {
-        play_stored(storage, path, Repeat::Loop)?;
+        ensure_stored(storage, path)?;
+    }
+    if let Some(level) = brightness {
+        link.set_brightness(level)?;
+    }
+    let storage = storage_of(link)?;
+    if let BootMedia::File(path) = boot {
+        start_playing(storage, path, Repeat::Loop)?;
     }
     storage.set_start_mode(boot.start_mode(), confirmed)
 }

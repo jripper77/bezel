@@ -17,7 +17,7 @@ use bezel_core::domain::media::{
     ConvertOptions, FrameRate, MediaFormat, MediaInfo, MediaTools, StreamSpec, TranscodeTarget,
     VideoCodec, VideoPixelFormat, VideoTrack,
 };
-use bezel_core::domain::screen::Confirm;
+use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::storage::{
     BootMedia, FileEntry, Refusal, RemotePath, Repeat, StartMode, UploadAction,
 };
@@ -296,8 +296,13 @@ fn an_upload_is_sent_verified_listed_played_and_set_as_boot_media() {
         Playback::Video(clip.clone(), Repeat::Loop)
     );
     storage::stop(link.as_mut()).expect("stops");
-    storage::set_boot_media(link.as_mut(), &BootMedia::File(clip.clone()), Confirm::Yes)
-        .expect("sets the boot media");
+    storage::set_boot_media(
+        link.as_mut(),
+        &BootMedia::File(clip.clone()),
+        None,
+        Confirm::Yes,
+    )
+    .expect("sets the boot media");
     let log = connector.log().storage;
     assert_eq!(log.start_mode, Some(StartMode::Video));
     assert_eq!(log.playback, Playback::Video(clip, Repeat::Loop));
@@ -341,10 +346,15 @@ fn replacing_deleting_and_the_boot_slot_need_confirmation() {
         "deleting internal/video/clip.mp4 needs confirmation"
     );
     for boot in [BootMedia::File(clip.clone()), BootMedia::Default] {
-        let err = storage::set_boot_media(link.as_mut(), &boot, Confirm::No).expect_err("refused");
+        let err = storage::set_boot_media(link.as_mut(), &boot, Some(Brightness::MAX), Confirm::No)
+            .expect_err("refused");
         assert!(matches!(err, BezelError::NotConfirmed(_)), "{err}");
     }
     assert!(calls(&connector).is_empty(), "{:?}", calls(&connector));
+    assert!(
+        connector.log().brightness.is_empty(),
+        "not even the brightness"
+    );
 
     // Overwrite: the preflight only queries; the refused upload sends,
     // reads and converts nothing.
@@ -660,7 +670,7 @@ fn play_stop_and_boot_media() {
         BootMedia::File(image.clone()),
         BootMedia::Default,
     ] {
-        storage::set_boot_media(link.as_mut(), &boot, Confirm::Yes).expect("boot media");
+        storage::set_boot_media(link.as_mut(), &boot, None, Confirm::Yes).expect("boot media");
     }
     assert_eq!(
         writes(&connector)[played..],
@@ -673,14 +683,47 @@ fn play_stop_and_boot_media() {
         ]
     );
     let written = writes(&connector);
-    let missing_boot =
-        storage::set_boot_media(link.as_mut(), &BootMedia::File(missing), Confirm::Yes);
+    let missing_boot = storage::set_boot_media(
+        link.as_mut(),
+        &BootMedia::File(missing),
+        Some(Brightness::MAX),
+        Confirm::Yes,
+    );
     assert!(
         matches!(missing_boot, Err(BezelError::InvalidInput(_))),
         "{missing_boot:?}"
     );
     assert_eq!(writes(&connector), written);
-    assert_eq!(connector.log().storage.start_mode, Some(StartMode::Default));
+    let log = connector.log();
+    assert!(log.brightness.is_empty(), "refused before the brightness");
+    assert_eq!(log.storage.start_mode, Some(StartMode::Default));
+}
+
+#[test]
+fn the_boot_media_keeps_the_brightness_it_is_given() {
+    let clip = remote("internal/video/clip.mp4");
+    let connector =
+        FakeConnector::with_storage(FakeStorage::default().with_file(clip.clone(), vec![1; 10]));
+    let mut link = open(&connector);
+    let level = Brightness::new(40).expect("a level");
+    storage::set_boot_media(
+        link.as_mut(),
+        &BootMedia::File(clip.clone()),
+        Some(level),
+        Confirm::Yes,
+    )
+    .expect("boot media");
+    let log = connector.log();
+    assert_eq!(log.brightness, [level]);
+    assert_eq!(log.storage.start_mode, Some(StartMode::Video));
+    assert_eq!(log.storage.playback, Playback::Video(clip, Repeat::Loop));
+
+    // Without one, the link's level stays.
+    storage::set_boot_media(link.as_mut(), &BootMedia::Default, None, Confirm::Yes)
+        .expect("default boot");
+    let log = connector.log();
+    assert_eq!(log.brightness, [level]);
+    assert_eq!(log.storage.start_mode, Some(StartMode::Default));
 }
 
 #[test]
@@ -730,6 +773,7 @@ fn screens_without_storage_are_unsupported() {
     assert!(unsupported(storage::set_boot_media(
         link.as_mut(),
         &boot,
+        Some(Brightness::MAX),
         Confirm::Yes
     )));
     let mut files = LocalFiles::new().with_clip("a.mp4", 1);
@@ -749,4 +793,5 @@ fn screens_without_storage_are_unsupported() {
         format!("not supported: {name} has no storage")
     );
     assert!(calls(&connector).is_empty());
+    assert!(connector.log().brightness.is_empty());
 }

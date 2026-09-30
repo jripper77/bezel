@@ -27,7 +27,8 @@ use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot};
 use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::{
-    Backdrop, FrameRenderer, MediaLocation, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
+    Backdrop, FrameRenderer, MediaLocation, MediaTranscoder, ScreenLink, SensorSource,
+    ThemeLocation, ThemeStore,
 };
 use bezel_core::{BezelError, Result};
 
@@ -405,46 +406,27 @@ impl Studio {
         }
         live.host = None;
         let playback = link.identity().model.capabilities.video_playback;
-        let video = match &self.runtime.theme().background {
-            Background::Video { asset, .. } if !playback => Some(asset.clone()),
+        let here = match (&self.runtime.theme().background, self.host.as_ref()) {
+            (Background::Video { asset, .. }, Some(host)) if !playback => {
+                Some((asset.clone(), host))
+            }
             _ => None,
         };
-        let (Some(asset), Some(host)) = (video, self.host.as_ref()) else {
-            live.restart_video = false;
-            if let Err(e) = self.runtime.start_video(link.as_mut(), None) {
-                tracing::warn!(screen = live.key, "video background not started: {e}");
+        let started = match here {
+            None => self.runtime.start_video(link.as_mut(), None).map(|_| None),
+            Some((asset, host)) => {
+                let mut media = match host.media.try_lock() {
+                    Ok(media) => media,
+                    Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+                    Err(TryLockError::WouldBlock) => return,
+                };
+                let media: &mut dyn MediaTranscoder = media.as_mut();
+                decode_here(&mut self.runtime, link.as_mut(), media, &host.dir, &asset)
             }
-            return;
-        };
-        let mut media = match host.media.try_lock() {
-            Ok(media) => media,
-            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-            Err(TryLockError::WouldBlock) => return,
         };
         live.restart_video = false;
-        let copy = match self.runtime.assets().get(&asset) {
-            Some(bytes) => VideoCopy::write(&host.dir, &asset, bytes),
-            None => Err(std::io::Error::other(format!(
-                "{} is not in the theme",
-                asset.0
-            ))),
-        };
-        let offer = copy.as_ref().ok().map(|copy| HostVideo {
-            media: media.as_mut(),
-            source: MediaLocation(copy.0.display().to_string()),
-            fps: HOST_VIDEO_FPS,
-        });
-        if let Err(e) = &copy {
-            tracing::warn!(screen = live.key, "video background not copied: {e}");
-        }
-        match self.runtime.start_video(link.as_mut(), offer) {
-            Ok(VideoState::Host) => {
-                live.host = copy.ok().map(|copy| HostPlayback {
-                    _copy: copy,
-                    started: Instant::now(),
-                });
-            }
-            Ok(_) => {}
+        match started {
+            Ok(playback) => live.host = playback,
             Err(e) => tracing::warn!(screen = live.key, "video background not started: {e}"),
         }
     }
@@ -529,6 +511,34 @@ impl Studio {
         self.unsampled = (self.unsampled + 1) % every;
         self.present(time)
     }
+}
+
+/// Starts the theme's video `asset` on `link` offering to decode it here
+/// with `media`, from a copy written in `dir`: the playback when the runtime
+/// chose that (the screen may have no converter).
+fn decode_here(
+    runtime: &mut ThemeRuntime,
+    link: &mut dyn ScreenLink,
+    media: &mut dyn MediaTranscoder,
+    dir: &Path,
+    asset: &AssetRef,
+) -> Result<Option<HostPlayback>> {
+    let bytes = runtime
+        .assets()
+        .get(asset)
+        .ok_or_else(|| BezelError::InvalidInput(format!("{} is not in the theme", asset.0)))?;
+    let copy = VideoCopy::write(dir, asset, bytes)
+        .map_err(|e| BezelError::Transport(format!("{}: {e}", dir.display())))?;
+    let offer = HostVideo {
+        media,
+        source: MediaLocation(copy.0.display().to_string()),
+        fps: HOST_VIDEO_FPS,
+    };
+    let playing = matches!(runtime.start_video(link, Some(offer))?, VideoState::Host);
+    Ok(playing.then(|| HostPlayback {
+        _copy: copy,
+        started: Instant::now(),
+    }))
 }
 
 /// Who holds a live screen while a storage job borrows its link.

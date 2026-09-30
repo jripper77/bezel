@@ -42,12 +42,12 @@
   `crates/bezel-themes` (`load_manifest`)
 
 ## Tests
-- `cargo test --workspace --locked`: 352 passando, 2 ignorados; `bezel-studio`: 32
-- `npm run test:unit`: 45 passando; linhas 99,79%, `src/editor/store.js` 100%
-- Playwright: 16 passando (8 cenários × claro/escuro, axe sem sérias/críticas), incl. "drag a widget onto the
+- `cargo test --workspace --locked`: 509 passando, 0 falhando, 7 ignorados (4 de ffmpeg real, 1 de hardware opt-in,
+  timing e corpus); `bezel-studio`: 46 unitários + o teste de hardware
+- `npm run test:unit`: 57 passando; linhas 99,8%, `src/editor/store.js` 100%
+- Playwright: 24 passando (12 cenários × claro/escuro, axe sem sérias/críticas), incl. "drag a widget onto the
   canvas", "keyboard move and undo", "switch between vertical and horizontal"
-- Coverage Rust: 94,43% de linhas no workspace na medição do doer (`backend.rs` 98,18%, `settings.rs` 97,67%,
-  `dto.rs` 99,25%; `commands.rs`/`lib.rs` = raiz de composição)
+- Coverage Rust: 94,94% de linhas no workspace (`commands.rs`/`lib.rs` = raiz de composição)
 
 ## Hardware validation
 - Studio instalado (`install-local.sh`) e aberto em modo simulado (`BEZEL_FAKE=1`) sem erros.

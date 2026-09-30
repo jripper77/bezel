@@ -140,7 +140,7 @@ mod tests {
         let screens = discover_screens(&FakeBus::turing_88()).unwrap();
         let json = serde_json::to_value(ScreenDto::from(&screens[0])).unwrap();
         assert_eq!(json["key"], "/dev/ttyACM1");
-        assert_eq!(json["models"][0]["hardwareValidated"], false);
+        assert_eq!(json["models"][0]["hardwareValidated"], true);
         assert_eq!(json["models"][0]["capabilities"]["videoPlayback"], true);
         assert_eq!(json["wake"]["serial"], "CT88INCH");
     }

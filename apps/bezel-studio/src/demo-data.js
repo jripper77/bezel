@@ -18,7 +18,7 @@ const turing88 = Object.freeze({
         storage: true,
         videoPlayback: true,
       },
-      hardwareValidated: false,
+      hardwareValidated: true,
     },
   ],
   display: { address: '/dev/ttyACM1', usb: '0525:a4a7', serial: null, manufacturer: null, product: null, location: '3-1.2' },

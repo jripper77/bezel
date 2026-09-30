@@ -91,6 +91,15 @@ const fn model(
     }
 }
 
+/// A model the project has driven on real hardware (full and partial frames,
+/// brightness, the four orientations).
+const fn validated(model: DeviceModel) -> DeviceModel {
+    DeviceModel {
+        hardware_validated: true,
+        ..model
+    }
+}
+
 use Family::*;
 use Orientation::*;
 
@@ -124,7 +133,7 @@ pub const MODELS: &[DeviceModel] = &[
     model("turing-6.5", "Turing Smart Screen 6.5\"", 650, (720, 1568), ReversePortrait, TuringRevC, REV_C),
     model("turing-6.8", "Turing Smart Screen 6.8\"", 680, (1080, 2320), ReversePortrait, TuringRevC, REV_C),
     model("turing-8", "Turing Smart Screen 8\"", 800, (800, 1280), ReversePortrait, TuringRevC, REV_C),
-    model("turing-8.8", "Turing Smart Screen 8.8\"", 880, (480, 1920), ReversePortrait, TuringRevC, REV_C),
+    validated(model("turing-8.8", "Turing Smart Screen 8.8\"", 880, (480, 1920), ReversePortrait, TuringRevC, REV_C)),
     // Turing/TURZX USB generation (VID 0x1CBE, full PNG/JPEG frames).
     model("turing-usb-1.6", "Turing 1.6\" Square (USB)", 160, (400, 400), ReversePortrait, TuringUsb, TURING_USB),
     model("turing-usb-2.1-round", "Turing 2.1\" Round (USB)", 210, (480, 480), ReversePortrait, TuringUsb, TURING_USB),
@@ -293,6 +302,12 @@ mod tests {
         assert_eq!(soc.role, EndpointRole::Display);
         assert_eq!(soc.models, &[ModelId("turing-8.8")]);
         let m = model_by_id(ModelId("turing-8.8")).unwrap();
+        assert!(m.hardware_validated);
+        assert_eq!(
+            MODELS.iter().filter(|m| m.hardware_validated).count(),
+            1,
+            "only the 8.8\" has been driven on real hardware"
+        );
         assert_eq!(m.diagonal(), "8.8\"");
         assert_eq!(m.panel, Size::new(480, 1920));
     }

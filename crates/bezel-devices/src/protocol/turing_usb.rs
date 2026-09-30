@@ -10,9 +10,16 @@
 //! multi-byte reply fields are little-endian.
 //!
 //! This module is pure: it builds and parses bytes and encodes frames.
+//!
+//! Storage (spec § 6) ships with golden vectors only (no capture of a real
+//! device, `hardware_validated = false`, D-2026-09-30-storage-video-1): the
+//! driver uses STORAGE_INFO, LIST_DIR, OPEN_FILE, WRITE_CHUNK, PLAY_VIDEO and
+//! SHOW_IMAGE, never [`op::WRITE_FILE`] (40) nor [`op::FILE_SIZE`] (98), whose
+//! meanings the references dispute (spec § 3).
 
 use std::fmt;
 
+use bezel_core::domain::storage::{self, Capacity};
 use cbc::cipher::{Block, BlockModeEncrypt, KeyIvInit};
 
 /// DES-CBC encryptor of the command headers.
@@ -46,6 +53,34 @@ pub const DEFAULT_CHUNK: u32 = 202_752;
 pub const EP_OUT: u8 = 0x01;
 /// IN endpoint (vendor app).
 pub const EP_IN: u8 = 0x81;
+/// Offset of the status byte in most replies (spec § 2).
+pub const STATUS_AT: usize = 8;
+/// Offset of the status byte in a [`op::SHOW_IMAGE`] reply (spec § 2).
+pub const IMAGE_STATUS_AT: usize = 1;
+/// Bytes per KiB, the unit of a STORAGE_INFO reply.
+const KIB: u64 = 1024;
+
+/// Storage roots on the device (spec § 6): `<root>img/` and `<root>video/`.
+pub mod root {
+    /// Internal storage.
+    pub const INTERNAL: &str = "/usr/data/";
+    /// The TF card.
+    pub const CARD: &str = "/tmp/sdcard/mmcblk0p1/";
+}
+
+/// The boot logo the vendor app writes (spec § 6). Golden only: it is
+/// written with [`super::op::WRITE_FILE`], which Bezel never sends
+/// (D-2026-09-30-storage-video-5).
+pub mod boot_logo {
+    /// Where the firmware reads it.
+    pub const PATH: &str = "/usr/data/boot.jpg";
+    /// Largest file the vendor app writes there.
+    pub const MAX_BYTES: usize = 307_200;
+    /// JPEG quality the vendor app encodes it with (at the panel size).
+    pub const QUALITY: u8 = 95;
+    /// The first two bytes of every JPEG (SOI marker).
+    pub const JPEG_SOI: [u8; 2] = [0xFF, 0xD8];
+}
 
 /// Command ids (vendor-app meanings, which differ from the Python labels for
 /// 40, 98 and 13; see the spec's section on the vendor app).
@@ -67,13 +102,16 @@ pub mod op {
     pub const OPEN_FILE: u8 = 38;
     /// One chunk of a chunked upload.
     pub const WRITE_CHUNK: u8 = 39;
-    /// Write a small file (< 100 KiB) in one shot.
+    /// Write a small file (< 100 KiB) in one shot (vendor app; the Python
+    /// reference calls it "delete"). Never sent until a capture settles it.
     pub const WRITE_FILE: u8 = 40;
     /// Sent by the vendor app when a theme starts, `[8]` = 0 (meaning unknown).
     pub const THEME_START: u8 = 41;
     /// Delete a remote file (path args; destructive).
     pub const DELETE_FILE: u8 = 42;
-    /// Size of a remote file (path args); LE32 at `[8..12]`.
+    /// Size of a remote file (path args); LE32 at `[8..12]` (vendor app; the
+    /// Python reference calls it "play file"). Never sent until a capture
+    /// settles it.
     pub const FILE_SIZE: u8 = 98;
     /// List a remote directory (path args).
     pub const LIST_DIR: u8 = 99;
@@ -205,6 +243,17 @@ pub fn write_file(timestamp: u32, path: &str, data_len: u32) -> Option<Header> {
     header(op::WRITE_FILE, timestamp, &args)
 }
 
+/// The header the vendor app writes the boot logo with: [`write_file`] to
+/// [`boot_logo::PATH`], `jpeg` following. `None` unless `jpeg` starts with
+/// the JPEG SOI marker and has at most [`boot_logo::MAX_BYTES`] bytes.
+/// Golden only: no driver sends it (D-2026-09-30-storage-video-5).
+pub fn boot_logo_header(timestamp: u32, jpeg: &[u8]) -> Option<Header> {
+    if !jpeg.starts_with(&boot_logo::JPEG_SOI) || jpeg.len() > boot_logo::MAX_BYTES {
+        return None;
+    }
+    write_file(timestamp, boot_logo::PATH, u32::try_from(jpeg.len()).ok()?)
+}
+
 /// One chunk of a streamed H.264 video: `[8..12]` = BE32 length, `[12]` = 1
 /// on the chunk that reaches the end of the file.
 pub fn stream_chunk(timestamp: u32, len: u32, last: bool) -> Header {
@@ -295,6 +344,24 @@ pub fn resp_ok(reply: &[u8]) -> bool {
     reply.get(1) == Some(&STATUS_OK) || reply.get(8) == Some(&STATUS_OK)
 }
 
+/// The vendor app's success test for `cmd`: 0xC8 at [`STATUS_AT`], or at
+/// [`IMAGE_STATUS_AT`] for [`op::SHOW_IMAGE`] (spec § 2). Used for
+/// [`op::OPEN_FILE`], [`op::PLAY_VIDEO`] and [`op::SHOW_IMAGE`].
+pub fn accepted(cmd: u8, reply: &[u8]) -> bool {
+    let at = if cmd == op::SHOW_IMAGE {
+        IMAGE_STATUS_AT
+    } else {
+        STATUS_AT
+    };
+    reply.get(at) == Some(&STATUS_OK)
+}
+
+/// True when a PLAYBACK_BUSY reply says nothing plays any more (`[8]` = 0,
+/// spec § 6). A missing reply is not idle.
+pub fn playback_idle(reply: &[u8]) -> bool {
+    reply.get(STATUS_AT) == Some(&0)
+}
+
 /// The version string of a SYNC reply: `None` unless `[0]` echoes 10;
 /// `[8..40]` as UTF-8 with the NUL padding removed (may be empty).
 pub fn sync_version(reply: &[u8]) -> Option<String> {
@@ -342,9 +409,37 @@ impl StorageInfo {
         })
     }
 
+    /// Parses a STORAGE_INFO reply: `None` unless `[0]` echoes
+    /// [`op::STORAGE_INFO`] (spec § 2) and the six fields are there.
+    pub fn from_reply(reply: &[u8]) -> Option<StorageInfo> {
+        if reply.first() != Some(&op::STORAGE_INFO) {
+            return None;
+        }
+        Self::parse(reply)
+    }
+
     /// True when a TF card is present.
     pub fn has_card(&self) -> bool {
         self.card_total_kib != 0
+    }
+
+    /// The capacities in bytes. No vendor reserve is known for this family;
+    /// the card exists when its total is not 0 (spec § 6).
+    pub fn info(&self) -> storage::StorageInfo {
+        let capacity = |total: u32, used: u32, free: u32| Capacity {
+            total: u64::from(total) * KIB,
+            used: u64::from(used) * KIB,
+            free: u64::from(free) * KIB,
+        };
+        let internal = capacity(
+            self.internal_total_kib,
+            self.internal_used_kib,
+            self.internal_free_kib,
+        );
+        let card = self
+            .has_card()
+            .then(|| capacity(self.card_total_kib, self.card_used_kib, self.card_free_kib));
+        storage::StorageInfo { internal, card }
     }
 }
 
@@ -706,6 +801,183 @@ mod tests {
         assert_eq!(
             &settings[..14],
             &[125, 0, 0x1a, 0x6d, 4, 3, 2, 1, 170, 1, 0, 1, 3, 1]
+        );
+    }
+
+    #[test]
+    fn storage_packets_match_the_reference_vectors() {
+        // Spec § 2/§ 3 layouts, encrypted by OpenSSL's DES-CBC (legacy
+        // provider) with PKCS#7 padding; the same script reproduces the
+        // verified sync vector of § 9. Golden only: no capture of a real
+        // screen exists (D-2026-09-30-storage-video-1).
+        // (name, header, plaintext[0..24], packet[0..16], packet[488..504])
+        let path = |cmd, p: &str| path_command(cmd, TS, p).unwrap();
+        let cases = [
+            (
+                "storage info",
+                simple(op::STORAGE_INFO, TS),
+                "64001a6d0403020100000000000000000000000000000000",
+                "0d0f4d5aff6928c70b292fa759ddb3f8",
+                "9234820321198b12616c6e39017b22b3",
+            ),
+            (
+                "list internal videos",
+                path(op::LIST_DIR, "/usr/data/video/"),
+                "63001a6d0403020100000010000000002f7573722f646174",
+                "d9f21aab0609590355032d30fc356184",
+                "7aa7d61e4bca88793935ed98a1c28577",
+            ),
+            (
+                "list card images",
+                path(op::LIST_DIR, "/tmp/sdcard/mmcblk0p1/img/"),
+                "63001a6d040302010000001a000000002f746d702f736463",
+                "d9f21aab06095903ef0cf8697a13ab1f",
+                "2c4281f6713f3799840bde8bffba8feb",
+            ),
+            (
+                "open file",
+                path(op::OPEN_FILE, "/usr/data/video/clip.h264"),
+                "26001a6d0403020100000019000000002f7573722f646174",
+                "4f19aecbd9a36eb172dc78001ea0a87b",
+                "9e76c6031d4ccb75ab4a87023b3eb1e6",
+            ),
+            (
+                "write chunk, 1 MiB",
+                write_chunk(TS, 1_048_576, false),
+                "27001a6d0403020100100000001000000000000000000000",
+                "fb3921145c3b8cdbf05ef21dd3b5ac8b",
+                "aa67e7f03160fd769f0f7c47742d0ce1",
+            ),
+            (
+                "write chunk, last 1000",
+                write_chunk(TS, 1000, true),
+                "27001a6d0403020100100000000003e80100000000000000",
+                "fb3921145c3b8cdb38127b8d533024a0",
+                "4ae915f0dbce62222aed0c8eb2021763",
+            ),
+            (
+                "play video",
+                path(op::PLAY_VIDEO, "/tmp/sdcard/mmcblk0p1/video/88.h264"),
+                "6e001a6d0403020100000023000000002f746d702f736463",
+                "13f01a509d49b56e73a80493c57fbae8",
+                "8481056d80708510cc2104e431e05a68",
+            ),
+            (
+                "show image",
+                path(op::SHOW_IMAGE, "/usr/data/img/logo.png"),
+                "71001a6d0403020100000016000000002f7573722f646174",
+                "6bd72bf298ebe212975839801b3df0f5",
+                "4de793bd6411543a4e91d79c2ea4c07e",
+            ),
+            (
+                "stop playback",
+                simple(op::STOP_PLAYBACK, TS),
+                "6f001a6d0403020100000000000000000000000000000000",
+                "e36104b5f63f6b8c67919b2d95f406ba",
+                "86c6a110cb0123c13b05e074e53008e8",
+            ),
+            (
+                "playback busy",
+                simple(op::PLAYBACK_BUSY, TS),
+                "70001a6d0403020100000000000000000000000000000000",
+                "635d93e727c1f6547590dcc63704b147",
+                "13be5753f0189233c25ddfe1bac64d1f",
+            ),
+        ];
+        for (name, h, plain24, first16, tail) in cases {
+            assert_eq!(hex(&h[..24]), plain24, "{name}: plaintext");
+            let p = packet(&h);
+            assert_eq!(hex(&p[..16]), first16, "{name}: first blocks");
+            assert_eq!(hex(&p[488..504]), tail, "{name}: last blocks");
+            assert_eq!(hex(&p[504..]), "000000000000a11a", "{name}: trailer");
+        }
+        // The paths end right after their bytes: the rest is zero.
+        let clip = path(op::OPEN_FILE, "/usr/data/video/clip.h264");
+        assert_eq!(&clip[16..41], b"/usr/data/video/clip.h264");
+        assert!(clip[41..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn boot_logo_is_a_golden_vector_only() {
+        // Spec § 6: /usr/data/boot.jpg, JPEG quality 95, at most 307,200
+        // bytes, written by the vendor app with command 40 (never sent by
+        // Bezel). Same OpenSSL script as the storage vectors.
+        let mut jpeg = vec![0u8; boot_logo::MAX_BYTES];
+        jpeg[..2].copy_from_slice(&boot_logo::JPEG_SOI);
+        let h = boot_logo_header(TS, &jpeg).unwrap();
+        assert_eq!(
+            hex(&h[..24]),
+            "28001a6d04030201000000120004b0002f7573722f646174"
+        );
+        assert_eq!(&h[16..34], boot_logo::PATH.as_bytes());
+        let p = packet(&h);
+        assert_eq!(hex(&p[..16]), "f96ad14e18448d82ccaffc5369103b25");
+        assert_eq!(hex(&p[488..504]), "8c6137cdb91e48afcd7147df201de9c2");
+
+        jpeg.push(0);
+        assert!(boot_logo_header(TS, &jpeg).is_none(), "over 307,200 bytes");
+        assert!(boot_logo_header(TS, b"\x89PNG").is_none(), "not a JPEG");
+        assert!(boot_logo_header(TS, &[]).is_none());
+        // A quality-95 JPEG of a small panel fits.
+        let rgba = [40u8, 80, 120, 255].repeat(48 * 48);
+        let q95 = encode_jpeg(&rgba, 48, 48, boot_logo::QUALITY, Subsampling::S420).unwrap();
+        let h = boot_logo_header(0, &q95).unwrap();
+        assert_eq!(&h[12..16], &(q95.len() as u32).to_be_bytes());
+    }
+
+    #[test]
+    fn storage_replies() {
+        let mut r = [0u8; PACKET_LEN];
+        for (i, v) in [0u32, 0, 0, 262_144, 65_536, 196_608].iter().enumerate() {
+            r[8 + 4 * i..12 + 4 * i].copy_from_slice(&v.to_le_bytes());
+        }
+        assert_eq!(StorageInfo::from_reply(&r), None, "no echo of 100");
+        r[0] = op::STORAGE_INFO;
+        let info = StorageInfo::from_reply(&r).unwrap().info();
+        assert_eq!(
+            info.internal,
+            Capacity {
+                total: 262_144 * 1024,
+                used: 65_536 * 1024,
+                free: 196_608 * 1024,
+            },
+            "KiB to bytes, no reserve"
+        );
+        assert_eq!(info.card, None, "TF total 0: no card");
+        r[8..12].copy_from_slice(&1u32.to_le_bytes());
+        r[16..20].copy_from_slice(&1u32.to_le_bytes());
+        let card = StorageInfo::from_reply(&r).unwrap().info().card;
+        assert_eq!(
+            card,
+            Some(Capacity {
+                total: 1024,
+                used: 0,
+                free: 1024
+            })
+        );
+        assert_eq!(StorageInfo::from_reply(&r[..31]), None);
+        assert_eq!(StorageInfo::from_reply(&[]), None);
+
+        let mut ok = [0u8; 16];
+        ok[STATUS_AT] = STATUS_OK;
+        assert!(accepted(op::OPEN_FILE, &ok));
+        assert!(accepted(op::PLAY_VIDEO, &ok));
+        assert!(!accepted(op::SHOW_IMAGE, &ok), "113 reports at [1]");
+        let mut image_ok = [0u8; 16];
+        image_ok[IMAGE_STATUS_AT] = STATUS_OK;
+        assert!(accepted(op::SHOW_IMAGE, &image_ok));
+        assert!(!accepted(op::PLAY_VIDEO, &image_ok));
+        assert!(!accepted(op::OPEN_FILE, &[]));
+
+        let mut busy = [0u8; 16];
+        assert!(playback_idle(&busy));
+        busy[STATUS_AT] = 1;
+        assert!(!playback_idle(&busy));
+        assert!(!playback_idle(&[]), "no reply is not idle");
+        assert_eq!(
+            (root::INTERNAL, root::CARD),
+            ("/usr/data/", "/tmp/sdcard/mmcblk0p1/"),
+            "spec § 6"
         );
     }
 

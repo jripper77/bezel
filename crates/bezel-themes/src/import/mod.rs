@@ -56,7 +56,7 @@ const MAX_VIDEO: u64 = 512 * 1024 * 1024;
 /// an NRBF stream (`.turtheme`), a folder with a `theme.yaml`, or a
 /// `theme.yaml` file itself.
 pub fn import_path(path: &Path) -> Result<Imported> {
-    let fail = |e: String| BezelError::Transport(format!("import {}: {e}", path.display()));
+    let fail = |e: String| BezelError::ThemeFile(format!("import {}: {e}", path.display()));
     if path.is_dir() {
         return python_yaml::import_dir(path).map_err(fail);
     }
@@ -363,6 +363,13 @@ mod tests {
         assert_eq!(ids, vec![1, 2]);
         assert_eq!(text_width(0, 10.0), 12.0);
         assert_eq!(line_height(10.0), 13.0);
+    }
+
+    #[test]
+    fn import_failures_are_theme_file_errors() {
+        let missing = std::env::temp_dir().join("bezel-import-mod-missing.turtheme");
+        let e = import_path(&missing).expect_err("refused");
+        assert!(matches!(e, BezelError::ThemeFile(_)), "{e:?}");
     }
 
     #[test]

@@ -56,6 +56,11 @@ pub enum BezelError {
     /// or deleted.
     #[error("refused: {0}")]
     Refused(Refusal),
+    /// A theme file or folder that cannot be read, written or imported
+    /// (missing, malformed, an unsafe asset path). The text names the file
+    /// and the problem.
+    #[error("theme file: {0}")]
+    ThemeFile(String),
 }
 
 fn partial_note(partial: &Option<u64>) -> String {
@@ -84,6 +89,14 @@ mod tests {
         assert_eq!(
             BezelError::Unsupported("Turing 3.5\" has no storage".into()).to_string(),
             "not supported: Turing 3.5\" has no storage"
+        );
+    }
+
+    #[test]
+    fn theme_file_errors_read_well() {
+        assert_eq!(
+            BezelError::ThemeFile("theme.json: missing field `name`".into()).to_string(),
+            "theme file: theme.json: missing field `name`"
         );
     }
 }

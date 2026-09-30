@@ -24,7 +24,7 @@ pub const EXTENSION: &str = "bezeltheme";
 pub struct FsThemeStore;
 
 fn io(context: &str, e: impl std::fmt::Display) -> BezelError {
-    BezelError::Transport(format!("{context}: {e}"))
+    BezelError::ThemeFile(format!("{context}: {e}"))
 }
 
 /// An asset path is relative, uses `/`, and never leaves the theme.
@@ -188,7 +188,7 @@ impl ThemeStore for FsThemeStore {
         } else if is_zip(path) {
             load_zip(path)
         } else {
-            Err(BezelError::ScreenNotFound(format!(
+            Err(BezelError::ThemeFile(format!(
                 "theme not found: {}",
                 location.0
             )))
@@ -484,6 +484,19 @@ mod tests {
                 .is_err()
         );
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn theme_file_problems_are_theme_file_errors() {
+        let root = scratch("errors");
+        let missing = ThemeLocation(root.join("nope").display().to_string());
+        let theme_file = |r: Result<_>| matches!(r, Err(BezelError::ThemeFile(_)));
+        assert!(theme_file(FsThemeStore.load(&missing).map(|_| ())));
+        assert!(theme_file(load_manifest(&missing).map(|_| ())));
+        assert!(theme_file(parse_manifest(b"{").map(|_| ())));
+        assert!(theme_file(
+            safe_asset_path(&AssetRef("../x.png".into())).map(|_| ())
+        ));
     }
 
     #[test]

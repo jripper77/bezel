@@ -23,7 +23,6 @@ mod images;
 mod layer;
 mod paint;
 mod path;
-mod quantity;
 mod renderer;
 mod shape;
 mod text;

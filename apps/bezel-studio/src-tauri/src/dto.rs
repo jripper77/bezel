@@ -6,7 +6,7 @@ use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::{Endpoint, Screen, ScreenState};
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::sensor::{
-    DisplayFormat, Quantities, Quantity, Reading, SensorInfo, Snapshot, format_reading,
+    DisplayFormat, Quantities, Reading, SensorInfo, Snapshot, format_reading,
 };
 use bezel_themes::dto::{SizeDto, ThemeDto};
 use serde::Serialize;
@@ -201,7 +201,7 @@ impl SampleDto {
         snapshot
             .iter()
             .map(|(key, reading)| {
-                let quantity = quantities.get(key).unwrap_or(Quantity::Number);
+                let quantity = quantities.quantity(key);
                 let dto = ReadingDto {
                     value: reading.value(),
                     display: format_reading(reading, quantity, DisplayFormat::default()),
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn readings_use_the_catalog_units() {
-        use bezel_core::domain::sensor::{Category, SensorKey};
+        use bezel_core::domain::sensor::{Category, Quantity, SensorKey};
         let key = SensorKey::new("hwmon.nvme0.composite").unwrap();
         let other = SensorKey::new("x.y").unwrap();
         let catalog = [SensorInfo {

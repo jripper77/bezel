@@ -20,7 +20,6 @@ use crate::graph::{self, GraphSpec};
 use crate::images::ImageCache;
 use crate::layer::Layer;
 use crate::paint;
-use crate::quantity::quantity_of;
 use crate::shape;
 use crate::text::{SystemFonts, TextEngine, TextJob};
 
@@ -180,10 +179,7 @@ fn text_of(content: &TextContent, context: &RenderContext<'_>) -> String {
             suffix,
         } => {
             let reading = context.snapshot.get(key);
-            let quantity = context
-                .quantities
-                .get(key)
-                .unwrap_or_else(|| quantity_of(key));
+            let quantity = context.quantities.quantity(key);
             let value = format_reading(&reading, quantity, *format);
             format!("{prefix}{value}{suffix}")
         }

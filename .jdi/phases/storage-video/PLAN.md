@@ -33,7 +33,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - Boot reescreve 0x7D com o último brilho/sleep enviados, mudando só o startMode; `present` mantém o alfa por pixel (A=0 mostra o vídeo) em BGRA e no formato de 3 bytes; nenhum comando de armazenamento, 0x7D, 0x82 ou 0x84 sai implicitamente (teste). `FakeConnector` ganha armazenamento em memória da 8.8" para CLI e studio.
 - **Dependencies:** T-6.1
 - **Test:** `protocol::turing_rev_c::tests::storage_packets_match_the_reference_vectors`, `protocol::turing_rev_c::tests::storage_info_subtracts_the_reserved_flash_and_detects_the_card`, `driver::turing_rev_c::tests::upload_reports_progress_and_can_be_cancelled`
-- **Status:** pending
+- **Status:** completed (094a24b)
 
 #### T-6.3: Crate `bezel-media` (ffmpeg/ffprobe externos)
 - **Specialist:** jdi-doer-bezel

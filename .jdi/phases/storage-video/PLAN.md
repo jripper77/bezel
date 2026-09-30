@@ -99,7 +99,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - Vídeo em loop tocado pela tela com o tema ao vivo por cima (alfa correto) e slot de boot confirmado após desligar/ligar; SUMMARY separa o verificado por protocolo do que depende de confirmação visual humana.
 - **Dependencies:** T-6.5, T-6.6, T-6.7
 - **Test:** DoD manual (evidência em SUMMARY.md § Hardware validation)
-- **Status:** pending
+- **Status:** in_progress (CLI validada na 8.8"; pendentes: aba do studio, confirmação visual do alfa e boot)
 
 ## Execution
 - Total tasks: 8

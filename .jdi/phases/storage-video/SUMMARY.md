@@ -1,7 +1,7 @@
 # Phase 6: Armazenamento e vídeo — Summary  (slug: storage-video)
 
 **Status:** partial
-**Tasks:** 4/8 complete, 0 blocked (T-6.5..T-6.8 pendentes)
+**Tasks:** 6/8 complete, 0 blocked (T-6.7 em andamento; T-6.8 parcial: CLI validada, studio e itens visuais pendentes)
 
 > Nota de processo: T-6.1 executada pelo `jdi-doer-bezel` no worktree `wt/sv-core` (a partir de `main`),
 > cherry-picked para a `main`.
@@ -65,6 +65,24 @@
   - `stream`: rawvideo RGBA em cover, fila de 2 frames, loop — o fallback de vídeo pelo PC.
   - Fora do `files_modified`: `crates/bezel-media/src/process.rs` (processos comuns aos três módulos).
   - 4 testes com ffmpeg real (`#[ignore]`) rodados localmente com ffmpeg 8.1.3 + libx264: 4/4.
+- T-6.5: TUR_USB — `ScreenStorage` só com vetores golden, `hardware_validated=false` — `59a4e1f`
+  - Raízes `/usr/data/` e `/tmp/sdcard/mmcblk0p1/`; `info` = 100 (KiB → bytes, cartão com TF total ≠ 0);
+    `list` = 99; `upload` = 111/112 → 38 → 39 por 1 MiB com progresso e cancelamento (SYNC + `size` →
+    `Cancelled{partial}`); `play_*` = parar, PNG transparente, 110/113; reusa os auxiliares do `driver/mod.rs`.
+  - Sem o 98 não há consulta de tamanho: `size` = presença no LIST_DIR + bytes gravados pelo link; `delete`,
+    `set_start_mode` e `Repeat::Once` = `Unsupported` (D-2026-09-30-storage-video-7); 40 e 98 nunca saem.
+- T-6.6: CLI `bezel storage info|ls|put|rm|play|stop|boot` — `d327cef`
+  - Tamanhos legíveis, `--json` em `info`/`ls`; resumo antes de toda ação destrutiva (mesmo com `--yes`);
+    sem `--yes`, `rm`/`boot` nem abrem a tela e `put` só consulta; barra de progresso em TTY; Ctrl+C cancela
+    pelo `CancelToken`; `--orientation`, `--fps`, `--ffmpeg`; vídeo de outra proporção com `cover_crop`;
+    sem ffmpeg, dicas por SO; tela cheia lista candidatos e não apaga nada; `Unsupported` vira uma frase clara.
+  - `bezel run` com tema de vídeo chama `start_video`: vídeo na tela → loop com base transparente; ausente →
+    pôster e o comando `bezel storage put …` exato; sem reprodução → decodificado no PC.
+  - `--fake`: 8.8" simulada com arquivos de demonstração e cartão de 8 GiB.
+- Orquestrador (achados de hardware da T-6.8): `2743b4a` — escrita serial resistente a sinais (o flush do
+  serialport desistia com "timeout for retrying flush reached" quando um sinal interrompia um esvaziamento
+  de mais de 10 ms, derrubando qualquer upload) e escrita que falha após o cancelamento tratada como o
+  cancelamento.
 - Orquestrador: `cover_crop` no core (`d4130d1`) — um vídeo de outra proporção guarda o centro em vez de
   esticar; usado pela CLI e pelo studio.
 
@@ -78,13 +96,14 @@
   `crates/bezel-cli/src/screen.rs`, `apps/bezel-studio/src-tauri/src/studio.rs`
 
 ## Tests
-- `cargo test --workspace --locked` na `main` após T-6.1..T-6.4: 455 passando, 0 falhando, 6 ignorados (4 de ffmpeg real)
+- `cargo test --workspace --locked` na `main` após T-6.1..T-6.6 e as correções de hardware: 486 passando, 0 falhando, 6 ignorados (4 de ffmpeg real)
 - DoD: `domain::storage::tests::destructive_operations_require_confirm_yes` e
   `domain::storage::tests::preflight_rejects_bad_names_sizes_and_full_storage` → OK
 - DoD T-6.2: `protocol::turing_rev_c::tests::storage_packets_match_the_reference_vectors`,
   `...::storage_info_subtracts_the_reserved_flash_and_detects_the_card`,
   `driver::turing_rev_c::tests::upload_reports_progress_and_can_be_cancelled` → OK; DoD T-6.4:
   `renderer::tests::device_video_background_renders_a_transparent_base` → OK
+- DoD T-6.6: `storage::tests::rm_without_yes_is_refused` → OK
 - DoD T-6.3: `transcode::tests::builds_the_vendor_argument_vector_for_rev_c` e
   `probe::tests::missing_ffmpeg_is_reported_not_fatal` → OK
 - Coverage (`cargo llvm-cov`): `bezel-media` 90,82% (97,4% com os ignorados); `app/storage.rs` 99,42%, `domain/storage.rs` 99,31%, `domain/media.rs` 97,71%,
@@ -92,9 +111,38 @@
   `renderer.rs` 96,10%; workspace 95,54% (medição da T-6.2)
 
 ## Hardware validation
-- pendente (T-6.8, orquestrador). Pontos a observar do relatório da T-6.2: o cancelamento no meio do upload
-  pode virar `Timeout` (bytes de HELLO aceitos como dados) — reconectar e conferir o arquivo; o alfa reto
-  sobre vídeo; boot persistente (anotar e restaurar).
+Turing 8.8" real (ROM `chs_88inch.dev1_rom1.90`) com cartão SD de 29,7 GiB, `bezel` da `main` (CLI), o
+`turing-smart-screen.service` do usuário parado durante os testes e religado ao final; só arquivos
+`bezel_test_*` foram criados e todos foram apagados (os 5 vídeos internos e 12 do cartão do usuário não
+foram tocados).
+- `storage info` / `--json`: interna 65,9 MiB (18,6 usados), cartão 29,7 GiB detectado; `ls` e `ls --json`
+  listam as raízes com tamanhos.
+- Recusas: `rm` e `boot` sem `--yes` → resumo, "Nothing was sent", código 1; `put` sobre arquivo existente
+  sem `--yes` → código 1.
+- `put` PNG 480x1920 em `internal/image` → enviado e verificado; `play`/`stop` ok.
+- `put` MP4 480x1920 nativo em `internal/video` → "as is", verificado; `play` em loop, `stop` ok.
+- `put` MP4 1920x1080 com áudio `--orientation horizontal --fps 24` → convertido pelo ffmpeg (90°, centro
+  1920x480, 24 fps, sem áudio), verificado, tocado.
+- Espaço: um MP4 de 79 MiB para a interna (44 MiB livres) foi recusado no preflight com a lista de
+  candidatos, nada apagado.
+- Cancelamento no cartão (Ctrl+C a ~30%): antes da correção `2743b4a`, "transport error: timeout for
+  retrying flush reached"; depois, "upload cancelled accepted=25688832" e, como o firmware ainda esperava o
+  resto do arquivo e não respondeu ao HELLO, a mensagem "the next command reconnects it, then check
+  sd/video/… for a partial file". A conexão seguinte reconectou (wake + retry, ~10 s) e listou o parcial de
+  24,3 MiB, apagado com `rm --yes`.
+- Achado: o **primeiro** upload depois de uma transferência abortada gravou 198 925 bytes para um PNG de
+  7 444 (o firmware anexou restos); a verificação de tamanho acusou e o arquivo foi apagado. Repetido com o
+  estado limpo: exato, duas vezes. Após a limpeza o cartão reporta 24,3 MiB a mais de uso do que antes (a
+  listagem está limpa): contabilidade do FAT ou resto da transferência abortada — conferir após reiniciar
+  a tela.
+- Cartão: PNG em `sd/image` e MP4 em `sd/video` enviados, tocados e apagados.
+- Tema com vídeo de fundo (8.8" horizontal): `run` sem o vídeo → pôster + o comando `put` exato; após
+  `storage put … sd/video/bezel_test_loop_90.mp4 --orientation horizontal` (convertido, 3,3 MiB), `run` →
+  "the screen plays … under the theme", 25 frames em 24,4 s, frame cheio aceito (`full_png_sucess`) depois
+  do PLAY_VIDEO, sem erros.
+- **Pendente de confirmação humana (DoD manual):** a transparência do tema sobre o vídeo (visual); o boot
+  (`storage boot … --yes` + desligar/ligar a tela; não executado: persistente e exige ação física); a aba
+  de armazenamento do studio (T-6.7).
 
 ## Observações para T-6.2..T-6.7
 - Testes unitários do core usam dublês gravadores em `app::storage::doubles` (`#[cfg(test)]`): o core não

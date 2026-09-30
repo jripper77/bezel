@@ -1,0 +1,24 @@
+{
+  "$schema_version": "1.2",
+  "context_window": 200000,
+  "thresholds": {
+    "warn_pct": 60,
+    "critical_pct": 70
+  },
+  "budgets": {
+    "max_context_chars": 6000,
+    "max_plan_chars": 12000,
+    "max_summary_chars": 8192
+  },
+  "compaction": {
+    "archive_after": 5
+  },
+  "orchestration": {
+    "mode": "standard",
+    "source": "default"
+  },
+  "gate": {
+    "code_globs": ["crates/**", "apps/**"]
+  },
+  "coverage_min": 80
+}

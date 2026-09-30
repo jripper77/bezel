@@ -1,0 +1,32 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+**/mutants.out*/
+
+# Node (UI tests only; nothing here ships)
+node_modules/
+apps/*/coverage/
+apps/*/test-results/
+apps/*/playwright-report/
+
+# Coverage reports (CI quality job and scripts/ci/sonar-coverage.sh)
+/resultados/
+
+# Local artifacts
+/dist/
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code: per-user local settings
+.claude/settings.local.json
+.jdi/STATE.md
+.jdi/ROADMAP.md
+.jdi/DECISIONS.md
+.jdi/todos.md
+.jdi/registry.md
+.jdi/specialists.md
+.jdi/reviewers.md
+.jdi/skills-registry.md

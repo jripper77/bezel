@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# bezel commit-msg hook — Conventional Commits + atomic-commit guard.
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+#
+# Rules (all mechanical, all explained on failure):
+#   1. Header matches  type(scope): subject   (scope optional for chore/docs/ci/build/style)
+#   2. Header <= 72 chars
+#   3. feat/fix/refactor/perf/test REQUIRE a scope, and it must be a roadmap phase slug
+#      (.jdi/roadmap/<slug>.md). chore/docs/ci/build/style may use a slug or jdi|repo|deps|release|hooks.
+#   4. One commit never mixes CODE (Cargo.*, clippy.toml, rustfmt.toml, src/, crates/, apps/, .github/)
+#      with JDI STATE (.jdi/**). Code is committed per task by the doer; state by the JDI commands.
+#   5. One commit never touches two phases (.jdi/phases/<a>/ and .jdi/phases/<b>/).
+#   6. WARN (not block) when a feat/fix/refactor/perf/test commit exceeds 20 files or 800 changed lines.
+#
+# Escape hatch for HUMANS only, one commit at a time:  JDI_ALLOW_MIXED=1 git commit ...
+# Agents (jdi-doer-*) must never bypass — the reviewer checks commit shape at gate 6.
+
+set -euo pipefail
+
+MSG_FILE="${1:?commit message file}"
+
+fail() {
+  echo "" >&2
+  echo "COMMIT REJECTED: $1" >&2
+  shift
+  for line in "$@"; do echo "  $line" >&2; done
+  echo "" >&2
+  exit 1
+}
+
+header=$(grep -vE '^[[:space:]]*#' "$MSG_FILE" | sed -n '1p')
+
+# Git-generated headers pass through untouched.
+case "$header" in
+  "Merge "*|"Revert "*|"fixup! "*|"squash! "*) exit 0 ;;
+esac
+
+types='feat|fix|test|refactor|perf|docs|chore|ci|build|style'
+re="^(${types})(\([a-z0-9][a-z0-9-]*\))?!?: [^[:space:]].*"
+
+if ! printf '%s' "$header" | grep -Eq "$re"; then
+  fail "header is not a Conventional Commit" \
+    "got:      '$header'" \
+    "expected: type(scope): subject" \
+    "types:    ${types//|/ }" \
+    "example:  feat(core-domain): add VcpCode newtype with MCCS constants"
+fi
+
+if [ "${#header}" -gt 72 ]; then
+  fail "header is ${#header} chars (max 72)" "move detail to the body (blank line, then paragraphs)"
+fi
+
+type=$(printf '%s' "$header" | sed -E "s/^(${types}).*/\1/")
+scope=$(printf '%s' "$header" | sed -nE 's/^[a-z]+\(([a-z0-9-]+)\).*/\1/p')
+
+# Roadmap slugs = filenames under .jdi/roadmap/ minus _header/_footer.
+slugs=""
+if [ -d .jdi/roadmap ]; then
+  for f in .jdi/roadmap/*.md; do
+    [ -f "$f" ] || continue
+    s=$(basename "$f" .md)
+    case "$s" in _*) continue ;; esac
+    slugs="$slugs $s"
+  done
+fi
+
+has_word() { printf ' %s ' "$1" | grep -q " $2 "; }
+
+case "$type" in
+  feat|fix|refactor|perf|test)
+    [ -n "$scope" ] || fail "type '$type' requires a scope = phase slug" \
+      "roadmap slugs:$slugs"
+    has_word "$slugs" "$scope" || fail "scope '$scope' is not a roadmap phase slug" \
+      "roadmap slugs:$slugs" \
+      "add a phase with /jdi-add-phase, or use chore/docs/ci for non-phase work"
+    ;;
+  *)
+    if [ -n "$scope" ]; then
+      has_word "$slugs jdi repo deps release hooks" "$scope" || fail \
+        "scope '$scope' unknown for type '$type'" \
+        "allowed: a roadmap slug, or jdi | repo | deps | release | hooks"
+    fi
+    ;;
+esac
+
+# ---- atomicity guard on the INDEX (commit-msg still sees the staged set) ----
+files=$(git diff --cached --name-only)
+[ -n "$files" ] || exit 0
+
+code=$(printf '%s\n' "$files" | grep -E '^(Cargo\.(toml|lock)|clippy\.toml|rustfmt\.toml|src/|crates/|apps/|\.github/)' || true)
+state=$(printf '%s\n' "$files" | grep -E '^\.jdi/' || true)
+
+if [ -n "$code" ] && [ -n "$state" ] && [ "${JDI_ALLOW_MIXED:-0}" != "1" ]; then
+  fail "commit mixes code with .jdi/ state — not atomic" \
+    "code:  $(printf '%s' "$code"  | head -3 | tr '\n' ' ')" \
+    "state: $(printf '%s' "$state" | head -3 | tr '\n' ' ')" \
+    "split: commit the task's code first (doer), then the .jdi/ artifacts (JDI command)" \
+    "humans only: JDI_ALLOW_MIXED=1 git commit ... to override this one commit"
+fi
+
+phase_count=$(printf '%s\n' "$files" | sed -n 's#^\.jdi/phases/\([^/]*\)/.*#\1#p' | sort -u | grep -c . || true)
+if [ "$phase_count" -gt 1 ]; then
+  fail "commit touches $phase_count phases — one phase per commit" \
+    "$(printf '%s\n' "$files" | sed -n 's#^\.jdi/phases/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ')"
+fi
+
+case "$type" in
+  feat|fix|refactor|perf|test)
+    n=$(printf '%s\n' "$files" | grep -c . || true)
+    lines=$(git diff --cached --numstat | awk '{ a += ($1 == "-" ? 0 : $1) + ($2 == "-" ? 0 : $2) } END { print a + 0 }')
+    if [ "$n" -gt 20 ] || [ "$lines" -gt 800 ]; then
+      echo "WARN: $n files / $lines changed lines in one '$type' commit — is this really one task? (not blocking)" >&2
+    fi
+    ;;
+esac
+
+exit 0

@@ -11,8 +11,11 @@ use crate::discovery::SystemBus;
 use crate::driver::kipye_rev_d::KipyeRevD;
 use crate::driver::turing_rev_a::TuringRevA;
 use crate::driver::turing_rev_c::{RealTime, TuringRevC};
+use crate::driver::turing_usb::{self, TuringUsb};
+use crate::driver::wch::{self, Wch};
 use crate::driver::weact::WeAct;
 use crate::driver::xuanfang_rev_b::XuanFangRevB;
+use crate::usb::{Endpoints, UsbWire};
 use crate::wire::{Flow, SerialWire};
 
 /// How long a rev C SoC may take to boot after its MCU is poked.
@@ -52,12 +55,21 @@ impl ScreenConnector for SystemConnector {
                 let wire = open_serial(display(screen)?, Flow::Hardware)?;
                 Ok(Box::new(WeAct::connect(wire, &RealTime, models)?))
             }
-            other => Err(BezelError::Transport(format!(
-                "{} screens are not supported yet",
-                other.slug()
-            ))),
+            Family::TuringUsb => {
+                let wire = open_usb(display(screen)?, turing_usb::ENDPOINTS)?;
+                Ok(Box::new(TuringUsb::connect(wire, &RealTime, models)?))
+            }
+            Family::Wch => {
+                let wire = open_usb(display(screen)?, wch::ENDPOINTS)?;
+                Ok(Box::new(Wch::connect(wire, &RealTime, models)?))
+            }
         }
     }
+}
+
+fn open_usb(endpoint: &Endpoint, endpoints: Endpoints) -> Result<UsbWire> {
+    let address = &endpoint.address.0;
+    UsbWire::open(address, endpoints).map_err(|e| access_error(address, &e))
 }
 
 /// The display endpoint of a family without a wake companion.
@@ -150,12 +162,14 @@ mod tests {
     }
 
     #[test]
-    fn every_serial_family_is_routed_and_missing_ports_fail_cleanly() {
+    fn every_family_is_routed_and_missing_devices_fail_cleanly() {
         for (family, model) in [
             (Family::TuringRevA, "turing-3.5"),
             (Family::XuanFangRevB, "xuanfang-3.5"),
             (Family::KipyeRevD, "kipye-qiye-3.5"),
             (Family::WeAct, "weact-fs-3.5"),
+            (Family::TuringUsb, "turing-usb-8.8"),
+            (Family::Wch, "wch-3.38"),
         ] {
             let mut screen = Screen {
                 family,

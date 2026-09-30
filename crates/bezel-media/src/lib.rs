@@ -317,7 +317,6 @@ exit 1
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
     use std::time::Duration;
 
     use bezel_core::domain::geometry::Size;
@@ -337,6 +336,8 @@ mod tests {
 
     #[cfg(unix)]
     mod with_fake_tools {
+        use std::ffi::OsString;
+
         use super::*;
         use crate::mp4::fixtures::Movie;
 

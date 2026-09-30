@@ -236,13 +236,10 @@ pub(crate) fn discard(output: &Path) {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::path::PathBuf;
-
     use bezel_core::domain::catalog::model_by_id;
     use bezel_core::domain::device::ModelId;
     use bezel_core::domain::frame::Rect;
     use bezel_core::domain::geometry::Size;
-    use bezel_core::domain::job::CancelToken;
     use bezel_core::domain::media::{ConvertOptions, UploadProfile};
 
     use super::*;
@@ -402,7 +399,10 @@ pub(crate) mod tests {
 
     #[cfg(unix)]
     mod with_fake_ffmpeg {
+        use std::path::PathBuf;
         use std::time::{Duration, Instant};
+
+        use bezel_core::domain::job::CancelToken;
 
         use super::*;
         use crate::fakes;

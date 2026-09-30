@@ -101,6 +101,8 @@ pub fn run() -> Result<(), tauri::Error> {
                     .is_some_and(|b| b.studio().live_key().is_some());
                 if live {
                     api.prevent_close();
+                    // Best effort: a window that cannot hide stays open, and
+                    // the screen keeps updating either way.
                     let _ = window.hide();
                 }
             }
@@ -144,6 +146,8 @@ pub fn run() -> Result<(), tauri::Error> {
 /// Shows, restores and focuses the main window.
 pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        // Best effort for each step: the window manager may refuse focus or
+        // unminimizing, and there is nothing better to do than try the rest.
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();

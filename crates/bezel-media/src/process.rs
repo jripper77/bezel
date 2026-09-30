@@ -70,6 +70,9 @@ pub(crate) fn capture<S: AsRef<OsStr>>(
     let stdout = child.stdout.take().map(|mut pipe| {
         thread::spawn(move || {
             let mut bytes = Vec::new();
+            // Draining only keeps the child from blocking on a full pipe; a
+            // read error just means less text for the report, and the exit
+            // status decides success.
             let _ = pipe.read_to_end(&mut bytes);
             String::from_utf8_lossy(&bytes).into_owned()
         })

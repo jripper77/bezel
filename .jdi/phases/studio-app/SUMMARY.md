@@ -31,6 +31,13 @@
   PROJECT.md § Frontend com `has_frontend: true` (D-2026-09-30-studio-app-6), install-local com temas e
   fontes, teste de hardware opt-in `apps/bezel-studio/src-tauri/tests/hardware.rs` — `1bca123` e o commit do teste
 
+- Correções da revisão (fix mode, `jdi-doer-bezel`): o ao vivo roda o `ThemeRuntime` do core (preview com
+  pôster, tela com `OnDevice`/`Frame`, vídeo decodificado no PC para WCH — D-2026-09-30-studio-app-7); quadros
+  saem para a tela fora do lock da sessão, com período sem deriva; setas em abas e controles não movem a
+  seleção; no máximo 30 renders/s durante o arraste; diálogo Salvar/Descartar/Cancelar antes de perder edições
+  e ao fechar; bandeja com "Ao vivo na tela" e Ocultar; abrir/salvar só na biblioteca ou em caminhos
+  escolhidos no diálogo. Orquestrador: README (seção do studio), CHANGELOG, PLAN com os arquivos reais.
+
 ## Blocked tasks
 - nenhuma
 
@@ -42,18 +49,17 @@
   `crates/bezel-themes` (`load_manifest`)
 
 ## Tests
-- `cargo test --workspace --locked`: 509 passando, 0 falhando, 7 ignorados (4 de ffmpeg real, 1 de hardware opt-in,
-  timing e corpus); `bezel-studio`: 46 unitários + o teste de hardware
-- `npm run test:unit`: 57 passando; linhas 99,8%, `src/editor/store.js` 100%
-- Playwright: 24 passando (12 cenários × claro/escuro, axe sem sérias/críticas), incl. "drag a widget onto the
-  canvas", "keyboard move and undo", "switch between vertical and horizontal"
-- Coverage Rust: 94,94% de linhas no workspace (`commands.rs`/`lib.rs` = raiz de composição)
+- `cargo test --workspace --locked`: 578 passando, 0 falhando, 7 ignorados; UI: 65 unitários, 30 Playwright
+  (claro/escuro, axe)
+- Coverage (`cargo llvm-cov`): 94,66% no workspace; `studio.rs` 97,70%, `backend.rs` 97,59%, `runtime.rs` 100%,
+  `library.rs` 99,56% (`commands.rs`/`lib.rs`/`tray.rs` = cola Tauri)
 
 ## Hardware validation
 - Studio instalado (`install-local.sh`) e aberto em modo simulado (`BEZEL_FAKE=1`) sem erros.
 - 8.8" real, serviço do usuário parado e religado: `BEZEL_HW_TESTS=1 cargo test -p bezel-studio --test hardware
-  -- --ignored` → backend do studio ao vivo com o tema incluso "Midnight 8.8\" horizontal" (7 atualizações em
-  8,8 s), virado para vertical com a tela ao vivo (8 atualizações em 8,7 s), depois devolvido; sem erros.
+  -- --ignored` → backend do studio ao vivo com o tema incluso "Midnight 8.8\" horizontal", virado para vertical
+  com a tela ao vivo, depois devolvido; sem erros. Antes das correções 7 atualizações em 8,8 s; depois (período
+  sem deriva, E/S fora do lock) 8 em 8,0 s nas duas orientações.
 - **Pendente de confirmação humana (DoD manual):** desenhar um tema na janela e vê-lo ao vivo na 8.8",
   fechar a janela e seguir pela bandeja.
 

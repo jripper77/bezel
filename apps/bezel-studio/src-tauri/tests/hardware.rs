@@ -9,7 +9,7 @@
 //! Stop any other program that drives the screen first.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bezel_core::domain::geometry::Orientation;
@@ -17,7 +17,7 @@ use bezel_devices::{SystemBus, SystemConnector};
 use bezel_media::FfmpegTranscoder;
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::SystemSensors;
-use bezel_studio::backend::Backend;
+use bezel_studio::backend::{Backend, Pacer, Session};
 use bezel_studio::clock::{language, now};
 use bezel_studio::library::ThemeLibrary;
 use bezel_studio::settings::SettingsFile;
@@ -44,7 +44,7 @@ fn backend(scratch: &Path) -> Backend {
         library: ThemeLibrary::new(scratch.join("themes"), vec![themes]),
         settings: SettingsFile::new(scratch.join("settings.json")),
         fonts,
-        studio: Mutex::new(Studio::new(
+        studio: Session::new(Studio::new(
             Box::new(SystemSensors::new()),
             Box::new(renderer),
             language(),
@@ -56,11 +56,12 @@ fn backend(scratch: &Path) -> Backend {
 
 fn stay_live(b: &Backend, label: &str) {
     let started = Instant::now();
+    let mut pacer = Pacer::new(started);
     let mut ticks = 0;
     while started.elapsed() < LIVE_FOR {
-        let wait = b.tick(now());
+        let period = b.tick(now());
         ticks += 1;
-        std::thread::sleep(wait);
+        std::thread::sleep(pacer.wait(period, Instant::now()));
     }
     let sample = b.sample();
     assert_eq!(sample.live_error, None, "{label}: the live screen stopped");

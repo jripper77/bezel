@@ -3,8 +3,8 @@
 //! tests. Errors reach the UI as text.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use bezel_core::app::{choose_screen, discover_screens};
 use bezel_core::domain::catalog::model_by_id;
@@ -26,7 +26,7 @@ use crate::library::{ThemeLibrary, is_native_theme};
 use crate::media::{kind_of, thumbnail_data_url};
 use crate::settings::SettingsFile;
 use crate::storage::StorageState;
-use crate::studio::Studio;
+use crate::studio::{Delivery, Studio};
 pub use crate::studio::{MAX_REFRESH, MIN_REFRESH};
 
 /// Result of a UI command: errors are shown as text.
@@ -54,9 +54,70 @@ pub struct Backend {
     /// Font families themes can use.
     pub fonts: Vec<String>,
     /// The editing session.
-    pub studio: Mutex<Studio>,
+    pub studio: Session,
     /// The screen's files: the media converter and the running operation.
     pub storage: StorageState,
+}
+
+/// The editing session behind its lock, and the signal that the live
+/// screen's link came back from showing a frame: the screen's I/O happens
+/// outside the lock, so previews render while the screen works.
+pub struct Session {
+    studio: Mutex<Studio>,
+    link_back: Condvar,
+}
+
+/// Longest wait for the live link to come back from showing a frame; after
+/// it the link counts as in use.
+const LINK_BACK_WAIT: Duration = Duration::from_secs(10);
+
+impl Session {
+    /// The session of `studio`.
+    pub fn new(studio: Studio) -> Self {
+        Self {
+            studio: Mutex::new(studio),
+            link_back: Condvar::new(),
+        }
+    }
+
+    /// The session, even after a panic in another command.
+    pub fn lock(&self) -> MutexGuard<'_, Studio> {
+        self.studio.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The session once the live link is back from showing a frame.
+    fn idle(&self) -> MutexGuard<'_, Studio> {
+        let waited = self
+            .link_back
+            .wait_timeout_while(self.lock(), LINK_BACK_WAIT, |s| s.presenting());
+        waited.unwrap_or_else(PoisonError::into_inner).0
+    }
+}
+
+/// Keeps the refresh loop on its cadence: each refresh is due one period
+/// after the previous one was due, however long the work took (the screen's
+/// I/O does not stretch the period). A loop that fell behind starts again
+/// from now instead of catching up in a burst.
+#[derive(Debug, Clone, Copy)]
+pub struct Pacer {
+    due: Instant,
+}
+
+impl Pacer {
+    /// A cadence whose first refresh was due at `now`.
+    pub fn new(now: Instant) -> Self {
+        Self { due: now }
+    }
+
+    /// How long to wait at `now` for the refresh due `period` after the
+    /// last one.
+    pub fn wait(&mut self, period: Duration, now: Instant) -> Duration {
+        self.due += period;
+        if self.due < now {
+            self.due = now;
+        }
+        self.due - now
+    }
 }
 
 /// Header of a frame sent to the UI: width and height, u32 little-endian.
@@ -101,7 +162,32 @@ fn read_file(path: &Path) -> UiResult<Vec<u8>> {
 impl Backend {
     /// The editing session, even after a panic in another command.
     pub fn studio(&self) -> MutexGuard<'_, Studio> {
-        self.studio.lock().unwrap_or_else(PoisonError::into_inner)
+        self.studio.lock()
+    }
+
+    /// The editing session once the live link is back from showing a frame
+    /// (for whatever needs the link).
+    pub(crate) fn idle_studio(&self) -> MutexGuard<'_, Studio> {
+        self.studio.idle()
+    }
+
+    /// Shows the frame the session prepared, outside its lock, then gives
+    /// the link back to the session.
+    fn deliver(&self, delivered: bezel_core::Result<Option<Delivery>>) -> bezel_core::Result<()> {
+        let Some(mut delivery) = delivered? else {
+            return Ok(());
+        };
+        let outcome = delivery.present();
+        let unwanted = self.studio().presented(delivery, &outcome);
+        self.studio.link_back.notify_all();
+        drop(unwanted);
+        outcome
+    }
+
+    /// Shows the edited theme on the live screen now.
+    pub(crate) fn show_now(&self, time: LocalTime) -> bezel_core::Result<()> {
+        let delivered = self.idle_studio().frame_for_screen(time);
+        self.deliver(delivered)
     }
 
     fn find_screen(&self, key: &str) -> UiResult<Screen> {
@@ -128,7 +214,8 @@ impl Backend {
     /// Starts (`screen` given) or stops showing the edited theme live.
     pub fn set_live(&self, on: bool, screen: Option<&str>, time: LocalTime) -> UiResult<()> {
         // Stop first: a screen can only be opened once.
-        drop(self.studio().stop_live());
+        let previous = self.idle_studio().stop_live();
+        drop(previous);
         if !on {
             self.settings.update(|s| s.live_screen = None);
             return Ok(());
@@ -139,9 +226,10 @@ impl Backend {
         let link = self.connect(key)?;
         let orientation = {
             let mut studio = self.studio();
-            studio.go_live(key.to_string(), link, time).map_err(text)?;
+            studio.go_live(key.to_string(), link);
             studio.theme().orientation
         };
+        self.show_now(time).map_err(text)?;
         self.settings.update(|s| {
             s.live_screen = Some(key.to_string());
             s.remember_orientation(key, orientation);
@@ -162,7 +250,7 @@ impl Backend {
     pub fn set_brightness(&self, screen: &str, percent: u8) -> UiResult<()> {
         let brightness = Brightness::new(percent).ok_or("brightness is 0 to 100")?;
         if self
-            .studio()
+            .idle_studio()
             .live_brightness(screen, brightness)
             .map_err(text)?
         {
@@ -178,7 +266,7 @@ impl Backend {
     pub fn release(&self, screen: &str) -> UiResult<()> {
         self.storage.ensure_idle()?;
         let live = {
-            let mut studio = self.studio();
+            let mut studio = self.idle_studio();
             if studio.live_key() == Some(screen) {
                 studio.stop_live()
             } else {
@@ -248,9 +336,9 @@ impl Backend {
         let live = {
             let mut studio = self.studio();
             studio.set_theme(theme);
-            studio.present(time).map_err(text)?;
             studio.live_key().map(str::to_string)
         };
+        self.show_now(time).map_err(text)?;
         if let Some(key) = live {
             self.remember_orientation(&key, orientation);
         }
@@ -439,13 +527,14 @@ impl Backend {
     }
 
     /// One refresh of the session (a sample when due, and a frame on the
-    /// live screen). Returns the time until the next one.
+    /// live screen, shown outside the session's lock). Returns the time
+    /// until the next one.
     pub fn tick(&self, time: LocalTime) -> Duration {
-        let mut studio = self.studio();
-        if let Err(e) = studio.tick(time) {
+        let delivered = self.studio().tick(time);
+        if let Err(e) = self.deliver(delivered) {
             tracing::warn!("live screen stopped: {e}");
         }
-        studio.period()
+        self.studio().period()
     }
 }
 
@@ -466,6 +555,7 @@ mod tests {
     use bezel_sensors::FakeSensors;
     use bezel_themes::FsThemeStore;
     use std::path::PathBuf;
+    use std::sync::mpsc;
 
     const TIME: LocalTime = LocalTime {
         year: 2026,
@@ -509,7 +599,7 @@ mod tests {
             library: ThemeLibrary::new(root.join("themes"), vec![]),
             settings: SettingsFile::new(root.join("settings.json")),
             fonts: vec!["Inter".into()],
-            studio: Mutex::new(studio),
+            studio: Session::new(studio),
             storage: StorageState::new(
                 Box::new(crate::storage::tests::FakeMedia::ready()),
                 root.join("scratch"),
@@ -592,6 +682,83 @@ mod tests {
         f.backend.set_live(false, None, TIME).unwrap();
         assert!(f.backend.set_live(true, None, TIME).is_err());
         assert!(f.backend.set_live(true, Some("COM9"), TIME).is_err());
+    }
+
+    #[test]
+    fn the_refresh_keeps_its_cadence() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let second = Duration::from_secs(1);
+        let mut pacer = Pacer::new(t0);
+        // The frame took 260 ms: the wait is the rest of the period.
+        assert_eq!(pacer.wait(second, t0 + ms(260)), ms(740));
+        assert_eq!(pacer.wait(second, t0 + second + ms(300)), ms(700));
+        // Far behind: the next one now, then the cadence from there.
+        assert_eq!(pacer.wait(second, t0 + ms(5000)), Duration::ZERO);
+        assert_eq!(pacer.wait(second, t0 + ms(5100)), ms(900));
+    }
+
+    /// A link whose frames wait until the test lets them through, telling
+    /// when one arrived: the screen's I/O in slow motion.
+    struct Held {
+        inner: Box<dyn ScreenLink>,
+        arrived: mpsc::Sender<()>,
+        through: mpsc::Receiver<()>,
+    }
+
+    impl ScreenLink for Held {
+        fn identity(&self) -> &bezel_core::domain::screen::ScreenIdentity {
+            self.inner.identity()
+        }
+        fn set_brightness(&mut self, brightness: Brightness) -> bezel_core::Result<()> {
+            self.inner.set_brightness(brightness)
+        }
+        fn set_orientation(&mut self, orientation: Orientation) -> bezel_core::Result<()> {
+            self.inner.set_orientation(orientation)
+        }
+        fn present(&mut self, frame: &bezel_core::domain::frame::Frame) -> bezel_core::Result<()> {
+            self.arrived.send(()).unwrap();
+            self.through.recv().unwrap();
+            self.inner.present(frame)
+        }
+        fn screen_off(&mut self) -> bezel_core::Result<()> {
+            self.inner.screen_off()
+        }
+        fn release(&mut self) -> bezel_core::Result<()> {
+            self.inner.release()
+        }
+    }
+
+    #[test]
+    fn previews_render_while_the_screen_shows_a_frame() {
+        let f = fixture("held");
+        let (arrived, frame_arrived) = mpsc::channel();
+        let (let_through, through) = mpsc::channel();
+        let inner = f.backend.connect(KEY).unwrap();
+        let held = Held {
+            inner,
+            arrived,
+            through,
+        };
+        f.backend.studio().go_live(KEY.into(), Box::new(held));
+        let theme = f.backend.session().theme;
+        let backend = &f.backend;
+        std::thread::scope(|scope| {
+            let ticking = scope.spawn(|| backend.tick(TIME));
+            frame_arrived.recv().unwrap();
+            // The screen is busy with a frame: the session is not.
+            assert!(backend.render(&theme, TIME).is_ok());
+            assert_eq!(backend.sample().live.as_deref(), Some(KEY));
+            // Whoever needs the link waits for it.
+            let dimming = scope.spawn(|| backend.set_brightness(KEY, 30));
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(f.connector.log().brightness.is_empty(), "after the frame");
+            let_through.send(()).unwrap();
+            assert!(ticking.join().unwrap() >= Duration::from_secs_f32(MIN_REFRESH));
+            dimming.join().unwrap().unwrap();
+        });
+        let log = f.connector.log();
+        assert_eq!((log.frames.len(), log.brightness.len()), (1, 1));
     }
 
     #[test]

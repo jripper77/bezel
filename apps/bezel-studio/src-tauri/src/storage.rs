@@ -347,18 +347,25 @@ fn prepared_dto(ticket: u64, source: String, prepared: &PreparedUpload) -> Prepa
 impl Backend {
     /// Borrows the live link of `screen`, or opens the screen.
     fn acquire(&self, screen: &str) -> StorageResult<Access> {
-        let lent = self.studio().lend_live_link(screen);
+        let lent = self
+            .idle_studio()
+            .lend_live_link(screen)
+            .map_err(core_error)?;
         match lent {
             Some(link) => Ok(Access::Live(link)),
             None => self.connect(screen).map(Access::Own).map_err(failed),
         }
     }
 
-    /// Gives a borrowed live link back (an opened one is closed).
+    /// Gives a borrowed live link back with a frame now (an opened link is
+    /// closed).
     fn give_back(&self, screen: &str, access: Access, resume: Resume, time: LocalTime) {
         if let Access::Live(link) = access {
-            let unwanted = self.studio().return_live_link(screen, link, resume, time);
+            let unwanted = self.studio().return_live_link(screen, link, resume);
             drop(unwanted);
+            if let Err(e) = self.show_now(time) {
+                tracing::warn!(screen, "live screen stopped after a storage job: {e}");
+            }
         }
     }
 

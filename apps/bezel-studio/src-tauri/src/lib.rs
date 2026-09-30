@@ -21,7 +21,8 @@ mod tray;
 
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::Instant;
 
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::geometry::{Orientation, Size};
@@ -35,7 +36,7 @@ use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
 use tauri::{AppHandle, Manager, WindowEvent};
 
-use crate::backend::{Backend, DEFAULT_MODEL, UNTITLED, default_orientation};
+use crate::backend::{Backend, DEFAULT_MODEL, Pacer, Session, UNTITLED, default_orientation};
 use crate::commands::Shared;
 use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
@@ -241,7 +242,7 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         library: ThemeLibrary::new(path.app_data_dir()?.join("themes"), bundled_theme_dirs(app)),
         settings,
         fonts,
-        studio: Mutex::new(studio),
+        studio: Session::new(studio),
         storage,
     })
 }
@@ -258,7 +259,8 @@ impl MediaSetup for FfmpegTranscoder {
 }
 
 /// Shows the last live screen again, then samples and refreshes the live
-/// screen at the theme's pace, on its own thread for the life of the app.
+/// screen at the theme's pace (the screen's I/O does not stretch it), on its
+/// own thread for the life of the app.
 fn start_refresh_loop(backend: Shared) {
     let spawned = std::thread::Builder::new()
         .name("bezel-refresh".into())
@@ -267,9 +269,10 @@ fn start_refresh_loop(backend: Shared) {
                 tracing::warn!("sensor catalog: {e}");
             }
             backend.restore_live(clock::now());
+            let mut pacer = Pacer::new(Instant::now());
             loop {
-                let wait = backend.tick(clock::now());
-                std::thread::sleep(wait);
+                let period = backend.tick(clock::now());
+                std::thread::sleep(pacer.wait(period, Instant::now()));
             }
         });
     if let Err(e) = spawned {

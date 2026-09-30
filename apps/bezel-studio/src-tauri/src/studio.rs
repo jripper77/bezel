@@ -13,6 +13,12 @@
 //! videos (a copy of the asset is decoded by the media converter the storage
 //! tab shares), or the poster ([`VideoState::VideoMissing`] carries what
 //! sending it takes).
+//!
+//! The screen's I/O happens outside the session: a frame is rendered in the
+//! session, then the live link leaves it with the frame ([`Delivery`]) and
+//! comes back once the screen showed it ([`Studio::presented`]). Previews
+//! render meanwhile; whoever needs the link waits for it
+//! ([`Studio::presenting`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -22,7 +28,7 @@ use std::time::{Duration, Instant};
 use bezel_core::app::{HOST_VIDEO_FPS, HostVideo, MissingVideo, ThemeRuntime, VideoState};
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::frame::Frame;
-use bezel_core::domain::geometry::Orientation;
+use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot};
 use bezel_core::domain::theme::{AssetRef, Background, Theme};
@@ -77,18 +83,68 @@ struct HostPlayback {
     started: Instant,
 }
 
+/// Where the live screen's link is.
+enum Slot {
+    /// In the session.
+    Here(Box<dyn ScreenLink>),
+    /// Out showing a frame ([`Delivery`]).
+    Presenting,
+    /// Lent to a storage job ([`Studio::lend_live_link`]): frames pause
+    /// until it comes back.
+    Lent,
+}
+
+impl Slot {
+    fn link(&mut self) -> Option<&mut Box<dyn ScreenLink>> {
+        match self {
+            Slot::Here(link) => Some(link),
+            Slot::Presenting | Slot::Lent => None,
+        }
+    }
+
+    /// The link when it is here, leaving `next` in its place; nothing
+    /// changes while it is out.
+    fn take_for(&mut self, next: Slot) -> Option<Box<dyn ScreenLink>> {
+        match std::mem::replace(self, next) {
+            Slot::Here(link) => Some(link),
+            out => {
+                *self = out;
+                None
+            }
+        }
+    }
+}
+
 /// The screen showing the edited theme.
 struct Live {
     key: String,
-    /// `None` while a storage job borrows it ([`Studio::lend_live_link`]):
-    /// frames pause until it comes back.
-    link: Option<Box<dyn ScreenLink>>,
+    slot: Slot,
     orientation: Option<Orientation>,
     /// Start the video (again) before the next frame: after going live, after
     /// a theme with another video, after a job that changed what plays.
     restart_video: bool,
     /// The video decoded here ([`VideoState::Host`]).
     host: Option<HostPlayback>,
+}
+
+/// A frame on its way to the live screen with the screen's link, out of the
+/// session so the screen's I/O does not hold it.
+pub struct Delivery {
+    key: String,
+    link: Box<dyn ScreenLink>,
+    frame: Frame,
+    /// Turn the screen to this orientation first (the theme turned).
+    turn: Option<Orientation>,
+}
+
+impl Delivery {
+    /// Shows the frame on the screen.
+    pub fn present(&mut self) -> Result<()> {
+        if let Some(orientation) = self.turn {
+            self.link.set_orientation(orientation)?;
+        }
+        self.link.present(&self.frame)
+    }
 }
 
 /// What a borrowed live link resumes when it comes back.
@@ -311,83 +367,92 @@ impl Studio {
         }
     }
 
-    /// Lends the live link of `key` to a storage job: frames pause and the
-    /// session stays usable (previews keep rendering) while the job talks to
-    /// the screen. `None` when `key` is not live (or its link is lent).
-    pub fn lend_live_link(&mut self, key: &str) -> Option<Box<dyn ScreenLink>> {
+    /// Whether the live link is out showing a frame: wait for
+    /// [`Self::presented`] before asking for it.
+    pub fn presenting(&self) -> bool {
         self.live
-            .as_mut()
-            .filter(|l| l.key == key)
-            .and_then(|l| l.link.take())
+            .as_ref()
+            .is_some_and(|l| matches!(l.slot, Slot::Presenting))
     }
 
-    /// Takes back a link lent by [`Self::lend_live_link`] and shows a frame
-    /// now (after `resume`). Hands the link back when `key` stopped being
-    /// live meanwhile: the caller closes it.
+    /// The live link of `key`, or why it cannot be had.
+    fn link_of(&mut self, key: &str) -> Result<Option<&mut Box<dyn ScreenLink>>> {
+        let Some(live) = self.live.as_mut().filter(|l| l.key == key) else {
+            return Ok(None);
+        };
+        let holder = match live.slot {
+            Slot::Here(_) => return Ok(live.slot.link()),
+            Slot::Presenting => LIVE_FRAME,
+            Slot::Lent => STORAGE_JOB,
+        };
+        Err(BezelError::InUse {
+            address: key.to_string(),
+            holders: vec![holder.to_string()],
+        })
+    }
+
+    /// Lends the live link of `key` to a storage job: frames pause and the
+    /// session stays usable (previews keep rendering) while the job talks to
+    /// the screen. `None` when `key` is not live; `InUse` while its link is
+    /// out.
+    pub fn lend_live_link(&mut self, key: &str) -> Result<Option<Box<dyn ScreenLink>>> {
+        if self.link_of(key)?.is_none() {
+            return Ok(None);
+        }
+        Ok(self.live.as_mut().and_then(|l| l.slot.take_for(Slot::Lent)))
+    }
+
+    /// Takes back a link lent by [`Self::lend_live_link`] (the next frame
+    /// starts the video again after `resume`). Hands the link back when
+    /// `key` stopped being live meanwhile: the caller closes it.
     pub fn return_live_link(
         &mut self,
         key: &str,
         link: Box<dyn ScreenLink>,
         resume: Resume,
-        time: LocalTime,
     ) -> Option<Box<dyn ScreenLink>> {
         let Some(live) = self
             .live
             .as_mut()
-            .filter(|l| l.key == key && l.link.is_none())
+            .filter(|l| l.key == key && matches!(l.slot, Slot::Lent))
         else {
             return Some(link);
         };
-        live.link = Some(link);
+        live.slot = Slot::Here(link);
         live.restart_video |= resume == Resume::Video;
-        if let Err(e) = self.present(time) {
-            tracing::warn!(screen = key, "live screen stopped after a storage job: {e}");
-        }
         None
     }
 
-    /// Shows the edited theme on `link` from now on, starting now.
-    pub fn go_live(
-        &mut self,
-        key: String,
-        link: Box<dyn ScreenLink>,
-        time: LocalTime,
-    ) -> Result<()> {
+    /// Shows the edited theme on `link` from the next frame on.
+    pub fn go_live(&mut self, key: String, link: Box<dyn ScreenLink>) {
         self.runtime.forget_screen();
         self.live = Some(Live {
             key,
-            link: Some(link),
+            slot: Slot::Here(link),
             orientation: None,
             restart_video: true,
             host: None,
         });
         self.live_error = None;
         self.unsampled = 0;
-        self.present(time)
     }
 
     /// Stops showing the theme and hands back the screen's link (`None`
-    /// while a storage job borrows it: the job closes it when done).
+    /// while it is out: whoever has it closes it).
     pub fn stop_live(&mut self) -> Option<Box<dyn ScreenLink>> {
-        let live = self.live.take()?;
+        let mut live = self.live.take()?;
         // The decoder stops before its copy of the video goes.
         self.runtime.forget_screen();
-        live.link
+        live.slot.take_for(Slot::Lent)
     }
 
     /// Sets the brightness of the live screen when it is `key`; `false` when
-    /// that screen is not live. `InUse` while a storage job borrows its link.
+    /// that screen is not live. `InUse` while its link is out.
     pub fn live_brightness(&mut self, key: &str, brightness: Brightness) -> Result<bool> {
-        let Some(live) = self.live.as_mut().filter(|l| l.key == key) else {
-            return Ok(false);
-        };
-        let Some(link) = live.link.as_mut() else {
-            return Err(BezelError::InUse {
-                address: key.to_string(),
-                holders: vec![STORAGE_JOB.to_string()],
-            });
-        };
-        link.set_brightness(brightness).map(|()| true)
+        match self.link_of(key)? {
+            Some(link) => link.set_brightness(brightness).map(|()| true),
+            None => Ok(false),
+        }
     }
 
     /// Starts the theme's video on the live screen when it has to (a failure
@@ -398,7 +463,7 @@ impl Studio {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let Some(link) = live.link.as_mut() else {
+        let Some(link) = live.slot.link() else {
             return;
         };
         if !live.restart_video {
@@ -431,53 +496,85 @@ impl Studio {
         }
     }
 
-    /// Renders and shows one frame on the live screen (nothing while a
-    /// storage job borrows its link). A failure stops the live mode (the link
-    /// is dropped) and is kept for [`Self::live_error`].
-    pub fn present(&mut self, time: LocalTime) -> Result<()> {
+    /// Renders the next frame of the live screen and takes its link out of
+    /// the session to show it ([`Delivery::present`], then
+    /// [`Self::presented`]). `None` while nothing is live or the link is
+    /// out. A theme that does not fit the screen stops the live mode, kept
+    /// for [`Self::live_error`].
+    pub fn frame_for_screen(&mut self, time: LocalTime) -> Result<Option<Delivery>> {
         self.start_live_video();
-        let Some(live) = self.live.as_ref().filter(|l| l.link.is_some()) else {
-            return Ok(());
+        let orientation = self.runtime.theme().orientation;
+        let Some(live) = self.live.as_mut() else {
+            return Ok(None);
         };
+        let Some(link) = live.slot.link() else {
+            return Ok(None);
+        };
+        let expected = link.identity().model.panel.in_orientation(orientation);
         let video = live
             .host
             .as_ref()
             .map_or(Duration::ZERO, |h| h.started.elapsed());
-        let result = self
+        let frame = self
             .runtime
             .render(self.renderer.as_mut(), time, video)
-            .and_then(|frame| self.present_frame(&frame));
-        if let Err(e) = &result {
-            self.runtime.forget_screen();
-            self.live = None;
-            self.live_error = Some(e.to_string());
-        }
-        result
+            .and_then(|frame| fits(frame, expected));
+        let frame = match frame {
+            Ok(frame) => frame,
+            Err(e) => {
+                self.stop_with(&e);
+                return Err(e);
+            }
+        };
+        let Some(live) = self.live.as_mut() else {
+            return Ok(None);
+        };
+        let Some(link) = live.slot.take_for(Slot::Presenting) else {
+            return Ok(None);
+        };
+        Ok(Some(Delivery {
+            key: live.key.clone(),
+            link,
+            frame,
+            turn: Some(orientation).filter(|o| live.orientation != Some(*o)),
+        }))
     }
 
-    fn present_frame(&mut self, frame: &Frame) -> Result<()> {
-        let orientation = self.runtime.theme().orientation;
-        let Some(live) = self.live.as_mut() else {
-            return Ok(());
+    /// Takes the link back after `delivery` showed its frame with
+    /// `outcome`. A failure stops the live mode (kept for
+    /// [`Self::live_error`]). Hands the link back when it is not taken (live
+    /// mode stopped meanwhile, or it failed): the caller closes it.
+    pub fn presented(
+        &mut self,
+        delivery: Delivery,
+        outcome: &Result<()>,
+    ) -> Option<Box<dyn ScreenLink>> {
+        let Delivery {
+            key, link, turn, ..
+        } = delivery;
+        let Some(live) = self
+            .live
+            .as_mut()
+            .filter(|l| l.key == key && matches!(l.slot, Slot::Presenting))
+        else {
+            return Some(link);
         };
-        let Some(link) = live.link.as_mut() else {
-            return Ok(());
-        };
-        let expected = link.identity().model.panel.in_orientation(orientation);
-        if frame.size() != expected {
-            return Err(BezelError::Transport(format!(
-                "this theme is {}x{} but the screen is {}x{} in this orientation",
-                frame.size().width,
-                frame.size().height,
-                expected.width,
-                expected.height
-            )));
+        if let Err(e) = outcome {
+            self.stop_with(e);
+            return Some(link);
         }
-        if live.orientation != Some(orientation) {
-            link.set_orientation(orientation)?;
-            live.orientation = Some(orientation);
+        live.slot = Slot::Here(link);
+        if turn.is_some() {
+            live.orientation = turn;
         }
-        link.present(frame)
+        None
+    }
+
+    /// Stops the live mode after `error`.
+    fn stop_with(&mut self, error: &BezelError) {
+        self.runtime.forget_screen();
+        self.live = None;
+        self.live_error = Some(error.to_string());
     }
 
     /// Time between two refreshes: the theme's refresh, or a picture of a
@@ -497,9 +594,9 @@ impl Studio {
     }
 
     /// One refresh: a sample when one is due (every refresh, or every
-    /// theme refresh while a video decoded here sets the pace), then a frame
-    /// on the live screen.
-    pub fn tick(&mut self, time: LocalTime) -> Result<()> {
+    /// theme refresh while a video decoded here sets the pace), then the
+    /// frame for the live screen ([`Self::frame_for_screen`]).
+    pub fn tick(&mut self, time: LocalTime) -> Result<Option<Delivery>> {
         let (refresh, period) = (self.refresh().as_millis(), self.period().as_millis());
         let every = ((refresh + period / 2) / period.max(1)).max(1);
         let every = u32::try_from(every).unwrap_or(u32::MAX);
@@ -509,8 +606,22 @@ impl Studio {
             tracing::warn!("sensor sample failed: {e}");
         }
         self.unsampled = (self.unsampled + 1) % every;
-        self.present(time)
+        self.frame_for_screen(time)
     }
+}
+
+/// `frame` when it has the size the screen expects.
+fn fits(frame: Frame, expected: Size) -> Result<Frame> {
+    if frame.size() == expected {
+        return Ok(frame);
+    }
+    Err(BezelError::Transport(format!(
+        "this theme is {}x{} but the screen is {}x{} in this orientation",
+        frame.size().width,
+        frame.size().height,
+        expected.width,
+        expected.height
+    )))
 }
 
 /// Starts the theme's video `asset` on `link` offering to decode it here
@@ -543,6 +654,8 @@ fn decode_here(
 
 /// Who holds a live screen while a storage job borrows its link.
 pub const STORAGE_JOB: &str = "a storage job of Bezel";
+/// Who holds a live screen while it shows a frame.
+pub const LIVE_FRAME: &str = "Bezel's live frame";
 
 /// `"My Photo.PNG"` → (`"my-photo"`, `".png"`): safe, lowercase asset names.
 fn split_name(file_name: &str) -> (String, String) {
@@ -622,6 +735,32 @@ mod tests {
         }
     }
 
+    /// Shows what `delivered` carries, as the backend does outside the
+    /// session.
+    fn show(s: &mut Studio, delivered: Result<Option<Delivery>>) -> Result<()> {
+        let Some(mut delivery) = delivered? else {
+            return Ok(());
+        };
+        let outcome = delivery.present();
+        drop(s.presented(delivery, &outcome));
+        outcome
+    }
+
+    fn present(s: &mut Studio) -> Result<()> {
+        let delivered = s.frame_for_screen(TIME);
+        show(s, delivered)
+    }
+
+    fn tick(s: &mut Studio) -> Result<()> {
+        let delivered = s.tick(TIME);
+        show(s, delivered)
+    }
+
+    fn go_live(s: &mut Studio, link: Box<dyn ScreenLink>) -> Result<()> {
+        s.go_live("k".into(), link);
+        present(s)
+    }
+
     fn theme_88() -> Theme {
         Theme::blank("T", Size::new(480, 1920), Orientation::ReversePortrait)
     }
@@ -652,9 +791,9 @@ mod tests {
         let connector = FakeConnector::default();
         let link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
         let mut s = studio();
-        s.go_live("k".into(), link, TIME).unwrap();
+        go_live(&mut s, link).unwrap();
         assert_eq!(s.live_key(), Some("k"));
-        s.tick(TIME).unwrap();
+        tick(&mut s).unwrap();
         let log = connector.log();
         assert_eq!(log.frames.len(), 2);
         assert_eq!(log.orientations, vec![Orientation::ReversePortrait]);
@@ -668,12 +807,12 @@ mod tests {
             Size::new(320, 480),
             Orientation::Portrait,
         ));
-        let error = s.present(TIME).unwrap_err().to_string();
+        let error = present(&mut s).unwrap_err().to_string();
         assert!(error.contains("320x480"), "{error}");
         assert_eq!(s.live_key(), None);
         assert!(s.live_error().unwrap().contains("480x1920"));
         assert!(s.stop_live().is_none());
-        s.present(TIME).unwrap();
+        present(&mut s).unwrap();
     }
 
     #[test]
@@ -681,10 +820,10 @@ mod tests {
         let connector = FakeConnector::default();
         let link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
         let mut s = studio();
-        s.go_live("k".into(), link, TIME).unwrap();
+        go_live(&mut s, link).unwrap();
         s.stop_live().unwrap().release().unwrap();
         assert_eq!(connector.log().releases, 1);
-        s.tick(TIME).unwrap();
+        tick(&mut s).unwrap();
         assert_eq!(connector.log().frames.len(), 1);
     }
 
@@ -860,14 +999,14 @@ mod tests {
             Language::English,
             theme.clone(),
         );
-        s.go_live("k".into(), link, TIME).unwrap();
-        s.tick(TIME).unwrap();
+        go_live(&mut s, link).unwrap();
+        tick(&mut s).unwrap();
         s.render(TIME).unwrap();
         // An edit swaps the theme in place: the history goes on.
         let mut edited = theme;
         edited.name = "Edited".into();
         s.set_theme(edited);
-        s.tick(TIME).unwrap();
+        tick(&mut s).unwrap();
         assert_eq!(
             *probe.0.lock().unwrap(),
             [
@@ -930,10 +1069,10 @@ mod tests {
         {
             // The converter is busy with a storage job: the poster meanwhile.
             let _busy = shared.lock().unwrap();
-            s.go_live("k".into(), link, TIME).unwrap();
+            go_live(&mut s, link).unwrap();
             assert_eq!(s.live_video(), Some(&VideoState::NotStarted));
         }
-        s.tick(TIME).unwrap();
+        tick(&mut s).unwrap();
         assert_eq!(s.live_video(), Some(&VideoState::Host));
         let copy = dir.join("Clip.mp4");
         assert_eq!(std::fs::read(&copy).unwrap(), [1, 2, 3]);
@@ -950,7 +1089,7 @@ mod tests {
         let mut other = s.theme().clone();
         other.background = Background::Color(Rgba::BLACK);
         s.set_theme(other);
-        s.tick(TIME).unwrap();
+        tick(&mut s).unwrap();
         assert_eq!(s.live_video(), Some(&VideoState::NoVideo));
         assert!(!copy.exists(), "no video, no copy");
         assert_eq!(s.period(), Duration::from_secs(1));
@@ -962,7 +1101,7 @@ mod tests {
     fn without_a_converter_or_decoding_the_poster_shows() {
         let (mut s, _, dir) = decoding("no-ffmpeg", FakeMedia::missing());
         let (_, link) = weact();
-        s.go_live("k".into(), link, TIME).unwrap();
+        go_live(&mut s, link).unwrap();
         assert!(matches!(
             s.live_video(),
             Some(VideoState::NoConverter { .. })
@@ -971,7 +1110,7 @@ mod tests {
         let (connector, link) = weact();
         s.stop_live();
         s.host = None;
-        s.go_live("k".into(), link, TIME).unwrap();
+        go_live(&mut s, link).unwrap();
         assert_eq!(s.live_video(), Some(&VideoState::NoPlayback));
         assert_eq!(connector.log().frames.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
@@ -997,17 +1136,116 @@ mod tests {
         let samples = Arc::new(Mutex::new(0));
         s.sensors = Box::new(Counted(FakeSensors::demo(), Arc::clone(&samples)));
         let (connector, link) = weact();
-        s.go_live("k".into(), link, TIME).unwrap();
+        go_live(&mut s, link).unwrap();
         for _ in 0..20 {
-            s.tick(TIME).unwrap();
+            tick(&mut s).unwrap();
         }
         assert_eq!(connector.log().frames.len(), 21);
         assert_eq!(*samples.lock().unwrap(), 2, "one per second of the theme");
         s.stop_live();
         for _ in 0..3 {
-            s.tick(TIME).unwrap();
+            tick(&mut s).unwrap();
         }
         assert_eq!(*samples.lock().unwrap(), 5, "every refresh again");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A link whose frames never reach the screen.
+    struct Unplugged(Box<dyn ScreenLink>);
+
+    impl ScreenLink for Unplugged {
+        fn identity(&self) -> &bezel_core::domain::screen::ScreenIdentity {
+            self.0.identity()
+        }
+        fn set_brightness(&mut self, brightness: Brightness) -> Result<()> {
+            self.0.set_brightness(brightness)
+        }
+        fn set_orientation(&mut self, orientation: Orientation) -> Result<()> {
+            self.0.set_orientation(orientation)
+        }
+        fn present(&mut self, _: &Frame) -> Result<()> {
+            Err(BezelError::Transport("the cable is out".into()))
+        }
+        fn screen_off(&mut self) -> Result<()> {
+            self.0.screen_off()
+        }
+        fn release(&mut self) -> Result<()> {
+            self.0.release()
+        }
+    }
+
+    #[test]
+    fn the_link_leaves_the_session_while_the_screen_shows_a_frame() {
+        let connector = FakeConnector::default();
+        let link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
+        let mut s = studio();
+        s.go_live("k".into(), link);
+        let mut delivery = s.frame_for_screen(TIME).unwrap().unwrap();
+        assert!(s.presenting());
+        assert!(
+            s.frame_for_screen(TIME).unwrap().is_none(),
+            "one frame at a time"
+        );
+        let busy = s.live_brightness("k", Brightness::MAX).unwrap_err();
+        assert!(busy.to_string().contains(LIVE_FRAME), "{busy}");
+        assert!(s.lend_live_link("k").is_err());
+        // Previews render meanwhile.
+        s.render(TIME).unwrap();
+        delivery.present().unwrap();
+        assert!(s.presented(delivery, &Ok(())).is_none(), "taken back");
+        assert!(!s.presenting());
+        assert!(s.live_brightness("k", Brightness::MAX).unwrap());
+        let log = connector.log();
+        assert_eq!(log.orientations, vec![Orientation::ReversePortrait]);
+        tick(&mut s).unwrap();
+        assert_eq!(connector.log().orientations.len(), 1, "turned once");
+
+        // Live mode stopped while the frame was out: the link comes back to
+        // be closed.
+        let delivery = s.frame_for_screen(TIME).unwrap().unwrap();
+        assert!(s.stop_live().is_none());
+        assert!(s.presented(delivery, &Ok(())).is_some());
+        assert_eq!(s.live_key(), None);
+    }
+
+    #[test]
+    fn a_frame_the_screen_refuses_stops_the_live_mode() {
+        let connector = FakeConnector::default();
+        let link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
+        let mut s = studio();
+        let error = go_live(&mut s, Box::new(Unplugged(link))).unwrap_err();
+        assert!(error.to_string().contains("cable"), "{error}");
+        assert_eq!(s.live_key(), None);
+        assert!(s.live_error().unwrap().contains("cable"));
+        assert!(s.frame_for_screen(TIME).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_lent_link_comes_back_and_the_video_starts_again() {
+        let stored = RemotePath::parse("internal/video/clip.mp4").unwrap();
+        let connector =
+            FakeConnector::with_storage(FakeStorage::default().with_file(stored, vec![1; 64]));
+        let link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
+        let mut s = studio();
+        s.set_theme(with_video(theme_88(), "assets/clip.mp4"));
+        go_live(&mut s, link).unwrap();
+        assert!(s.lend_live_link("other").unwrap().is_none(), "not live");
+        let lent = s.lend_live_link("k").unwrap().unwrap();
+        assert!(s.lend_live_link("k").is_err(), "lent once");
+        assert!(s.frame_for_screen(TIME).unwrap().is_none(), "frames pause");
+        assert!(s.return_live_link("other", lent, Resume::Video).is_some());
+        let lent = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
+        assert!(s.return_live_link("k", lent, Resume::Video).is_none());
+        let plays = |c: &FakeConnector| {
+            c.log()
+                .storage
+                .calls
+                .iter()
+                .filter(|c| matches!(c, bezel_devices::fake::StorageCall::PlayVideo(..)))
+                .count()
+        };
+        assert_eq!(plays(&connector), 1);
+        present(&mut s).unwrap();
+        assert_eq!(plays(&connector), 2, "started again after the job");
     }
 }

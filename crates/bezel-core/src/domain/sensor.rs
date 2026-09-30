@@ -84,6 +84,8 @@ pub enum Quantity {
     Watts,
     /// Volts.
     Volts,
+    /// Amperes.
+    Amperes,
     /// Revolutions per minute.
     Rpm,
     /// Bytes.
@@ -264,6 +266,7 @@ fn format_value(v: f64, quantity: Quantity, f: DisplayFormat) -> String {
         Quantity::Megahertz => (v, " MHz", 0),
         Quantity::Watts => (v, " W", 0),
         Quantity::Volts => (v, " V", 2),
+        Quantity::Amperes => (v, " A", 2),
         Quantity::Rpm => (v, " RPM", 0),
         Quantity::Bytes => return scaled_bytes(v, "", f),
         Quantity::BytesPerSecond => return scaled_bytes(v, "/s", f),
@@ -381,6 +384,7 @@ mod tests {
         assert_eq!(format_reading(&v(555.0), Quantity::Megahertz, f), "555 MHz");
         assert_eq!(format_reading(&v(31.58), Quantity::Watts, f), "32 W");
         assert_eq!(format_reading(&v(1.2345), Quantity::Volts, f), "1.23 V");
+        assert_eq!(format_reading(&v(12.5), Quantity::Amperes, f), "12.50 A");
         assert_eq!(format_reading(&v(1200.0), Quantity::Rpm, f), "1200 RPM");
         assert_eq!(
             format_reading(&v(2730.0 * 1048576.0), Quantity::Bytes, f),

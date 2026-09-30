@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/bezel-core",
     "crates/bezel-devices",
+    "crates/bezel-sensors",
     "crates/bezel-cli",
     "crates/bezel-themes",
     "apps/bezel-studio/src-tauri",
@@ -26,6 +27,7 @@ serde_json = "1"
 tracing = "0.1"
 bezel-core = { path = "crates/bezel-core" }
 bezel-devices = { path = "crates/bezel-devices" }
+bezel-sensors = { path = "crates/bezel-sensors" }
 bezel-themes = { path = "crates/bezel-themes" }
 
 [workspace.lints.rust]

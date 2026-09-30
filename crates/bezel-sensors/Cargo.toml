@@ -1,0 +1,20 @@
+[package]
+name = "bezel-sensors"
+description = "Driven adapter of Bezel that measures the machine: CPU, GPU, memory, disks, network and hwmon sensors."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Safe statvfs (already in the tree through nusb): df-exact used/free per mount.
+rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }
+
+[lints]
+workspace = true

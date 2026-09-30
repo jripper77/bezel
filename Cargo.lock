@@ -344,6 +344,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bezel-sensors"
+version = "0.0.0"
+dependencies = [
+ "bezel-core",
+ "rustix",
+ "tracing",
+]
+
+[[package]]
 name = "bezel-studio"
 version = "0.0.0"
 dependencies = [

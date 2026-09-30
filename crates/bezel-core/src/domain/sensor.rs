@@ -59,9 +59,10 @@ pub mod keys {
     pub const MEMORY_TOTAL: &str = "memory.total";
     /// RAM in use, percent.
     pub const MEMORY_PERCENT: &str = "memory.percent";
-    /// Download rate of all non-loopback interfaces, bytes per second.
+    /// Download rate of the physical interfaces (no loopback, bridges, VPNs or
+    /// containers, whose traffic also crosses a physical NIC), bytes per second.
     pub const NET_DOWN: &str = "net.down";
-    /// Upload rate of all non-loopback interfaces, bytes per second.
+    /// Upload rate of the physical interfaces, bytes per second.
     pub const NET_UP: &str = "net.up";
     /// Disk read rate of all disks, bytes per second.
     pub const DISK_READ: &str = "disk.read";

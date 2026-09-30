@@ -4,15 +4,39 @@
 screens sold as Turing Smart Screen, TURZX, XuanFang, Kipye, WeAct and their OEM
 rebrands — on Linux and Windows, from one app.
 
-> Status: early development. Screen discovery works; drawing, sensors, the theme
-> editor and SD-card/video support land phase by phase (see the roadmap below).
+> Status: early development. Every protocol family is implemented and the Turing
+> 8.8" is validated on real hardware; sensors, the renderer and the theme editor
+> are landing, then SD-card/video support.
 
 ## Quick start
 
 ```bash
-bezel devices          # list connected screens (read-only)
-bezel devices --json   # the same, as JSON
+bezel devices                             # list connected screens (read-only)
+bezel test-pattern --orientation horizontal --seconds 5
+bezel show wallpaper.png                  # horizontal for a wide picture, vertical otherwise
+bezel show poster.jpg --orientation vertical --fit contain
+bezel brightness 40
+bezel off                                 # the next command wakes the screen
+bezel release                             # back to the screen's own clock/media
 ```
+
+Use the screen standing up or lying down: every command takes
+`--orientation vertical|horizontal` (or `vertical-flipped`, `horizontal-flipped`
+when the cable comes out the other side).
+
+## Supported screens
+
+| Family | Examples | Link |
+|---|---|---|
+| Turing rev A | Turing Smart Screen 3.5", UsbPCMonitor 3.5"/5"/7" | serial |
+| XuanFang rev B | XuanFang 3.5" (and Flagship) | serial |
+| Turing rev C | Turing 2.1"–8.8" (the 8.8" is hardware-validated) | serial + wake MCU |
+| Kipye rev D | Kipye Qiye 3.5" | serial |
+| WeAct | WeAct Studio Display FS 3.5", 0.96" | serial |
+| Turing USB (0x1CBE) | TURZX 1.6"–12.3" USB generation | USB bulk |
+| WCH (0x43A8) | WCH-based 2.4"–4.3" panels | USB bulk |
+
+`bezel devices` lists what is connected and which models match.
 
 ## Build from source
 

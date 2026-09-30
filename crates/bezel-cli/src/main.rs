@@ -31,7 +31,9 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     if cli.verbose {
         tracing_subscriber::fmt()
-            .with_env_filter("bezel=debug,bezel_devices=debug,bezel_core=debug")
+            .with_env_filter(
+                "bezel=debug,bezel_devices=debug,bezel_core=debug,bezel_sensors=debug,bezel_render=debug,bezel_themes=debug",
+            )
             .with_writer(std::io::stderr)
             .init();
     }

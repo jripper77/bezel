@@ -13,6 +13,9 @@ use sysinfo::{
 
 use crate::provider::{Provider, WARMING_UP, describe, percent, put, slug};
 
+/// Why a CPU clock is missing (sysinfo returns 0 when the query failed).
+const NO_CLOCK: &str = "Windows did not report the CPU clock";
+
 const TOO_SOON: &str = "sampled again too soon for Windows to measure CPU usage";
 
 /// CPU usage and clocks.
@@ -93,16 +96,26 @@ impl Provider for Cpu {
         put(out, keys::CPU_USAGE, usage(self.sys.global_cpu_usage()));
         let cpus = self.sys.cpus();
         let mut total = 0.0;
+        let mut clocked = 0usize;
         for (n, cpu) in cpus.iter().enumerate().take(self.cores) {
             put(out, &format!("cpu.{n}.usage"), usage(cpu.cpu_usage()));
-            let mhz = cpu.frequency() as f64;
-            total += mhz;
-            put(out, &format!("cpu.{n}.frequency"), Reading::Value(mhz));
+            // sysinfo reports 0 when the Windows query failed: never a clock.
+            let reading = match cpu.frequency() {
+                0 => Reading::Unavailable(NO_CLOCK.into()),
+                mhz => {
+                    total += mhz as f64;
+                    clocked += 1;
+                    Reading::Value(mhz as f64)
+                }
+            };
+            put(out, &format!("cpu.{n}.frequency"), reading);
         }
         let average = if cpus.is_empty() {
             Reading::Unavailable("Windows reported no CPU".into())
+        } else if clocked == 0 {
+            Reading::Unavailable(NO_CLOCK.into())
         } else {
-            Reading::Value(total / cpus.len() as f64)
+            Reading::Value(total / clocked as f64)
         };
         put(out, keys::CPU_FREQUENCY, average);
         put(

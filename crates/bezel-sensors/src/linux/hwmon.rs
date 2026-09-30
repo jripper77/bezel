@@ -290,7 +290,25 @@ fn cpu_temperature(chips: &[Chip]) -> Option<(usize, usize)> {
 }
 
 /// Every sensor of `chip`, in order.
+/// Why a runtime-suspended device is not read.
+const SUSPENDED: &str = "the device is powered down (runtime suspend)";
+
+/// True when the chip's device is runtime-suspended. Reading its sensors
+/// would wake it (a hybrid laptop's discrete GPU, every second); the status
+/// file itself is safe to read.
+fn suspended(chip: &Chip) -> bool {
+    std::fs::read_to_string(chip.device.join("power/runtime_status"))
+        .is_ok_and(|s| s.trim() == "suspended")
+}
+
 fn read_chip(chip: &Chip) -> Vec<Reading> {
+    if suspended(chip) {
+        return chip
+            .sensors
+            .iter()
+            .map(|_| Reading::Unavailable(SUSPENDED.into()))
+            .collect();
+    }
     chip.sensors
         .iter()
         .map(|s| match read_int(&s.input) {
@@ -471,6 +489,37 @@ mod tests {
             .find(|i| i.key.as_str() == keys::CPU_TEMPERATURE)
             .map(|i| i.source)
             .unwrap()
+    }
+
+    #[test]
+    fn a_suspended_device_is_not_read() {
+        let t = FakeTree::new("hwmon-suspended");
+        chip(
+            &t,
+            0,
+            "amdgpu",
+            "pci0000:00/0000:03:00.0",
+            &[("temp1_input", "45000")],
+        );
+        let (_, awake) = sample(&t);
+        let values: Vec<Reading> = awake
+            .iter()
+            .filter(|(k, _)| k.as_str().starts_with("hwmon.amdgpu"))
+            .map(|(_, r)| r.clone())
+            .collect();
+        assert_eq!(values, vec![Reading::Value(45.0)]);
+
+        t.file(
+            "sys/devices/pci0000:00/0000:03:00.0/power/runtime_status",
+            "suspended\n",
+        );
+        let (_, asleep) = sample(&t);
+        let values: Vec<Reading> = asleep
+            .iter()
+            .filter(|(k, _)| k.as_str().starts_with("hwmon.amdgpu"))
+            .map(|(_, r)| r.clone())
+            .collect();
+        assert_eq!(values, vec![Reading::Unavailable(SUSPENDED.into())]);
     }
 
     #[test]

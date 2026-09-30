@@ -11,6 +11,9 @@ authors.workspace = true
 [dependencies]
 bezel-core = { workspace = true }
 tracing = { workspace = true }
+# NVML is loaded at run time (libnvidia-ml.so.1 / nvml.dll): without the
+# NVIDIA driver there are simply no NVIDIA sensors (D-2026-09-30-sensors-2).
+nvml-wrapper = "0.13.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Safe statvfs (already in the tree through nusb): df-exact used/free per mount.

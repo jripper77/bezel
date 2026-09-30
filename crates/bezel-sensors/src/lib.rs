@@ -4,7 +4,9 @@
 //! [`SystemSensors`] composes internal providers. On Linux they read `/proc`
 //! and `/sys` directly: CPU times, cpufreq and load, every hwmon chip (with
 //! the CPU temperature picked by priority), RAPL, memory, network, disks and
-//! mounts. [`FakeSensors`] replays scripted snapshots for tests and demos.
+//! mounts, and AMD GPUs through amdgpu's sysfs files. NVIDIA GPUs come from
+//! NVML, loaded at run time. [`FakeSensors`] replays scripted snapshots for
+//! tests and demos.
 //!
 //! What every provider guarantees (D-2026-09-30-sensors-1 and -4):
 //! - a value that cannot be measured is `Reading::Unavailable(reason)`,
@@ -14,9 +16,13 @@
 //! - a sample only reads local kernel files and never waits on the network.
 #![forbid(unsafe_code)]
 
+#[cfg(target_os = "linux")]
+mod amdgpu;
 mod fake;
+mod gpu;
 #[cfg(target_os = "linux")]
 mod linux;
+mod nvidia;
 mod provider;
 mod system;
 #[cfg(test)]

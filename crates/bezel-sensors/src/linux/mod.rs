@@ -21,19 +21,25 @@ pub(crate) struct Roots {
     pub(crate) sys: PathBuf,
     /// `/proc`.
     pub(crate) proc: PathBuf,
+    /// libdrm's table of AMD GPU marketing names (`amdgpu.ids`).
+    pub(crate) amdgpu_ids: PathBuf,
 }
 
 impl Roots {
     /// The running system's trees.
     pub(crate) fn host() -> Self {
-        Self::new("/sys", "/proc")
+        Self {
+            amdgpu_ids: PathBuf::from("/usr/share/libdrm/amdgpu.ids"),
+            ..Self::new("/sys", "/proc")
+        }
     }
 
-    /// Trees rooted elsewhere (tests).
+    /// Trees rooted elsewhere (tests), without a GPU name table.
     pub(crate) fn new(sys: impl Into<PathBuf>, proc: impl Into<PathBuf>) -> Self {
         Self {
             sys: sys.into(),
             proc: proc.into(),
+            amdgpu_ids: PathBuf::new(),
         }
     }
 }

@@ -6,6 +6,7 @@ use bezel_core::Result;
 use bezel_core::domain::sensor::{SensorInfo, Snapshot};
 use bezel_core::ports::SensorSource;
 
+use crate::gpu::{Alias, FoundGpu, number};
 use crate::provider::Provider;
 
 /// Measures this machine by composing the platform's providers. Discovery
@@ -13,6 +14,7 @@ use crate::provider::Provider;
 /// every `sample` returns a reading (possibly unavailable) for each entry.
 pub struct SystemSensors {
     providers: Vec<Box<dyn Provider>>,
+    aliases: Vec<Alias>,
     catalog: Vec<SensorInfo>,
 }
 
@@ -20,28 +22,41 @@ impl SystemSensors {
     /// Discovers every sensor this machine offers. Never fails: whatever
     /// cannot be read shows up as unavailable, with the reason.
     pub fn new() -> Self {
-        Self::from_providers(platform_providers())
+        let (providers, gpus) = platform();
+        Self::assemble(providers, gpus)
     }
 
     /// Linux sensors read from other `/sys` and `/proc` trees (tests, or a
-    /// container that mounts the host's trees elsewhere). GPUs through NVML
-    /// are not included.
+    /// container that mounts the host's trees elsewhere). NVIDIA GPUs, which
+    /// come from NVML rather than sysfs, are not included.
     #[cfg(target_os = "linux")]
     pub fn with_roots(
         sys: impl Into<std::path::PathBuf>,
         proc: impl Into<std::path::PathBuf>,
     ) -> Self {
-        Self::from_providers(crate::linux::providers(&crate::linux::Roots::new(
-            sys, proc,
-        )))
+        let roots = crate::linux::Roots::new(sys, proc);
+        Self::assemble(
+            crate::linux::providers(&roots),
+            crate::amdgpu::discover(&roots),
+        )
     }
 
-    fn from_providers(providers: Vec<Box<dyn Provider>>) -> Self {
-        let mut catalog: Vec<SensorInfo> = providers.iter().flat_map(|p| p.catalog()).collect();
+    fn assemble(mut providers: Vec<Box<dyn Provider>>, gpus: Vec<FoundGpu>) -> Self {
+        let gpus = number(gpus);
+        providers.extend(gpus.providers);
+        let mut catalog: Vec<SensorInfo> = providers
+            .iter()
+            .flat_map(|p| p.catalog())
+            .chain(gpus.catalog)
+            .collect();
         // Headline sensors first in each category, per-device ones after
         // (the order is presentation only; keys are what themes bind to).
         catalog.sort_by_key(|info| (info.category, rank(info.key.as_str())));
-        Self { providers, catalog }
+        Self {
+            providers,
+            aliases: gpus.aliases,
+            catalog,
+        }
     }
 }
 
@@ -62,13 +77,16 @@ fn rank(key: &str) -> u8 {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_providers() -> Vec<Box<dyn Provider>> {
-    crate::linux::providers(&crate::linux::Roots::host())
+fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+    let roots = crate::linux::Roots::host();
+    let mut gpus = crate::nvidia::discover();
+    gpus.extend(crate::amdgpu::discover(&roots));
+    (crate::linux::providers(&roots), gpus)
 }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_providers() -> Vec<Box<dyn Provider>> {
-    Vec::new()
+fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+    (Vec::new(), crate::nvidia::discover())
 }
 
 impl SensorSource for SystemSensors {
@@ -111,6 +129,10 @@ impl SensorSource for SystemSensors {
                 out.insert(key.clone(), reading.clone());
             }
         }
+        for alias in &self.aliases {
+            let reading = out.get(&alias.target);
+            out.insert(alias.key.clone(), reading);
+        }
         Ok(out)
     }
 }
@@ -140,7 +162,11 @@ mod tests {
             .file("proc/uptime", "10.5 20.0\n")
             .file("sys/class/hwmon/hwmon0/name", "k10temp\n")
             .file("sys/class/hwmon/hwmon0/temp1_input", "50000\n")
-            .file("sys/class/hwmon/hwmon0/temp1_label", "Tctl\n");
+            .file("sys/class/hwmon/hwmon0/temp1_label", "Tctl\n")
+            .file("sys/devices/card/gpu_busy_percent", "42\n")
+            .dir("sys/drivers/amdgpu")
+            .link("sys/devices/card/driver", "sys/drivers/amdgpu")
+            .link("sys/class/drm/card0/device", "sys/devices/card");
         let mut sensors = SystemSensors::with_roots(t.path("sys"), t.path("proc"));
         let catalog = sensors.catalog().unwrap();
         assert_eq!(catalog[0].key.as_str(), "cpu.usage");
@@ -157,6 +183,12 @@ mod tests {
             );
         }
         assert_eq!(snapshot.len(), catalog.len());
+        let gpu = |k: &str| snapshot.get(&bezel_core::domain::sensor::SensorKey::new(k).unwrap());
+        assert_eq!(
+            gpu("gpu.0.usage"),
+            bezel_core::domain::sensor::Reading::Value(42.0)
+        );
+        assert_eq!(gpu("gpu.usage"), gpu("gpu.0.usage"));
     }
 
     /// The real machine, read-only: whatever it has, every catalog entry is

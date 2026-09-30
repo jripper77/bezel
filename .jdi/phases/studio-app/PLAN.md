@@ -36,7 +36,7 @@ App de janela única com editor drag-and-drop WYSIWYG, sensores ao vivo, bandeja
 - **Files modified:** `apps/bezel-studio/src-tauri/src/**`, `apps/bezel-studio/src-tauri/{Cargo.toml,build.rs,capabilities/default.json,tauri.conf.json}`
 - **Acceptance:** commands list/connect screens, brightness/orientation, sensor catalog + samples, theme get/set/save/load/import, bundled themes, `render_preview` (ipc::Response RGBA), live runtime thread with theme swap; tray (show/hide, live toggle, quit) and autostart
 - **Dependencies:** render-engine merged (bezel-render, bezel-themes, bezel-sensors)
-- **Status:** in_progress (49d3f16: preview, live, library, media, tray, autostart; 750c72c: importar `.turtheme`/`theme.yaml`/pasta Python pela UI, com a lista de avisos; falta: temas inclusos — vêm da render-engine T-4.5, em outro worktree)
+- **Status:** completed (49d3f16, 67f4e85, 6fcbefd: preview, live, biblioteca, mídia, bandeja, autostart, importação pela UI, temas inclusos e fontes)
 
 #### T-5.6: Vertical e horizontal como escolha de primeira classe
 - **Specialist:** jdi-doer-bezel
@@ -49,7 +49,7 @@ App de janela única com editor drag-and-drop WYSIWYG, sensores ao vivo, bandeja
   - a galeria de temas mostra a orientação de cada tema.
 - **Dependencies:** T-5.4
 - **Test:** `npm run test:unit`; Playwright "switch between vertical and horizontal"; `cargo test -p bezel-studio`
-- **Status:** completed (27d1ad9)
+- **Status:** completed (19b0f71, 853a120)
 
 ### Wave 3
 

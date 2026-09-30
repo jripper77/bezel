@@ -99,7 +99,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
   - Vídeo em loop tocado pela tela com o tema ao vivo por cima (alfa correto) e slot de boot confirmado após desligar/ligar; SUMMARY separa o verificado por protocolo do que depende de confirmação visual humana.
 - **Dependencies:** T-6.5, T-6.6, T-6.7
 - **Test:** DoD manual (evidência em SUMMARY.md § Hardware validation)
-- **Status:** in_progress (CLI validada na 8.8"; itens humanos pendentes)
+- **Status:** in_progress (CLI validada; itens humanos pendentes)
 
 ## Execution
 - Total tasks: 8
@@ -129,4 +129,4 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
 
 ## Notes
 - Só T-6.3 mexe no `Cargo.toml` raiz e no `Cargo.lock`; outra task que precisar de dependência nova depende de T-6.3.
-- Se T-6.7 passar de um commit, dividir em backend e UI; a fase então vira duas (storage e video), como o CONTEXT prevê.
+- T-6.7 saiu em dois commits (backend e UI), como previsto.

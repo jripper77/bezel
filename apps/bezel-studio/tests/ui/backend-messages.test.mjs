@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { LOCALES, placeholders, translator } from '../../src/i18n/index.js';
-import { errorText, warningText } from '../../src/messages.js';
+import { errorText, sensorLabel, warningText } from '../../src/messages.js';
 import { refusalText } from '../../src/ui/storage.js';
 
 const codes = JSON.parse(readFileSync(new URL('fixtures/backend-codes.json', import.meta.url), 'utf8'));
@@ -89,4 +89,20 @@ test('every refusal and every way a file differs has its own sentence', () => {
     }
     for (const code of codes.mismatches) assert.ok(t.has(`storage.mismatch.${code}`), `${locale}: ${code}`);
   }
+});
+
+test('well-known sensors are named in the chosen language, others as the machine names them', () => {
+  assert.equal(sensorLabel(pt, { key: 'cpu.usage', label: 'CPU usage' }), 'Uso da CPU');
+  assert.equal(sensorLabel(en, { key: 'cpu.usage', label: 'CPU usage' }), 'CPU usage');
+  assert.equal(sensorLabel(pt, { key: 'hwmon.nvme0.composite', label: 'NVMe composite' }), 'NVMe composite');
+});
+
+test('every sensor named by the UI is a key of the core catalog', () => {
+  const core = readFileSync(new URL('../../../../crates/bezel-core/src/domain/sensor.rs', import.meta.url), 'utf8');
+  const block = core.slice(core.indexOf('pub mod keys'), core.indexOf('pub const IMPORTED'));
+  const keys = new Set([...block.matchAll(/pub const [A-Z0-9_]+: &str = "([a-z0-9.]+)";/g)].map((m) => m[1]));
+  assert.ok(keys.size > 40);
+  const named = Object.keys(LOCALES.en).filter((k) => k.startsWith('sensor.')).map((k) => k.slice('sensor.'.length));
+  assert.deepEqual(named.filter((k) => !keys.has(k)), []);
+  assert.deepEqual([...keys].filter((k) => !named.includes(k)), [], 'every well-known key has a name');
 });

@@ -14,7 +14,7 @@ import { createPreferences } from './ui/preferences.js';
 import { showAccessHelp } from './ui/udev.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
-import { errorText } from './messages.js';
+import { errorText, sensorLabel } from './messages.js';
 
 const bridge = createBridge(window);
 const $ = (id) => document.getElementById(id);
@@ -70,7 +70,9 @@ function fail(e) {
 const session = await bridge.session().catch(() => null);
 // Without a session: a blank theme for the 8.8", horizontal like the backend's
 // default for bar-shaped screens.
-const store = createStore(session?.theme ?? { schema: 1, name: t('themes.untitled'), canvas: { width: 1920, height: 480 }, orientation: 'landscape', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] });
+// New elements and copies are named in the UI's language.
+const names = { widget: (widget) => t(`widget.${widget}`), copy: (name) => t('layers.copyOf', { name }) };
+const store = createStore(session?.theme ?? { schema: 1, name: t('themes.untitled'), canvas: { width: 1920, height: 480 }, orientation: 'landscape', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] }, { names });
 state.location = session?.location ?? null;
 // The fastest refresh a theme may ask for comes from the backend (the
 // core's); without a backend nothing refreshes faster than once a second.
@@ -124,7 +126,7 @@ const inspector = createInspector({
   root: $('inspector'),
   store,
   t,
-  sensors: { catalog: () => state.catalog, fonts: () => state.fonts },
+  sensors: { catalog: () => labelledCatalog(), fonts: () => state.fonts },
   minRefresh,
 });
 
@@ -206,10 +208,15 @@ function scheduleTick() {
 }
 
 // ---------------------------------------------------------- sensors ----
+/** The catalog with each sensor's name in the UI's language. */
+function labelledCatalog() {
+  return state.catalog.map((s) => ({ ...s, label: sensorLabel(t, s) }));
+}
+
 async function loadCatalog() {
   try {
     state.catalog = await bridge.catalog();
-    library.setCatalog(state.catalog);
+    library.setCatalog(labelledCatalog());
   } catch (e) {
     fail(e);
   }
@@ -499,6 +506,7 @@ function setLocale(next) {
   current = translator(next);
   document.documentElement.lang = next;
   applyTranslations(document, t);
+  library.setCatalog(labelledCatalog());
   library.retranslate();
   storage.retranslate();
   refreshChrome('select');

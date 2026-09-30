@@ -212,3 +212,14 @@ test('setOrientation turning 180° keeps the layout; the same or an unknown one 
   square.dispatch('setOrientation', { orientation: 'landscape' });
   assert.deepEqual(square.getState().theme.canvas, { width: 480, height: 480 });
 });
+
+test('new elements and copies are named in the language the UI asks for', () => {
+  const names = { widget: (w) => `W-${w}`, copy: (name) => `${name} (cópia)` };
+  const s = createStore(DEMO_THEME, { names });
+  s.dispatch('add', { widget: 'bar', x: 100, y: 100 });
+  assert.equal(s.getState().theme.elements.at(-1).name, 'W-bar');
+  s.dispatch('add', { widget: 'value', x: 100, y: 100, sensor: { key: 'cpu.usage', quantity: 'percent', label: 'Uso da CPU' } });
+  assert.equal(s.getState().theme.elements.at(-1).name, 'Uso da CPU', 'a sensor names its element');
+  s.dispatch('duplicate', { ids: [1] });
+  assert.equal(s.getState().theme.elements.at(-1).name, 'Clock (cópia)');
+});

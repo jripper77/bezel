@@ -41,11 +41,11 @@ export function merge(target, patch) {
 
 /** Pure theme commands. Each returns `{theme, selection?}`. */
 export const commands = {
-  add(theme, { widget, x, y, sensor, name }) {
+  add(theme, { widget, x, y, sensor, name, names = ENGLISH }) {
     const made = createWidget(widget, theme.canvas, sensor);
     const id = nextId(theme);
     const frame = roundBox({ x: x - made.width / 2, y: y - made.height / 2, width: made.width, height: made.height });
-    const element = { id, name: uniqueName(theme, name ?? defaultName(widget, sensor)), frame, opacity: 1, visible: true, locked: false, kind: made.kind };
+    const element = { id, name: uniqueName(theme, name ?? sensor?.label ?? names.widget(widget)), frame, opacity: 1, visible: true, locked: false, kind: made.kind };
     return { theme: { ...theme, elements: [...theme.elements, element] }, selection: [id] };
   },
 
@@ -54,12 +54,12 @@ export const commands = {
     return { theme: { ...theme, elements: theme.elements.filter((e) => !set.has(e.id)) }, selection: [] };
   },
 
-  duplicate(theme, { ids, offset = 16 }) {
+  duplicate(theme, { ids, offset = 16, names = ENGLISH }) {
     let next = theme;
     const created = [];
     for (const e of theme.elements.filter((el) => ids.includes(el.id))) {
       const id = nextId(next);
-      const copy = { ...clone(e), id, name: uniqueName(next, `${e.name} copy`), locked: false, frame: { ...e.frame, x: e.frame.x + offset, y: e.frame.y + offset } };
+      const copy = { ...clone(e), id, name: uniqueName(next, names.copy(e.name)), locked: false, frame: { ...e.frame, x: e.frame.x + offset, y: e.frame.y + offset } };
       next = { ...next, elements: [...next.elements, copy] };
       created.push(id);
     }
@@ -155,18 +155,24 @@ export const commands = {
   },
 };
 
-function defaultName(widget, sensor) {
-  if (sensor?.label) return sensor.label;
-  return widget.charAt(0).toUpperCase() + widget.slice(1);
-}
+/**
+ * How new elements are named: after their widget, and a copy after the
+ * original. The UI passes names in its language; these are the defaults.
+ */
+const ENGLISH = Object.freeze({
+  widget: (widget) => widget.charAt(0).toUpperCase() + widget.slice(1),
+  copy: (name) => `${name} copy`,
+});
 
 // ---------------------------------------------------------------- store ----
 
 /**
  * Creates a store around a theme.
  * @param {object} theme theme.json object
+ * @param {{names?: {widget: (w: string) => string, copy: (name: string) => string}}} [options]
+ *   how new elements and copies are named (English by default)
  */
-export function createStore(theme) {
+export function createStore(theme, { names = ENGLISH } = {}) {
   let state = { theme: clone(theme), selection: [] };
   let past = [];
   let future = [];
@@ -203,7 +209,7 @@ export function createStore(theme) {
       const command = commands[name];
       if (!command) throw new Error(`unknown command ${name}`);
       const before = state.theme;
-      const result = command(state.theme, args);
+      const result = command(state.theme, { names, ...args });
       if (result.theme === before && result.selection === undefined) return state;
       if (gesture) {
         if (!gesture.recorded) {

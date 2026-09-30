@@ -63,8 +63,8 @@ test('drag a widget onto the canvas', async ({ page }) => {
   await expectAccessible(page);
 
   await page.getByRole('tab', { name: 'Sensores' }).click();
-  await page.getByRole('searchbox', { name: 'Buscar sensor' }).fill('gpu temp');
-  await dragTo(page, page.getByRole('button', { name: /GPU temperature/ }), page.locator('#canvas-box'), { x: 0.3, y: 0.8 });
+  await page.getByRole('searchbox', { name: 'Buscar sensor' }).fill('temperatura da gpu');
+  await dragTo(page, page.getByRole('button', { name: /Temperatura da GPU/ }), page.locator('#canvas-box'), { x: 0.3, y: 0.8 });
   await expect(page.locator('#inspector').getByRole('combobox', { name: 'Sensor', exact: true })).toHaveValue('gpu.temperature');
   await page.getByRole('tab', { name: 'Camadas' }).click();
   await expect(layers(page)).toHaveCount(5);

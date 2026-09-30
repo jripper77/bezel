@@ -33,3 +33,14 @@ export function errorText(t, e) {
   const message = e?.message ?? (typeof e === 'string' ? e : String(e));
   return t('error.unknown', { message });
 }
+
+/**
+ * The name of a sensor of the catalog: the UI's own for the well-known
+ * keys, else the name the machine gave it (a chip, a disk, a network card).
+ * @param {(k: string, p?: object) => string} t
+ * @param {{key: string, label: string}} sensor
+ */
+export function sensorLabel(t, sensor) {
+  const key = `sensor.${sensor.key}`;
+  return t.has(key) ? t(key) : sensor.label;
+}

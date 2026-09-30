@@ -5,8 +5,8 @@ screens sold as Turing Smart Screen, TURZX, XuanFang, Kipye, WeAct and their OEM
 rebrands — on Linux and Windows, from one app.
 
 > Status: early development. Every protocol family is implemented and the Turing
-> 8.8" is validated on real hardware; sensors, the renderer and the theme editor
-> are landing, then SD-card/video support.
+> 8.8" is validated on real hardware; sensors are measured on Linux and Windows;
+> the renderer and the theme editor are landing, then SD-card/video support.
 
 ## Quick start
 
@@ -18,6 +18,8 @@ bezel show poster.jpg --orientation vertical --fit contain
 bezel brightness 40
 bezel off                                 # the next command wakes the screen
 bezel release                             # back to the screen's own clock/media
+bezel sensors                             # every sensor of this machine
+bezel sensors --watch 1 --json            # live, one JSON document per second
 ```
 
 Use the screen standing up or lying down: `test-pattern` and `show` take

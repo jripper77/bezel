@@ -22,6 +22,10 @@ the Conventional Commits.
   `horizontal` (or `portrait`, `landscape`) and their flipped forms.
 - A screen held by another program is refused with that program's name and
   PID instead of garbling both streams.
+- `bezel sensors`: every sensor of the machine (CPU per core, temperatures of
+  every hwmon chip, NVIDIA and AMD GPUs, memory, disks, network) as a table,
+  JSON or a live `--watch`; a sensor that cannot be read says why instead of
+  showing a guess. Windows reads LibreHardwareMonitor when it runs.
 
 ### Fixed
 - A rev C screen that another app just turned off (turing-smart-screen-python

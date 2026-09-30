@@ -63,6 +63,50 @@ the Conventional Commits.
   video under the theme, shows the poster with the `bezel storage put` command
   when the video is missing, and decodes it on the computer for screens that
   cannot play videos (`--ffmpeg PATH`).
+- A cancelled upload reports the incomplete file it left and the command that
+  deletes it; an upload whose stored size differs from the file says to delete
+  it and send it again.
+- `bezel udev-rules` prints the Linux udev rule generated from the device
+  catalog and the one-line sudo command that installs it, for AppImage,
+  archive and source installs; Bezel never runs it. A refused port points at
+  it, and the studio shows the command, ready to copy.
+- Turing USB panels in the vendor's desktop mode (1a86:ad10–ad13) are listed by
+  `bezel devices` as "desktop mode (not validated on hardware)", and
+  `bezel monitor-mode --yes` switches one back to USB monitor mode; without
+  `--yes` (or the studio's confirmation) nothing is sent.
+- Game FPS (`gpu.fps`), read-only: the RivaTuner Statistics Server shared
+  memory on Windows, the newest MangoHud CSV log on Linux (`--mangohud-dir`).
+  Nothing measuring a game, or a reading older than 3 s, is unavailable with
+  how to turn the source on. Not yet validated with a real game.
+- `net.ping`, the round trip to `--ping-host` (default 8.8.8.8), measured on a
+  thread of its own so a silent host never delays the other sensors; fans,
+  pump, voltages, network totals and available memory from hwmon/sysfs on
+  Linux and LibreHardwareMonitor on Windows; the sensor keys of imported themes
+  map to Bezel's.
+- Bezel Studio in Portuguese and English throughout, following the system
+  language unless one is chosen in Preferences; errors and import warnings are
+  translated; the ping target and the MangoHud log folder are Preferences.
+- Linux packages: the deb and the rpm install the `bezel` command as
+  `/usr/bin/bezel`, the `bezel-run@` systemd user service in
+  `/usr/lib/systemd/user` (running `/usr/bin/bezel`) and the bundled themes
+  where the command finds them, next to the udev rule; installing applies the
+  rule to serial, USB and HID devices at once.
+- User guide in English (`docs/user/`) and Portuguese (`docs/user/pt-BR/`):
+  installing on each system, screen permissions and Windows drivers (WinUSB
+  with Zadig, LibreHardwareMonitor), the unsigned installers and SmartScreen,
+  the first theme, vertical or horizontal use, sensors, game FPS, storage and
+  video, ffmpeg, preparing an SD card, running at login, coming from
+  turing-smart-screen-python, troubleshooting and the supported screens.
+
+### Changed
+- A theme file that cannot be read or does not fit its screen fails with
+  `theme file: …` instead of a transport error; the studio opens a
+  `theme.json` like the command line does.
+- A file a Turing USB screen stores without reporting its size counts as
+  present, with an unknown size, when listing, playing and in video
+  backgrounds.
+- `scripts/install-local.sh` points the `bezel-run@` service it installs at the
+  `bezel` it installed.
 
 ### Fixed
 - A rev C screen that another app just turned off (turing-smart-screen-python

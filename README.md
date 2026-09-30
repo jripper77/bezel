@@ -4,12 +4,22 @@
 screens sold as Turing Smart Screen, TURZX, XuanFang, Kipye, WeAct and their OEM
 rebrands — on Linux and Windows, from one app.
 
-> Status: early development. Every protocol family is implemented and the Turing
-> 8.8" is validated on real hardware; sensors are measured on Linux and Windows;
-> the renderer, headless themes (`bezel run`) and the studio's editor work;
-> screen storage and video backgrounds work (`bezel storage` validated on the
-> 8.8"; the studio's Storage tab awaits its hardware check); packaging and the
-> 1.0 release come next.
+Every protocol family is implemented and the Turing 8.8" is validated on real
+hardware; the other screens follow the protocols of the vendor app and of
+turing-smart-screen-python. Releases ship deb, rpm and AppImage packages for
+Linux, MSI and setup installers for Windows, and the `bezel` command line for
+both.
+
+## Install and documentation
+
+Download from the [releases page](https://github.com/slipalison/bezel/releases)
+and follow the **[user guide](docs/user/README.md)** (em português:
+**[guia do usuário](docs/user/pt-BR/README.md)**): installing on each system,
+screen permissions and Windows drivers, the first theme, sensors, game FPS,
+storage and video, running at login and troubleshooting.
+
+The installers are not signed: Windows SmartScreen may ask you to confirm
+(*More info → Run anyway*); see [Install Bezel](docs/user/install.md).
 
 ## Bezel Studio
 
@@ -80,16 +90,18 @@ fonts (`themes/fonts/`, SIL Open Font License 1.1).
 The studio does this from its tray ("Start with the computer" in the Screen
 panel). Without the studio:
 
-- **Linux** (systemd user service, installed by `scripts/install-local.sh`):
+- **Linux** (systemd user service: the deb and rpm packages install it in
+  `/usr/lib/systemd/user`, `scripts/install-local.sh` in `~/.config/systemd/user`):
   ```bash
   systemctl --user enable --now bezel-run@turing-8.8-horizontal
   journalctl --user -u bezel-run@turing-8.8-horizontal -f   # its log
   ```
-  For your own theme file, override the command once (`systemctl --user edit bezel-run@mine`):
+  For your own theme file, override the command once (`systemctl --user edit bezel-run@mine`;
+  `%h/.local/bin/bezel` instead of `/usr/bin/bezel` for a from-source install):
   ```ini
   [Service]
   ExecStart=
-  ExecStart=%h/.local/bin/bezel run %h/themes/mine.bezeltheme
+  ExecStart=/usr/bin/bezel run %h/themes/mine.bezeltheme
   ```
 - **Windows** (a logon task; `bezel.exe` comes in the release's CLI `.zip`, here
   unpacked into `C:\Tools\bezel`):
@@ -98,7 +110,8 @@ panel). Without the studio:
   ```
 
 Stop any other program that drives the screen first (a turing-smart-screen-python
-service, the vendor app): `bezel` refuses a port another process holds.
+service, the vendor app): `bezel` refuses a port another process holds. More in
+[Running at login](docs/user/run-at-login.md).
 
 ## Screen storage and video
 
@@ -156,7 +169,10 @@ bezel storage boot default --yes          # back to the built-in start screen
 | Turing USB (0x1CBE) | TURZX 1.6"–12.3" USB generation | USB bulk |
 | WCH (0x43A8) | WCH-based 2.4"–4.3" panels | USB bulk |
 
-`bezel devices` lists what is connected and which models match.
+`bezel devices` lists what is connected and which models match. A Turing USB
+panel in the vendor's desktop mode is listed as "desktop mode (not validated on
+hardware)", and `bezel monitor-mode --yes` switches it back to USB monitor mode
+([Supported screens](docs/user/devices.md)).
 
 ## Build from source
 
@@ -165,8 +181,10 @@ cargo build --release --locked
 bash scripts/install-local.sh   # installs into ~/.local (no sudo)
 ```
 
-Linux needs read/write access to the screen's serial port: install
-`packaging/linux/60-bezel.rules` into `/etc/udev/rules.d/` (the deb/rpm packages do it).
+On Linux your user needs access to the screen: the deb and rpm packages install
+the udev rule; for a build from source, `bezel udev-rules` prints it and the
+one-line sudo command that installs it (Bezel never runs it itself). See
+[Let Bezel open the screen](docs/user/permissions.md).
 
 ## License
 

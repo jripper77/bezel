@@ -314,7 +314,7 @@ fn duration_text(secs: f64) -> String {
 /// The fraction (0..=1) a value represents between `min` and `max`, clamped.
 /// Bars, rings and needles use it; `None` when the range is empty.
 pub fn fraction(value: f64, min: f64, max: f64) -> Option<f64> {
-    if !value.is_finite() || !(max > min) {
+    if !value.is_finite() || max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
         return None;
     }
     Some(((value - min) / (max - min)).clamp(0.0, 1.0))

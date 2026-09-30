@@ -32,8 +32,8 @@ pub enum Flow {
 /// How long a write may make no progress before it fails: the SoC reads
 /// while it writes to its flash or the memory card, which can stall.
 const WRITE_STALL: Duration = Duration::from_secs(10);
-/// Drains that a signal interrupted, retried before giving up.
-const FLUSH_RETRIES: usize = 16;
+/// Pause between two looks at the bytes still queued for the device.
+const DRAIN_POLL: Duration = Duration::from_millis(1);
 
 /// Writes every byte of `bytes` through `write`: a write a signal
 /// interrupted is tried again, and so is one that timed out while the last
@@ -68,15 +68,35 @@ fn write_patiently(
     Ok(())
 }
 
-/// Drains through `flush`, again after a drain that timed out (a signal cut
-/// it short), at most `retries` more times; then its error stands.
-fn drain_patiently(retries: usize, mut flush: impl FnMut() -> io::Result<()>) -> io::Result<()> {
-    let mut left = retries;
+/// Waits until the port has sent everything, watching `queued` (bytes
+/// still in the host's output buffer) instead of blocking in the kernel's
+/// drain: that one waits forever when the device stops reading (seen on
+/// the 8.8": a firmware that hung mid-upload kept a sender blocked for good)
+/// and gives up early when a signal interrupts it. The queue must shrink
+/// at least once every `stall`, else the device stopped reading.
+fn drain_watching(
+    stall: Duration,
+    mut now: impl FnMut() -> Instant,
+    mut queued: impl FnMut() -> io::Result<u32>,
+    mut pause: impl FnMut(),
+) -> io::Result<()> {
+    let mut progress = now();
+    let mut last = u32::MAX;
     loop {
-        match flush() {
-            Err(e) if e.kind() == io::ErrorKind::TimedOut && left > 0 => left -= 1,
-            other => return other,
+        let left = queued()?;
+        if left == 0 {
+            return Ok(());
         }
+        if left < last {
+            last = left;
+            progress = now();
+        } else if now().saturating_duration_since(progress) >= stall {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("the screen stopped reading ({left} bytes still queued)"),
+            ));
+        }
+        pause();
     }
 }
 
@@ -113,15 +133,21 @@ impl SerialWire {
 impl Wire for SerialWire {
     /// Writes every byte and waits until they left. The port's 10 ms timeout
     /// only paces reads: a write that makes no progress for [`WRITE_STALL`]
-    /// fails, and a drain that a signal interrupted (Ctrl+C, a terminal
-    /// resize; serialport then reports "timeout for retrying flush reached"
-    /// although the bytes are still going out) is drained again. Seen on
+    /// fails, and so does a drain whose queue stops shrinking for as long
+    /// ([`drain_watching`]; the kernel's own drain can block forever, and a
+    /// signal such as Ctrl+C cuts it short). Seen on
     /// the 8.8" during a memory-card upload.
     fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
         write_patiently(bytes, WRITE_STALL, Instant::now, |rest| {
             self.port.write(rest)
         })?;
-        drain_patiently(FLUSH_RETRIES, || self.port.flush())
+        let port = &self.port;
+        drain_watching(
+            WRITE_STALL,
+            Instant::now,
+            || port.bytes_to_write().map_err(io::Error::other),
+            || std::thread::sleep(DRAIN_POLL),
+        )
     }
 
     fn receive(&mut self, max: usize, timeout: Duration) -> io::Result<Vec<u8>> {
@@ -316,40 +342,52 @@ mod tests {
         assert_eq!(writes, 0, "nothing to write");
     }
 
-    /// Drains with a flush answering `script` in order (then `Ok`); returns
-    /// the result and the number of flushes.
-    fn drain_with(retries: usize, script: Vec<io::Result<()>>) -> (io::Result<()>, usize) {
+    /// Drains watching a queue that reports `script` in order (then 0),
+    /// with a clock moving 1 s per look; returns the result and the looks.
+    fn drain_with(script: Vec<io::Result<u32>>) -> (io::Result<()>, usize) {
         let mut script = VecDeque::from(script);
-        let mut flushes = 0;
-        let result = drain_patiently(retries, || {
-            flushes += 1;
-            script.pop_front().unwrap_or(Ok(()))
-        });
-        (result, flushes)
+        let start = Instant::now();
+        let mut ticks = 0u64;
+        let mut looks = 0;
+        let result = drain_watching(
+            Duration::from_secs(3),
+            || {
+                ticks += 1;
+                start + Duration::from_secs(ticks)
+            },
+            || {
+                looks += 1;
+                script.pop_front().unwrap_or(Ok(0))
+            },
+            || {},
+        );
+        (result, looks)
     }
 
     #[test]
-    fn a_cut_drain_is_drained_again_up_to_the_limit() {
-        // serialport's words when a signal cuts a drain short.
-        let cut = || {
-            Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "timeout for retrying flush reached",
-            ))
-        };
-        let (result, flushes) = drain_with(FLUSH_RETRIES, vec![cut(), cut(), cut()]);
+    fn a_drain_waits_while_the_queue_shrinks_and_fails_when_it_stalls() {
+        let (result, looks) = drain_with(vec![Ok(0)]);
         result.unwrap();
-        assert_eq!(flushes, 4);
+        assert_eq!(looks, 1, "nothing queued: done at once");
 
-        let (result, flushes) = drain_with(FLUSH_RETRIES, (0..100).map(|_| cut()).collect());
+        // Shrinking, however slowly, is progress.
+        let (result, looks) = drain_with((1..=20).rev().map(Ok).collect());
+        result.unwrap();
+        assert_eq!(looks, 21);
+
+        // A device that stopped reading: the same count for 3 s fails
+        // instead of blocking forever.
+        let (result, looks) = drain_with((0..100).map(|_| Ok(10_240)).collect());
         let err = result.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::TimedOut);
-        assert_eq!(err.to_string(), "timeout for retrying flush reached");
-        assert_eq!(flushes, FLUSH_RETRIES + 1);
+        assert!(
+            err.to_string().contains("10240 bytes still queued"),
+            "{err}"
+        );
+        assert!(looks < 10, "{looks}");
 
-        let broken = vec![Err(failure(io::ErrorKind::BrokenPipe))];
-        let (result, flushes) = drain_with(FLUSH_RETRIES, broken);
+        // The port's own error stands.
+        let (result, _) = drain_with(vec![Ok(5), Err(failure(io::ErrorKind::BrokenPipe))]);
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
-        assert_eq!(flushes, 1, "other errors are not retried");
     }
 }

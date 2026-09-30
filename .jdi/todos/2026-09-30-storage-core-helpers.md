@@ -1,1 +1,0 @@
-- [release-polish] Move the studio's `fitting_options` (turn a video like the edited theme and cover-crop it) into the core next to `cover_crop`, so the CLI and the studio share one rule

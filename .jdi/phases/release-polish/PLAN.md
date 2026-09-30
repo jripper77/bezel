@@ -19,7 +19,8 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
   - TUR_USB: `Unsupported` de `size` = presente com `FileEntry.size = None` em list, play e no vídeo do runtime; sobrescrever segue exigindo `Confirm::Yes`. Testes existentes passam sem mudar asserções.
 - **Dependencies:** none
 - **Test:** `app::storage::tests::unknown_size_counts_as_present`, `domain::media::tests::fitting_options_turn_and_cover_crop`
-- **Status:** pending
+- **Status:** completed (`45598d6`..`0480bfa`, 8 commits)
+- **Nota:** fora de `files_modified`, sinalizados: `crates/bezel-core/src/ports/mod.rs` (só doc: `ScreenStorage::size` documenta `Unsupported` = presente com tamanho desconhecido), `crates/bezel-devices/src/fake.rs` (`FakeStorage::size_unknown`/`with_file_of_unknown_size`, porque o core não implementa porta nem em teste), `crates/bezel-core/tests/{storage,runtime_video}.rs` e `crates/bezel-cli/tests/bundled_themes.rs` (usava a regra duplicada de "cabe no painel" e o `sensor_keys` removido). Asserções mudadas só onde o teste exercitava a duplicação ou o código morto: teste do locale movido para o core, testes do backend do studio comparam com `MIN_REFRESH_SECONDS`, testes do core deixam de chamar `sensor_keys`/`next_id`/`element_mut`/`translated`. Mudanças visíveis: erros de tema passam a `theme file: …` (antes `transport error:`/`screen not found:`); o studio abre um `theme.json` como a CLI (antes falhava). `MAX_REFRESH` segue por adaptador (CLI 60 s, studio 2 s). Sobras: `0.25` literal no JS (`app.js`, `ui/inspector.js`, arquivos da T-7.6); `clock::now()` segue igual na CLI e no studio (chrono fica nos adaptadores, sem crate comum); `Theme::element` só é usado em teste (fora da lista da D-9).
 
 #### T-7.2: Sensores: chaves únicas, hwmon/amdgpu unificados, chaves importadas
 - **Specialist:** jdi-doer-bezel

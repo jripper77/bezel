@@ -1,1 +1,0 @@
-- [release-polish] TUR_USB: `app::storage::list`/`play`/the runtime's video lookup fail with `Unsupported` when the screen holds a file Bezel did not write (no size query without command 98, D-2026-09-30-storage-video-7). Treat an `Unsupported` size as "present, size unknown" in the core (e.g. `FileEntry.size: Option<u64>` or an `exists` port method)

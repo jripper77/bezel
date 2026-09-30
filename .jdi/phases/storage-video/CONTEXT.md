@@ -25,7 +25,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
       **Verify:** `export LC_ALL=C.UTF-8; for t in storage_packets_match_the_reference_vectors storage_info_subtracts_the_reserved_flash_and_detects_the_card; do cargo test -p bezel-devices --locked --lib -- --exact "protocol::turing_rev_c::tests::$t" 2>&1 | grep -q '1 passed' || { printf 'missing %s\n' "$t"; exit 1; }; done && echo OK`
       **Source:** CONTEXT
 - [ ] Delete and overwrite are refused without `Confirm::Yes`, before any byte reaches the link
-      **Verify:** `cargo test -p bezel-core --locked --lib -- --exact domain::storage::tests::destructive_operations_require_confirm_yes 2>&1 | grep -q '1 passed' && echo OK`
+      **Verify:** `cargo test -p bezel-core --locked --lib -- --exact domain::storage::tests::destructive_operations_require_confirm_yes 2>&1 | grep -q '1 passed' && cargo test -p bezel-core --locked --test storage -- --exact replacing_deleting_and_the_boot_slot_need_confirmation 2>&1 | grep -q '1 passed' && echo OK`
       **Source:** CONTEXT
 - [ ] Rev C upload follows the vendor sequence, reports progress and can be cancelled
       **Verify:** `cargo test -p bezel-devices --locked --lib -- --exact driver::turing_rev_c::tests::upload_reports_progress_and_can_be_cancelled 2>&1 | grep -q '1 passed' && echo OK`

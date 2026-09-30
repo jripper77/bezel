@@ -160,7 +160,11 @@ pub fn prepare_upload(
 ///
 /// Progress goes to `job` (convert, upload, verify); cancelling returns
 /// `BezelError::Cancelled` whose `partial` names what an interrupted upload
-/// left on the screen (offer a confirmed [`delete`]).
+/// left on the screen (offer a confirmed [`delete`]). A stored size that
+/// differs from the file's fails with `BezelError::Transport` telling the
+/// user to delete the file and send it again (bytes an earlier cancelled
+/// upload left queued on the screen can land in this file); nothing is
+/// deleted here.
 pub fn upload(
     link: &mut dyn ScreenLink,
     media: &mut dyn MediaTranscoder,
@@ -301,7 +305,8 @@ fn verify(
     let stored = storage.size(path)?;
     if stored != Some(bytes) {
         return Err(BezelError::Transport(format!(
-            "{path} holds {} of {bytes} bytes after the upload",
+            "{path} was stored with {} bytes, not the file's {bytes}: \
+             the stored size differs; delete it and send it again",
             stored.unwrap_or(0)
         )));
     }

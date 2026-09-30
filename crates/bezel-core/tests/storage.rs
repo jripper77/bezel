@@ -626,7 +626,8 @@ fn a_cancelled_upload_reports_what_it_left_and_deletes_nothing() {
 
 #[test]
 fn verification_and_races_are_caught() {
-    // A transfer the screen stored short fails its verification.
+    // A transfer the screen stored short fails its verification, and the
+    // error says what to do: the file stays for the user to delete.
     let connector = FakeConnector::with_storage(FakeStorage {
         short_by: 1,
         ..FakeStorage::default()
@@ -644,8 +645,16 @@ fn verification_and_races_are_caught() {
     assert_eq!(
         result,
         Err(BezelError::Transport(
-            "internal/video/clip.mp4 holds 999 of 1000 bytes after the upload".into()
+            "internal/video/clip.mp4 was stored with 999 bytes, not the file's 1000: \
+             the stored size differs; delete it and send it again"
+                .into()
         ))
+    );
+    assert!(
+        !writes(&connector)
+            .iter()
+            .any(|c| matches!(c, StorageCall::Delete(_))),
+        "nothing is deleted for the user"
     );
 
     // A file that appeared at the target after the preflight is not

@@ -22,6 +22,7 @@ bezel-devices = { workspace = true }
 bezel-sensors = { workspace = true }
 bezel-render = { workspace = true }
 bezel-themes = { workspace = true }
+bezel-media = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4.6.7", features = ["derive"] }

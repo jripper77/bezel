@@ -7,6 +7,7 @@ members = [
     "crates/bezel-render",
     "crates/bezel-cli",
     "crates/bezel-themes",
+    "crates/bezel-media",
     "apps/bezel-studio/src-tauri",
 ]
 
@@ -31,6 +32,7 @@ bezel-devices = { path = "crates/bezel-devices" }
 bezel-sensors = { path = "crates/bezel-sensors" }
 bezel-render = { path = "crates/bezel-render" }
 bezel-themes = { path = "crates/bezel-themes" }
+bezel-media = { path = "crates/bezel-media" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

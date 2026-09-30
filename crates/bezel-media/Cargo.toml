@@ -1,0 +1,22 @@
+[package]
+name = "bezel-media"
+description = "Driven adapter of Bezel for media files on the host: native MP4 and image probing, conversion and decoding through an external ffmpeg."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+# Only to read the size of still images from their headers (no decoding).
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
+# The folder that holds conversion outputs, removed with the transcoder.
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

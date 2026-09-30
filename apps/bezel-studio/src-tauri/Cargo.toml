@@ -25,6 +25,7 @@ bezel-devices = { workspace = true }
 bezel-render = { workspace = true }
 bezel-sensors = { workspace = true }
 bezel-themes = { workspace = true }
+bezel-media = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

@@ -353,6 +353,7 @@ dependencies = [
  "assert_cmd",
  "bezel-core",
  "bezel-devices",
+ "bezel-media",
  "bezel-render",
  "bezel-sensors",
  "bezel-themes",
@@ -391,6 +392,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bezel-media"
+version = "0.0.0"
+dependencies = [
+ "bezel-core",
+ "image",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "bezel-render"
 version = "0.0.0"
 dependencies = [
@@ -422,6 +435,7 @@ dependencies = [
  "base64 0.22.1",
  "bezel-core",
  "bezel-devices",
+ "bezel-media",
  "bezel-render",
  "bezel-sensors",
  "bezel-themes",

@@ -65,7 +65,8 @@ jobs:
       #   Debian 12 or Mint 21.
       #   apt packages: libwebkit2gtk-4.1-dev (Tauri's webview, with GTK and
       #   GLib), libudev-dev (serialport's port enumeration), librsvg2-dev (the
-      #   AppImage's gtk plugin).
+      #   AppImage's gtk plugin), libayatana-appindicator3-dev (the tray icon;
+      #   the AppImage bundles it and the deb depends on it).
       # rust-windows: the same steps on windows-latest except the audit, with
       #   the MSI, the NSIS installer and the CLI .zip. Coverage 0: the floor
       #   is measured on Linux.
@@ -75,7 +76,7 @@ jobs:
         [
           {"nome":"rust-linux","linguagem":"rust","versao":"1.98","cobertura":80,
            "so":"ubuntu-22.04",
-           "pacotes_sistema":"libwebkit2gtk-4.1-dev libudev-dev librsvg2-dev",
+           "pacotes_sistema":"libwebkit2gtk-4.1-dev libudev-dev librsvg2-dev libayatana-appindicator3-dev",
            "auditoria":true,"build_release":"bezel-studio",
            "empacotar_tauri":true,"caminho_tauri":"apps/bezel-studio/src-tauri",
            "binarios_extra":"bezel","carimbar_versao":true},

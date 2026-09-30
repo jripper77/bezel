@@ -87,13 +87,17 @@ test('orientations split into vertical/horizontal and turned or not', () => {
   for (const o of ORIENTATIONS) assert.equal(orientationOf(isHorizontal(o) ? 'horizontal' : 'vertical', isTurned(o)), o);
 });
 
-test('relayoutBox keeps the size and the relative center, inside the new canvas', () => {
+test('relayoutBox turns a vertical stack into a horizontal row, sizes kept, inside', () => {
   const tall = { width: 480, height: 1920 };
   const wide = { width: 1920, height: 480 };
-  assert.deepEqual(relayoutBox(box(20, 700, 440, 200), tall, wide), box(740, 100, 440, 200));
-  assert.deepEqual(relayoutBox(box(40, 80, 400, 120), tall, wide), box(760, 0, 400, 120), 'pushed down inside');
-  assert.deepEqual(relayoutBox(box(0, 1800, 100, 120), tall, wide), box(150, 360, 100, 120), 'pushed up inside');
-  assert.deepEqual(relayoutBox(box(0, 0, 480, 1920), tall, wide), box(720, 0, 480, 1920), 'too tall starts at the top');
+  // Centered boxes stacked top to bottom land left to right, vertically centered.
+  assert.deepEqual(relayoutBox(box(90, 300, 300, 300), tall, wide), box(300, 90, 300, 300));
+  assert.deepEqual(relayoutBox(box(20, 700, 440, 200), tall, wide), box(580, 140, 440, 200));
+  assert.deepEqual(relayoutBox(box(40, 80, 400, 120), tall, wide), box(0, 180, 400, 120), 'pushed right inside');
+  assert.deepEqual(relayoutBox(box(0, 1800, 100, 120), tall, wide), box(1810, 0, 100, 120), 'pushed down inside');
+  assert.deepEqual(relayoutBox(box(0, 0, 480, 1920), tall, wide), box(720, 0, 480, 480), 'too tall shrinks to fit');
   const back = relayoutBox(relayoutBox(box(90, 902, 300, 100), tall, wide), wide, tall);
   assert.deepEqual(back, box(90, 902, 300, 100), 'a box that fits both ways comes back');
+  const square = { width: 480, height: 480 };
+  assert.deepEqual(relayoutBox(box(10, 20, 30, 40), square, square), box(25, 5, 30, 40), 'a square canvas mirrors across the diagonal');
 });

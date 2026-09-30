@@ -112,16 +112,20 @@ export function orientationOf(axis, turned) {
 }
 
 /**
- * A box carried from canvas `from` to canvas `to`: it keeps its size, its
- * center keeps its relative place (cx·W'/W, cy·H'/H), then it is pushed
- * inside `to`. A box larger than `to` on an axis starts at 0 on that axis.
+ * A box carried from canvas `from` to canvas `to` when the screen turns
+ * between vertical and horizontal. Reading order is kept by transposing the
+ * center: top-to-bottom becomes left-to-right (cx' = cy·W'/H, cy' = cx·H'/W),
+ * so a vertical stack becomes a horizontal row. The box keeps its size
+ * (text is never turned), shrinks only where it is larger than `to`, and is
+ * pushed inside.
  */
 export function relayoutBox(b, from, to) {
-  const place = (start, size, before, after) => {
-    const center = ((start + size / 2) * after) / before;
-    return Math.min(Math.max(Math.round(center - size / 2), 0), Math.max(Math.floor(after - size), 0));
-  };
-  return { ...b, x: place(b.x, b.width, from.width, to.width), y: place(b.y, b.height, from.height, to.height) };
+  const width = Math.min(b.width, to.width);
+  const height = Math.min(b.height, to.height);
+  const cx = ((b.y + b.height / 2) * to.width) / from.height;
+  const cy = ((b.x + b.width / 2) * to.height) / from.width;
+  const place = (center, size, room) => Math.min(Math.max(Math.round(center - size / 2), 0), room - size);
+  return { ...b, x: place(cx, width, to.width), y: place(cy, height, to.height), width, height };
 }
 
 /** Rounds a box to whole pixels (what the file stores after an edit). */

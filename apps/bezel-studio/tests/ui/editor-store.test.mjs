@@ -171,10 +171,10 @@ test('setOrientation between vertical and horizontal re-lays the elements in one
   assert.equal(theme.orientation, 'reverse-landscape');
   assert.deepEqual(theme.canvas, { width: 1920, height: 480 });
   assert.deepEqual(theme.elements.map((e) => e.frame), [
-    { x: 760, y: 0, width: 400, height: 120 },
-    { x: 810, y: 0, width: 300, height: 300 },
-    { x: 740, y: 100, width: 440, height: 200 },
-  ], 'sizes kept, centers scaled, locked ones too, all inside');
+    { x: 0, y: 180, width: 400, height: 120 },
+    { x: 300, y: 90, width: 300, height: 300 },
+    { x: 580, y: 140, width: 440, height: 200 },
+  ], 'the vertical stack becomes a row: sizes kept, locked ones too, all inside');
   for (const { frame: f } of theme.elements) {
     assert.ok(f.x >= 0 && f.y >= 0 && f.x + f.width <= 1920 && f.y + f.height <= 480);
   }

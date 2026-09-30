@@ -10,13 +10,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use bezel_cli::theme::{bundled_candidates, data_home, first_dir, font_dirs, resolve};
 use bezel_cli::{
     Cli, Command, ProgressStyle, Rendering, SensorsArgs, SleepPace, StorageArgs, StorageKit,
-    WatchStyle, clock, run, run_sensors, run_storage_command, run_theme_command,
+    WatchStyle, clock, run, run_monitor_mode, run_sensors, run_storage_command, run_theme_command,
+    udev_rules,
 };
 use bezel_core::domain::job::CancelToken;
 use bezel_core::domain::storage::RemotePath;
 use bezel_core::ports::SensorSource;
 use bezel_devices::fake::FakeStorage;
-use bezel_devices::{FakeBus, FakeConnector, SystemBus, SystemConnector};
+use bezel_devices::{FakeBus, FakeConnector, FakeHid, SystemBus, SystemConnector, SystemHid};
 use bezel_media::FfmpegTranscoder;
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
@@ -33,6 +34,15 @@ const DEMO_FILES: &[(&str, usize)] = &[
 
 /// Usable space of the simulated memory card: 8 GiB.
 const DEMO_CARD_BYTES: u64 = 8 << 30;
+
+/// The simulated bus of `--fake`: a Turing 8.8" and a Turing USB panel in
+/// desktop mode.
+fn fake_bus() -> FakeBus {
+    FakeBus::turing_88().and(FakeBus::desktop_mode())
+}
+
+/// The model byte the simulated panel in desktop mode answers: an 8.8".
+const FAKE_DESKTOP_MODEL: u8 = 0x88;
 
 /// The simulated screen of `--fake`: a Turing 8.8" with a few demo files
 /// and a memory card.
@@ -114,7 +124,7 @@ fn themes(cli: &Cli) -> anyhow::Result<String> {
         bundled: bundled.as_deref(),
     };
     let result = if cli.fake {
-        let (bus, connector) = (FakeBus::turing_88(), fake_connector());
+        let (bus, connector) = (fake_bus(), fake_connector());
         run_theme_command(
             cli, &bus, &connector, &mut kit, &mut media, &mut pace, &mut log,
         )
@@ -164,10 +174,30 @@ fn storage(args: &StorageArgs, fake: bool) -> anyhow::Result<String> {
         log: &mut log,
     };
     if fake {
-        run_storage_command(args, &FakeBus::turing_88(), &fake_connector(), &mut kit)
+        run_storage_command(args, &fake_bus(), &fake_connector(), &mut kit)
     } else {
         run_storage_command(args, &SystemBus, &SystemConnector, &mut kit)
     }
+}
+
+/// `bezel monitor-mode`: the real HID stack, or a simulated panel.
+fn monitor_mode(cli: &Cli) -> anyhow::Result<String> {
+    let mut log = std::io::stderr();
+    if cli.fake {
+        let hid = FakeHid::answering(FAKE_DESKTOP_MODEL);
+        run_monitor_mode(cli, &fake_bus(), &hid, &mut log)
+    } else {
+        run_monitor_mode(cli, &SystemBus, &SystemHid, &mut log)
+    }
+}
+
+/// `bezel udev-rules`: the install command names the program the way the
+/// user started it.
+fn print_udev_rules() -> anyhow::Result<String> {
+    let program = std::env::args()
+        .next()
+        .unwrap_or_else(|| "bezel".to_string());
+    udev_rules::run(&program, &mut std::io::stderr())
 }
 
 fn main() -> ExitCode {
@@ -184,9 +214,11 @@ fn main() -> ExitCode {
         Command::Sensors(args) => sensors(args, cli.fake),
         Command::Render { .. } | Command::Run { .. } | Command::Import { .. } => themes(&cli),
         Command::Storage(args) => storage(args, cli.fake),
+        Command::MonitorMode { .. } => monitor_mode(&cli),
+        Command::UdevRules => print_udev_rules(),
         _ if cli.fake => run(
             &cli,
-            &FakeBus::turing_88(),
+            &fake_bus(),
             &fake_connector(),
             &mut SkiaRenderer::new(),
         ),
@@ -201,6 +233,12 @@ fn main() -> ExitCode {
         }
         Err(e) => {
             eprintln!("bezel: {e:#}");
+            // On Linux a denied device is fixed by the udev rule.
+            if cfg!(target_os = "linux")
+                && let Some(hint) = udev_rules::access_hint(&e)
+            {
+                eprintln!("{hint}");
+            }
             ExitCode::FAILURE
         }
     }

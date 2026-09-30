@@ -1,12 +1,17 @@
 # Bezel: lets the logged-in user open USB smart screens without root.
-# One line per USB id of the supported-device catalog
-# (crates/bezel-core/src/domain/catalog.rs); a test keeps both in sync.
+# Generated from the supported-device catalog by `bezel udev-rules`
+# (crates/bezel-devices/src/udev.rs); a test keeps this file identical.
 # Serial screens are CDC-ACM ttys; the Turing USB (1cbe) and WCH (43a8)
-# families are raw USB devices.
+# families are raw USB devices; a Turing USB panel in desktop mode
+# (1a86:ad10-ad13, not validated on hardware) is reached through hidraw.
 
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0525", ATTRS{idProduct}=="a4a7", TAG+="uaccess"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="125f", ATTRS{idProduct}=="7903", TAG+="uaccess"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="5722", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad10", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad11", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad12", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ad13", TAG+="uaccess"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ca21", TAG+="uaccess"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ca24", TAG+="uaccess"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="ca27", TAG+="uaccess"

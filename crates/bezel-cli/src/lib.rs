@@ -1,6 +1,7 @@
 //! Command-line driving adapter of Bezel. `main.rs` is the composition root;
 //! everything here is testable against any [`DeviceBus`], [`ScreenConnector`],
-//! [`SensorSource`], [`FrameRenderer`], [`ThemeStore`] and [`MediaTranscoder`].
+//! [`DesktopModeHid`], [`SensorSource`], [`FrameRenderer`], [`ThemeStore`] and
+//! [`MediaTranscoder`].
 #![forbid(unsafe_code)]
 
 pub mod clock;
@@ -11,6 +12,7 @@ mod screen;
 mod sensors;
 pub mod storage;
 pub mod theme;
+pub mod udev_rules;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -20,7 +22,8 @@ use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::theme::Fit;
 use bezel_core::ports::{
-    DeviceBus, FrameRenderer, MediaTranscoder, ScreenConnector, SensorSource, ThemeStore,
+    DesktopModeHid, DeviceBus, FrameRenderer, MediaTranscoder, ScreenConnector, SensorSource,
+    ThemeStore,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -39,7 +42,8 @@ pub const VERSION: &str = match option_env!("BEZEL_VERSION") {
 #[command(name = "bezel", version = VERSION)]
 pub struct Cli {
     /// Use simulated hardware instead of the real machine: a Turing 8.8"
-    /// screen and demo sensor values (demos and tests).
+    /// screen, a Turing USB panel in desktop mode and demo sensor values
+    /// (demos and tests).
     #[arg(long, global = true, hide = true)]
     pub fake: bool,
 
@@ -157,12 +161,30 @@ pub struct SensorsArgs {
 /// Subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// List the connected smart screens (read-only: nothing is written to them).
+    /// List the connected smart screens, and Turing USB panels in the
+    /// vendor's desktop mode (read-only: nothing is written to them).
     Devices {
         /// Print JSON instead of a table.
         #[arg(long)]
         json: bool,
     },
+    /// Switch a Turing USB panel in the vendor's desktop mode back to USB
+    /// monitor mode (not validated on hardware): asks the panel its model,
+    /// then sends the two HID reports that switch it; it restarts as a
+    /// USB screen. Nothing is sent without --yes.
+    MonitorMode {
+        /// HID address of the panel, as `bezel devices` lists it (needed
+        /// when several panels are in desktop mode).
+        #[command(flatten)]
+        target: Target,
+        /// Confirm the switch.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Print the Linux udev rule that lets your user open every supported
+    /// screen without root (stdout), and the one-line sudo command that
+    /// installs it (stderr). Bezel never runs that command itself.
+    UdevRules,
     /// Show an animated test pattern: color bars, a marker in each corner
     /// (red top-left, green top-right, white bottom-right, blue bottom-left)
     /// and a moving strip that exercises partial updates.
@@ -392,6 +414,33 @@ where
         }
         // Need a media transcoder and a cancel token: see `run_storage_command`.
         Command::Storage(_) => anyhow::bail!("storage commands run through run_storage_command"),
+        // Needs the HID port: see `run_monitor_mode`.
+        Command::MonitorMode { .. } => {
+            anyhow::bail!("`monitor-mode` runs through run_monitor_mode")
+        }
+        // Writes the install command to stderr: see `udev_rules::run`.
+        Command::UdevRules => anyhow::bail!("`udev-rules` runs through udev_rules::run"),
+    }
+}
+
+/// Runs `monitor-mode` (anything else is an error): switches a panel in
+/// desktop mode back to USB monitor mode through `hid`, only with `--yes`.
+/// Says what it is about to do on `log`; returns what goes to stdout.
+pub fn run_monitor_mode<B, H>(
+    cli: &Cli,
+    bus: &B,
+    hid: &H,
+    log: &mut dyn Write,
+) -> anyhow::Result<String>
+where
+    B: DeviceBus + ?Sized,
+    H: DesktopModeHid + ?Sized,
+{
+    match &cli.command {
+        Command::MonitorMode { target, yes } => {
+            devices::monitor_mode(bus, hid, target.screen.as_deref(), *yes, log)
+        }
+        _ => anyhow::bail!("not the monitor-mode command"),
     }
 }
 
@@ -420,6 +469,10 @@ mod tests {
         assert!(err.to_string().contains("run_sensors"), "{err}");
         let err = run_args(&["bezel", "--fake", "storage", "info"]).unwrap_err();
         assert!(err.to_string().contains("run_storage_command"), "{err}");
+        let err = run_args(&["bezel", "--fake", "monitor-mode", "--yes"]).unwrap_err();
+        assert!(err.to_string().contains("run_monitor_mode"), "{err}");
+        let err = run_args(&["bezel", "udev-rules"]).unwrap_err();
+        assert!(err.to_string().contains("udev_rules::run"), "{err}");
         assert!(
             run_args(&["bezel", "sensors", "--count", "2"]).is_err(),
             "--count needs --watch"

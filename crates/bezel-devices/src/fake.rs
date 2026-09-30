@@ -1,13 +1,16 @@
 //! In-memory bus and screens for tests and demos: a fixed list of
 //! endpoints, and screens that record what they are asked to do. Screens of
 //! the families with storage (rev C, TUR_USB) also simulate their stored
-//! files and device-side playback ([`FakeStorage`]).
+//! files and device-side playback ([`FakeStorage`]). [`FakeHid`] stands for
+//! the HID interface of a panel in desktop mode.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bezel_core::domain::device::{Family, Transport, UsbId};
-use bezel_core::domain::discovery::{DeviceAddress, Endpoint, Screen, UsbLocation};
+use bezel_core::domain::discovery::{
+    DesktopModePanel, DeviceAddress, Endpoint, MonitorModeConfirmed, Screen, UsbLocation,
+};
 use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::job::Job;
@@ -16,10 +19,12 @@ use bezel_core::domain::storage::{
     Capacity, Confirmed, FileName, Medium, RemotePath, Repeat, StartMode, StorageInfo,
     StorageLocation,
 };
-use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink, ScreenStorage};
+use bezel_core::ports::{DesktopModeHid, DeviceBus, ScreenConnector, ScreenLink, ScreenStorage};
 use bezel_core::{BezelError, Result};
 
 use crate::driver::{Sent, send_in_chunks};
+use crate::hid_desktop;
+use crate::wire::ScriptedWire;
 
 /// Usable internal flash of a simulated screen (vendor reserve already
 /// off): 1 GiB.
@@ -52,6 +57,26 @@ impl FakeBus {
             serial_endpoint("/dev/ttyACM1", UsbId::new(0x0525, 0xa4a7), None, &[1, 2]),
         ])
     }
+
+    /// A Turing USB panel in desktop mode: its HID interface (1a86:ad11) at
+    /// `hid:/dev/hidraw7`, as the HID stack lists it on Linux.
+    pub fn desktop_mode() -> Self {
+        Self::new(vec![Endpoint {
+            address: DeviceAddress(format!("{}/dev/hidraw7", hid_desktop::ADDRESS_PREFIX)),
+            transport: Transport::Hid,
+            usb: UsbId::new(0x1a86, 0xad11),
+            serial_number: None,
+            manufacturer: None,
+            product: None,
+            location: None,
+        }])
+    }
+
+    /// This bus with `other`'s endpoints after its own.
+    pub fn and(mut self, other: FakeBus) -> Self {
+        self.endpoints.extend(other.endpoints);
+        self
+    }
 }
 
 fn serial_endpoint(port: &str, usb: UsbId, serial: Option<&str>, ports: &[u8]) -> Endpoint {
@@ -72,6 +97,90 @@ fn serial_endpoint(port: &str, usb: UsbId, serial: Option<&str>, ports: &[u8]) -
 impl DeviceBus for FakeBus {
     fn endpoints(&self) -> Result<Vec<Endpoint>> {
         Ok(self.endpoints.clone())
+    }
+}
+
+/// One call that reached a simulated panel in desktop mode: the reports
+/// written to it, byte for byte as they go to the HID stack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HidCall {
+    /// The panel's HID address.
+    pub address: DeviceAddress,
+    /// The reports, in order (report id first).
+    pub reports: Vec<Vec<u8>>,
+}
+
+/// A [`DesktopModeHid`] for tests and demos: it runs the real report
+/// sequences against a scripted wire, answers the model query with a set
+/// model byte (or not at all) and records every call. Like the real one, it
+/// refuses a panel whose USB id is not one of desktop mode.
+#[derive(Debug, Clone, Default)]
+pub struct FakeHid {
+    model_byte: Option<u8>,
+    calls: Arc<Mutex<Vec<HidCall>>>,
+}
+
+impl FakeHid {
+    /// A panel that answers the model query with `model_byte`.
+    pub fn answering(model_byte: u8) -> Self {
+        Self {
+            model_byte: Some(model_byte),
+            ..Self::default()
+        }
+    }
+
+    /// A panel that never answers the model query.
+    pub fn silent() -> Self {
+        Self::default()
+    }
+
+    /// Every call so far (shared by clones).
+    pub fn calls(&self) -> Vec<HidCall> {
+        self.calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn record(&self, panel: &DesktopModePanel, wire: ScriptedWire) {
+        self.calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(HidCall {
+                address: panel.address().clone(),
+                reports: wire.sent,
+            });
+    }
+}
+
+fn hid_failure(panel: &DesktopModePanel, e: &std::io::Error) -> BezelError {
+    BezelError::Transport(format!("{}: {e}", panel.address()))
+}
+
+impl DesktopModeHid for FakeHid {
+    fn query_model(
+        &self,
+        panel: &DesktopModePanel,
+        _confirmed: &MonitorModeConfirmed,
+    ) -> Result<Option<u8>> {
+        hid_desktop::ensure_desktop_mode(&panel.address().0, panel.hid.usb)?;
+        let answer = self.model_byte.map(hid_desktop::simulated_answer);
+        let mut wire = ScriptedWire::with_replies(answer);
+        let model = hid_desktop::ask_model(&mut wire).map_err(|e| hid_failure(panel, &e))?;
+        self.record(panel, wire);
+        Ok(model)
+    }
+
+    fn back_to_monitor(
+        &self,
+        panel: &DesktopModePanel,
+        _confirmed: MonitorModeConfirmed,
+    ) -> Result<()> {
+        hid_desktop::ensure_desktop_mode(&panel.address().0, panel.hid.usb)?;
+        let mut wire = ScriptedWire::default();
+        hid_desktop::switch_back(&mut wire).map_err(|e| hid_failure(panel, &e))?;
+        self.record(panel, wire);
+        Ok(())
     }
 }
 
@@ -458,6 +567,41 @@ mod tests {
     use bezel_core::domain::job::{CancelToken, Progress};
     use bezel_core::domain::screen::Confirm;
     use bezel_core::domain::storage::{BootMedia, Operation};
+
+    #[test]
+    fn fake_hid_runs_the_real_reports_and_records_them() {
+        use bezel_core::app::{discover_devices, leave_desktop_mode};
+
+        let bus = FakeBus::turing_88().and(FakeBus::desktop_mode());
+        let found = discover_devices(&bus).unwrap();
+        assert_eq!(found.screens.len(), 1);
+        assert_eq!(found.desktop_mode.len(), 1);
+
+        let hid = FakeHid::answering(0x88);
+        assert!(leave_desktop_mode(&bus, &hid, None, Confirm::No).is_err());
+        assert!(hid.calls().is_empty(), "nothing without Confirm::Yes");
+
+        let done = leave_desktop_mode(&bus, &hid, None, Confirm::Yes).unwrap();
+        assert_eq!(done.model().map(|m| m.id.0), Some("turing-usb-8.8"));
+        let calls = hid.clone().calls();
+        let [first, second] = hid_desktop::back_to_monitor_reports();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].address.0, "hid:/dev/hidraw7");
+        assert_eq!(calls[0].reports, vec![hid_desktop::model_query()]);
+        assert_eq!(calls[1].reports, vec![first, second]);
+
+        let silent = FakeHid::silent();
+        let done = leave_desktop_mode(&bus, &silent, Some("hid:/dev/hidraw7"), Confirm::Yes);
+        assert_eq!(done.unwrap().model_byte, None);
+        assert_eq!(silent.calls().len(), 2, "switched back all the same");
+
+        let mut stray = found.desktop_mode[0].clone();
+        stray.hid.usb = UsbId::new(0x046d, 0xc52b);
+        let confirmed = MonitorModeConfirmed::require(Confirm::Yes).unwrap();
+        assert!(silent.query_model(&stray, &confirmed).is_err());
+        assert!(silent.back_to_monitor(&stray, confirmed).is_err());
+        assert_eq!(silent.calls().len(), 2, "a stray device gets nothing");
+    }
 
     #[test]
     fn fake_screen_records_and_checks_sizes() {

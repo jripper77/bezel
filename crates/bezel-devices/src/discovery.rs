@@ -1,8 +1,10 @@
 //! Read-only discovery of smart-screen endpoints.
 //!
 //! Serial (CDC-ACM) endpoints come from the OS serial-port list; raw USB
-//! endpoints (Turing USB, WCH) from the USB device list. Nothing is opened:
-//! enumeration only reads descriptors the OS already cached.
+//! endpoints (Turing USB, WCH) from the USB device list; the HID interface
+//! of a Turing USB panel in desktop mode from the HID stack, asked only when
+//! the USB list shows such a panel. Nothing is opened: enumeration only
+//! reads descriptors the OS already cached.
 
 use bezel_core::domain::catalog;
 use bezel_core::domain::device::{Transport, UsbId};
@@ -62,25 +64,67 @@ fn is_bulk_screen(usb: UsbId) -> bool {
 }
 
 fn usb_endpoints() -> std::result::Result<Vec<Endpoint>, nusb::Error> {
-    let devices = nusb::list_devices().wait()?;
-    Ok(devices
-        .filter(|d| is_bulk_screen(UsbId::new(d.vendor_id(), d.product_id())))
-        .map(|d| {
-            let location = UsbLocation {
-                bus: d.bus_id().to_string(),
-                ports: d.port_chain().to_vec(),
-            };
-            Endpoint {
-                address: DeviceAddress(format!("usb:{location}")),
-                transport: Transport::UsbBulk,
-                usb: UsbId::new(d.vendor_id(), d.product_id()),
-                serial_number: non_empty(d.serial_number().map(str::to_string)),
-                manufacturer: non_empty(d.manufacturer_string().map(str::to_string)),
-                product: non_empty(d.product_string().map(str::to_string)),
-                location: Some(location),
-            }
-        })
-        .collect())
+    let devices: Vec<nusb::DeviceInfo> = nusb::list_devices().wait()?.collect();
+    let usb_id = |d: &nusb::DeviceInfo| UsbId::new(d.vendor_id(), d.product_id());
+    let mut endpoints: Vec<Endpoint> = devices
+        .iter()
+        .filter(|d| is_bulk_screen(usb_id(d)))
+        .map(bulk_endpoint)
+        .collect();
+    let desktop_mode: Vec<UsbId> = devices
+        .iter()
+        .map(usb_id)
+        .filter(|id| catalog::is_desktop_mode(*id))
+        .collect();
+    if !desktop_mode.is_empty() {
+        endpoints.extend(desktop_mode_endpoints(&desktop_mode));
+    }
+    Ok(endpoints)
+}
+
+fn bulk_endpoint(d: &nusb::DeviceInfo) -> Endpoint {
+    let location = UsbLocation {
+        bus: d.bus_id().to_string(),
+        ports: d.port_chain().to_vec(),
+    };
+    Endpoint {
+        address: DeviceAddress(format!("{}{location}", crate::usb::ADDRESS_PREFIX)),
+        transport: Transport::UsbBulk,
+        usb: UsbId::new(d.vendor_id(), d.product_id()),
+        serial_number: non_empty(d.serial_number().map(str::to_string)),
+        manufacturer: non_empty(d.manufacturer_string().map(str::to_string)),
+        product: non_empty(d.product_string().map(str::to_string)),
+        location: Some(location),
+    }
+}
+
+/// The HID interfaces of the panels in desktop mode the USB list showed
+/// (`seen`). A panel without one is only logged: without HID there is no
+/// way back to monitor mode from here.
+fn desktop_mode_endpoints(seen: &[UsbId]) -> Vec<Endpoint> {
+    let found = match crate::hid_desktop::endpoints() {
+        Ok(found) => found,
+        Err(e) => {
+            tracing::warn!("HID enumeration failed, panels in desktop mode not listed: {e}");
+            return Vec::new();
+        }
+    };
+    for id in unreached(seen, &found) {
+        tracing::warn!("{id} is a panel in desktop mode without a HID interface Bezel can reach");
+    }
+    found
+}
+
+/// The ids in `seen` no endpoint of `found` has.
+fn unreached(seen: &[UsbId], found: &[Endpoint]) -> Vec<UsbId> {
+    let mut missing: Vec<UsbId> = seen
+        .iter()
+        .copied()
+        .filter(|id| !found.iter().any(|e| e.usb == *id))
+        .collect();
+    missing.sort();
+    missing.dedup();
+    missing
 }
 
 #[cfg(test)]
@@ -150,10 +194,32 @@ mod tests {
     }
 
     #[test]
+    fn desktop_mode_panels_without_hid_are_reported() {
+        let hid = |pid| Endpoint {
+            address: DeviceAddress(format!("hid:/dev/hidraw{pid}")),
+            transport: Transport::Hid,
+            usb: UsbId::new(0x1a86, pid),
+            serial_number: None,
+            manufacturer: None,
+            product: None,
+            location: None,
+        };
+        let ad10 = UsbId::new(0x1a86, 0xad10);
+        let ad11 = UsbId::new(0x1a86, 0xad11);
+        assert_eq!(unreached(&[ad10, ad11, ad10], &[hid(0xad11)]), vec![ad10]);
+        assert!(unreached(&[ad11], &[hid(0xad11), hid(0xad11)]).is_empty());
+        assert!(unreached(&[], &[]).is_empty());
+    }
+
+    #[test]
     fn only_bulk_families_are_scanned_over_usb() {
         assert!(is_bulk_screen(UsbId::new(0x1cbe, 0x0088)));
         assert!(is_bulk_screen(UsbId::new(0x43a8, 0x0e5e)));
         assert!(!is_bulk_screen(UsbId::new(0x0525, 0xa4a7)));
         assert!(!is_bulk_screen(UsbId::new(0x046d, 0x082d)));
+        assert!(
+            !is_bulk_screen(UsbId::new(0x1a86, 0xad11)),
+            "desktop mode is HID"
+        );
     }
 }

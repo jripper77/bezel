@@ -76,6 +76,10 @@ pub enum Transport {
     Serial,
     /// Raw USB bulk endpoints (libusb/WinUSB).
     UsbBulk,
+    /// A USB HID interface (hidraw on Linux, the HID class driver on
+    /// Windows): how a Turing USB panel in desktop mode is reached
+    /// (`docs/reverse-engineering/protocol-turing-usb.md` section 10).
+    Hid,
 }
 
 /// Stable identifier of a catalog model, e.g. `turing-8.8`.

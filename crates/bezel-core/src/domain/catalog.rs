@@ -244,6 +244,51 @@ pub const RULES: &[EndpointRule] = &[
     rule(0x43a8, 0x0e6d, Any, Display, Wch, &[ModelId("wch-4.3")]),
 ];
 
+/// USB ids of a Turing USB panel the vendor app switched into its Windows
+/// "desktop mode" (the product ids its display driver's INF matches,
+/// `docs/reverse-engineering/protocol-turing-usb.md` section 10). Such a
+/// panel is no screen Bezel can draw on: it is only listed, reached through
+/// its HID interface, and offered the switch back to USB monitor mode behind
+/// a confirmation (D-2026-09-30-release-polish-8). Not validated on hardware.
+pub const DESKTOP_MODE_IDS: &[UsbId] = &[
+    UsbId::new(0x1a86, 0xad10),
+    UsbId::new(0x1a86, 0xad11),
+    UsbId::new(0x1a86, 0xad12),
+    UsbId::new(0x1a86, 0xad13),
+];
+
+/// The models that can enter desktop mode, with the byte each answers to the
+/// HID model query (the low byte of its Turing USB product id). The vendor
+/// app takes a panel that does not answer for an 8.8", so the 8.8" comes
+/// first; Bezel never assumes it.
+pub const DESKTOP_MODE_MODELS: &[(u8, ModelId)] = &[
+    (0x88, ModelId("turing-usb-8.8")),
+    (0x80, ModelId("turing-usb-8")),
+    (0x50, ModelId("turing-usb-5.2")),
+];
+
+/// True for the USB id of a Turing USB panel in desktop mode.
+pub fn is_desktop_mode(usb: UsbId) -> bool {
+    DESKTOP_MODE_IDS.contains(&usb)
+}
+
+/// The catalog models a panel in desktop mode may be, before it says which.
+pub fn desktop_mode_candidates() -> Vec<&'static DeviceModel> {
+    DESKTOP_MODE_MODELS
+        .iter()
+        .filter_map(|(_, id)| model_by_id(*id))
+        .collect()
+}
+
+/// The model a panel in desktop mode names in its answer to the model query;
+/// `None` for a byte the catalog does not know.
+pub fn desktop_mode_model(model_byte: u8) -> Option<&'static DeviceModel> {
+    DESKTOP_MODE_MODELS
+        .iter()
+        .find(|(byte, _)| *byte == model_byte)
+        .and_then(|(_, id)| model_by_id(*id))
+}
+
 /// Looks a model up by id.
 pub fn model_by_id(id: ModelId) -> Option<&'static DeviceModel> {
     MODELS.iter().find(|m| m.id == id)
@@ -256,7 +301,8 @@ pub fn classify(usb: UsbId, serial: Option<&str>) -> Option<&'static EndpointRul
         .find(|r| r.usb == usb && r.serial.accepts(serial))
 }
 
-/// Every USB id the catalog recognises (used for udev rules and USB scans).
+/// Every USB id of a screen the catalog recognises (the udev rule also
+/// grants the [`DESKTOP_MODE_IDS`], which are not screens).
 pub fn known_usb_ids() -> Vec<UsbId> {
     let mut ids: Vec<UsbId> = RULES.iter().map(|r| r.usb).collect();
     ids.sort();
@@ -328,6 +374,36 @@ mod tests {
             Family::TuringRevA
         );
         assert_eq!(classify(id, None).unwrap().family, Family::TuringRevA);
+    }
+
+    #[test]
+    fn desktop_mode_ids_are_no_screens_and_name_three_models() {
+        for id in DESKTOP_MODE_IDS {
+            assert!(is_desktop_mode(*id));
+            assert!(classify(*id, None).is_none(), "{id} is not a screen");
+            assert!(!known_usb_ids().contains(id));
+        }
+        assert_eq!(DESKTOP_MODE_IDS[0].to_string(), "1a86:ad10");
+        assert_eq!(DESKTOP_MODE_IDS[3].to_string(), "1a86:ad13");
+        assert!(!is_desktop_mode(UsbId::new(0x1a86, 0xad14)));
+        assert!(!is_desktop_mode(UsbId::new(0x1cbe, 0x0088)));
+
+        let names: Vec<&str> = desktop_mode_candidates().iter().map(|m| m.id.0).collect();
+        assert_eq!(names, ["turing-usb-8.8", "turing-usb-8", "turing-usb-5.2"]);
+        for (byte, id) in DESKTOP_MODE_MODELS {
+            let model = desktop_mode_model(*byte).unwrap();
+            assert_eq!(model.id, *id);
+            assert_eq!(model.family, Family::TuringUsb);
+            assert!(!model.hardware_validated);
+            // The model byte is the low byte of the model's Turing USB PID.
+            let rule = RULES.iter().find(|r| r.models == [*id]).unwrap();
+            assert_eq!(rule.usb.pid & 0xff, u16::from(*byte), "{id}");
+        }
+        assert!(desktop_mode_model(0x00).is_none());
+        assert!(
+            desktop_mode_model(0x92).is_none(),
+            "the 9.2\" has no desktop mode"
+        );
     }
 
     #[test]

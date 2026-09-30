@@ -15,6 +15,11 @@ tracing = { workspace = true }
 # how a rev C screen's MCU and SoC are grouped into one screen (D-2026-09-30-foundation-3).
 serialport = { version = "4.10.1", features = ["usbportinfo-location"] }
 nusb = "0.2.7"
+# A Turing USB panel in desktop mode is reached through its HID interface
+# (D-2026-09-30-release-polish-8): nusb cannot claim an interface the HID
+# class driver owns on Windows. The native backends are Rust (hidraw through
+# basic-udev on Linux, windows-sys on Windows), so no C library is built.
+hidapi = { version = "2.6.7", default-features = false, features = ["linux-native-basic-udev", "windows-native"] }
 # Raw-USB families encrypt their command headers (D-2026-09-30-device-protocols-4):
 # DES-CBC for Turing USB, DES-ECB for WCH. Padding is written by hand, so the
 # `block-padding` feature stays off.

@@ -3,9 +3,14 @@
 //! A screen can expose more than one endpoint: rev C Turing screens show a
 //! wake-only micro-controller and, once awake, a Linux/Android SoC gadget,
 //! both behind the same internal USB hub. They are grouped by that hub.
+//!
+//! A Turing USB panel in the vendor's desktop mode is no screen: it is
+//! listed apart ([`DesktopModePanel`]) with its HID interface.
 
 use super::catalog::{self, EndpointRole};
 use super::device::{DeviceModel, Family, ModelId, Transport, UsbId};
+use super::screen::Confirm;
+use crate::BezelError;
 use std::fmt;
 
 /// Opaque address of an endpoint: a serial port name (`/dev/ttyACM1`, `COM5`)
@@ -122,7 +127,8 @@ struct Classified {
     models: &'static [ModelId],
 }
 
-/// Groups endpoints into screens. Unknown endpoints are ignored.
+/// Groups endpoints into screens. Unknown endpoints and HID interfaces are
+/// ignored.
 ///
 /// Wake endpoints join the display endpoint of the same family that shares
 /// their parent hub; without location data, a lone wake endpoint joins a lone
@@ -142,7 +148,12 @@ pub fn group_screens(endpoints: Vec<Endpoint>) -> Vec<Screen> {
     screens
 }
 
+/// A screen endpoint; HID interfaces never are (only desktop-mode panels
+/// are reached through HID, see [`desktop_mode_panels`]).
 fn classify(endpoint: Endpoint) -> Option<Classified> {
+    if endpoint.transport == Transport::Hid {
+        return None;
+    }
     let rule = catalog::classify(endpoint.usb, endpoint.serial_number.as_deref())?;
     Some(Classified {
         endpoint,
@@ -213,6 +224,108 @@ fn partner_index(screens: &[Screen], wake: &Classified) -> Option<usize> {
     match free.as_slice() {
         [only] => Some(*only),
         _ => None,
+    }
+}
+
+/// A Turing USB panel the vendor app switched into its Windows "desktop
+/// mode" (`docs/reverse-engineering/protocol-turing-usb.md` section 10): it
+/// enumerates as 1a86:ad10-ad13 and is reached only through its HID
+/// interface. Bezel cannot draw on it; it lists it and, behind a
+/// confirmation, switches it back to USB monitor mode.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopModePanel {
+    /// The HID interface.
+    pub hid: Endpoint,
+    /// The models it may be; the panel names one only when asked (the model
+    /// query is sent only as part of a confirmed switch).
+    pub candidates: Vec<&'static DeviceModel>,
+}
+
+impl DesktopModePanel {
+    /// Desktop mode has not been validated on real hardware by the project:
+    /// every surface labels it "not validated on hardware"
+    /// (D-2026-09-30-release-polish-8).
+    pub const HARDWARE_VALIDATED: bool = false;
+
+    /// The family the panel belongs to once back in USB monitor mode.
+    pub const FAMILY: Family = Family::TuringUsb;
+
+    /// The HID interface's address, which picks the panel.
+    pub fn address(&self) -> &DeviceAddress {
+        &self.hid.address
+    }
+}
+
+/// The panels in desktop mode among `endpoints`: HID interfaces with one of
+/// the [`catalog::DESKTOP_MODE_IDS`], sorted by address.
+pub fn desktop_mode_panels(endpoints: &[Endpoint]) -> Vec<DesktopModePanel> {
+    let mut panels: Vec<DesktopModePanel> = endpoints
+        .iter()
+        .filter(|e| e.transport == Transport::Hid && catalog::is_desktop_mode(e.usb))
+        .map(|e| DesktopModePanel {
+            hid: e.clone(),
+            candidates: catalog::desktop_mode_candidates(),
+        })
+        .collect();
+    panels.sort_by(|a, b| a.address().cmp(b.address()));
+    panels
+}
+
+/// Everything one enumeration found.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Discovery {
+    /// The screens, as [`group_screens`] assembles them.
+    pub screens: Vec<Screen>,
+    /// The panels in desktop mode.
+    pub desktop_mode: Vec<DesktopModePanel>,
+}
+
+/// Sorts `endpoints` into screens and panels in desktop mode; unknown
+/// endpoints are ignored.
+pub fn group_devices(endpoints: Vec<Endpoint>) -> Discovery {
+    let desktop_mode = desktop_mode_panels(&endpoints);
+    Discovery {
+        screens: group_screens(endpoints),
+        desktop_mode,
+    }
+}
+
+/// What switching a panel in desktop mode back to USB monitor mode is called
+/// in confirmations and errors.
+pub const MONITOR_MODE_SWITCH: &str =
+    "switching a panel in desktop mode back to USB monitor mode (not validated on hardware)";
+
+/// Proof that the user confirmed switching a panel in desktop mode back to
+/// USB monitor mode. Only [`MonitorModeConfirmed::require`] makes one, and
+/// only from [`Confirm::Yes`]; the HID port's switch takes it.
+#[derive(Debug)]
+pub struct MonitorModeConfirmed {
+    _proof: (),
+}
+
+impl MonitorModeConfirmed {
+    /// The proof, or `NotConfirmed` for [`Confirm::No`].
+    pub fn require(confirm: Confirm) -> crate::Result<Self> {
+        match confirm {
+            Confirm::Yes => Ok(Self { _proof: () }),
+            Confirm::No => Err(BezelError::NotConfirmed(MONITOR_MODE_SWITCH.to_string())),
+        }
+    }
+}
+
+/// What a confirmed switch back to USB monitor mode did.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MonitorModeSwitch {
+    /// The panel that was switched.
+    pub panel: DesktopModePanel,
+    /// Its answer to the model query; `None` when it did not answer in time.
+    pub model_byte: Option<u8>,
+}
+
+impl MonitorModeSwitch {
+    /// The catalog model the panel named, when it named a known one.
+    pub fn model(&self) -> Option<&'static DeviceModel> {
+        self.model_byte.and_then(catalog::desktop_mode_model)
     }
 }
 
@@ -312,6 +425,69 @@ mod tests {
         let ids: Vec<_> = screens[0].candidates.iter().map(|m| m.id).collect();
         assert_eq!(ids, vec![ModelId("turing-2.1"), ModelId("turing-2.8")]);
         assert!(screens[0].model().is_none());
+    }
+
+    fn hid(addr: &str, pid: u16) -> Endpoint {
+        Endpoint {
+            transport: Transport::Hid,
+            ..ep(addr, 0x1a86, pid, None, None)
+        }
+    }
+
+    #[test]
+    fn desktop_mode_panels_are_listed_apart_from_screens() {
+        let found = group_devices(vec![
+            hid("hid:/dev/hidraw9", 0xad13),
+            ep("/dev/ttyACM1", 0x0525, 0xa4a7, None, Some(("3", &[1, 2]))),
+            hid("hid:/dev/hidraw3", 0xad11),
+            // Same USB id, but not a HID interface: not a panel Bezel can reach.
+            ep("/dev/ttyACM7", 0x1a86, 0xad11, None, None),
+            // A HID interface with a screen's id: neither a screen nor a panel.
+            hid("hid:/dev/hidraw0", 0x5722),
+        ]);
+        assert_eq!(found.screens.len(), 1);
+        assert_eq!(found.screens[0].family, Family::TuringRevC);
+        let addresses: Vec<&str> = found
+            .desktop_mode
+            .iter()
+            .map(|p| p.address().0.as_str())
+            .collect();
+        assert_eq!(addresses, ["hid:/dev/hidraw3", "hid:/dev/hidraw9"]);
+        let panel = &found.desktop_mode[0];
+        assert_eq!(panel.hid.usb, UsbId::new(0x1a86, 0xad11));
+        let ids: Vec<_> = panel.candidates.iter().map(|m| m.id.0).collect();
+        assert_eq!(ids, ["turing-usb-8.8", "turing-usb-8", "turing-usb-5.2"]);
+        const { assert!(!DesktopModePanel::HARDWARE_VALIDATED) };
+        assert!(
+            panel
+                .candidates
+                .iter()
+                .all(|m| m.family == DesktopModePanel::FAMILY)
+        );
+        assert!(group_screens(vec![hid("hid:/dev/hidraw3", 0xad11)]).is_empty());
+        assert_eq!(group_devices(Vec::new()), Discovery::default());
+    }
+
+    #[test]
+    fn the_switch_back_needs_confirmation_and_names_the_model() {
+        let err = MonitorModeConfirmed::require(Confirm::No).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "switching a panel in desktop mode back to USB monitor mode \
+             (not validated on hardware) needs confirmation"
+        );
+        assert!(MonitorModeConfirmed::require(Confirm::Yes).is_ok());
+
+        let panel = desktop_mode_panels(&[hid("hid:/dev/hidraw3", 0xad11)]).remove(0);
+        let mut switch = MonitorModeSwitch {
+            panel,
+            model_byte: Some(0x80),
+        };
+        assert_eq!(switch.model().map(|m| m.id.0), Some("turing-usb-8"));
+        switch.model_byte = Some(0x42);
+        assert!(switch.model().is_none());
+        switch.model_byte = None;
+        assert!(switch.model().is_none());
     }
 
     #[test]

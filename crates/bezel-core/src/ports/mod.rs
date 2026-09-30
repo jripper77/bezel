@@ -2,7 +2,7 @@
 
 use crate::Result;
 use crate::domain::clock::{Language, LocalTime};
-use crate::domain::discovery::{Endpoint, Screen};
+use crate::domain::discovery::{DesktopModePanel, Endpoint, MonitorModeConfirmed, Screen};
 use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
 use crate::domain::history::Histories;
@@ -23,6 +23,32 @@ pub trait DeviceBus {
     /// Every candidate endpoint currently connected. Adapters may pre-filter to
     /// the catalog's USB ids; unknown endpoints are ignored by the core anyway.
     fn endpoints(&self) -> Result<Vec<Endpoint>>;
+}
+
+/// Driven port: the HID interface of a Turing USB panel in desktop mode
+/// (`docs/reverse-engineering/protocol-turing-usb.md` section 10: 64-byte
+/// reports, report id 0). Nothing reaches it implicitly: both methods take
+/// the proof of a confirmed switch, which only `app::leave_desktop_mode`
+/// obtains from `Confirm::Yes` (D-2026-09-30-release-polish-8). Adapters
+/// refuse an address that no longer leads to a panel in desktop mode. Not
+/// validated on hardware.
+pub trait DesktopModeHid {
+    /// Sends the model query and waits up to 1 s for one report: the model
+    /// byte it carries, or `None` when the panel does not answer (the vendor
+    /// app then assumes an 8.8"; Bezel does not).
+    fn query_model(
+        &self,
+        panel: &DesktopModePanel,
+        confirmed: &MonitorModeConfirmed,
+    ) -> Result<Option<u8>>;
+
+    /// Sends the two back-to-monitor-mode reports. The panel answers
+    /// nothing; it re-enumerates as its Turing USB self.
+    fn back_to_monitor(
+        &self,
+        panel: &DesktopModePanel,
+        confirmed: MonitorModeConfirmed,
+    ) -> Result<()>;
 }
 
 /// Driven port: opens a discovered screen (waking it when needed) and

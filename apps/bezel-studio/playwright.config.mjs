@@ -1,6 +1,8 @@
 // The studio UI in demo mode (no `window.__TAURI__`, served from localhost),
-// served as the static files Tauri embeds, in light and dark themes. Every
-// run starts its own server so a leftover one cannot serve another checkout.
+// served as the static files Tauri embeds, in light and dark themes and in
+// pt-BR and en: the system's language picks the UI's, and every spec looks
+// for texts through the studio's own translations. Every run starts its own
+// server so a leftover one cannot serve another checkout.
 import { defineConfig } from '@playwright/test';
 
 const PORT = 1430;
@@ -15,13 +17,14 @@ export default defineConfig({
     browserName: 'chromium',
     baseURL: `http://localhost:${PORT}`,
     viewport: { width: 1280, height: 800 },
-    locale: 'pt-BR',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'light', use: { colorScheme: 'light' } },
-    { name: 'dark', use: { colorScheme: 'dark' } },
+    { name: 'light-pt', use: { colorScheme: 'light', locale: 'pt-BR' } },
+    { name: 'dark-pt', use: { colorScheme: 'dark', locale: 'pt-BR' } },
+    { name: 'light-en', use: { colorScheme: 'light', locale: 'en-US' } },
+    { name: 'dark-en', use: { colorScheme: 'dark', locale: 'en-US' } },
   ],
   webServer: {
     command: `python3 -m http.server ${PORT} --directory src`,

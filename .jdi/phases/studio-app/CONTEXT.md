@@ -27,7 +27,7 @@ App Tauri de janela única: dispositivos, preview ao vivo, editor drag-and-drop 
       **Verify:** `cd apps/bezel-studio && npx playwright test -g "keyboard move and undo" --reporter=line 2>&1 | grep -qE '[0-9]+ passed' && echo OK`
       **Source:** CONTEXT
 - [ ] Editor store commands (add, move, resize, snap, reorder, undo, redo) are covered ≥ 80%
-      **Verify:** `cd apps/bezel-studio && npm run test:unit 2>&1 | grep -E 'editor/store.js' | awk -F'|' '{ exit ($2+0 >= 80) ? 0 : 1 }' && echo OK`
+      **Verify:** `cd apps/bezel-studio && npm run test:unit >/dev/null 2>&1 && awk '/^SF:.*src\/editor\/store\.js$/{f=1} f&&/^LF:/{lf=substr($0,4)} f&&/^LH:/{lh=substr($0,4)} f&&/^end_of_record/{exit} END{exit !(lf>0 && lh/lf>=0.8)}' coverage/lcov.info && echo OK`
       **Source:** CONTEXT
 - [ ] `render_preview` returns an RGBA frame of the canvas size
       **Verify:** `cargo test -p bezel-studio --locked -- --exact commands::tests::render_preview_returns_the_canvas_size 2>&1 | grep -q '1 passed' && echo OK`

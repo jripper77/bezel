@@ -8,3 +8,4 @@ pub mod frame;
 pub mod geometry;
 pub mod pattern;
 pub mod screen;
+pub mod sensor;

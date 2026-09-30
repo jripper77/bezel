@@ -5,6 +5,7 @@ use crate::domain::discovery::{Endpoint, Screen};
 use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
 use crate::domain::screen::{Brightness, ScreenIdentity};
+use crate::domain::sensor::{SensorInfo, Snapshot};
 
 /// Driven port: enumerates the USB endpoints the host can see, without
 /// opening or writing to any of them.
@@ -37,4 +38,13 @@ pub trait ScreenLink: Send {
     fn screen_off(&mut self) -> Result<()>;
     /// Hands the screen back to its standalone mode (clock, stored media).
     fn release(&mut self) -> Result<()>;
+}
+
+/// Driven port: measures the machine. Adapters time their own samples (rates
+/// are per second of real elapsed time between two `sample` calls).
+pub trait SensorSource: Send {
+    /// The sensors this machine offers right now.
+    fn catalog(&mut self) -> Result<Vec<SensorInfo>>;
+    /// Current readings of every sensor in the catalog.
+    fn sample(&mut self) -> Result<Snapshot>;
 }

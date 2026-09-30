@@ -38,6 +38,20 @@ the Conventional Commits.
 - Bundled "Midnight" themes for the 8.8" (horizontal and vertical), 5", 3.5"
   (both ways) and 2.1"/2.8" round screens, with the Inter and JetBrains Mono
   fonts (SIL Open Font License 1.1); a theme can be named instead of a path.
+- `bezel storage info|ls|put|rm|play|stop|boot`: the screen's internal flash
+  and memory card (sizes, `--json`), sending pictures and videos with a
+  progress bar and Ctrl+C to cancel, device-side playback and the boot media.
+  Deleting, replacing and changing the boot media print what they will do and
+  need `--yes`; without it nothing reaches the screen.
+- `bezel storage put` converts a video to the panel's format with an external
+  ffmpeg (`--ffmpeg PATH`, else `PATH`): turned for `--orientation`, cropped to
+  the panel's shape instead of stretched, optional `--fps`; without ffmpeg,
+  clips already in the format still go and the install command is shown. A
+  full screen lists what could be deleted and deletes nothing.
+- `bezel run` with a video-background theme has the screen loop the stored
+  video under the theme, shows the poster with the `bezel storage put` command
+  when the video is missing, and decodes it on the computer for screens that
+  cannot play videos (`--ffmpeg PATH`).
 
 ### Fixed
 - A rev C screen that another app just turned off (turing-smart-screen-python

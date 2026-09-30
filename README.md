@@ -7,7 +7,8 @@ rebrands — on Linux and Windows, from one app.
 > Status: early development. Every protocol family is implemented and the Turing
 > 8.8" is validated on real hardware; sensors are measured on Linux and Windows;
 > the renderer and headless themes (`bezel run`) work; the theme editor is
-> landing, then SD-card/video support.
+> landing; screen storage and video backgrounds (`bezel storage`) are being
+> validated on the 8.8".
 
 ## Quick start
 
@@ -74,6 +75,50 @@ panel). Without the studio:
 
 Stop any other program that drives the screen first (a turing-smart-screen-python
 service, the vendor app): `bezel` refuses a port another process holds.
+
+## Screen storage and video
+
+Screens with storage (Turing rev C, the Turing USB generation) keep pictures and
+videos in four folders — `internal/image`, `internal/video`, `sd/image` and
+`sd/video` (`sd` is the memory card, reached only through the screen; Bezel never
+formats it) — and play them on their own.
+
+```bash
+bezel storage info                        # flash and card: used and free (--json)
+bezel storage ls                          # every stored file; or one folder: bezel storage ls sd/video
+bezel storage put clip.mp4                # converted for the panel when needed, with progress
+bezel storage put logo.png sd/image/logo.png
+bezel storage play internal/video/clip.mp4   # the screen loops it itself (--once: plays it once)
+bezel storage stop
+bezel storage rm internal/video/clip.mp4 --yes
+bezel storage boot internal/video/clip.mp4 --brightness 60 --yes   # shown after power-up
+bezel storage boot default --yes          # back to the built-in start screen
+```
+
+- **Confirmation.** Whatever deletes, replaces or persists (`rm`, `put` over a
+  stored file, `boot`) first prints what it is about to do, and needs `--yes`;
+  without it nothing is sent to the screen and the exit code is 1.
+- **Sending.** Pictures (JPEG, PNG, BMP, GIF) go as they are. A video is converted
+  with ffmpeg to the panel's native format (480x1920 H.264 MP4 without audio on
+  the 8.8"): turned for `--orientation` (default: the clip's own shape), cropped
+  to the panel's shape (never stretched), `--fps 24` optional. A clip already in
+  that format goes as it is. ffmpeg is not bundled: `--ffmpeg PATH`, else the one
+  on `PATH`; without it only clips already in the format go, and `put` says how
+  to install it. File names are lower-case `a-z 0-9 _ . -`, files up to 120 MB.
+- **Progress and Ctrl+C.** `put` draws its progress (convert, upload, verify) on
+  stderr; Ctrl+C cancels it and says how to delete what was left
+  (`bezel storage rm ... --yes`); a second Ctrl+C quits at once.
+- **Full screen.** Nothing is ever deleted for you: the refusal lists the stored
+  files, largest first, to choose from.
+- **Boot media.** Rev C screens store the boot choice together with the
+  brightness they boot with: `--brightness`, else the vendor default (about 67%).
+  On the Turing USB generation Bezel cannot yet delete files, play a video once
+  or change the boot media; `bezel` says so.
+- **Themes with a video background.** `bezel run` has the screen loop the video
+  and draws the theme over it. When the screen does not store the video yet, the
+  poster shows and `bezel run` prints the exact `bezel storage put` command;
+  screens that cannot play videos get them decoded on this computer (ffmpeg,
+  `bezel run --ffmpeg PATH`).
 
 ## Supported screens
 

@@ -9,15 +9,42 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use bezel_cli::theme::{bundled_candidates, data_home, first_dir, font_dirs, resolve};
 use bezel_cli::{
-    Cli, Command, Rendering, SensorsArgs, SleepPace, WatchStyle, clock, run, run_sensors,
-    run_theme_command,
+    Cli, Command, ProgressStyle, Rendering, SensorsArgs, SleepPace, StorageArgs, StorageKit,
+    WatchStyle, clock, run, run_sensors, run_storage_command, run_theme_command,
 };
+use bezel_core::domain::job::CancelToken;
+use bezel_core::domain::storage::RemotePath;
 use bezel_core::ports::SensorSource;
+use bezel_devices::fake::FakeStorage;
 use bezel_devices::{FakeBus, FakeConnector, SystemBus, SystemConnector};
+use bezel_media::FfmpegTranscoder;
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
 use clap::Parser;
+
+/// Files on the simulated 8.8" of `--fake` (fresh in every process), so
+/// that `bezel --fake storage ls` has something to show.
+const DEMO_FILES: &[(&str, usize)] = &[
+    ("internal/image/bezel_demo.png", 48 * 1024),
+    ("internal/video/bezel_demo.mp4", 2_400 * 1024),
+    ("sd/video/bezel_loop.mp4", 750 * 1024),
+];
+
+/// Usable space of the simulated memory card: 8 GiB.
+const DEMO_CARD_BYTES: u64 = 8 << 30;
+
+/// The simulated screen of `--fake`: a Turing 8.8" with a few demo files
+/// and a memory card.
+fn fake_connector() -> FakeConnector {
+    let mut storage = FakeStorage::default().with_card(DEMO_CARD_BYTES);
+    for (path, bytes) in DEMO_FILES {
+        if let Ok(path) = RemotePath::parse(path) {
+            storage = storage.with_file(path, vec![0x5a; *bytes]);
+        }
+    }
+    FakeConnector::with_storage(storage)
+}
 
 fn sensor_source(fake: bool) -> Box<dyn SensorSource> {
     if fake {
@@ -77,6 +104,7 @@ fn themes(cli: &Cli) -> anyhow::Result<String> {
     }
     let mut pace = SleepPace::new(stop);
     let mut log = std::io::stderr();
+    let mut media = FfmpegTranscoder::new(cli.command.ffmpeg().map(Path::to_path_buf));
     let mut kit = Rendering {
         store: &FsThemeStore,
         renderer: &mut renderer,
@@ -86,14 +114,17 @@ fn themes(cli: &Cli) -> anyhow::Result<String> {
         bundled: bundled.as_deref(),
     };
     let result = if cli.fake {
-        let (bus, connector) = (FakeBus::turing_88(), FakeConnector::default());
-        run_theme_command(cli, &bus, &connector, &mut kit, &mut pace, &mut log)
+        let (bus, connector) = (FakeBus::turing_88(), fake_connector());
+        run_theme_command(
+            cli, &bus, &connector, &mut kit, &mut media, &mut pace, &mut log,
+        )
     } else {
         run_theme_command(
             cli,
             &SystemBus,
             &SystemConnector,
             &mut kit,
+            &mut media,
             &mut pace,
             &mut log,
         )
@@ -104,12 +135,47 @@ fn themes(cli: &Cli) -> anyhow::Result<String> {
     result
 }
 
+/// `bezel storage`. Ctrl+C during an upload cancels it through the job's
+/// token (the upload stops at its next block and says what is left); a
+/// second Ctrl+C quits at once.
+fn storage(args: &StorageArgs, fake: bool) -> anyhow::Result<String> {
+    let mut media = FfmpegTranscoder::new(args.ffmpeg().map(Path::to_path_buf));
+    let cancel = CancelToken::new();
+    if args.cancellable() {
+        let token = cancel.clone();
+        ctrlc::set_handler(move || {
+            if token.is_cancelled() {
+                std::process::exit(130);
+            }
+            token.cancel();
+            eprintln!("\nbezel: cancelling the upload... (Ctrl+C again quits at once)");
+        })?;
+    }
+    let mut log = std::io::stderr();
+    let progress = if log.is_terminal() {
+        ProgressStyle::Bar
+    } else {
+        ProgressStyle::Lines
+    };
+    let mut kit = StorageKit {
+        media: &mut media,
+        cancel: &cancel,
+        progress,
+        log: &mut log,
+    };
+    if fake {
+        run_storage_command(args, &FakeBus::turing_88(), &fake_connector(), &mut kit)
+    } else {
+        run_storage_command(args, &SystemBus, &SystemConnector, &mut kit)
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     if cli.verbose {
         tracing_subscriber::fmt()
             .with_env_filter(
-                "bezel=debug,bezel_devices=debug,bezel_core=debug,bezel_sensors=debug,bezel_render=debug,bezel_themes=debug",
+                "bezel=debug,bezel_cli=debug,bezel_devices=debug,bezel_core=debug,bezel_sensors=debug,bezel_render=debug,bezel_themes=debug,bezel_media=debug",
             )
             .with_writer(std::io::stderr)
             .init();
@@ -117,10 +183,11 @@ fn main() -> ExitCode {
     let result = match &cli.command {
         Command::Sensors(args) => sensors(args, cli.fake),
         Command::Render { .. } | Command::Run { .. } | Command::Import { .. } => themes(&cli),
+        Command::Storage(args) => storage(args, cli.fake),
         _ if cli.fake => run(
             &cli,
             &FakeBus::turing_88(),
-            &FakeConnector::default(),
+            &fake_connector(),
             &mut SkiaRenderer::new(),
         ),
         _ => run(&cli, &SystemBus, &SystemConnector, &mut SkiaRenderer::new()),

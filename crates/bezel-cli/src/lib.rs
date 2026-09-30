@@ -1,6 +1,6 @@
 //! Command-line driving adapter of Bezel. `main.rs` is the composition root;
 //! everything here is testable against any [`DeviceBus`], [`ScreenConnector`],
-//! [`SensorSource`], [`FrameRenderer`] and [`ThemeStore`].
+//! [`SensorSource`], [`FrameRenderer`], [`ThemeStore`] and [`MediaTranscoder`].
 #![forbid(unsafe_code)]
 
 pub mod clock;
@@ -8,6 +8,7 @@ mod devices;
 pub mod live;
 mod screen;
 mod sensors;
+pub mod storage;
 pub mod theme;
 
 use std::io::Write;
@@ -17,11 +18,14 @@ use std::time::Duration;
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::theme::Fit;
-use bezel_core::ports::{DeviceBus, FrameRenderer, ScreenConnector, SensorSource, ThemeStore};
+use bezel_core::ports::{
+    DeviceBus, FrameRenderer, MediaTranscoder, ScreenConnector, SensorSource, ThemeStore,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 
 pub use live::{Pace, RunRequest, SleepPace};
 pub use sensors::{WatchStyle, run as run_sensors};
+pub use storage::{ProgressStyle, StorageArgs, StorageKit, run as run_storage_command};
 
 /// Product version: the one CI or `scripts/install-local.sh` stamped, else the crate's.
 pub const VERSION: &str = match option_env!("BEZEL_VERSION") {
@@ -93,6 +97,29 @@ impl From<FitArg> for Fit {
             FitArg::Contain => Fit::Contain,
             FitArg::Fill => Fit::Fill,
             FitArg::None => Fit::None,
+        }
+    }
+}
+
+impl From<Orientation> for OrientationArg {
+    fn from(o: Orientation) -> Self {
+        match o {
+            Orientation::Portrait => OrientationArg::Portrait,
+            Orientation::ReversePortrait => OrientationArg::ReversePortrait,
+            Orientation::Landscape => OrientationArg::Landscape,
+            Orientation::ReverseLandscape => OrientationArg::ReverseLandscape,
+        }
+    }
+}
+
+impl OrientationArg {
+    /// The name the help and the hints use (`vertical`, `horizontal-flipped`, ...).
+    pub const fn cli_name(self) -> &'static str {
+        match self {
+            OrientationArg::Portrait => "vertical",
+            OrientationArg::ReversePortrait => "vertical-flipped",
+            OrientationArg::Landscape => "horizontal",
+            OrientationArg::ReverseLandscape => "horizontal-flipped",
         }
     }
 }
@@ -215,6 +242,11 @@ pub enum Command {
         /// Stop after N frames.
         #[arg(long, value_name = "N", hide = true)]
         frames: Option<u64>,
+        /// The ffmpeg program (or its folder) that decodes a video background
+        /// for screens that cannot play it themselves; default: ffmpeg on the
+        /// PATH.
+        #[arg(long, value_name = "PATH")]
+        ffmpeg: Option<PathBuf>,
     },
     /// Convert another app's theme (.turtheme, theme.yaml or a
     /// turing-smart-screen-python theme folder) into a native Bezel theme.
@@ -225,6 +257,9 @@ pub enum Command {
         #[arg(long, short = 'o', value_name = "DEST")]
         output: PathBuf,
     },
+    /// The files a screen stores (internal flash and memory card): list,
+    /// send, delete, play, and what it shows on its own after power-up.
+    Storage(StorageArgs),
 }
 
 impl Command {
@@ -232,6 +267,15 @@ impl Command {
     pub fn theme(&self) -> Option<&Path> {
         match self {
             Command::Render { theme, .. } | Command::Run { theme, .. } => Some(theme),
+            _ => None,
+        }
+    }
+
+    /// The ffmpeg a `run` or `storage put` command names with `--ffmpeg`.
+    pub fn ffmpeg(&self) -> Option<&Path> {
+        match self {
+            Command::Run { ffmpeg, .. } => ffmpeg.as_deref(),
+            Command::Storage(args) => args.ffmpeg(),
             _ => None,
         }
     }
@@ -254,12 +298,14 @@ pub struct Rendering<'a> {
 }
 
 /// Runs `render`, `run` or `import` and returns what should be printed on
-/// stdout; `run` reports progress on `log` and waits with `pace`.
+/// stdout; `run` reports progress on `log`, waits with `pace` and decodes a
+/// video background with `media` for screens that cannot play it.
 pub fn run_theme_command<B, C>(
     cli: &Cli,
     bus: &B,
     connector: &C,
     kit: &mut Rendering<'_>,
+    media: &mut dyn MediaTranscoder,
     pace: &mut dyn Pace,
     log: &mut dyn Write,
 ) -> anyhow::Result<String>
@@ -276,6 +322,7 @@ where
             target,
             theme,
             frames,
+            ..
         } => {
             let path = theme::resolve(theme, kit.bundled)?;
             let request = RunRequest {
@@ -283,7 +330,7 @@ where
                 theme: &path,
                 max_frames: *frames,
             };
-            live::run(bus, connector, kit, request, pace, log)
+            live::run(bus, connector, kit, request, media, pace, log)
         }
         Command::Import { source, output } => theme::import(kit.store, source, output),
         _ => anyhow::bail!("not a theme command"),
@@ -342,6 +389,8 @@ where
         Command::Render { .. } | Command::Run { .. } | Command::Import { .. } => {
             anyhow::bail!("theme commands run through run_theme_command")
         }
+        // Need a media transcoder and a cancel token: see `run_storage_command`.
+        Command::Storage(_) => anyhow::bail!("storage commands run through run_storage_command"),
     }
 }
 
@@ -368,6 +417,8 @@ mod tests {
         assert!(listed.starts_with("1. Turing"), "{listed}");
         let err = run_args(&["bezel", "--fake", "sensors"]).unwrap_err();
         assert!(err.to_string().contains("run_sensors"), "{err}");
+        let err = run_args(&["bezel", "--fake", "storage", "info"]).unwrap_err();
+        assert!(err.to_string().contains("run_storage_command"), "{err}");
         assert!(
             run_args(&["bezel", "sensors", "--count", "2"]).is_err(),
             "--count needs --watch"
@@ -420,6 +471,7 @@ mod tests {
             &FakeBus::turing_88(),
             &connector,
             &mut kit,
+            &mut storage::doubles::StubMedia::missing(),
             &mut NoWait,
             &mut Vec::new(),
         )?;
@@ -457,10 +509,12 @@ mod tests {
             "{out}"
         );
         assert!(folder.join("theme.json").is_file());
-        let cli = Cli::try_parse_from(["bezel", "run", "a"]).unwrap();
+        let cli = Cli::try_parse_from(["bezel", "run", "a", "--ffmpeg", "/opt/ffmpeg"]).unwrap();
         assert_eq!(cli.command.theme(), Some(Path::new("a")));
+        assert_eq!(cli.command.ffmpeg(), Some(Path::new("/opt/ffmpeg")));
         let cli = Cli::try_parse_from(["bezel", "import", "a", "-o", "b"]).unwrap();
         assert_eq!(cli.command.theme(), None);
+        assert_eq!(cli.command.ffmpeg(), None);
         let _ = std::fs::remove_dir_all(folder);
         let _ = std::fs::remove_file(png);
     }
@@ -479,6 +533,11 @@ mod tests {
                 unreachable!("parsed as test-pattern")
             };
             assert_eq!(orientation, expected, "{name}");
+            let back = OrientationArg::from(Orientation::from(expected));
+            assert_eq!(back, expected);
+            // The hints name orientations the way the command line reads them.
+            let hinted = OrientationArg::from_str(back.cli_name(), false).unwrap();
+            assert_eq!(hinted, expected, "{name}");
         }
         assert_eq!(Fit::from(FitArg::Contain), Fit::Contain);
         let off = run_args(&["bezel", "--fake", "off"]).unwrap();

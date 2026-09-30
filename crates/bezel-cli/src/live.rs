@@ -1,20 +1,29 @@
 //! `bezel run`: a theme on a screen with live sensors, one frame every
 //! `refresh_seconds`, until Ctrl+C; then the screen goes back to its
 //! standalone mode.
+//!
+//! A video background follows the core's `ThemeRuntime::start_video`
+//! (D-2026-09-30-storage-video-4): a screen that stores the video loops it
+//! under the theme; one that could but does not store it shows the poster
+//! and the command says how to send it (`bezel storage put`); a screen that
+//! cannot play videos gets them decoded on this computer (ffmpeg), at up to
+//! [`HOST_VIDEO_FPS`] pictures per second.
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use bezel_core::app::{ThemeRuntime, open_screen};
-use bezel_core::domain::theme::Theme;
-use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink};
+use bezel_core::app::{HostVideo, MissingVideo, ThemeRuntime, VideoState, open_screen};
+use bezel_core::domain::device::DeviceModel;
+use bezel_core::domain::theme::{AssetRef, Background, Theme};
+use bezel_core::ports::{DeviceBus, MediaLocation, MediaTranscoder, ScreenConnector, ScreenLink};
+use bezel_themes::native::{MANIFEST, safe_asset_path};
 
-use crate::theme::{describe, load, warning_lines};
-use crate::{Rendering, Target};
+use crate::theme::{Loaded, describe, load, warning_lines};
+use crate::{OrientationArg, Rendering, Target};
 
 /// Fastest refresh, seconds.
 pub const MIN_REFRESH: f32 = 0.25;
@@ -114,6 +123,155 @@ where
     Ok(link)
 }
 
+/// Pictures per second of a video background decoded on this computer (for
+/// screens that cannot play videos themselves); a slow link shows fewer.
+pub const HOST_VIDEO_FPS: u32 = 10;
+
+/// The theme's video file on this computer, for host decoding: the file in
+/// a theme folder, or a temporary copy of the asset (zipped and converted
+/// themes), deleted when dropped.
+struct HostSource {
+    location: MediaLocation,
+    temporary: Option<PathBuf>,
+}
+
+impl Drop for HostSource {
+    fn drop(&mut self) {
+        if let Some(file) = &self.temporary {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+}
+
+/// The folder of a theme laid out as files (`theme.json` beside its assets).
+fn theme_folder(theme: &Path) -> Option<PathBuf> {
+    if theme.is_dir() {
+        return Some(theme.to_path_buf());
+    }
+    let manifest = theme.file_name().is_some_and(|n| n == MANIFEST);
+    manifest.then(|| theme.parent().unwrap_or(Path::new(".")).to_path_buf())
+}
+
+/// `asset` as a file of the theme folder, when the theme is one and has it.
+fn asset_file(theme: &Path, asset: &AssetRef) -> Option<PathBuf> {
+    let relative = safe_asset_path(asset).ok()?;
+    let file = theme_folder(theme)?.join(relative);
+    file.is_file().then_some(file)
+}
+
+/// The video to decode on this computer, only for a screen that cannot play
+/// it itself and a theme with a video background.
+fn host_source(theme: &Path, loaded: &Loaded, model: &DeviceModel) -> Option<HostSource> {
+    let Background::Video { asset, .. } = &loaded.theme.background else {
+        return None;
+    };
+    if model.capabilities.video_playback {
+        return None;
+    }
+    if let Some(file) = asset_file(theme, asset) {
+        let location = MediaLocation(file.to_string_lossy().into_owned());
+        return Some(HostSource {
+            location,
+            temporary: None,
+        });
+    }
+    let bytes = loaded.assets.get(asset)?;
+    let name = Path::new(&asset.0).file_name()?.to_string_lossy();
+    let file = std::env::temp_dir().join(format!("bezel-video-{}-{name}", std::process::id()));
+    std::fs::write(&file, bytes).ok()?;
+    Some(HostSource {
+        location: MediaLocation(file.to_string_lossy().into_owned()),
+        temporary: Some(file),
+    })
+}
+
+/// The command that puts a missing theme video on the screen.
+fn put_hint(theme: &Path, runtime: &ThemeRuntime, missing: &MissingVideo) -> String {
+    let orientation = OrientationArg::from(runtime.theme().orientation).cli_name();
+    let put = |file: &str| {
+        format!(
+            "  bezel storage put {file} {} --orientation {orientation}",
+            missing.path
+        )
+    };
+    match asset_file(theme, &missing.asset) {
+        Some(file) => put(&quoted(&file.to_string_lossy())),
+        None => format!(
+            "  bezel import {} -o <FOLDER>   # the theme as a folder, to reach its video\n{}",
+            quoted(&theme.to_string_lossy()),
+            put(&format!("<FOLDER>/{}", missing.asset.0))
+        ),
+    }
+}
+
+/// A path as a shell reads it back.
+fn quoted(text: &str) -> String {
+    if text
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-+:".contains(c))
+    {
+        text.to_string()
+    } else {
+        format!("'{}'", text.replace('\'', r"'\''"))
+    }
+}
+
+/// What `bezel run` says about the video background once it started.
+fn video_line(state: &VideoState, theme: &Path, runtime: &ThemeRuntime) -> Option<String> {
+    let line = match state {
+        VideoState::NoVideo | VideoState::NotStarted => return None,
+        VideoState::OnDevice(path) => format!("the screen plays {path} under the theme"),
+        VideoState::VideoMissing(missing) => format!(
+            "warning: the screen does not store this theme's video yet, so its poster shows. \
+             Send it, then run the theme again:\n{}",
+            put_hint(theme, runtime, missing)
+        ),
+        VideoState::Host => format!(
+            "the video is decoded on this computer, up to {HOST_VIDEO_FPS} pictures per second"
+        ),
+        VideoState::NoConverter { install_hints } => format!(
+            "warning: its poster shows: decoding the video on this computer needs ffmpeg. \
+             Install it with: {} (or pass --ffmpeg PATH)",
+            install_hints.join(" ; ")
+        ),
+        VideoState::NoPlayback => {
+            "warning: its poster shows: the theme's video could not be read on this computer"
+                .to_string()
+        }
+    };
+    Some(line)
+}
+
+/// Starts the theme's video background on the screen (queries and plays
+/// stored files, never uploads) and says how it is shown; on failure the
+/// poster stays.
+fn start_video(
+    runtime: &mut ThemeRuntime,
+    link: &mut dyn ScreenLink,
+    media: &mut dyn MediaTranscoder,
+    source: Option<&HostSource>,
+    theme: &Path,
+    log: &mut dyn Write,
+) {
+    if matches!(runtime.video(), VideoState::NoVideo) {
+        return;
+    }
+    let host = source.map(|s| HostVideo {
+        media,
+        source: s.location.clone(),
+        fps: HOST_VIDEO_FPS,
+    });
+    let line = match runtime.start_video(link, host) {
+        Ok(state) => video_line(&state.clone(), theme, runtime),
+        Err(e) => Some(format!(
+            "warning: cannot start the theme's video ({e}); its poster shows"
+        )),
+    };
+    if let Some(line) = line {
+        let _ = writeln!(log, "{line}");
+    }
+}
+
 /// Shows a frame every `every` until `pace` says stop or `max_frames` were
 /// shown: how many were shown and how it ended.
 fn show_frames(
@@ -138,14 +296,54 @@ fn show_frames(
     (frames, Ok(()))
 }
 
+/// [`show_frames`] for a video decoded on this computer: a frame every
+/// `1 / HOST_VIDEO_FPS`, drawn over the video's picture of that moment, with
+/// the sensors sampled every `every`.
+fn stream_frames(
+    runtime: &mut ThemeRuntime,
+    kit: &mut Rendering<'_>,
+    link: &mut dyn ScreenLink,
+    pace: &mut dyn Pace,
+    (every, max_frames): (Duration, Option<u64>),
+) -> (u64, bezel_core::Result<()>) {
+    let tick = Duration::from_secs(1) / HOST_VIDEO_FPS;
+    let started = Instant::now();
+    let mut next_sample = started;
+    let mut frames = 0u64;
+    while !pace.stopped() {
+        let now = Instant::now();
+        if now >= next_sample {
+            if let Err(e) = runtime.sample(kit.sensors) {
+                return (frames, Err(e));
+            }
+            next_sample = now + every;
+        }
+        let shown = runtime
+            .render(kit.renderer, (kit.clock)(), now - started)
+            .and_then(|frame| link.present(&frame));
+        if let Err(e) = shown {
+            return (frames, Err(e));
+        }
+        frames += 1;
+        if max_frames.is_some_and(|max| frames >= max) {
+            break;
+        }
+        pace.wait((now + tick).saturating_duration_since(Instant::now()));
+    }
+    (frames, Ok(()))
+}
+
 /// `bezel run`: shows the requested theme on the screen until `pace` says
-/// stop (or after `max_frames`), then releases the screen. Progress goes to
-/// `log`; the returned text sums the run up.
+/// stop (or after `max_frames`), then releases the screen. A video
+/// background starts once the screen is open (`media` decodes it for screens
+/// that cannot play it). Progress goes to `log`; the returned text sums the
+/// run up.
 pub fn run<B, C>(
     bus: &B,
     connector: &C,
     kit: &mut Rendering<'_>,
     request: RunRequest<'_>,
+    media: &mut dyn MediaTranscoder,
     pace: &mut dyn Pace,
     log: &mut dyn Write,
 ) -> anyhow::Result<String>
@@ -166,10 +364,24 @@ where
         "{screen}: showing {line}, every {:.2} s; Ctrl+C to stop",
         every.as_secs_f64()
     );
+    let source = host_source(request.theme, &loaded, link.identity().model);
     let mut runtime = ThemeRuntime::new(loaded.theme, loaded.assets, kit.language);
+    start_video(
+        &mut runtime,
+        link.as_mut(),
+        media,
+        source.as_ref(),
+        request.theme,
+        log,
+    );
     let started = Instant::now();
     let pacing = (every, request.max_frames);
-    let (frames, outcome) = show_frames(&mut runtime, kit, link.as_mut(), pace, pacing);
+    let (frames, outcome) = if matches!(runtime.video(), VideoState::Host) {
+        stream_frames(&mut runtime, kit, link.as_mut(), pace, pacing)
+    } else {
+        show_frames(&mut runtime, kit, link.as_mut(), pace, pacing)
+    };
+    drop(source);
     // Hand the screen back even when a frame failed.
     let released = link.release();
     outcome.with_context(|| format!("stopped after {frames} frames"))?;
@@ -189,7 +401,10 @@ mod tests {
     use bezel_core::domain::clock::{Language, LocalTime};
     use bezel_core::domain::geometry::{Orientation, Size};
     use bezel_core::domain::sensor::{SensorInfo, Snapshot};
-    use bezel_core::domain::theme::Theme;
+    use bezel_core::domain::storage::{RemotePath, Repeat};
+    use bezel_devices::fake::{FakeStorage, Playback};
+
+    use crate::storage::doubles::{STREAMED, StubMedia, weact_bus};
     use bezel_core::ports::{SensorSource, ThemeLocation, ThemeStore};
     use bezel_core::{BezelError, Result};
     use bezel_devices::{FakeBus, FakeConnector};
@@ -275,6 +490,27 @@ mod tests {
         max_frames: Option<u64>,
     ) -> (anyhow::Result<String>, FakeConnector, String) {
         let connector = FakeConnector::default();
+        let screen = (FakeBus::turing_88(), connector.clone());
+        let (out, log) = run_on(
+            &screen,
+            theme,
+            sensors,
+            pace,
+            max_frames,
+            &mut StubMedia::ready(),
+        );
+        (out, connector, log)
+    }
+
+    /// Runs `theme` on the screen of `bus` and `connector`.
+    fn run_on(
+        (bus, connector): &(FakeBus, FakeConnector),
+        theme: &Path,
+        sensors: &mut dyn SensorSource,
+        pace: &mut dyn Pace,
+        max_frames: Option<u64>,
+        media: &mut StubMedia,
+    ) -> (anyhow::Result<String>, String) {
         let mut renderer = SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip);
         let mut kit = Rendering {
             store: &FsThemeStore,
@@ -291,15 +527,30 @@ mod tests {
             max_frames,
         };
         let mut log = Vec::new();
-        let out = run(
-            &FakeBus::turing_88(),
-            &connector,
-            &mut kit,
-            request,
-            pace,
-            &mut log,
-        );
-        (out, connector, String::from_utf8(log).unwrap())
+        let out = run(bus, connector, &mut kit, request, media, pace, &mut log);
+        (out, String::from_utf8(log).unwrap())
+    }
+
+    /// Saves a theme with a video background (`assets/clip.mp4`) for a panel
+    /// of `size`, as a folder or (`zipped`) a `.bezeltheme` file.
+    fn video_theme(name: &str, size: Size, orientation: Orientation, zipped: bool) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bezel-live-{}-{name}", std::process::id()));
+        let path = if zipped {
+            dir.with_extension("bezeltheme")
+        } else {
+            dir
+        };
+        let mut theme = Theme::blank(name, size, orientation);
+        let clip = AssetRef("assets/clip.mp4".into());
+        theme.background = Background::Video {
+            asset: clip.clone(),
+            poster: None,
+        };
+        let assets = BTreeMap::from([(clip, vec![1, 2, 3])]);
+        FsThemeStore
+            .save(&ThemeLocation(path.display().to_string()), &theme, &assets)
+            .unwrap();
+        path
     }
 
     #[test]
@@ -372,6 +623,172 @@ mod tests {
             connector.log().orientations.is_empty(),
             "screen never opened"
         );
+    }
+
+    #[test]
+    fn a_video_the_screen_stores_loops_under_the_theme() {
+        let path = video_theme("stored", Size::new(480, 1920), Orientation::Portrait, false);
+        // Vertical on a panel mounted upside down: the copy turned half a turn.
+        let stored = RemotePath::parse("internal/video/clip_180.mp4").unwrap();
+        let connector = FakeConnector::with_storage(
+            FakeStorage::default().with_file(stored.clone(), vec![9; 64]),
+        );
+        let screen = (FakeBus::turing_88(), connector.clone());
+        let mut sensors = FakeSensors::demo();
+        let (out, log) = run_on(
+            &screen,
+            &path,
+            &mut sensors,
+            &mut scripted(9),
+            Some(2),
+            &mut StubMedia::ready(),
+        );
+        assert!(out.unwrap().contains("2 frames"));
+        assert!(
+            log.contains("the screen plays internal/video/clip_180.mp4 under the theme"),
+            "{log}"
+        );
+        let seen = connector.log();
+        assert_eq!(seen.storage.playback, Playback::Video(stored, Repeat::Loop));
+        assert_eq!(
+            seen.frames[0].pixel(5, 5).map(|p| p.a),
+            Some(0),
+            "a transparent base"
+        );
+    }
+
+    #[test]
+    fn a_missing_video_shows_the_poster_and_how_to_send_it() {
+        let folder = video_theme(
+            "missing",
+            Size::new(480, 1920),
+            Orientation::Landscape,
+            false,
+        );
+        let connector = FakeConnector::default();
+        let screen = (FakeBus::turing_88(), connector.clone());
+        let mut sensors = FakeSensors::demo();
+        let (out, log) = run_on(
+            &screen,
+            &folder,
+            &mut sensors,
+            &mut scripted(9),
+            Some(1),
+            &mut StubMedia::ready(),
+        );
+        out.unwrap();
+        let file = folder.join("assets/clip.mp4");
+        assert!(
+            log.contains("does not store this theme's video yet"),
+            "{log}"
+        );
+        assert!(
+            log.contains(&format!(
+                "  bezel storage put {} internal/video/clip_90.mp4 --orientation horizontal",
+                file.display()
+            )),
+            "{log}"
+        );
+        assert!(
+            connector
+                .log()
+                .storage
+                .calls
+                .iter()
+                .all(|c| !c.changes_the_screen())
+        );
+
+        let zipped = video_theme(
+            "missing",
+            Size::new(480, 1920),
+            Orientation::Landscape,
+            true,
+        );
+        let (out, log) = run_on(
+            &screen,
+            &zipped,
+            &mut sensors,
+            &mut scripted(9),
+            Some(1),
+            &mut StubMedia::ready(),
+        );
+        out.unwrap();
+        assert!(
+            log.contains(&format!("  bezel import {} -o <FOLDER>", zipped.display())),
+            "{log}"
+        );
+        assert!(
+            log.contains("put <FOLDER>/assets/clip.mp4 internal/video/clip_90.mp4"),
+            "{log}"
+        );
+        let _ = std::fs::remove_dir_all(folder);
+        let _ = std::fs::remove_file(zipped);
+    }
+
+    #[test]
+    fn a_screen_without_playback_gets_the_video_decoded_here() {
+        let screen = (weact_bus(), FakeConnector::default());
+        let mut sensors = FakeSensors::demo();
+        let folder = video_theme("host", Size::new(80, 160), Orientation::Portrait, false);
+        let mut media = StubMedia::ready();
+        let (out, log) = run_on(
+            &screen,
+            &folder,
+            &mut sensors,
+            &mut scripted(9),
+            Some(3),
+            &mut media,
+        );
+        assert!(out.unwrap().contains("3 frames"));
+        assert!(
+            log.contains("decoded on this computer, up to 10 pictures"),
+            "{log}"
+        );
+        let (source, spec) = &media.streamed[0];
+        assert_eq!(source.0, folder.join("assets/clip.mp4").to_string_lossy());
+        assert_eq!((spec.size, spec.fps), (Size::new(80, 160), HOST_VIDEO_FPS));
+        let frames = screen.1.log().frames;
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[2].pixel(40, 80), Some(STREAMED));
+
+        // A zipped theme is decoded from a temporary copy, removed after.
+        let zipped = video_theme("host", Size::new(80, 160), Orientation::Portrait, true);
+        let mut media = StubMedia::ready();
+        let (out, _) = run_on(
+            &screen,
+            &zipped,
+            &mut sensors,
+            &mut scripted(9),
+            Some(1),
+            &mut media,
+        );
+        out.unwrap();
+        let copy = PathBuf::from(&media.streamed[0].0.0);
+        assert!(copy.starts_with(std::env::temp_dir()), "{}", copy.display());
+        assert!(!copy.exists(), "the copy is deleted");
+
+        let (out, log) = run_on(
+            &screen,
+            &zipped,
+            &mut sensors,
+            &mut scripted(9),
+            Some(1),
+            &mut StubMedia::missing(),
+        );
+        out.unwrap();
+        assert!(
+            log.contains("needs ffmpeg. Install it with: sudo dnf install ffmpeg"),
+            "{log}"
+        );
+        let _ = std::fs::remove_dir_all(folder);
+        let _ = std::fs::remove_file(zipped);
+    }
+
+    #[test]
+    fn paths_are_quoted_for_the_shell() {
+        assert_eq!(quoted("/home/me/clip.mp4"), "/home/me/clip.mp4");
+        assert_eq!(quoted("/home/me/my clip.mp4"), "'/home/me/my clip.mp4'");
+        assert_eq!(quoted("it's.mp4"), r"'it'\''s.mp4'");
     }
 
     #[test]

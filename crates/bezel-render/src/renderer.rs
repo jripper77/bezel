@@ -105,6 +105,13 @@ impl SkiaRenderer {
     }
 }
 
+impl SkiaRenderer {
+    /// Family names of the fonts a theme can use (bundled and installed).
+    pub fn font_families(&self) -> Vec<String> {
+        self.text.families()
+    }
+}
+
 impl FrameRenderer for SkiaRenderer {
     fn render(
         &mut self,

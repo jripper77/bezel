@@ -75,20 +75,42 @@ fn load_folder(dir: &Path) -> Result<(Theme, BTreeMap<AssetRef, Vec<u8>>)> {
     Ok((theme, assets))
 }
 
-fn load_zip(file: &Path) -> Result<(Theme, BTreeMap<AssetRef, Vec<u8>>)> {
-    let bytes = fs::read(file).map_err(|e| io(&file.display().to_string(), e))?;
-    let mut zip = ZipArchive::new(Cursor::new(bytes)).map_err(|e| io("zip", e))?;
-    let mut read = |name: &str| -> Result<Option<Vec<u8>>> {
-        match zip.by_name(name) {
-            Ok(mut entry) => {
-                let mut out = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or(0));
-                entry.read_to_end(&mut out).map_err(|e| io(name, e))?;
-                Ok(Some(out))
-            }
-            Err(zip::result::ZipError::FileNotFound) => Ok(None),
-            Err(e) => Err(io(name, e)),
+fn open_zip(file: &Path) -> Result<ZipArchive<fs::File>> {
+    let handle = fs::File::open(file).map_err(|e| io(&file.display().to_string(), e))?;
+    ZipArchive::new(handle).map_err(|e| io("zip", e))
+}
+
+fn read_entry<R: Read + std::io::Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>> {
+    match zip.by_name(name) {
+        Ok(mut entry) => {
+            let mut out = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or(0));
+            entry.read_to_end(&mut out).map_err(|e| io(name, e))?;
+            Ok(Some(out))
         }
-    };
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(e) => Err(io(name, e)),
+    }
+}
+
+/// Reads only the manifest of the theme at `location` (a folder or a
+/// `.bezeltheme`), without its assets: enough to list a theme library.
+pub fn load_manifest(location: &ThemeLocation) -> Result<Theme> {
+    let path = Path::new(&location.0);
+    if path.is_dir() {
+        let bytes = fs::read(path.join(MANIFEST)).map_err(|e| io(&location.0, e))?;
+        parse_manifest(&bytes)
+    } else {
+        let mut zip = open_zip(path)?;
+        parse_manifest(&read_entry(&mut zip, MANIFEST)?.ok_or_else(|| io("zip", "no theme.json"))?)
+    }
+}
+
+fn load_zip(file: &Path) -> Result<(Theme, BTreeMap<AssetRef, Vec<u8>>)> {
+    let mut zip = open_zip(file)?;
+    let mut read = |name: &str| read_entry(&mut zip, name);
     let theme = parse_manifest(&read(MANIFEST)?.ok_or_else(|| io("zip", "no theme.json"))?)?;
     let mut assets = BTreeMap::new();
     for asset in theme.assets() {
@@ -371,7 +393,10 @@ mod tests {
             let (loaded, loaded_assets) = FsThemeStore.load(&loc).expect("loads");
             assert_eq!(loaded, theme, "{loc:?}");
             assert_eq!(loaded_assets, assets, "{loc:?}");
+            assert_eq!(load_manifest(&loc).expect("manifest"), theme, "{loc:?}");
         }
+        let missing = ThemeLocation(root.join("missing.bezeltheme").display().to_string());
+        assert!(load_manifest(&missing).is_err());
         let _ = fs::remove_dir_all(&root);
     }
 

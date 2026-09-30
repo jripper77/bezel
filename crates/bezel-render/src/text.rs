@@ -181,6 +181,19 @@ impl TextEngine {
         self.default_family.clone()
     }
 
+    /// Family names of every loaded font, sorted without duplicates.
+    pub fn families(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .fonts
+            .db()
+            .faces()
+            .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+            .collect();
+        names.sort_by_key(|n| n.to_lowercase());
+        names.dedup();
+        names
+    }
+
     /// Draws `job` into `layer`.
     pub fn draw(
         &mut self,

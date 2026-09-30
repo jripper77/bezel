@@ -15,6 +15,7 @@ thiserror = { workspace = true }
 # Use-case tests run through the adapters' fakes (tests/), never through a
 # port implemented inside the hexagon.
 bezel-devices = { workspace = true }
+bezel-sensors = { workspace = true }
 
 [lints]
 workspace = true

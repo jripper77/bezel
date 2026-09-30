@@ -1,52 +1,165 @@
-//! Driver for Turing rev C screens (2.1"/2.8"/5"/8.8" UART generation).
+//! Driver for Turing rev C screens (2.1"/2.8"/5"/8.8" UART generation):
+//! frames, and the stored files and device-side playback of spec § 13.
+//!
+//! Nothing storage-related is sent implicitly (spec § 16): the storage
+//! commands, OPTIONS 0x7D and playback go out only from the
+//! [`ScreenStorage`] methods, which the core's use cases call. 0x81, 0x82
+//! and 0x84 are never sent. On small screens the vendor sends 0x82 and
+//! re-initialises before PLAY_VIDEO; Bezel does not (disruptive, and no
+//! small screen has been validated).
 
 use std::time::Duration;
 
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::frame::{Frame, RGBA_BYTES};
 use bezel_core::domain::geometry::Orientation;
+use bezel_core::domain::job::Job;
+use bezel_core::domain::media::MediaKind;
 use bezel_core::domain::screen::{Brightness, ScreenIdentity};
-use bezel_core::ports::ScreenLink;
+use bezel_core::domain::storage::{
+    Confirmed, FileName, Medium, RemotePath, Repeat, StartMode, StorageInfo, StorageLocation,
+};
+use bezel_core::ports::{ScreenLink, ScreenStorage};
 use bezel_core::{BezelError, Result};
 
-use crate::driver::{Pause, check_frame, io_err};
-use crate::protocol::turing_rev_c::{self as proto, Hello, PixelFormat, Status, op};
+use crate::driver::{
+    Pause, Sent, StorageRoots, check_frame, io_err, parse_listing, send_in_chunks, upload_size,
+};
+use crate::protocol::turing_rev_c::{
+    self as proto, BLOCK, Hello, Options, PixelFormat, ScreenClass, Status, StorageReport, op,
+    reply, root,
+};
 use crate::wire::Wire;
 
-/// How long the device may take to answer HELLO or QUERY_STATUS.
+/// How long the device may take to answer HELLO, QUERY_STATUS, STOP_MEDIA,
+/// GET_STORAGE_INFO and LIST_DIR.
 const REPLY_TIMEOUT: Duration = Duration::from_millis(1000);
-/// Longest reply read at once (HELLO, status and media answers are short).
+/// Longest reply read at once (the spec's "R 1024").
 const REPLY_MAX: usize = 1024;
+/// Longest LIST_DIR reply (the vendor reads up to 10,240 bytes).
+const LIST_REPLY_MAX: usize = 10_240;
+/// How long the reply a full frame may get (`full_png_sucess`) is waited for.
+const FRAME_REPLY_WAIT: Duration = Duration::from_millis(50);
 /// HELLO attempts before giving up.
 const HELLO_TRIES: usize = 3;
 /// Pause between failed HELLO attempts (after a resync block).
 const HELLO_RETRY_PAUSE: Duration = Duration::from_millis(1000);
+/// Pause after STOP_VIDEO before the first STOP_MEDIA (spec § 7.2 step 3).
+const STOP_VIDEO_SETTLE: Duration = Duration::from_millis(200);
 /// STOP_MEDIA polls while waiting for `media_stop`.
 const STOP_MEDIA_POLLS: usize = 20;
+/// Pause between two STOP_MEDIA polls.
+const STOP_MEDIA_POLL_PAUSE: Duration = Duration::from_millis(400);
+/// Sends of GET_STORAGE_INFO, LIST_DIR and GET_FILE_SIZE before giving up.
+const QUERY_TRIES: usize = 3;
+/// How long GET_FILE_SIZE may take to answer.
+const FILE_SIZE_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long UPLOAD_FILE may take to answer `create_success`.
+const CREATE_TIMEOUT: Duration = Duration::from_secs(3);
+/// UPLOAD_FILE headers sent per upload (the vendor never resends one).
+const CREATE_TRIES: usize = 1;
+/// Protocol blocks per write of an upload's data phase. The vendor writes
+/// one 250-byte block per call; grouping them keeps the bytes on the wire
+/// identical and the number of writes low. Progress and cancellation are
+/// per write.
+const UPLOAD_CHUNK_BLOCKS: usize = 256;
+/// File bytes per write: a whole number of blocks, so the writes together
+/// are exactly the framing of the whole file.
+const UPLOAD_CHUNK: usize = UPLOAD_CHUNK_BLOCKS * proto::BLOCK_PAYLOAD;
+/// One wait for `file_rev_done` after an upload into the card's videos.
+const RECEIVED_TIMEOUT_CARD_VIDEO: Duration = Duration::from_secs(10);
+/// One wait for `file_rev_done` after an upload anywhere else.
+const RECEIVED_TIMEOUT: Duration = Duration::from_secs(240);
+/// Waits for `file_rev_done` on large screens.
+const RECEIVED_ROUNDS_LARGE: usize = 15;
+/// Waits for `file_rev_done` on small screens.
+const RECEIVED_ROUNDS_SMALL: usize = 1;
+/// Pause between two waits for `file_rev_done`.
+const RECEIVED_ROUND_PAUSE: Duration = Duration::from_millis(200);
+/// Reads within one wait for `file_rev_done`: the cancel token is checked
+/// between them.
+const RECEIVED_POLL: Duration = Duration::from_secs(1);
+/// How long PLAY_VIDEO may take to answer `play_video_success`.
+const PLAY_VIDEO_TIMEOUT: Duration = Duration::from_secs(6);
+/// PLAY_VIDEO sends before giving up.
+const PLAY_VIDEO_TRIES: usize = 2;
+/// How long PLAY_IMAGE may take to answer `play_img_ok`.
+const PLAY_IMAGE_TIMEOUT: Duration = Duration::from_secs(3);
+/// PLAY_IMAGE sends before giving up.
+const PLAY_IMAGE_TRIES: usize = 1;
+/// Brightness written into OPTIONS when this link has sent none (the
+/// vendor's default setting, spec § 5).
+const DEFAULT_STORED_BRIGHTNESS: u8 = 170;
 /// After TURNOFF: reads that wait for the SoC to leave the bus (at most
 /// `OFF_POLLS` × `OFF_POLL`; a read error means it is gone).
 const OFF_POLLS: usize = 16;
 /// One of those reads.
 const OFF_POLL: Duration = Duration::from_millis(250);
 
+/// How long a request waits for its reply, how many times it is sent and
+/// how many reply bytes are read.
+#[derive(Debug, Clone, Copy)]
+struct Wait {
+    timeout: Duration,
+    tries: usize,
+    max: usize,
+}
+
+const QUERY: Wait = Wait {
+    timeout: REPLY_TIMEOUT,
+    tries: QUERY_TRIES,
+    max: REPLY_MAX,
+};
+const LISTING: Wait = Wait {
+    timeout: REPLY_TIMEOUT,
+    tries: QUERY_TRIES,
+    max: LIST_REPLY_MAX,
+};
+const SIZE: Wait = Wait {
+    timeout: FILE_SIZE_TIMEOUT,
+    tries: QUERY_TRIES,
+    max: REPLY_MAX,
+};
+const CREATE: Wait = Wait {
+    timeout: CREATE_TIMEOUT,
+    tries: CREATE_TRIES,
+    max: REPLY_MAX,
+};
+const PLAY_VIDEO: Wait = Wait {
+    timeout: PLAY_VIDEO_TIMEOUT,
+    tries: PLAY_VIDEO_TRIES,
+    max: REPLY_MAX,
+};
+const PLAY_IMAGE: Wait = Wait {
+    timeout: PLAY_IMAGE_TIMEOUT,
+    tries: PLAY_IMAGE_TRIES,
+    max: REPLY_MAX,
+};
+
+/// The card's video folder, whose uploads get the short completion wait.
+const CARD_VIDEO: StorageLocation = StorageLocation::new(Medium::Card, MediaKind::Video);
+
 /// A connected rev C screen.
-pub struct TuringRevC<W: Wire> {
+pub struct TuringRevC<W: Wire, P: Pause> {
     wire: W,
+    pause: P,
     identity: ScreenIdentity,
     format: PixelFormat,
+    class: ScreenClass,
     orientation: Orientation,
     last: Option<Vec<u8>>,
     seq: u32,
+    /// PRE_UPDATE_BITMAP went out since device-side media last changed.
+    streaming: bool,
+    /// The OPTIONS fields to send: the last brightness this link sent, and
+    /// the start mode, flip and sleep delay of its last OPTIONS.
+    options: Options,
 }
 
-impl<W: Wire> TuringRevC<W> {
+impl<W: Wire, P: Pause + Clone> TuringRevC<W, P> {
     /// Handshakes over `wire` and prepares the screen for streaming.
     /// `candidates` are the models discovery allowed; the HELLO answer picks one.
-    pub fn connect<P: Pause>(
-        mut wire: W,
-        pause: &P,
-        candidates: &[&'static DeviceModel],
-    ) -> Result<Self> {
+    pub fn connect(mut wire: W, pause: &P, candidates: &[&'static DeviceModel]) -> Result<Self> {
         let hello = handshake(&mut wire, pause)?;
         tracing::debug!(reply = %hello.raw, rom = hello.rom, "HELLO");
         let model = pick_model(&hello, candidates).ok_or_else(|| {
@@ -54,7 +167,9 @@ impl<W: Wire> TuringRevC<W> {
         })?;
         let mut screen = Self {
             wire,
+            pause: pause.clone(),
             format: hello.partial_format(),
+            class: ScreenClass::of(&model.id),
             identity: ScreenIdentity {
                 model,
                 firmware: Some(hello.raw),
@@ -62,12 +177,21 @@ impl<W: Wire> TuringRevC<W> {
             orientation: Orientation::Portrait,
             last: None,
             seq: 0,
+            streaming: false,
+            options: Options {
+                brightness: DEFAULT_STORED_BRIGHTNESS,
+                start_mode: proto::StartMode::Default,
+                flip: false,
+                sleep_minutes: 0,
+            },
         };
         screen.stop_media()?;
-        screen.send(&proto::simple(op::PRE_UPDATE_BITMAP))?;
+        screen.enter_streaming()?;
         Ok(screen)
     }
+}
 
+impl<W: Wire, P: Pause> TuringRevC<W, P> {
     /// The wire, for tests and diagnostics.
     pub fn wire(&self) -> &W {
         &self.wire
@@ -77,21 +201,45 @@ impl<W: Wire> TuringRevC<W> {
         self.wire.send(bytes).map_err(io_err)
     }
 
+    fn enter_streaming(&mut self) -> Result<()> {
+        self.send(&proto::simple(op::PRE_UPDATE_BITMAP))?;
+        self.streaming = true;
+        Ok(())
+    }
+
+    /// STOP_VIDEO, then STOP_MEDIA until the device says `media_stop`.
     fn stop_media(&mut self) -> Result<()> {
         self.send(&proto::simple(op::STOP_VIDEO))?;
-        for _ in 0..STOP_MEDIA_POLLS {
+        self.pause.pause(STOP_VIDEO_SETTLE);
+        for poll in 1..=STOP_MEDIA_POLLS {
             self.send(&proto::simple(op::STOP_MEDIA))?;
-            let reply = self
+            let answer = self
                 .wire
                 .receive(REPLY_MAX, REPLY_TIMEOUT)
                 .map_err(io_err)?;
-            if String::from_utf8_lossy(&reply).contains("media_stop") {
+            if String::from_utf8_lossy(&answer).contains(reply::MEDIA_STOPPED) {
                 return Ok(());
+            }
+            if poll < STOP_MEDIA_POLLS {
+                self.pause.pause(STOP_MEDIA_POLL_PAUSE);
             }
         }
         // Older firmware never answers; streaming still works.
         tracing::debug!("no media_stop answer; continuing");
         Ok(())
+    }
+
+    /// Device-side media is about to change: the next frame is a full one,
+    /// preceded by PRE_UPDATE_BITMAP as at a theme start (spec § 7.2).
+    fn media_changed(&mut self) {
+        self.last = None;
+        self.streaming = false;
+    }
+
+    /// Stops device-side playback (before uploads, plays and on request).
+    fn stop_playback(&mut self) -> Result<()> {
+        self.media_changed();
+        self.stop_media()
     }
 
     fn native(&self, frame: &Frame) -> Result<Vec<u8>> {
@@ -102,6 +250,9 @@ impl<W: Wire> TuringRevC<W> {
     }
 
     fn full_frame(&mut self, bgra: Vec<u8>) -> Result<()> {
+        if !self.streaming {
+            self.enter_streaming()?;
+        }
         self.send(&proto::start_display_block())?;
         self.send(&proto::full_frame_header(bgra.len() as u32))?;
         self.send(&proto::blocks(&bgra))?;
@@ -109,9 +260,9 @@ impl<W: Wire> TuringRevC<W> {
         // pollute the next reply.
         let after = self
             .wire
-            .receive(REPLY_MAX, Duration::from_millis(50))
+            .receive(REPLY_MAX, FRAME_REPLY_WAIT)
             .map_err(io_err)?;
-        tracing::debug!(bytes = bgra.len(), reply = %String::from_utf8_lossy(&after), "full frame");
+        tracing::debug!(bytes = bgra.len(), reply = %printable(&after), "full frame");
         self.last = Some(bgra);
         self.seq = 0;
         Ok(())
@@ -129,24 +280,128 @@ impl<W: Wire> TuringRevC<W> {
     /// QUERY_STATUS round-trip; `true` when the device asks for a full frame.
     fn needs_full_frame(&mut self) -> Result<bool> {
         self.send(&proto::simple(op::QUERY_STATUS))?;
-        let reply = self
+        let answer = self
             .wire
             .receive(REPLY_MAX, REPLY_TIMEOUT)
             .map_err(io_err)?;
-        let status = Status::parse(&reply);
-        tracing::debug!(reply = %String::from_utf8_lossy(&reply).trim_end_matches('\0'), seq = self.seq, "QUERY_STATUS");
+        let status = Status::parse(&answer);
+        tracing::debug!(reply = %printable(&answer), seq = self.seq, "QUERY_STATUS");
         Ok(status.is_some_and(|s| s.need_resend))
+    }
+
+    /// Sends `packet` (stale input dropped first) until a reply parses, at
+    /// most `wait.tries` times. `what` names the request in errors.
+    fn request<T>(
+        &mut self,
+        packet: &[u8],
+        wait: Wait,
+        what: &str,
+        parse: impl Fn(&[u8]) -> Option<T>,
+    ) -> Result<T> {
+        for attempt in 1..=wait.tries {
+            self.wire.discard_input().map_err(io_err)?;
+            self.send(packet)?;
+            let answer = self.wire.receive(wait.max, wait.timeout).map_err(io_err)?;
+            if let Some(value) = parse(&answer) {
+                return Ok(value);
+            }
+            tracing::debug!(attempt, what, reply = %printable(&answer), "unexpected reply");
+        }
+        Err(BezelError::Timeout(format!(
+            "the screen: no valid answer to {what}"
+        )))
+    }
+
+    fn roots(&self) -> StorageRoots {
+        StorageRoots {
+            internal: self.class.internal_root(),
+            card: root::CARD,
+        }
+    }
+
+    fn list_folder(&mut self, folder: &str) -> Result<Vec<FileName>> {
+        let packet = path_packet(op::LIST_DIR, folder)?;
+        self.request(
+            &packet,
+            LISTING,
+            &format!("LIST_DIR {folder}"),
+            parse_listing,
+        )
+    }
+
+    fn file_size(&mut self, target: &str) -> Result<Option<u64>> {
+        let packet = path_packet(op::FILE_SIZE, target)?;
+        let what = format!("GET_FILE_SIZE {target}");
+        let bytes = self.request(&packet, SIZE, &what, proto::file_size)?;
+        Ok((bytes > 0).then_some(bytes))
+    }
+
+    /// Waits for `file_rev_done` as the vendor does (spec § 13.4); without
+    /// it the use case's size check decides. A cancel during the wait
+    /// recovers the link like a cancel between blocks.
+    fn await_received(&mut self, path: &RemotePath, job: &Job<'_>) -> Result<()> {
+        let wait = if path.location == CARD_VIDEO {
+            RECEIVED_TIMEOUT_CARD_VIDEO
+        } else {
+            RECEIVED_TIMEOUT
+        };
+        let polls = (wait.as_millis() / RECEIVED_POLL.as_millis()).max(1);
+        let rounds = match self.class {
+            ScreenClass::Large => RECEIVED_ROUNDS_LARGE,
+            ScreenClass::Small => RECEIVED_ROUNDS_SMALL,
+        };
+        for round in 1..=rounds {
+            for _ in 0..polls {
+                if job.is_cancelled() {
+                    return Err(self.recover_after_cancel(path));
+                }
+                let answer = self
+                    .wire
+                    .receive(REPLY_MAX, RECEIVED_POLL)
+                    .map_err(io_err)?;
+                if String::from_utf8_lossy(&answer).contains(reply::RECEIVED) {
+                    return Ok(());
+                }
+            }
+            if round < rounds {
+                self.pause.pause(RECEIVED_ROUND_PAUSE);
+            }
+        }
+        tracing::warn!(%path, "no file_rev_done after the upload; the size check decides");
+        Ok(())
+    }
+
+    /// After an interrupted upload: HELLO (with its resync blocks) brings the
+    /// link back, then GET_FILE_SIZE measures what is left. Never deletes.
+    fn recover_after_cancel(&mut self, path: &RemotePath) -> BezelError {
+        self.media_changed();
+        if let Err(e) = handshake(&mut self.wire, &self.pause) {
+            tracing::warn!(error = %e, %path, "no HELLO answer after a cancelled upload");
+            return BezelError::Timeout(format!(
+                "the screen after a cancelled upload; reconnect it and check {path}"
+            ));
+        }
+        match self.device_path(path).and_then(|t| self.file_size(&t)) {
+            Ok(partial) => BezelError::Cancelled { partial },
+            Err(e) => e,
+        }
+    }
+
+    fn device_path(&self, path: &RemotePath) -> Result<String> {
+        self.roots().path(path)
     }
 }
 
-impl<W: Wire> ScreenLink for TuringRevC<W> {
+impl<W: Wire, P: Pause> ScreenLink for TuringRevC<W, P> {
     fn identity(&self) -> &ScreenIdentity {
         &self.identity
     }
 
     fn set_brightness(&mut self, brightness: Brightness) -> Result<()> {
         let level = brightness.scaled(255) as u8;
-        self.send(&proto::set_brightness(level))
+        self.send(&proto::set_brightness(level))?;
+        self.options.brightness = level;
+        Ok(())
     }
 
     fn set_orientation(&mut self, orientation: Orientation) -> Result<()> {
@@ -157,6 +412,8 @@ impl<W: Wire> ScreenLink for TuringRevC<W> {
         Ok(())
     }
 
+    /// Frames keep their alpha per pixel in both pixel formats: over a video
+    /// the screen plays, A = 0 shows the video (spec § 13.5).
     fn present(&mut self, frame: &Frame) -> Result<()> {
         let bgra = self.native(frame)?;
         let Some(last) = self.last.as_ref() else {
@@ -192,14 +449,132 @@ impl<W: Wire> ScreenLink for TuringRevC<W> {
         self.last = None;
         self.send(&proto::simple(op::END_UPDATE_BITMAP))
     }
+
+    fn storage(&mut self) -> Option<&mut dyn ScreenStorage> {
+        Some(self)
+    }
+}
+
+impl<W: Wire, P: Pause> ScreenStorage for TuringRevC<W, P> {
+    fn info(&mut self) -> Result<StorageInfo> {
+        let packet = proto::storage_info();
+        let report = self.request(&packet, QUERY, "GET_STORAGE_INFO", StorageReport::parse)?;
+        tracing::debug!(?report, "GET_STORAGE_INFO");
+        Ok(report.info())
+    }
+
+    fn list(&mut self, location: StorageLocation) -> Result<Vec<FileName>> {
+        let folder = self.roots().folder(location);
+        self.list_folder(&folder)
+    }
+
+    fn size(&mut self, path: &RemotePath) -> Result<Option<u64>> {
+        let target = self.device_path(path)?;
+        self.file_size(&target)
+    }
+
+    /// Spec § 13.4: STOP_VIDEO, STOP_MEDIA, LIST_DIR of the folder (creates
+    /// it), UPLOAD_FILE until `create_success`, the data phase, then the
+    /// wait for `file_rev_done`. The use case verifies with GET_FILE_SIZE.
+    fn upload(&mut self, path: &RemotePath, data: &[u8], job: &mut Job<'_>) -> Result<()> {
+        let size = upload_size(data)?;
+        let target = self.device_path(path)?;
+        let header = proto::upload_file(&target, size).ok_or_else(|| too_long(&target))?;
+        job.checkpoint()?;
+        self.stop_playback()?;
+        let folder = self.roots().folder(path.location);
+        self.list_folder(&folder)?;
+        job.checkpoint()?;
+        let what = format!("UPLOAD_FILE {target}");
+        self.request(&header, CREATE, &what, has(reply::CREATED))?;
+        tracing::info!(%target, size, "upload");
+        let wire = &mut self.wire;
+        let sent = send_in_chunks(data, UPLOAD_CHUNK, job, |chunk| {
+            wire.send(&proto::blocks(chunk)).map_err(io_err)
+        })?;
+        match sent {
+            Sent::All => self.await_received(path, job),
+            Sent::Cancelled { accepted } => {
+                tracing::info!(%target, accepted, "upload cancelled");
+                Err(self.recover_after_cancel(path))
+            }
+        }
+    }
+
+    fn delete(&mut self, path: &RemotePath, _confirmed: Confirmed) -> Result<()> {
+        let target = self.device_path(path)?;
+        let packet = path_packet(op::DELETE_FILE, &target)?;
+        tracing::info!(%target, "DELETE_FILE");
+        self.send(&packet)
+    }
+
+    fn play_video(&mut self, path: &RemotePath, repeat: Repeat) -> Result<()> {
+        let target = self.device_path(path)?;
+        let packet = proto::play_video(&target, repeat).ok_or_else(|| too_long(&target))?;
+        self.stop_playback()?;
+        let what = format!("PLAY_VIDEO {target}");
+        self.request(&packet, PLAY_VIDEO, &what, has(reply::VIDEO_PLAYING))
+    }
+
+    fn play_image(&mut self, path: &RemotePath) -> Result<()> {
+        let target = self.device_path(path)?;
+        let packet = path_packet(op::PLAY_IMAGE, &target)?;
+        self.stop_playback()?;
+        let what = format!("PLAY_IMAGE {target}");
+        self.request(&packet, PLAY_IMAGE, &what, has(reply::IMAGE_SHOWN))
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        self.stop_playback()
+    }
+
+    /// OPTIONS 0x7D with the last brightness this link sent (the vendor
+    /// default before any), its flip and sleep delay: only the start mode
+    /// changes.
+    fn set_start_mode(&mut self, mode: StartMode, _confirmed: Confirmed) -> Result<()> {
+        self.options.start_mode = match mode {
+            StartMode::Default => proto::StartMode::Default,
+            StartMode::Image => proto::StartMode::Image,
+            StartMode::Video => proto::StartMode::Video,
+        };
+        tracing::info!(options = ?self.options, "OPTIONS");
+        self.send(&proto::set_options(self.options))
+    }
+}
+
+/// A reply check: the text contains `needle`.
+fn has(needle: &'static str) -> impl Fn(&[u8]) -> Option<()> {
+    move |answer| {
+        String::from_utf8_lossy(answer)
+            .contains(needle)
+            .then_some(())
+    }
+}
+
+/// A packet naming `target`, or `InvalidInput` when the path is too long.
+fn path_packet(opcode: u8, target: &str) -> Result<[u8; BLOCK]> {
+    proto::path_command(opcode, target).ok_or_else(|| too_long(target))
+}
+
+fn too_long(target: &str) -> BezelError {
+    BezelError::InvalidInput(format!("{target}: too long for one command packet"))
+}
+
+/// A reply for logs: printable ASCII only.
+fn printable(answer: &[u8]) -> String {
+    answer
+        .iter()
+        .filter(|b| b.is_ascii_graphic() || **b == b' ')
+        .map(|&b| char::from(b))
+        .collect()
 }
 
 fn handshake<W: Wire, P: Pause>(wire: &mut W, pause: &P) -> Result<Hello> {
     wire.discard_input().map_err(io_err)?;
     for attempt in 0..HELLO_TRIES {
         wire.send(&proto::hello()).map_err(io_err)?;
-        let reply = wire.receive(REPLY_MAX, REPLY_TIMEOUT).map_err(io_err)?;
-        if let Some(hello) = Hello::parse(&reply) {
+        let answer = wire.receive(REPLY_MAX, REPLY_TIMEOUT).map_err(io_err)?;
+        if let Some(hello) = Hello::parse(&answer) {
             return Ok(hello);
         }
         tracing::debug!(attempt, "no HELLO answer; resyncing");
@@ -236,28 +611,116 @@ pub fn rgba_to_bgra(rgba: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex, PoisonError};
+
     use super::*;
     use crate::driver::RealTime;
     use crate::wire::ScriptedWire;
     use bezel_core::domain::catalog::model_by_id;
     use bezel_core::domain::device::ModelId;
     use bezel_core::domain::frame::{Rect, Rgba};
+    use bezel_core::domain::job::{CancelToken, Progress};
+    use bezel_core::domain::screen::Confirm;
+    use bezel_core::domain::storage::{BootMedia, Capacity, Operation};
 
+    #[derive(Clone)]
     struct NoPause;
     impl Pause for NoPause {
         fn pause(&self, _d: Duration) {}
     }
 
+    /// Records every pause.
+    #[derive(Clone, Default)]
+    struct Pauses(Arc<Mutex<Vec<Duration>>>);
+    impl Pause for Pauses {
+        fn pause(&self, d: Duration) {
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(d);
+        }
+    }
+    impl Pauses {
+        fn take(&self) -> Vec<Duration> {
+            std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
+        }
+    }
+
+    type Screen<P = NoPause> = TuringRevC<ScriptedWire, P>;
+
+    const ROM_190: &str = "chs_88inch.dev1_rom1.90";
+
     fn m88() -> &'static DeviceModel {
         model_by_id(ModelId("turing-8.8")).unwrap()
     }
 
-    fn connected() -> TuringRevC<ScriptedWire> {
-        let wire = ScriptedWire::with_replies([
-            b"chs_88inch.dev1_rom1.90\0".to_vec(),
-            b"media_stop".to_vec(),
-        ]);
-        TuringRevC::connect(wire, &NoPause, &[m88()]).unwrap()
+    fn connected_with<P: Pause + Clone>(pause: &P, hello: &str, model: &'static str) -> Screen<P> {
+        let wire = ScriptedWire::with_replies([hello.as_bytes().to_vec(), b"media_stop".to_vec()]);
+        let model = model_by_id(ModelId(model)).unwrap();
+        TuringRevC::connect(wire, pause, &[model]).unwrap()
+    }
+
+    fn connected() -> Screen {
+        connected_with(&NoPause, ROM_190, "turing-8.8")
+    }
+
+    fn path(text: &str) -> RemotePath {
+        RemotePath::parse(text).unwrap()
+    }
+
+    fn script<P: Pause>(s: &mut Screen<P>, replies: &[&str]) {
+        for r in replies {
+            s.wire.reply(r.as_bytes());
+        }
+    }
+
+    /// A command packet: 250 bytes with the magic after the opcode (data
+    /// blocks of these tests never look like one).
+    fn is_command(packet: &[u8]) -> bool {
+        packet.len() == BLOCK && packet[1..3] == proto::MAGIC
+    }
+
+    /// Opcodes of the commands in `sent`, data blocks left out.
+    fn commands(sent: &[Vec<u8>]) -> Vec<u8> {
+        sent.iter()
+            .filter(|p| is_command(p))
+            .map(|p| p[0])
+            .collect()
+    }
+
+    /// What was sent after the first `from` writes.
+    fn since<P: Pause>(s: &Screen<P>, from: usize) -> &[Vec<u8>] {
+        &s.wire().sent[from..]
+    }
+
+    fn confirmed() -> Confirmed {
+        Confirmed::require(Confirm::Yes, &Operation::Boot(BootMedia::Default)).unwrap()
+    }
+
+    /// Runs an upload whose job cancels once `cancel_at` bytes were
+    /// reported; returns the result and the `(done, total)` reports.
+    fn run_upload<P: Pause>(
+        s: &mut Screen<P>,
+        target: &RemotePath,
+        data: &[u8],
+        cancel_at: Option<u64>,
+    ) -> (Result<()>, Vec<(u64, u64)>) {
+        let token = CancelToken::new();
+        let remote = token.clone();
+        let mut seen = Vec::new();
+        let mut sink = |p: Progress| {
+            seen.push((p.done, p.total));
+            if cancel_at.is_some_and(|at| p.done >= at) {
+                remote.cancel();
+            }
+        };
+        let mut job = Job::new(&token, &mut sink);
+        let result = s.upload(target, data, &mut job);
+        (result, seen)
+    }
+
+    fn test_file(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
     }
 
     #[test]
@@ -273,11 +736,9 @@ mod tests {
                 op::PRE_UPDATE_BITMAP
             ]
         );
-        assert_eq!(
-            s.identity().firmware.as_deref(),
-            Some("chs_88inch.dev1_rom1.90")
-        );
+        assert_eq!(s.identity().firmware.as_deref(), Some(ROM_190));
         assert_eq!(s.format, PixelFormat::Bgra);
+        assert_eq!(s.class, ScreenClass::Large);
         assert_eq!(s.wire().discards, 1);
     }
 
@@ -353,6 +814,485 @@ mod tests {
     }
 
     #[test]
+    fn frames_keep_per_pixel_alpha_in_both_formats() {
+        let clear = |r, g, b| Rgba { r, g, b, a: 0 };
+        // ROM 1.90: BGRA everywhere, A = 0 kept (the video shows through).
+        let mut s = connected();
+        s.set_orientation(Orientation::ReversePortrait).unwrap();
+        let mut frame = Frame::filled(m88().panel, Rgba::BLACK);
+        frame.fill_rect(Rect::new(0, 0, 1, 1), clear(10, 20, 30));
+        s.present(&frame).unwrap();
+        assert_eq!(
+            &s.wire().sent.last().unwrap()[..8],
+            &[30, 20, 10, 0, 0, 0, 0, 255]
+        );
+        frame.fill_rect(Rect::new(5, 0, 1, 1), clear(1, 2, 3));
+        s.wire.reply(b"needReSend:0|renderCnt:1");
+        let before = s.wire().sent.len();
+        s.present(&frame).unwrap();
+        assert_eq!(&since(&s, before)[1][..7], &[0x80, 0, 5, 3, 2, 1, 0]);
+
+        // ROM 1.88: the 3-byte form carries alpha in the low bits of B and G.
+        let mut s = connected_with(&NoPause, "chs_88inch.dev1_rom1.88", "turing-8.8");
+        assert_eq!(s.format, PixelFormat::CompressedBgra);
+        s.set_orientation(Orientation::ReversePortrait).unwrap();
+        let mut frame = Frame::filled(m88().panel, Rgba::BLACK);
+        s.present(&frame).unwrap();
+        frame.fill_rect(Rect::new(5, 0, 1, 1), clear(0x10, 0xFF, 0xFF));
+        frame.fill_rect(Rect::new(7, 0, 1, 1), Rgba::WHITE);
+        s.wire.reply(b"needReSend:0|renderCnt:1");
+        let before = s.wire().sent.len();
+        s.present(&frame).unwrap();
+        assert_eq!(
+            &since(&s, before)[1][..12],
+            &[0x80, 0, 5, 0xFC, 0xFC, 0x10, 0x80, 0, 7, 0xFF, 0xFF, 0xFF]
+        );
+    }
+
+    #[test]
+    fn nothing_storage_related_is_sent_implicitly() {
+        let mut s = connected();
+        s.set_orientation(Orientation::Landscape).unwrap();
+        let panel = m88().panel.in_orientation(Orientation::Landscape);
+        let base = Frame::filled(panel, Rgba::BLACK);
+        s.present(&base).unwrap();
+        let mut next = base.clone();
+        next.fill_rect(Rect::new(0, 0, 4, 4), Rgba::WHITE);
+        s.wire.reply(b"needReSend:1|renderCnt:1");
+        s.present(&next).unwrap();
+        s.present(&base).unwrap();
+        s.set_brightness(Brightness::MAX).unwrap();
+        s.screen_off().unwrap();
+        s.release().unwrap();
+        let forbidden = [
+            op::STORAGE_INFO,
+            op::LIST_DIR,
+            op::DELETE_FILE,
+            op::FILE_SIZE,
+            op::UPLOAD_FILE,
+            op::PLAY_VIDEO,
+            op::SET_OPTIONS,
+            op::SET_ROTATION,
+            0x82,
+            op::RESTART,
+            op::PLAY_IMAGE,
+        ];
+        let sent = commands(&s.wire().sent);
+        assert!(sent.len() > 6, "{sent:02x?}");
+        assert!(sent.iter().all(|o| !forbidden.contains(o)), "{sent:02x?}");
+    }
+
+    #[test]
+    fn storage_queries_map_folders_and_parse_replies() {
+        let mut s = connected();
+        assert!(s.storage().is_some());
+        let before = s.wire().sent.len();
+        let discards = s.wire().discards;
+        script(&mut s, &["garbage", "7340032-1048576-6291456-0-0-0\0"]);
+        let info = s.info().unwrap();
+        assert_eq!(
+            info.internal,
+            Capacity {
+                total: (7_340_032 - 512) * 1024,
+                used: 1_048_576 * 1024,
+                free: (6_291_456 - 512) * 1024,
+            }
+        );
+        assert_eq!(info.card, None);
+        assert_eq!(
+            commands(since(&s, before)),
+            [op::STORAGE_INFO, op::STORAGE_INFO],
+            "a bad reply is asked again"
+        );
+        assert_eq!(s.wire().discards, discards + 2, "stale input dropped first");
+
+        let before = s.wire().sent.len();
+        script(&mut s, &["file:88.mp4/logo.png/", "nodir-createdone"]);
+        let internal_video = path("internal/video/x").location;
+        let names: Vec<String> = s
+            .list(internal_video)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(names, ["88.mp4", "logo.png"]);
+        assert!(s.list(path("sd/image/x").location).unwrap().is_empty());
+        let sent = since(&s, before);
+        assert_eq!(
+            sent[0],
+            proto::path_command(op::LIST_DIR, "/mnt/UDISK/video/").unwrap()
+        );
+        assert_eq!(
+            sent[1],
+            proto::path_command(op::LIST_DIR, "/mnt/SDCARD/img/").unwrap()
+        );
+
+        let before = s.wire().sent.len();
+        script(&mut s, &["12345", "0"]);
+        let clip = path("internal/video/88.mp4");
+        assert_eq!(s.size(&clip).unwrap(), Some(12_345));
+        assert_eq!(s.size(&clip).unwrap(), None, "0 means absent");
+        assert_eq!(
+            since(&s, before)[0],
+            proto::path_command(op::FILE_SIZE, "/mnt/UDISK/video/88.mp4").unwrap()
+        );
+        let before = s.wire().sent.len();
+        let err = s.size(&clip).unwrap_err();
+        assert!(matches!(err, BezelError::Timeout(_)), "{err}");
+        assert_eq!(commands(since(&s, before)), [op::FILE_SIZE; QUERY_TRIES]);
+        assert!(
+            err.to_string()
+                .contains("GET_FILE_SIZE /mnt/UDISK/video/88.mp4")
+        );
+    }
+
+    #[test]
+    fn upload_reports_progress_and_can_be_cancelled() {
+        // A whole upload follows spec § 13.4 and reports after every write.
+        let mut s = connected();
+        let data = test_file(UPLOAD_CHUNK * 2 + 1000);
+        let total = data.len() as u64;
+        let clip = path("internal/video/clip.mp4");
+        let before = s.wire().sent.len();
+        let size = total.to_string();
+        script(
+            &mut s,
+            &[
+                "media_stop",
+                "file:old.mp4/",
+                "create_success",
+                "file_rev_done",
+                &size,
+            ],
+        );
+        let (result, progress) = run_upload(&mut s, &clip, &data, None);
+        result.unwrap();
+        assert_eq!(s.size(&clip).unwrap(), Some(total), "the use case's check");
+        let sent = since(&s, before);
+        assert_eq!(
+            commands(sent),
+            [
+                op::STOP_VIDEO,
+                op::STOP_MEDIA,
+                op::LIST_DIR,
+                op::UPLOAD_FILE,
+                op::FILE_SIZE
+            ]
+        );
+        assert_eq!(
+            sent[2],
+            proto::path_command(op::LIST_DIR, "/mnt/UDISK/video/").unwrap()
+        );
+        let header = proto::upload_file("/mnt/UDISK/video/clip.mp4", total as u32).unwrap();
+        assert_eq!(sent[3], header);
+        let writes = &sent[4..7];
+        assert!(writes.iter().all(|w| !is_command(w)));
+        assert_eq!(
+            writes.concat(),
+            proto::blocks(&data),
+            "the same bytes, 3 writes"
+        );
+        assert!(is_command(&sent[7]));
+        let chunk = UPLOAD_CHUNK as u64;
+        assert_eq!(
+            progress,
+            [
+                (0, total),
+                (chunk, total),
+                (2 * chunk, total),
+                (total, total)
+            ]
+        );
+
+        // Cancelled after the first write: no more data, HELLO puts the link
+        // back, GET_FILE_SIZE measures what is left, nothing is deleted.
+        let mut s = connected();
+        let before = s.wire().sent.len();
+        let partial = chunk.to_string();
+        script(
+            &mut s,
+            &[
+                "media_stop",
+                "nodir-createdone",
+                "create_success",
+                ROM_190,
+                &partial,
+            ],
+        );
+        let (result, progress) = run_upload(&mut s, &clip, &data, Some(1));
+        assert_eq!(
+            result,
+            Err(BezelError::Cancelled {
+                partial: Some(chunk)
+            })
+        );
+        assert_eq!(progress, [(0, total), (chunk, total)]);
+        let sent = since(&s, before);
+        assert_eq!(
+            commands(sent),
+            [
+                op::STOP_VIDEO,
+                op::STOP_MEDIA,
+                op::LIST_DIR,
+                op::UPLOAD_FILE,
+                op::HELLO,
+                op::FILE_SIZE
+            ]
+        );
+        assert_eq!(sent.iter().filter(|w| !is_command(w)).count(), 1);
+        assert!(!s.streaming && s.last.is_none(), "the next frame is full");
+
+        // Nothing left on the screen: no partial to offer for deletion.
+        let mut s = connected();
+        script(
+            &mut s,
+            &[
+                "media_stop",
+                "nodir-createdone",
+                "create_success",
+                ROM_190,
+                "0",
+            ],
+        );
+        let (result, _) = run_upload(&mut s, &clip, &data, Some(0));
+        assert_eq!(result, Err(BezelError::Cancelled { partial: None }));
+
+        // Cancelled before the header: nothing is sent at all.
+        let mut s = connected();
+        let before = s.wire().sent.len();
+        let token = CancelToken::new();
+        token.cancel();
+        let mut sink = |_: Progress| {};
+        let mut job = Job::new(&token, &mut sink);
+        let result = s.upload(&clip, &data, &mut job);
+        assert_eq!(result, Err(BezelError::Cancelled { partial: None }));
+        assert!(since(&s, before).is_empty());
+    }
+
+    #[test]
+    fn upload_failures_and_the_completion_wait() {
+        let clip = path("sd/video/clip.mp4");
+        let data = test_file(1000);
+
+        // The device refuses the header: no data follows.
+        let mut s = connected();
+        let before = s.wire().sent.len();
+        script(&mut s, &["media_stop", "nodir-createdone", "no space"]);
+        let (result, _) = run_upload(&mut s, &clip, &data, None);
+        assert!(matches!(result, Err(BezelError::Timeout(_))), "{result:?}");
+        assert!(since(&s, before).iter().all(|w| is_command(w)));
+        assert_eq!(
+            since(&s, before)[3],
+            proto::upload_file("/mnt/SDCARD/video/clip.mp4", 1000).unwrap()
+        );
+        let (empty, _) = run_upload(&mut s, &clip, &[], None);
+        assert!(matches!(empty, Err(BezelError::InvalidInput(_))));
+
+        // No `file_rev_done`: 15 waits 200 ms apart, then the size check decides.
+        let pauses = Pauses::default();
+        let mut s = connected_with(&pauses, ROM_190, "turing-8.8");
+        pauses.take();
+        script(
+            &mut s,
+            &["media_stop", "nodir-createdone", "create_success"],
+        );
+        let (result, _) = run_upload(&mut s, &clip, &data, None);
+        assert_eq!(result, Ok(()));
+        let waits = pauses.take();
+        assert_eq!(waits[0], STOP_VIDEO_SETTLE);
+        assert_eq!(
+            &waits[1..],
+            [RECEIVED_ROUND_PAUSE; RECEIVED_ROUNDS_LARGE - 1]
+        );
+
+        // Cancelled while the device writes: recovered the same way.
+        let mut s = connected();
+        let size = data.len().to_string();
+        script(
+            &mut s,
+            &[
+                "media_stop",
+                "nodir-createdone",
+                "create_success",
+                ROM_190,
+                &size,
+            ],
+        );
+        let (result, _) = run_upload(&mut s, &clip, &data, Some(1000));
+        assert_eq!(
+            result,
+            Err(BezelError::Cancelled {
+                partial: Some(1000)
+            })
+        );
+
+        // The screen does not answer HELLO after a cancel: reconnect.
+        let mut s = connected();
+        let before = s.wire().sent.len();
+        script(
+            &mut s,
+            &["media_stop", "nodir-createdone", "create_success"],
+        );
+        let (result, _) = run_upload(&mut s, &clip, &test_file(UPLOAD_CHUNK + 1), Some(1));
+        let err = result.unwrap_err();
+        assert!(matches!(err, BezelError::Timeout(_)), "{err}");
+        assert!(err.to_string().contains("sd/video/clip.mp4"), "{err}");
+        let hellos = commands(since(&s, before))
+            .into_iter()
+            .filter(|o| *o == op::HELLO)
+            .count();
+        assert_eq!(hellos, HELLO_TRIES);
+    }
+
+    #[test]
+    fn playback_stops_media_first_and_waits_for_the_device() {
+        let pauses = Pauses::default();
+        let mut s = connected_with(&pauses, ROM_190, "turing-8.8");
+        let base = Frame::filled(m88().panel, Rgba::BLACK);
+        s.present(&base).unwrap();
+        pauses.take();
+
+        let video = path("sd/video/88.mp4");
+        let before = s.wire().sent.len();
+        script(&mut s, &["media_stop", "play_video_success"]);
+        s.play_video(&video, Repeat::Loop).unwrap();
+        let sent = since(&s, before);
+        assert_eq!(
+            commands(sent),
+            [op::STOP_VIDEO, op::STOP_MEDIA, op::PLAY_VIDEO]
+        );
+        assert_eq!(
+            sent[2],
+            proto::play_video("/mnt/SDCARD/video/88.mp4", Repeat::Loop).unwrap()
+        );
+        assert_eq!(pauses.take(), [STOP_VIDEO_SETTLE]);
+
+        // The next frame goes out full, after PRE_UPDATE_BITMAP (vendor order).
+        let before = s.wire().sent.len();
+        s.present(&base).unwrap();
+        assert_eq!(
+            commands(since(&s, before)),
+            [op::PRE_UPDATE_BITMAP, op::DISPLAY_BITMAP]
+        );
+
+        // Not confirmed: sent once more, then an error.
+        let before = s.wire().sent.len();
+        script(&mut s, &["media_stop", "", "play_video_success"]);
+        s.play_video(&video, Repeat::Once).unwrap();
+        let plays = commands(since(&s, before))
+            .into_iter()
+            .filter(|o| *o == op::PLAY_VIDEO)
+            .count();
+        assert_eq!(plays, PLAY_VIDEO_TRIES);
+        script(&mut s, &["media_stop"]);
+        let err = s.play_video(&video, Repeat::Loop).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("PLAY_VIDEO /mnt/SDCARD/video/88.mp4"),
+            "{err}"
+        );
+
+        let image = path("internal/image/logo.png");
+        let before = s.wire().sent.len();
+        script(&mut s, &["media_stop", "play_img_ok"]);
+        s.play_image(&image).unwrap();
+        assert_eq!(
+            since(&s, before)[2],
+            proto::path_command(op::PLAY_IMAGE, "/mnt/UDISK/img/logo.png").unwrap()
+        );
+        let before = s.wire().sent.len();
+        s.present(&base).unwrap();
+        assert_eq!(
+            commands(since(&s, before)),
+            [op::PRE_UPDATE_BITMAP, op::DISPLAY_BITMAP],
+            "a full frame after an image starts too"
+        );
+        script(&mut s, &["media_stop"]);
+        assert!(matches!(s.play_image(&image), Err(BezelError::Timeout(_))));
+
+        // Stop polls STOP_MEDIA until `media_stop`, 400 ms apart.
+        pauses.take();
+        let before = s.wire().sent.len();
+        script(&mut s, &["", "busy", "media_stop"]);
+        s.stop().unwrap();
+        assert_eq!(
+            commands(since(&s, before)),
+            [
+                op::STOP_VIDEO,
+                op::STOP_MEDIA,
+                op::STOP_MEDIA,
+                op::STOP_MEDIA
+            ]
+        );
+        assert_eq!(
+            pauses.take(),
+            [
+                STOP_VIDEO_SETTLE,
+                STOP_MEDIA_POLL_PAUSE,
+                STOP_MEDIA_POLL_PAUSE
+            ]
+        );
+
+        // Delete: one packet, no reply awaited.
+        let before = s.wire().sent.len();
+        s.delete(&image, confirmed()).unwrap();
+        assert_eq!(
+            since(&s, before),
+            [
+                proto::path_command(op::DELETE_FILE, "/mnt/UDISK/img/logo.png")
+                    .unwrap()
+                    .to_vec()
+            ]
+        );
+    }
+
+    #[test]
+    fn boot_rewrites_options_keeping_the_last_brightness() {
+        let mut s = connected();
+        s.set_start_mode(StartMode::Video, confirmed()).unwrap();
+        // § 17.2: brightness 170 (none sent yet: the vendor default), video,
+        // no flip, no sleep.
+        let expected = proto::set_options(Options {
+            brightness: 170,
+            start_mode: proto::StartMode::Video,
+            flip: false,
+            sleep_minutes: 0,
+        });
+        assert_eq!(s.wire().sent.last().unwrap(), &expected.to_vec());
+        s.set_brightness(Brightness::new(25).unwrap()).unwrap();
+        s.set_start_mode(StartMode::Image, confirmed()).unwrap();
+        assert_eq!(
+            &s.wire().sent.last().unwrap()[..15],
+            &[0x7D, 0xEF, 0x69, 0, 0, 0, 5, 0, 0, 0, 64, 1, 0, 0, 0]
+        );
+        s.set_start_mode(StartMode::Default, confirmed()).unwrap();
+        assert_eq!(&s.wire().sent.last().unwrap()[10..15], &[64, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn small_screens_store_under_root_and_wait_once() {
+        let pauses = Pauses::default();
+        let mut s = connected_with(&pauses, "chs_5inch.dev1_rom1.87", "turing-5");
+        assert_eq!(s.class, ScreenClass::Small);
+        let before = s.wire().sent.len();
+        script(&mut s, &["file:"]);
+        assert!(
+            s.list(path("internal/image/x").location)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            since(&s, before)[0],
+            proto::path_command(op::LIST_DIR, "/root/img/").unwrap()
+        );
+        pauses.take();
+        script(&mut s, &["media_stop", "file:", "create_success"]);
+        let (result, _) = run_upload(&mut s, &path("internal/video/a.mp4"), &[1, 2, 3], None);
+        assert_eq!(result, Ok(()));
+        assert_eq!(pauses.take(), [STOP_VIDEO_SETTLE], "one completion wait");
+    }
+
+    #[test]
     fn wrong_size_and_controls() {
         let mut s = connected();
         let small = Frame::filled(bezel_core::domain::geometry::Size::new(10, 10), Rgba::BLACK);
@@ -392,6 +1332,7 @@ mod tests {
         let odd = Hello::parse(b"chs_99inch.dev1_rom1.0").unwrap();
         assert!(pick_model(&odd, &two).is_none());
         assert_eq!(rgba_to_bgra(&[1, 2, 3, 4]), vec![3, 2, 1, 4]);
+        assert_eq!(printable(b"ok\0\x01!"), "ok!");
         RealTime.pause(Duration::ZERO);
     }
 }

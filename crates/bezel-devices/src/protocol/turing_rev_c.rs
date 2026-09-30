@@ -7,6 +7,9 @@
 //!
 //! This module is pure: it only builds and parses bytes.
 
+use bezel_core::domain::device::ModelId;
+use bezel_core::domain::storage::{Capacity, Repeat, StorageInfo};
+
 /// Size of every command packet and data block.
 pub const BLOCK: usize = 250;
 /// Payload bytes carried by each data block (the 250th byte is zero).
@@ -64,6 +67,69 @@ pub mod op {
 
 /// The two bytes HELLO carries (their meaning is unknown; both references send them).
 pub const HELLO_PAYLOAD: [u8; 2] = [0xC5, 0xD3];
+
+/// Text the device answers with, matched by content (spec § 3, § 13).
+pub mod reply {
+    /// STOP_MEDIA: playback stopped.
+    pub const MEDIA_STOPPED: &str = "media_stop";
+    /// UPLOAD_FILE header accepted: the data phase may follow.
+    pub const CREATED: &str = "create_success";
+    /// UPLOAD_FILE data phase received and written.
+    pub const RECEIVED: &str = "file_rev_done";
+    /// PLAY_VIDEO started.
+    pub const VIDEO_PLAYING: &str = "play_video_success";
+    /// PLAY_IMAGE shown.
+    pub const IMAGE_SHOWN: &str = "play_img_ok";
+}
+
+/// Storage roots (spec § 13.1). The media folders inside them (`img/`,
+/// `video/`) are common to every family with storage.
+pub mod root {
+    /// Internal flash of the vendor's large screens.
+    pub const LARGE_INTERNAL: &str = "/mnt/UDISK/";
+    /// Internal flash of the vendor's small screens.
+    pub const SMALL_INTERNAL: &str = "/root/";
+    /// The TF card, on every model.
+    pub const CARD: &str = "/mnt/SDCARD/";
+}
+
+/// Models in the vendor's large class (spec, introduction): storage under
+/// `/mnt/UDISK`, 15 upload-completion rounds, no 0x82 before video play.
+pub const LARGE_MODELS: [&str; 5] = [
+    "turing-4",
+    "turing-6.5",
+    "turing-6.8",
+    "turing-8",
+    "turing-8.8",
+];
+
+/// The vendor's two classes of rev C screens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenClass {
+    /// 4", 6.5", 6.8", 8", 8.8".
+    Large,
+    /// 2.1"/2.8" round, 2.4", 2.8" square, 3.4", 5".
+    Small,
+}
+
+impl ScreenClass {
+    /// The class of a rev C model.
+    pub fn of(model: &ModelId) -> Self {
+        if LARGE_MODELS.contains(&model.0) {
+            ScreenClass::Large
+        } else {
+            ScreenClass::Small
+        }
+    }
+
+    /// Root of the internal flash's media folders.
+    pub const fn internal_root(self) -> &'static str {
+        match self {
+            ScreenClass::Large => root::LARGE_INTERNAL,
+            ScreenClass::Small => root::SMALL_INTERNAL,
+        }
+    }
+}
 
 /// Builds a command packet. `len` is the opcode-specific length field
 /// (payload length, 1 for argument-less commands, or the size of a following
@@ -143,6 +209,47 @@ pub fn set_options(o: Options) -> [u8; BLOCK] {
             o.sleep_minutes.min(10),
         ],
     )
+}
+
+/// Longest device path UPLOAD_FILE carries: the inline payload minus the
+/// LE32 file size after the path (spec § 3).
+pub const MAX_UPLOAD_PATH: usize = MAX_INLINE - 4;
+
+/// GET_STORAGE_INFO.
+pub fn storage_info() -> [u8; BLOCK] {
+    simple(op::STORAGE_INFO)
+}
+
+/// A command whose inline payload is a device path and whose length field
+/// is the path's byte count: LIST_DIR, DELETE_FILE, GET_FILE_SIZE,
+/// PLAY_IMAGE. `None` when the path exceeds [`MAX_INLINE`].
+pub fn path_command(opcode: u8, path: &str) -> Option<[u8; BLOCK]> {
+    let len = u32::try_from(path.len()).ok()?;
+    command(opcode, len, 0, path.as_bytes())
+}
+
+/// PLAY_VIDEO: the loop flag rides in byte 7. `None` when the path exceeds
+/// [`MAX_INLINE`].
+pub fn play_video(path: &str, repeat: Repeat) -> Option<[u8; BLOCK]> {
+    let len = u32::try_from(path.len()).ok()?;
+    let flag = match repeat {
+        Repeat::Once => 0,
+        Repeat::Loop => 1,
+    };
+    command(op::PLAY_VIDEO, len, flag, path.as_bytes())
+}
+
+/// UPLOAD_FILE header: BE32 path length in the length field, then the path
+/// and the file size as **LE32** (spec § 13.4). The data phase follows as
+/// [`blocks`]. `None` when the path exceeds [`MAX_UPLOAD_PATH`].
+pub fn upload_file(path: &str, size: u32) -> Option<[u8; BLOCK]> {
+    if path.len() > MAX_UPLOAD_PATH {
+        return None;
+    }
+    let mut data = Vec::with_capacity(path.len() + 4);
+    data.extend_from_slice(path.as_bytes());
+    data.extend_from_slice(&size.to_le_bytes());
+    command(op::UPLOAD_FILE, u32::try_from(path.len()).ok()?, 0, &data)
 }
 
 /// The 250 × `0x2C` block sent before a full frame (and to resync after a failed HELLO).
@@ -338,6 +445,91 @@ impl Status {
     }
 }
 
+/// Flash the vendor keeps out of the reported total and free (spec § 13.2).
+pub const FLASH_RESERVE_KIB: u64 = 512;
+/// A card counts as inserted only when its total exceeds this (spec § 13.2).
+pub const CARD_PRESENT_ABOVE_KIB: u64 = 1024;
+/// Bytes per KiB, the unit of GET_STORAGE_INFO.
+const KIB: u64 = 1024;
+
+/// A reply as text: NUL bytes removed (the vendor's parser does the same),
+/// surrounding whitespace trimmed.
+fn text(reply: &[u8]) -> String {
+    String::from_utf8_lossy(reply)
+        .replace('\0', "")
+        .trim()
+        .to_string()
+}
+
+/// A GET_STORAGE_INFO reply `a-b-c-d-e-f`, fields in KiB as the device sends
+/// them: flash total, used, free, then TF card total, used, free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageReport {
+    /// Flash total, reserve included.
+    pub flash_total: u64,
+    /// Flash in use.
+    pub flash_used: u64,
+    /// Flash free, reserve included.
+    pub flash_free: u64,
+    /// Card total; 0 without a card.
+    pub card_total: u64,
+    /// Card in use.
+    pub card_used: u64,
+    /// Card free.
+    pub card_free: u64,
+}
+
+impl StorageReport {
+    /// Parses a reply; `None` unless it is six decimal fields joined by `-`.
+    pub fn parse(reply: &[u8]) -> Option<Self> {
+        let text = text(reply);
+        let fields: Vec<u64> = text
+            .split('-')
+            .map(|f| f.trim().parse().ok())
+            .collect::<Option<_>>()?;
+        let [
+            flash_total,
+            flash_used,
+            flash_free,
+            card_total,
+            card_used,
+            card_free,
+        ] = fields.try_into().ok()?;
+        Some(Self {
+            flash_total,
+            flash_used,
+            flash_free,
+            card_total,
+            card_used,
+            card_free,
+        })
+    }
+
+    /// The capacities in bytes, as the vendor reads them: the flash reserve
+    /// is taken off total and free, and the card exists only when its total
+    /// exceeds [`CARD_PRESENT_ABOVE_KIB`].
+    pub fn info(&self) -> StorageInfo {
+        let bytes = |kib: u64| kib.saturating_mul(KIB);
+        let internal = Capacity {
+            total: bytes(self.flash_total.saturating_sub(FLASH_RESERVE_KIB)),
+            used: bytes(self.flash_used),
+            free: bytes(self.flash_free.saturating_sub(FLASH_RESERVE_KIB)),
+        };
+        let card = (self.card_total > CARD_PRESENT_ABOVE_KIB).then(|| Capacity {
+            total: bytes(self.card_total),
+            used: bytes(self.card_used),
+            free: bytes(self.card_free),
+        });
+        StorageInfo { internal, card }
+    }
+}
+
+/// A GET_FILE_SIZE reply: the decimal size in bytes (`0` for an absent
+/// file). `None` unless the whole reply is a number.
+pub fn file_size(reply: &[u8]) -> Option<u64> {
+    text(reply).parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +558,139 @@ mod tests {
         assert_eq!(head(&set_rotation(2)), "81ef690000000100000002");
         assert_eq!(set_rotation(6)[10], 2);
         assert!(start_display_block().iter().all(|&b| b == 0x2C));
+    }
+
+    /// Asserts the whole 250-byte packet: `head_hex`, then `zeros` zero bytes.
+    fn assert_packet(packet: Option<[u8; BLOCK]>, head_hex: &str, zeros: usize) {
+        let packet = packet.expect("the packet fits");
+        let expected = format!("{}{}", head_hex.replace(' ', ""), "00".repeat(zeros));
+        assert_eq!(hex(&packet), expected);
+    }
+
+    #[test]
+    fn storage_packets_match_the_reference_vectors() {
+        // docs: protocol-turing-rev-c.md § 17.2 (vendor, static, computed).
+        assert_packet(Some(storage_info()), "64ef6900000001", 243);
+        assert_packet(
+            path_command(op::LIST_DIR, "/mnt/UDISK/video/"),
+            "65 ef 69 00 00 00 11 00 00 00 2f 6d 6e 74 2f 55 44 49 53 4b 2f 76 69 64 65 6f 2f",
+            223,
+        );
+        assert_packet(
+            path_command(op::FILE_SIZE, "/mnt/SDCARD/video/"),
+            "6e ef 69 00 00 00 12 00 00 00 2f 6d 6e 74 2f 53 44 43 41 52 44 2f 76 69 64 65 6f 2f",
+            222,
+        );
+        assert_packet(
+            play_video("/mnt/SDCARD/video/88.mp4", Repeat::Loop),
+            "78 ef 69 00 00 00 18 01 00 00 2f 6d 6e 74 2f 53 44 43 41 52 44 2f 76 69 64 65 6f 2f \
+             38 38 2e 6d 70 34",
+            216,
+        );
+        assert_packet(
+            upload_file("/mnt/UDISK/video/88.mp4", 12_345_678),
+            "6f ef 69 00 00 00 17 00 00 00 2f 6d 6e 74 2f 55 44 49 53 4b 2f 76 69 64 65 6f 2f \
+             38 38 2e 6d 70 34 4e 61 bc 00",
+            213,
+        );
+        assert_packet(
+            Some(set_options(Options {
+                brightness: 170,
+                start_mode: StartMode::Video,
+                flip: false,
+                sleep_minutes: 0,
+            })),
+            "7d ef 69 00 00 00 05 00 00 00 aa 02 00 00 00",
+            235,
+        );
+        // Same layout, from the command table (§ 3): no loop flag, path at byte 10.
+        let image = "/mnt/SDCARD/img/logo.png";
+        assert_packet(
+            path_command(op::PLAY_IMAGE, image),
+            &format!("8cef6900000018000000{}", hex(image.as_bytes())),
+            250 - 10 - image.len(),
+        );
+        let stored = "/mnt/UDISK/img/logo.png";
+        assert_packet(
+            path_command(op::DELETE_FILE, stored),
+            &format!("66ef6900000017000000{}", hex(stored.as_bytes())),
+            250 - 10 - stored.len(),
+        );
+        assert_eq!(play_video("/a.mp4", Repeat::Once).map(|p| p[7]), Some(0));
+
+        // Paths too long for one packet are refused, never truncated.
+        let longest = format!("/{}", "a".repeat(MAX_UPLOAD_PATH - 1));
+        assert!(upload_file(&longest, 1).is_some());
+        assert!(upload_file(&format!("{longest}a"), 1).is_none());
+        let too_long = "a".repeat(MAX_INLINE + 1);
+        assert!(path_command(op::LIST_DIR, &too_long).is_none());
+        assert!(play_video(&too_long, Repeat::Loop).is_none());
+    }
+
+    #[test]
+    fn storage_info_subtracts_the_reserved_flash_and_detects_the_card() {
+        let kib = |n: u64| n * 1024;
+        let report =
+            StorageReport::parse(b"7340032-1048576-6291456-31260672-2048-31258624\0\0").unwrap();
+        assert_eq!(report.flash_total, 7_340_032);
+        let info = report.info();
+        assert_eq!(
+            info.internal,
+            Capacity {
+                total: kib(7_340_032 - 512),
+                used: kib(1_048_576),
+                free: kib(6_291_456 - 512),
+            }
+        );
+        assert_eq!(
+            info.card,
+            Some(Capacity {
+                total: kib(31_260_672),
+                used: kib(2048),
+                free: kib(31_258_624),
+            })
+        );
+
+        // A card counts only above 1024 KiB; TF total 0 means none.
+        for (reply, card) in [
+            (&b"7340032-0-7340032-0-0-0"[..], false),
+            (b"7340032-0-7340032-1024-0-1024", false),
+            (b" 7340032-0-7340032-1025-0-1025\r\n", true),
+        ] {
+            let info = StorageReport::parse(reply).unwrap().info();
+            assert_eq!(
+                info.card.is_some(),
+                card,
+                "{}",
+                String::from_utf8_lossy(reply)
+            );
+        }
+        // The reserve never makes a capacity negative.
+        let tiny = StorageReport::parse(b"100-0-100-0-0-0").unwrap().info();
+        assert_eq!((tiny.internal.total, tiny.internal.free), (0, 0));
+
+        for bad in [
+            &b""[..],
+            b"1-2-3",
+            b"a-b-c-d-e-f",
+            b"1-2-3-4-5-6-7",
+            b"media_stop",
+        ] {
+            assert!(StorageReport::parse(bad).is_none(), "{bad:?}");
+        }
+        assert_eq!(file_size(b"12345678\0"), Some(12_345_678));
+        assert_eq!(file_size(b"0"), Some(0));
+        assert_eq!(file_size(b"file_rev_done"), None);
+        assert_eq!(file_size(b""), None);
+    }
+
+    #[test]
+    fn screen_classes_pick_the_internal_root() {
+        let class = |id: &'static str| ScreenClass::of(&ModelId(id));
+        assert_eq!(class("turing-8.8"), ScreenClass::Large);
+        assert_eq!(class("turing-4").internal_root(), "/mnt/UDISK/");
+        assert_eq!(class("turing-5"), ScreenClass::Small);
+        assert_eq!(class("turing-2.1").internal_root(), "/root/");
     }
 
     #[test]

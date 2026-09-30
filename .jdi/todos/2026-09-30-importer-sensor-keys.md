@@ -1,0 +1,1 @@
+- [release-polish] Publish the sensor keys imported themes use but no provider has yet: `cpu.fan`, `fan.pump`, `fan.case*`, `gpu.fps`, `net.ping`, `net.*.total`, `memory.available.percent`, `system.volume`, `cpu.voltage`, `gpu.voltage` (sensors SUMMARY § Follow-ups)

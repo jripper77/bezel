@@ -1,0 +1,1 @@
+- [release-polish] Identify TUR_USB panels in HID desktop mode (1a86:ad10–ad13) in `bezel devices` and the studio, and offer "back to USB monitor mode" (the two `5f3759df` HID reports, protocol-turing-usb.md § 10) behind a confirmation (D-2026-09-30-device-protocols-6)

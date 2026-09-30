@@ -1,0 +1,1 @@
+- [device-protocols follow-up] Refactor from REVIEW W1–W5: one RGB565 LE/BE converter, one `io_err`/frame-size check (with the right error kind) shared by the drivers, `Pause` out of turing_rev_c.rs, drop unused `NO_CHANGE`, name the rev C 1024-byte reply size, and make the rev C wake/retry path testable with a fake bus

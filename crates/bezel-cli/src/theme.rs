@@ -15,7 +15,7 @@ use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::theme::{AssetRef, Theme};
 use bezel_core::ports::{ThemeLocation, ThemeStore};
 use bezel_themes::import::import_path;
-use bezel_themes::native::{EXTENSION, MANIFEST};
+use bezel_themes::native::{EXTENSION, is_native, native_location};
 
 use crate::Rendering;
 use crate::messages::Messages;
@@ -61,18 +61,6 @@ pub fn data_home(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
 /// The first existing folder of `candidates`.
 pub fn first_dir(candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates.iter().find(|d| d.is_dir()).cloned()
-}
-
-/// True for a native theme: a folder with `theme.json`, a `.bezeltheme`
-/// file, or a `theme.json` itself.
-fn is_native(path: &Path) -> bool {
-    if path.is_dir() {
-        return path.join(MANIFEST).is_file();
-    }
-    path.file_name().is_some_and(|n| n == MANIFEST)
-        || path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION))
 }
 
 /// Names of the themes in a bundled folder, sorted.
@@ -143,13 +131,8 @@ pub fn font_dirs(theme: &Path, bundled: Option<&Path>) -> Vec<PathBuf> {
 /// themes (`.turtheme`, `theme.yaml`, a Python theme folder) converted.
 pub fn load(store: &dyn ThemeStore, path: &Path) -> anyhow::Result<Loaded> {
     if is_native(path) {
-        let folder = match path.file_name() {
-            Some(n) if n == MANIFEST => path.parent().unwrap_or(Path::new(".")),
-            _ => path,
-        };
-        let location = ThemeLocation(folder.to_string_lossy().into_owned());
         let (theme, assets) = store
-            .load(&location)
+            .load(&native_location(path))
             .with_context(|| format!("cannot read the theme {}", path.display()))?;
         return Ok(Loaded {
             theme,
@@ -259,6 +242,7 @@ mod tests {
     use bezel_render::{SkiaRenderer, SystemFonts};
     use bezel_sensors::FakeSensors;
     use bezel_themes::FsThemeStore;
+    use bezel_themes::native::MANIFEST;
 
     const TIME: LocalTime = LocalTime {
         year: 2026,

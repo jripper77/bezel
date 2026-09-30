@@ -17,12 +17,13 @@ use bezel_core::domain::theme::Theme;
 use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink, ThemeLocation, ThemeStore};
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::import::import_path;
+use bezel_themes::native::{is_native, native_location};
 
 use crate::dto::{
     AddedDto, AssetDto, ImportedDto, LiveVideoDto, SampleDto, SavedDto, ScreenDto, SensorDto,
     SessionDto, ThemeEntryDto,
 };
-use crate::library::{ThemeLibrary, is_native_theme};
+use crate::library::ThemeLibrary;
 use crate::media::{kind_of, thumbnail_data_url};
 use crate::settings::SettingsFile;
 use crate::storage::StorageState;
@@ -448,14 +449,13 @@ impl Backend {
         Ok(ThemeDto::from(studio.theme()))
     }
 
-    /// Imports a theme: Bezel's own (`.bezeltheme`, or a folder with a
-    /// `theme.json`) as it is; another app's (a TURZX `.turtheme`, a
+    /// Imports a theme: Bezel's own (`.bezeltheme`, a folder with a
+    /// `theme.json`, or that `theme.json`) as it is; another app's (a TURZX `.turtheme`, a
     /// turing-smart-screen-python `theme.yaml` or its folder) converted, with
     /// what had no exact equivalent as warnings.
     pub fn import(&self, path: &Path) -> UiResult<ImportedDto> {
-        let (theme, assets, warnings) = if is_native_theme(path) {
-            let location = ThemeLocation(path.display().to_string());
-            let (theme, assets) = self.store.load(&location).map_err(text)?;
+        let (theme, assets, warnings) = if is_native(path) {
+            let (theme, assets) = self.store.load(&native_location(path)).map_err(text)?;
             (theme, assets, Vec::new())
         } else {
             let (theme, assets, report) = import_path(path).map_err(text)?;
@@ -1068,6 +1068,20 @@ static_text:
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("theme.yaml"), TINY_PYTHON_THEME).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_theme_json_opens_its_folder_like_the_cli() {
+        let f = fixture("import-manifest");
+        let folder = f.root.join("Manifest theme");
+        let target = ThemeLocation(folder.display().to_string());
+        f.backend.library.grant(&target);
+        f.backend
+            .save(&f.backend.session().theme, Some(target))
+            .unwrap();
+        let imported = f.backend.import(&folder.join("theme.json")).unwrap();
+        assert_eq!(imported.theme.name, "Start");
+        assert!(imported.warnings.is_empty());
     }
 
     #[test]

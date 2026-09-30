@@ -58,6 +58,32 @@ fn is_zip(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == EXTENSION) || path.is_file()
 }
 
+/// True for a theme in Bezel's own format: a folder with a `theme.json`, a
+/// `.bezeltheme` file, or a `theme.json` itself. Anything else is another
+/// app's theme, for the importers.
+pub fn is_native(path: &Path) -> bool {
+    if path.is_dir() {
+        return path.join(MANIFEST).is_file();
+    }
+    path.file_name().is_some_and(|n| n == MANIFEST)
+        || path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION))
+}
+
+/// Where [`FsThemeStore`] loads the native theme at `path` from: the folder
+/// of a `theme.json`, else `path` itself.
+pub fn native_location(path: &Path) -> ThemeLocation {
+    let folder = match path.file_name() {
+        Some(name) if name == MANIFEST => path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new(".")),
+        _ => path,
+    };
+    ThemeLocation(folder.to_string_lossy().into_owned())
+}
+
 fn load_folder(dir: &Path) -> Result<(Theme, BTreeMap<AssetRef, Vec<u8>>)> {
     let theme = parse_manifest(
         &fs::read(dir.join(MANIFEST)).map_err(|e| io(&dir.display().to_string(), e))?,
@@ -457,6 +483,32 @@ mod tests {
                 ))
                 .is_err()
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn native_themes_are_told_apart_from_other_apps() {
+        let root = scratch("native");
+        let folder = root.join("folder");
+        fs::create_dir_all(&folder).expect("dir");
+        fs::write(folder.join(MANIFEST), b"{}").expect("write");
+        let python = root.join("python");
+        fs::create_dir_all(&python).expect("dir");
+        fs::write(python.join("theme.yaml"), b"").expect("write");
+        assert!(is_native(&folder));
+        assert!(is_native(&folder.join(MANIFEST)));
+        assert!(is_native(&root.join("Zipped.BezelTheme")));
+        assert!(!is_native(&python));
+        assert!(!is_native(&python.join("theme.yaml")));
+        assert!(!is_native(&root.join("vendor.turtheme")));
+
+        let at = |path: &Path| native_location(path).0;
+        let shown = |path: &Path| path.to_string_lossy().into_owned();
+        assert_eq!(at(&folder.join(MANIFEST)), shown(&folder));
+        assert_eq!(at(&folder), shown(&folder));
+        assert_eq!(at(Path::new(MANIFEST)), ".");
+        let zipped = root.join("t.bezeltheme");
+        assert_eq!(at(&zipped), shown(&zipped));
         let _ = fs::remove_dir_all(&root);
     }
 

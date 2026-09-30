@@ -4,6 +4,7 @@
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use bezel_core::app::{choose_screen, discover_screens};
 use bezel_core::domain::catalog::model_by_id;
@@ -26,6 +27,7 @@ use crate::media::{kind_of, thumbnail_data_url};
 use crate::settings::SettingsFile;
 use crate::storage::StorageState;
 use crate::studio::Studio;
+pub use crate::studio::{MAX_REFRESH, MIN_REFRESH};
 
 /// Result of a UI command: errors are shown as text.
 pub type UiResult<T> = Result<T, String>;
@@ -436,17 +438,14 @@ impl Backend {
         }
     }
 
-    /// One refresh of the session (sample, and a frame on the live screen).
-    /// Returns the seconds until the next one.
-    pub fn tick(&self, time: LocalTime) -> f32 {
+    /// One refresh of the session (a sample when due, and a frame on the
+    /// live screen). Returns the time until the next one.
+    pub fn tick(&self, time: LocalTime) -> Duration {
         let mut studio = self.studio();
         if let Err(e) = studio.tick(time) {
             tracing::warn!("live screen stopped: {e}");
         }
-        studio
-            .theme()
-            .refresh_seconds
-            .clamp(MIN_REFRESH, MAX_REFRESH)
+        studio.period()
     }
 }
 
@@ -456,11 +455,6 @@ pub const UNTITLED: &str = "Untitled";
 /// Model a new theme is sized for when no screen is connected.
 pub const DEFAULT_MODEL: bezel_core::domain::device::ModelId =
     bezel_core::domain::device::ModelId("turing-8.8");
-
-/// Fastest refresh, seconds.
-pub const MIN_REFRESH: f32 = 0.25;
-/// Slowest refresh, seconds (sensors still update the UI this often).
-pub const MAX_REFRESH: f32 = 2.0;
 
 #[cfg(test)]
 mod tests {
@@ -585,7 +579,7 @@ mod tests {
         assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
         let theme = f.backend.session().theme;
         f.backend.push(&theme, TIME).unwrap();
-        assert!(f.backend.tick(TIME) >= MIN_REFRESH);
+        assert!(f.backend.tick(TIME).as_secs_f32() >= MIN_REFRESH);
         assert_eq!(f.connector.log().frames.len(), 3);
         f.backend.set_brightness(KEY, 40).unwrap();
         assert!(f.backend.set_brightness(KEY, 101).is_err());

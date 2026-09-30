@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bezel_core::domain::clock::{Language, LocalTime};
-use bezel_core::domain::frame::Frame;
+use bezel_core::domain::frame::{Frame, Rgba};
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::job::{Job, JobPhase, Progress};
 use bezel_core::domain::media::{
@@ -55,6 +55,20 @@ pub(crate) struct FakeMedia {
     tool: Option<PathBuf>,
     /// The conversions asked for.
     pub(crate) converted: Arc<Mutex<Vec<TranscodeTarget>>>,
+    /// The videos decoded on the host, and how.
+    pub(crate) streamed: Arc<Mutex<Vec<(MediaLocation, StreamSpec)>>>,
+}
+
+/// The color of every picture of a video [`FakeMedia`] decodes.
+pub(crate) const STREAMED: Rgba = Rgba::opaque(0, 200, 0);
+
+/// A decoded video whose pictures are all [`STREAMED`].
+struct Solid(Frame);
+
+impl VideoFrames for Solid {
+    fn frame_at(&mut self, _: Duration) -> Result<&Frame> {
+        Ok(&self.0)
+    }
 }
 
 impl FakeMedia {
@@ -64,6 +78,7 @@ impl FakeMedia {
             ready: true,
             tool: Some(PathBuf::from("/usr/bin/ffmpeg")),
             converted: Arc::default(),
+            streamed: Arc::default(),
         }
     }
 
@@ -73,6 +88,7 @@ impl FakeMedia {
             ready: false,
             tool: None,
             converted: Arc::default(),
+            streamed: Arc::default(),
         }
     }
 }
@@ -148,8 +164,12 @@ impl MediaTranscoder for FakeMedia {
         std::fs::read(&source.0).map_err(|e| BezelError::InvalidInput(e.to_string()))
     }
 
-    fn stream(&mut self, _: &MediaLocation, _: StreamSpec) -> Result<Box<dyn VideoFrames>> {
-        Err(BezelError::Unsupported("no host decoding here".into()))
+    fn stream(&mut self, source: &MediaLocation, spec: StreamSpec) -> Result<Box<dyn VideoFrames>> {
+        if !self.ready {
+            return Err(BezelError::Unsupported("no ffmpeg".into()));
+        }
+        self.streamed.lock().unwrap().push((source.clone(), spec));
+        Ok(Box::new(Solid(Frame::filled(spec.size, STREAMED))))
     }
 }
 

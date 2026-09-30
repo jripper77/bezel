@@ -22,7 +22,7 @@
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bezel_core::BezelError;
 use bezel_core::app::storage::{self, PreparedUpload, UploadRequest};
@@ -43,7 +43,7 @@ use crate::dto::{
     ConversionDto, FolderDto, JobDto, MediaToolsDto, PrepareDto, PreparedDto, RefusalDto,
     StorageDto, StorageErrorDto, StoredFileDto, media_summary,
 };
-use crate::studio::Resume;
+use crate::studio::{Resume, SharedMedia};
 
 /// Result of a storage command: errors carry a code the UI translates.
 pub type StorageResult<T> = Result<T, StorageErrorDto>;
@@ -119,7 +119,7 @@ fn remove_scratch(file: Option<&Path>) {
 /// What the storage commands share: the media converter, the one running
 /// operation, its cancel token and the upload waiting for confirmation.
 pub struct StorageState {
-    media: Mutex<Box<dyn MediaSetup>>,
+    media: SharedMedia,
     scratch: PathBuf,
     busy: AtomicBool,
     cancel: Mutex<Option<CancelToken>>,
@@ -144,13 +144,19 @@ impl StorageState {
     /// Storage commands over `media`; copies of theme videos go to `scratch`.
     pub fn new(media: Box<dyn MediaSetup>, scratch: PathBuf) -> Self {
         Self {
-            media: Mutex::new(media),
+            media: Arc::new(Mutex::new(media)),
             scratch,
             busy: AtomicBool::new(false),
             cancel: Mutex::new(None),
             pending: Mutex::new(None),
             tickets: AtomicU64::new(0),
         }
+    }
+
+    /// The media converter, for the session to decode a theme's video on
+    /// this computer (screens that cannot play videos).
+    pub fn shared_media(&self) -> SharedMedia {
+        Arc::clone(&self.media)
     }
 
     fn claim(&self) -> StorageResult<Claim<'_>> {

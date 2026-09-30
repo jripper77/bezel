@@ -22,7 +22,6 @@ mod tray;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::geometry::{Orientation, Size};
@@ -218,19 +217,23 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         .collect();
     let renderer = SkiaRenderer::with_fonts(bundled_fonts, SystemFonts::Load);
     let fonts = renderer.font_families();
+    let path = app.path();
+    let settings = SettingsFile::new(path.app_config_dir()?.join("settings.json"));
+    let ffmpeg = settings.load().ffmpeg_path.map(PathBuf::from);
+    let cache = path.app_cache_dir()?;
+    let storage = StorageState::new(
+        Box::new(FfmpegTranscoder::new(ffmpeg)),
+        cache.join("sending"),
+    );
+    // Screens that cannot play videos get the theme's video decoded here by
+    // the storage tab's converter.
     let studio = Studio::new(
         sensors,
         Box::new(renderer),
         clock::language(),
         starting_theme(),
-    );
-    let path = app.path();
-    let settings = SettingsFile::new(path.app_config_dir()?.join("settings.json"));
-    let ffmpeg = settings.load().ffmpeg_path.map(PathBuf::from);
-    let storage = StorageState::new(
-        Box::new(FfmpegTranscoder::new(ffmpeg)),
-        path.app_cache_dir()?.join("sending"),
-    );
+    )
+    .with_host_decoding(storage.shared_media(), cache.join("playing"));
     Ok(Backend {
         bus,
         connector,
@@ -266,7 +269,7 @@ fn start_refresh_loop(backend: Shared) {
             backend.restore_live(clock::now());
             loop {
                 let wait = backend.tick(clock::now());
-                std::thread::sleep(Duration::from_secs_f32(wait));
+                std::thread::sleep(wait);
             }
         });
     if let Err(e) = spawned {

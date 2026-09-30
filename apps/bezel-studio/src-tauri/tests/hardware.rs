@@ -60,7 +60,7 @@ fn stay_live(b: &Backend, label: &str) {
     while started.elapsed() < LIVE_FOR {
         let wait = b.tick(now());
         ticks += 1;
-        std::thread::sleep(Duration::from_secs_f32(wait));
+        std::thread::sleep(wait);
     }
     let sample = b.sample();
     assert_eq!(sample.live_error, None, "{label}: the live screen stopped");

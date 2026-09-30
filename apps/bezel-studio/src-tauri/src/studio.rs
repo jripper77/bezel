@@ -1,32 +1,80 @@
-//! The editing session behind the window: the theme being edited with its
-//! assets, the latest sensor readings and graph histories, and the screen
-//! showing the theme live. Everything goes through the core's ports, so the
-//! whole session runs on fakes in tests.
+//! The editing session behind the window: the core's [`ThemeRuntime`] with
+//! the theme being edited, its assets, the latest readings and the graph
+//! histories, and the screen showing it live. It is the same runtime as
+//! `bezel run` (D-2026-09-30-studio-app-4): every refresh samples through
+//! it, the live screen gets what it renders, and every committed edit swaps
+//! the theme in place with the histories kept. Everything goes through the
+//! core's ports, so the whole session runs on fakes in tests.
 //!
 //! A theme with a video background (D-2026-09-30-storage-video-4): the
-//! preview always shows the poster; the live screen loops the stored video
-//! and gets overlays on a transparent base when the core's
-//! [`ThemeRuntime::start_video`] finds the video on the screen, and the
-//! poster otherwise ([`VideoState::VideoMissing`] carries what sending it
-//! takes). The session renders its own frames from the editor's readings, so
-//! its runtime only carries that decision: it gets the theme without assets
-//! (the decision reads the background, never the bytes).
+//! preview always shows the poster; the live screen gets what the runtime's
+//! [`ThemeRuntime::start_video`] chose: the stored video looping under
+//! overlays, the video decoded on this computer for screens that cannot play
+//! videos (a copy of the asset is decoded by the media converter the storage
+//! tab shares), or the poster ([`VideoState::VideoMissing`] carries what
+//! sending it takes).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, TryLockError};
+use std::time::{Duration, Instant};
 
-use bezel_core::app::{MissingVideo, ThemeRuntime, VideoState};
+use bezel_core::app::{HOST_VIDEO_FPS, HostVideo, MissingVideo, ThemeRuntime, VideoState};
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::Orientation;
-use bezel_core::domain::history::Histories;
 use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot};
-use bezel_core::domain::theme::{AssetRef, Theme};
+use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::{
-    Backdrop, FrameRenderer, RenderContext, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
+    Backdrop, FrameRenderer, MediaLocation, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
 };
 use bezel_core::{BezelError, Result};
+
+use crate::storage::MediaSetup;
+
+/// Fastest refresh, seconds.
+pub const MIN_REFRESH: f32 = 0.25;
+/// Slowest refresh, seconds (sensors still update the UI this often).
+pub const MAX_REFRESH: f32 = 2.0;
+
+/// The media converter the storage tab shares with the session.
+pub type SharedMedia = Arc<Mutex<Box<dyn MediaSetup>>>;
+
+/// Decoding a theme's video on this computer, for screens that cannot play
+/// videos: the converter and where the copy of the video it reads goes.
+struct HostDecoding {
+    media: SharedMedia,
+    dir: PathBuf,
+}
+
+/// A copy of the theme's video for the converter, removed when dropped.
+struct VideoCopy(PathBuf);
+
+impl VideoCopy {
+    fn write(dir: &Path, asset: &AssetRef, bytes: &[u8]) -> std::io::Result<Self> {
+        let name = asset.0.rsplit(['/', '\\']).next().unwrap_or("video");
+        let file = dir.join(name);
+        std::fs::create_dir_all(dir)?;
+        std::fs::write(&file, bytes)?;
+        Ok(Self(file))
+    }
+}
+
+impl Drop for VideoCopy {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_file(&self.0) {
+            tracing::warn!(file = %self.0.display(), "copy of the theme video not removed: {e}");
+        }
+    }
+}
+
+/// The video decoded on this computer for the live screen.
+struct HostPlayback {
+    /// The file the converter reads (kept while it plays).
+    _copy: VideoCopy,
+    started: Instant,
+}
 
 /// The screen showing the edited theme.
 struct Live {
@@ -35,21 +83,11 @@ struct Live {
     /// frames pause until it comes back.
     link: Option<Box<dyn ScreenLink>>,
     orientation: Option<Orientation>,
-    /// How the theme's video background reaches this screen.
-    video: ThemeRuntime,
     /// Start the video (again) before the next frame: after going live, after
     /// a theme with another video, after a job that changed what plays.
     restart_video: bool,
-}
-
-impl Live {
-    /// What a frame shows under the elements on this screen.
-    fn backdrop(&self) -> Backdrop<'static> {
-        match self.video.video() {
-            VideoState::OnDevice(_) => Backdrop::OnDevice,
-            _ => Backdrop::Poster,
-        }
-    }
+    /// The video decoded here ([`VideoState::Host`]).
+    host: Option<HostPlayback>,
 }
 
 /// What a borrowed live link resumes when it comes back.
@@ -66,21 +104,21 @@ pub enum Resume {
 pub struct Studio {
     sensors: Box<dyn SensorSource>,
     renderer: Box<dyn FrameRenderer>,
-    language: Language,
+    runtime: ThemeRuntime,
     catalog: Vec<SensorInfo>,
-    quantities: Quantities,
-    snapshot: Snapshot,
     sample_millis: f64,
-    histories: Histories,
-    theme: Theme,
-    assets: BTreeMap<AssetRef, Vec<u8>>,
+    /// Refreshes since the last sample (a video decoded here refreshes more
+    /// often than the theme samples).
+    unsampled: u32,
     location: Option<ThemeLocation>,
     live: Option<Live>,
     live_error: Option<String>,
+    host: Option<HostDecoding>,
 }
 
 impl Studio {
-    /// A session editing `theme`.
+    /// A session editing `theme`. Without [`Self::with_host_decoding`] a
+    /// screen that cannot play videos shows the poster.
     pub fn new(
         sensors: Box<dyn SensorSource>,
         renderer: Box<dyn FrameRenderer>,
@@ -90,18 +128,23 @@ impl Studio {
         Self {
             sensors,
             renderer,
-            language,
+            runtime: ThemeRuntime::new(theme, BTreeMap::new(), language),
             catalog: Vec::new(),
-            quantities: Quantities::new(),
-            snapshot: Snapshot::default(),
             sample_millis: 0.0,
-            histories: Histories::new(&theme.history_lengths()),
-            theme,
-            assets: BTreeMap::new(),
+            unsampled: 0,
             location: None,
             live: None,
             live_error: None,
+            host: None,
         }
+    }
+
+    /// Decodes the theme's video with `media` for screens that cannot play
+    /// videos, from a copy written in `dir`.
+    #[must_use]
+    pub fn with_host_decoding(mut self, media: SharedMedia, dir: PathBuf) -> Self {
+        self.host = Some(HostDecoding { media, dir });
+        self
     }
 
     // ------------------------------------------------------------ sensors --
@@ -109,7 +152,7 @@ impl Studio {
     /// Re-reads the sensor catalog (sensors come and go with hardware).
     pub fn refresh_catalog(&mut self) -> Result<&[SensorInfo]> {
         self.catalog = self.sensors.catalog()?;
-        self.quantities = Quantities::from_catalog(&self.catalog);
+        self.runtime.use_catalog(&self.catalog);
         Ok(&self.catalog)
     }
 
@@ -120,28 +163,27 @@ impl Studio {
 
     /// What each sensor of the last catalog measures.
     pub fn quantities(&self) -> &Quantities {
-        &self.quantities
+        self.runtime.quantities()
     }
 
     /// Takes a sample and records it in the graph histories.
     pub fn sample(&mut self) -> Result<()> {
         let started = Instant::now();
-        self.snapshot = self.sensors.sample()?;
+        self.runtime.sample(self.sensors.as_mut())?;
         self.sample_millis = started.elapsed().as_secs_f64() * 1000.0;
-        self.histories.push(&self.snapshot);
         Ok(())
     }
 
     /// The latest readings and how long taking them took.
     pub fn readings(&self) -> (&Snapshot, f64) {
-        (&self.snapshot, self.sample_millis)
+        (self.runtime.snapshot(), self.sample_millis)
     }
 
     // ----------------------------------------------------------- document --
 
     /// The theme being edited.
     pub fn theme(&self) -> &Theme {
-        &self.theme
+        self.runtime.theme()
     }
 
     /// Where the theme was loaded from or saved to.
@@ -151,23 +193,18 @@ impl Studio {
 
     /// The session's assets (used by the theme or added for it).
     pub fn assets(&self) -> &BTreeMap<AssetRef, Vec<u8>> {
-        &self.assets
+        self.runtime.assets()
     }
 
-    /// Replaces the edited theme, keeping the history of sensors still graphed.
+    /// Replaces the edited theme in place, keeping the history of sensors
+    /// still graphed.
     pub fn set_theme(&mut self, theme: Theme) {
-        if theme == self.theme {
+        if theme == *self.runtime.theme() {
             return;
         }
-        let mut histories = Histories::new(&theme.history_lengths());
-        histories.adopt(&self.histories);
-        self.histories = histories;
-        if let Some(live) = self.live.as_mut() {
-            let before = live.video.video().clone();
-            live.video.replace(theme.clone(), BTreeMap::new());
-            live.restart_video |= *live.video.video() != before;
-        }
-        self.theme = theme;
+        let before = self.runtime.video().clone();
+        self.runtime.replace_theme(theme);
+        self.video_changed(&before);
     }
 
     /// Starts a new document.
@@ -177,9 +214,20 @@ impl Studio {
         assets: BTreeMap<AssetRef, Vec<u8>>,
         location: Option<ThemeLocation>,
     ) {
-        self.set_theme(theme);
-        self.assets = assets;
+        let before = self.runtime.video().clone();
+        self.runtime.replace(theme, assets);
+        self.video_changed(&before);
         self.location = location;
+    }
+
+    /// After a new theme: another video starts again on the live screen.
+    fn video_changed(&mut self, before: &VideoState) {
+        if let Some(live) = self.live.as_mut()
+            && self.runtime.video() != before
+        {
+            live.restart_video = true;
+            live.host = None;
+        }
     }
 
     /// Opens the theme at `location`.
@@ -191,14 +239,14 @@ impl Studio {
 
     /// Saves the theme (with only the assets it uses) at `location`.
     pub fn save(&mut self, store: &dyn ThemeStore, location: ThemeLocation) -> Result<()> {
-        let used: BTreeSet<AssetRef> = self.theme.assets().into_iter().collect();
+        let used: BTreeSet<AssetRef> = self.theme().assets().into_iter().collect();
         let assets: BTreeMap<AssetRef, Vec<u8>> = self
-            .assets
+            .assets()
             .iter()
             .filter(|(k, _)| used.contains(*k))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        store.save(&location, &self.theme, &assets)?;
+        store.save(&location, self.theme(), &assets)?;
         self.location = Some(location);
         Ok(())
     }
@@ -206,7 +254,8 @@ impl Studio {
     /// Adds a file to the theme under `assets/`, named after `file_name`.
     /// The same bytes added twice give the same reference.
     pub fn add_asset(&mut self, file_name: &str, bytes: Vec<u8>) -> AssetRef {
-        if let Some((existing, _)) = self.assets.iter().find(|(_, b)| **b == bytes) {
+        let assets = self.runtime.assets();
+        if let Some((existing, _)) = assets.iter().find(|(_, b)| **b == bytes) {
             return existing.clone();
         }
         let (stem, extension) = split_name(file_name);
@@ -218,12 +267,12 @@ impl Studio {
                 format!("-{n}")
             };
             let candidate = AssetRef(format!("assets/{stem}{suffix}{extension}"));
-            if !self.assets.contains_key(&candidate) {
+            if !assets.contains_key(&candidate) {
                 break candidate;
             }
             n += 1;
         };
-        self.assets.insert(asset.clone(), bytes);
+        self.runtime.add_asset(asset.clone(), bytes);
         asset
     }
 
@@ -232,19 +281,8 @@ impl Studio {
     /// Renders the edited theme with the latest readings, as the preview
     /// shows it (a video background shows its poster).
     pub fn render(&mut self, time: LocalTime) -> Result<Frame> {
-        self.render_with(time, Backdrop::Poster)
-    }
-
-    fn render_with(&mut self, time: LocalTime, backdrop: Backdrop<'_>) -> Result<Frame> {
-        let context = RenderContext {
-            snapshot: &self.snapshot,
-            histories: &self.histories,
-            quantities: &self.quantities,
-            time,
-            language: self.language,
-            backdrop,
-        };
-        self.renderer.render(&self.theme, &self.assets, context)
+        self.runtime
+            .render_with(self.renderer.as_mut(), time, Backdrop::Poster)
     }
 
     /// Key of the screen showing the theme, if any.
@@ -260,12 +298,13 @@ impl Studio {
     /// How the theme's video background reaches the live screen (`None`
     /// when no screen is live).
     pub fn live_video(&self) -> Option<&VideoState> {
-        self.live.as_ref().map(|l| l.video.video())
+        self.live.as_ref().map(|_| self.runtime.video())
     }
 
     /// The theme video the live screen `key` could play but does not store.
     pub fn missing_video(&self, key: &str) -> Option<MissingVideo> {
-        match self.live.as_ref().filter(|l| l.key == key)?.video.video() {
+        self.live.as_ref().filter(|l| l.key == key)?;
+        match self.runtime.video() {
             VideoState::VideoMissing(missing) => Some(missing.clone()),
             _ => None,
         }
@@ -313,22 +352,26 @@ impl Studio {
         link: Box<dyn ScreenLink>,
         time: LocalTime,
     ) -> Result<()> {
-        let video = ThemeRuntime::new(self.theme.clone(), BTreeMap::new(), self.language);
+        self.runtime.forget_screen();
         self.live = Some(Live {
             key,
             link: Some(link),
             orientation: None,
-            video,
             restart_video: true,
+            host: None,
         });
         self.live_error = None;
+        self.unsampled = 0;
         self.present(time)
     }
 
     /// Stops showing the theme and hands back the screen's link (`None`
     /// while a storage job borrows it: the job closes it when done).
     pub fn stop_live(&mut self) -> Option<Box<dyn ScreenLink>> {
-        self.live.take().and_then(|l| l.link)
+        let live = self.live.take()?;
+        // The decoder stops before its copy of the video goes.
+        self.runtime.forget_screen();
+        live.link
     }
 
     /// Sets the brightness of the live screen when it is `key`; `false` when
@@ -347,7 +390,9 @@ impl Studio {
     }
 
     /// Starts the theme's video on the live screen when it has to (a failure
-    /// keeps the poster).
+    /// keeps the poster). A screen that cannot play videos gets it decoded
+    /// here; while the converter is busy with a storage job the poster stays
+    /// and the start is tried again at the next frame.
     fn start_live_video(&mut self) {
         let Some(live) = self.live.as_mut() else {
             return;
@@ -355,10 +400,52 @@ impl Studio {
         let Some(link) = live.link.as_mut() else {
             return;
         };
-        if std::mem::take(&mut live.restart_video)
-            && let Err(e) = live.video.start_video(link.as_mut(), None)
-        {
-            tracing::warn!(screen = live.key, "video background not started: {e}");
+        if !live.restart_video {
+            return;
+        }
+        live.host = None;
+        let playback = link.identity().model.capabilities.video_playback;
+        let video = match &self.runtime.theme().background {
+            Background::Video { asset, .. } if !playback => Some(asset.clone()),
+            _ => None,
+        };
+        let (Some(asset), Some(host)) = (video, self.host.as_ref()) else {
+            live.restart_video = false;
+            if let Err(e) = self.runtime.start_video(link.as_mut(), None) {
+                tracing::warn!(screen = live.key, "video background not started: {e}");
+            }
+            return;
+        };
+        let mut media = match host.media.try_lock() {
+            Ok(media) => media,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return,
+        };
+        live.restart_video = false;
+        let copy = match self.runtime.assets().get(&asset) {
+            Some(bytes) => VideoCopy::write(&host.dir, &asset, bytes),
+            None => Err(std::io::Error::other(format!(
+                "{} is not in the theme",
+                asset.0
+            ))),
+        };
+        let offer = copy.as_ref().ok().map(|copy| HostVideo {
+            media: media.as_mut(),
+            source: MediaLocation(copy.0.display().to_string()),
+            fps: HOST_VIDEO_FPS,
+        });
+        if let Err(e) = &copy {
+            tracing::warn!(screen = live.key, "video background not copied: {e}");
+        }
+        match self.runtime.start_video(link.as_mut(), offer) {
+            Ok(VideoState::Host) => {
+                live.host = copy.ok().map(|copy| HostPlayback {
+                    _copy: copy,
+                    started: Instant::now(),
+                });
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(screen = live.key, "video background not started: {e}"),
         }
     }
 
@@ -367,18 +454,19 @@ impl Studio {
     /// is dropped) and is kept for [`Self::live_error`].
     pub fn present(&mut self, time: LocalTime) -> Result<()> {
         self.start_live_video();
-        let Some(backdrop) = self
-            .live
-            .as_ref()
-            .filter(|l| l.link.is_some())
-            .map(Live::backdrop)
-        else {
+        let Some(live) = self.live.as_ref().filter(|l| l.link.is_some()) else {
             return Ok(());
         };
+        let video = live
+            .host
+            .as_ref()
+            .map_or(Duration::ZERO, |h| h.started.elapsed());
         let result = self
-            .render_with(time, backdrop)
+            .runtime
+            .render(self.renderer.as_mut(), time, video)
             .and_then(|frame| self.present_frame(&frame));
         if let Err(e) = &result {
+            self.runtime.forget_screen();
             self.live = None;
             self.live_error = Some(e.to_string());
         }
@@ -386,7 +474,7 @@ impl Studio {
     }
 
     fn present_frame(&mut self, frame: &Frame) -> Result<()> {
-        let orientation = self.theme.orientation;
+        let orientation = self.runtime.theme().orientation;
         let Some(live) = self.live.as_mut() else {
             return Ok(());
         };
@@ -410,11 +498,35 @@ impl Studio {
         link.present(frame)
     }
 
-    /// One refresh: a sample, then a frame on the live screen.
+    /// Time between two refreshes: the theme's refresh, or a picture of a
+    /// video decoded here.
+    pub fn period(&self) -> Duration {
+        if self.live.as_ref().is_some_and(|l| l.host.is_some()) {
+            return Duration::from_secs(1) / HOST_VIDEO_FPS;
+        }
+        self.refresh()
+    }
+
+    /// The theme's refresh, clamped.
+    fn refresh(&self) -> Duration {
+        let seconds = self.runtime.theme().refresh_seconds;
+        let seconds = if seconds.is_finite() { seconds } else { 1.0 };
+        Duration::from_secs_f32(seconds.clamp(MIN_REFRESH, MAX_REFRESH))
+    }
+
+    /// One refresh: a sample when one is due (every refresh, or every
+    /// theme refresh while a video decoded here sets the pace), then a frame
+    /// on the live screen.
     pub fn tick(&mut self, time: LocalTime) -> Result<()> {
-        if let Err(e) = self.sample() {
+        let (refresh, period) = (self.refresh().as_millis(), self.period().as_millis());
+        let every = ((refresh + period / 2) / period.max(1)).max(1);
+        let every = u32::try_from(every).unwrap_or(u32::MAX);
+        if self.unsampled == 0
+            && let Err(e) = self.sample()
+        {
             tracing::warn!("sensor sample failed: {e}");
         }
+        self.unsampled = (self.unsampled + 1) % every;
         self.present(time)
     }
 }
@@ -457,13 +569,22 @@ fn clean(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::tests::{FakeMedia, STREAMED};
     use bezel_core::app::open_screen;
+    use bezel_core::domain::device::{Transport, UsbId};
+    use bezel_core::domain::discovery::{DeviceAddress, Endpoint};
     use bezel_core::domain::frame::Rgba;
     use bezel_core::domain::geometry::Size;
-    use bezel_core::domain::theme::{Background, Fit};
+    use bezel_core::domain::sensor::SensorKey;
+    use bezel_core::domain::storage::RemotePath;
+    use bezel_core::domain::theme::{
+        Binding, BoxF, Element, ElementId, ElementKind, Fit, GraphStyle,
+    };
+    use bezel_core::ports::RenderContext;
+    use bezel_devices::fake::FakeStorage;
     use bezel_devices::{FakeBus, FakeConnector};
+    use bezel_render::{SkiaRenderer, SystemFonts};
     use bezel_sensors::FakeSensors;
-    use std::sync::{Arc, Mutex};
 
     const TIME: LocalTime = LocalTime {
         year: 2026,
@@ -650,5 +771,233 @@ mod tests {
         assert_eq!(s.render(TIME).unwrap().size(), Size::new(1920, 480));
         assert_eq!(*renders.0.lock().unwrap(), 2);
         assert_eq!(s.location(), None);
+    }
+
+    /// What a frame showed under the elements, and how many samples of
+    /// `cpu.usage` its graph had.
+    #[derive(Default, Clone)]
+    struct Probe(Arc<Mutex<Vec<(&'static str, usize)>>>);
+
+    impl FrameRenderer for Probe {
+        fn render(
+            &mut self,
+            theme: &Theme,
+            _: &BTreeMap<AssetRef, Vec<u8>>,
+            context: RenderContext<'_>,
+        ) -> Result<Frame> {
+            let backdrop = match context.backdrop {
+                Backdrop::Poster => "poster",
+                Backdrop::OnDevice => "on-device",
+                Backdrop::Frame(_) => "picture",
+            };
+            let usage = SensorKey::new("cpu.usage").unwrap();
+            let samples = context.histories.get(&usage).len();
+            self.0.lock().unwrap().push((backdrop, samples));
+            Ok(Frame::filled(theme.canvas, Rgba::BLACK))
+        }
+    }
+
+    /// `theme` graphing `cpu.usage` over 8 samples.
+    fn graphing(mut theme: Theme) -> Theme {
+        theme.elements.push(Element {
+            id: ElementId(7),
+            name: "usage".into(),
+            frame: BoxF {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 40.0,
+            },
+            opacity: 1.0,
+            visible: true,
+            locked: false,
+            kind: ElementKind::Graph {
+                binding: Binding {
+                    key: SensorKey::new("cpu.usage").unwrap(),
+                    min: 0.0,
+                    max: 100.0,
+                },
+                history: 8,
+                style: GraphStyle::Line,
+                color: Rgba::WHITE,
+                fill: None,
+                line_width: 1.0,
+                autoscale: false,
+            },
+        });
+        theme
+    }
+
+    fn with_video(mut theme: Theme, asset: &str) -> Theme {
+        theme.background = Background::Video {
+            asset: AssetRef(asset.into()),
+            poster: None,
+        };
+        theme
+    }
+
+    #[test]
+    fn the_live_screen_and_the_preview_share_one_runtime() {
+        let stored = RemotePath::parse("internal/video/clip.mp4").unwrap();
+        let connector =
+            FakeConnector::with_storage(FakeStorage::default().with_file(stored, vec![1; 64]));
+        let link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
+        let probe = Probe::default();
+        let theme = with_video(graphing(theme_88()), "assets/clip.mp4");
+        let mut s = Studio::new(
+            Box::new(FakeSensors::demo()),
+            Box::new(probe.clone()),
+            Language::English,
+            theme.clone(),
+        );
+        s.go_live("k".into(), link, TIME).unwrap();
+        s.tick(TIME).unwrap();
+        s.render(TIME).unwrap();
+        // An edit swaps the theme in place: the history goes on.
+        let mut edited = theme;
+        edited.name = "Edited".into();
+        s.set_theme(edited);
+        s.tick(TIME).unwrap();
+        assert_eq!(
+            *probe.0.lock().unwrap(),
+            [
+                ("on-device", 0),
+                ("on-device", 1),
+                ("poster", 1),
+                ("on-device", 2)
+            ]
+        );
+        assert_eq!(
+            s.readings().0.len(),
+            FakeSensors::demo().catalog().unwrap().len()
+        );
+        assert_eq!(s.period(), Duration::from_secs(1));
+    }
+
+    /// The fake WeAct 0.96": no storage, no playback of stored videos.
+    fn weact() -> (FakeConnector, Box<dyn ScreenLink>) {
+        let bus = FakeBus::new(vec![Endpoint {
+            address: DeviceAddress("/dev/ttyACM0".into()),
+            transport: Transport::Serial,
+            usb: UsbId::new(0x1a86, 0xfe0c),
+            serial_number: Some("AD0001".into()),
+            manufacturer: None,
+            product: None,
+            location: None,
+        }]);
+        let connector = FakeConnector::default();
+        let link = open_screen(&bus, &connector, None).unwrap();
+        (connector, link)
+    }
+
+    /// A session decoding videos with `media`, copies in a fresh `dir`.
+    fn decoding(name: &str, media: FakeMedia) -> (Studio, SharedMedia, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("bezel-studio-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shared: SharedMedia = Arc::new(Mutex::new(Box::new(media)));
+        let theme = with_video(
+            Theme::blank("Clip", Size::new(80, 160), Orientation::Portrait),
+            "assets/Clip.mp4",
+        );
+        let mut s = Studio::new(
+            Box::new(FakeSensors::demo()),
+            Box::new(SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip)),
+            Language::English,
+            theme.clone(),
+        )
+        .with_host_decoding(Arc::clone(&shared), dir.clone());
+        let assets = BTreeMap::from([(AssetRef("assets/Clip.mp4".into()), vec![1, 2, 3])]);
+        s.start(theme, assets, None);
+        (s, shared, dir)
+    }
+
+    #[test]
+    fn a_screen_without_playback_gets_the_video_decoded_here() {
+        let media = FakeMedia::ready();
+        let streamed = Arc::clone(&media.streamed);
+        let (mut s, shared, dir) = decoding("host", media);
+        let (connector, link) = weact();
+        {
+            // The converter is busy with a storage job: the poster meanwhile.
+            let _busy = shared.lock().unwrap();
+            s.go_live("k".into(), link, TIME).unwrap();
+            assert_eq!(s.live_video(), Some(&VideoState::NotStarted));
+        }
+        s.tick(TIME).unwrap();
+        assert_eq!(s.live_video(), Some(&VideoState::Host));
+        let copy = dir.join("Clip.mp4");
+        assert_eq!(std::fs::read(&copy).unwrap(), [1, 2, 3]);
+        let (source, spec) = streamed.lock().unwrap()[0].clone();
+        assert_eq!(source.0, copy.display().to_string());
+        assert_eq!((spec.size, spec.fps), (Size::new(80, 160), HOST_VIDEO_FPS));
+        assert_eq!(s.period(), Duration::from_millis(100));
+        let shown = connector.log().frames.last().cloned().unwrap();
+        assert_eq!(shown.pixel(40, 80), Some(STREAMED));
+        let preview = s.render(TIME).unwrap();
+        assert_ne!(preview.pixel(40, 80), Some(STREAMED), "the poster");
+
+        // Another video starts over; stopping removes the copy.
+        let mut other = s.theme().clone();
+        other.background = Background::Color(Rgba::BLACK);
+        s.set_theme(other);
+        s.tick(TIME).unwrap();
+        assert_eq!(s.live_video(), Some(&VideoState::NoVideo));
+        assert!(!copy.exists(), "no video, no copy");
+        assert_eq!(s.period(), Duration::from_secs(1));
+        s.stop_live();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn without_a_converter_or_decoding_the_poster_shows() {
+        let (mut s, _, dir) = decoding("no-ffmpeg", FakeMedia::missing());
+        let (_, link) = weact();
+        s.go_live("k".into(), link, TIME).unwrap();
+        assert!(matches!(
+            s.live_video(),
+            Some(VideoState::NoConverter { .. })
+        ));
+        assert!(!dir.join("Clip.mp4").exists(), "the copy went with it");
+        let (connector, link) = weact();
+        s.stop_live();
+        s.host = None;
+        s.go_live("k".into(), link, TIME).unwrap();
+        assert_eq!(s.live_video(), Some(&VideoState::NoPlayback));
+        assert_eq!(connector.log().frames.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Counts the samples of the demo sensors.
+    struct Counted(FakeSensors, Arc<Mutex<usize>>);
+
+    impl SensorSource for Counted {
+        fn catalog(&mut self) -> Result<Vec<SensorInfo>> {
+            self.0.catalog()
+        }
+
+        fn sample(&mut self) -> Result<Snapshot> {
+            *self.1.lock().unwrap() += 1;
+            self.0.sample()
+        }
+    }
+
+    #[test]
+    fn a_video_decoded_here_sets_the_pace_and_samples_keep_theirs() {
+        let (mut s, _, dir) = decoding("pace", FakeMedia::ready());
+        let samples = Arc::new(Mutex::new(0));
+        s.sensors = Box::new(Counted(FakeSensors::demo(), Arc::clone(&samples)));
+        let (connector, link) = weact();
+        s.go_live("k".into(), link, TIME).unwrap();
+        for _ in 0..20 {
+            s.tick(TIME).unwrap();
+        }
+        assert_eq!(connector.log().frames.len(), 21);
+        assert_eq!(*samples.lock().unwrap(), 2, "one per second of the theme");
+        s.stop_live();
+        for _ in 0..3 {
+            s.tick(TIME).unwrap();
+        }
+        assert_eq!(*samples.lock().unwrap(), 5, "every refresh again");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -181,10 +181,11 @@ pub struct SensorInfo {
     pub source: String,
 }
 
-/// Units of keys a catalog does not know (a theme made on another machine):
+/// The quantity `key`'s name implies; plain numbers when nothing matches.
+///
+/// For keys a catalog does not know (a theme made on another machine):
 /// well-known keys exactly, open-ended keys (`hwmon.<chip>.<label>`,
 /// `disk.<mount>.used`, `net.<iface>.up`) by their segments.
-/// The quantity `key`'s name implies; plain numbers when nothing matches.
 pub fn quantity_of(key: &SensorKey) -> Quantity {
     let k = key.as_str().to_ascii_lowercase();
     match k.as_str() {

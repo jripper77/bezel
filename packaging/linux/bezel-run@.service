@@ -1,0 +1,24 @@
+# Shows a Bezel theme on the smart screen with live sensors, without a window
+# (D-2026-09-30-render-engine-5). A systemd *user* unit whose instance is a
+# bundled theme's name (`%i`, taken literally). For a theme file, override
+# ExecStart in a drop-in (`systemctl --user edit bezel-run@mine`).
+#
+#   systemctl --user enable --now bezel-run@turing-8.8-horizontal
+#
+# Stop other programs that drive the screen first (for example a
+# turing-smart-screen-python service): two programs on one port interleave
+# their packets, and bezel refuses a port another process holds.
+[Unit]
+Description=Bezel theme %i on the smart screen
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/bezel run %i
+# The screen may enumerate after login, or wake slowly: try again.
+Restart=on-failure
+RestartSec=5
+# SIGTERM makes bezel hand the screen back to its own mode.
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=default.target

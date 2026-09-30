@@ -50,6 +50,31 @@ Bundled themes (`themes/`, the "Midnight" set): `turing-8.8-horizontal` (1920x48
 `~/.local/share/bezel/themes`, and use the bundled Inter and JetBrains Mono
 fonts (`themes/fonts/`, SIL Open Font License 1.1).
 
+### Run a theme at login without a window
+
+The studio does this from its tray ("Start with the computer" in the Screen
+panel). Without the studio:
+
+- **Linux** (systemd user service, installed by `scripts/install-local.sh`):
+  ```bash
+  systemctl --user enable --now bezel-run@turing-8.8-horizontal
+  journalctl --user -u bezel-run@turing-8.8-horizontal -f   # its log
+  ```
+  For your own theme file, override the command once (`systemctl --user edit bezel-run@mine`):
+  ```ini
+  [Service]
+  ExecStart=
+  ExecStart=%h/.local/bin/bezel run %h/themes/mine.bezeltheme
+  ```
+- **Windows** (a logon task; `bezel.exe` comes in the release's CLI `.zip`, here
+  unpacked into `C:\Tools\bezel`):
+  ```powershell
+  schtasks /Create /SC ONLOGON /TN "Bezel" /TR "C:\Tools\bezel\bezel.exe run turing-8.8-horizontal"
+  ```
+
+Stop any other program that drives the screen first (a turing-smart-screen-python
+service, the vendor app): `bezel` refuses a port another process holds.
+
 ## Supported screens
 
 | Family | Examples | Link |

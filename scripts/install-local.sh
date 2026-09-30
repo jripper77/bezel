@@ -53,6 +53,10 @@ rm -rf "$themes_dir"
 mkdir -p "$(dirname "$themes_dir")"
 cp -r themes "$themes_dir"
 
+# The systemd user unit that runs a theme without a window (not enabled here).
+install -Dm644 packaging/linux/bezel-run@.service "$HOME/.config/systemd/user/bezel-run@.service"
+systemctl --user daemon-reload >/dev/null 2>&1 || true
+
 icons_src=apps/bezel-studio/src-tauri/icons
 install -Dm644 "$icons_src/32x32.png" "$icons_dir/32x32/apps/bezel.png"
 install -Dm644 "$icons_src/64x64.png" "$icons_dir/64x64/apps/bezel.png"

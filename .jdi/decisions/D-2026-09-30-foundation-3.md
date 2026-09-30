@@ -1,0 +1,1 @@
+D-2026-09-30-foundation-3 (2026-09-30): The supported-device catalog (family, VID:PID, USB serial markers, resolution, native orientation, size, capabilities) is core domain data in one table; discovery is a driven adapter that never writes to a port (the rev-C MCU wake belongs to the connect use case of phase device-protocols).

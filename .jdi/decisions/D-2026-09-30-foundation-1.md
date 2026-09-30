@@ -1,0 +1,1 @@
+D-2026-09-30-foundation-1 (2026-09-30): License = GPL-3.0-or-later. Bezel reimplements protocols learned from the GPL-3.0 turing-smart-screen-python and must stay compatible with it; no TURZX binary, font, theme or decompiled code is ever committed (only protocol facts in docs/).

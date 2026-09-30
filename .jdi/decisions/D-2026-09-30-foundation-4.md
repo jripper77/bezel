@@ -1,0 +1,1 @@
+D-2026-09-30-foundation-4 (2026-09-30): A minimal Tauri 2 studio (window listing the detected screens) ships from v0.1.0 so the pipeline builds deb/rpm/AppImage/msi/nsis from the first release; the CLI (bezel) ships as the extra binary.

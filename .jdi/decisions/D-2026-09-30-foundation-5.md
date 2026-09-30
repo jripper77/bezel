@@ -1,0 +1,1 @@
+D-2026-09-30-foundation-5 (2026-09-30): docs/reverse-engineering/ is the byte-level contract for every protocol and file format; it is written from the static analysis of both reference apps, sanitized (no decompiled source, user device serials redacted).

@@ -1,6 +1,6 @@
 //! The wall clock and language the renderer's clock elements use.
 
-use bezel_core::domain::clock::{Language, LocalTime};
+use bezel_core::domain::clock::{Language, LocalTime, language_of};
 use chrono::{Datelike, Local, Timelike};
 
 /// The local time now.
@@ -19,15 +19,7 @@ pub fn now() -> LocalTime {
     }
 }
 
-/// The language of day and month names for a locale such as `pt-BR`.
-pub fn language_of(locale: Option<&str>) -> Language {
-    match locale {
-        Some(l) if l.to_ascii_lowercase().starts_with("pt") => Language::PortugueseBr,
-        _ => Language::English,
-    }
-}
-
-/// The user's language, from the system locale.
+/// The user's language, from the system locale (the core's `language_of`).
 pub fn language() -> Language {
     language_of(sys_locale::get_locale().as_deref())
 }
@@ -44,11 +36,7 @@ mod tests {
     }
 
     #[test]
-    fn portuguese_locales_pick_portuguese() {
-        assert_eq!(language_of(Some("pt-BR")), Language::PortugueseBr);
-        assert_eq!(language_of(Some("PT_pt")), Language::PortugueseBr);
-        assert_eq!(language_of(Some("en-US")), Language::English);
-        assert_eq!(language_of(None), Language::English);
+    fn the_system_locale_gives_a_language() {
         let _ = language();
     }
 }

@@ -30,6 +30,16 @@ pub enum Language {
     PortugueseBr,
 }
 
+/// The language of day and month names for a locale such as `pt-BR` (the
+/// driving adapter reads the system's): Portuguese for any `pt` locale,
+/// English otherwise.
+pub fn language_of(locale: Option<&str>) -> Language {
+    match locale {
+        Some(l) if l.to_ascii_lowercase().starts_with("pt") => Language::PortugueseBr,
+        _ => Language::English,
+    }
+}
+
 const EN_DAYS: [&str; 7] = [
     "Monday",
     "Tuesday",
@@ -183,6 +193,14 @@ mod tests {
             "quarta-feira, 30 de setembro"
         );
         assert_eq!(format_clock("%a %b", &T, Language::PortugueseBr), "qua set");
+    }
+
+    #[test]
+    fn portuguese_locales_pick_portuguese() {
+        assert_eq!(language_of(Some("pt-BR")), Language::PortugueseBr);
+        assert_eq!(language_of(Some("PT_pt")), Language::PortugueseBr);
+        assert_eq!(language_of(Some("en-US")), Language::English);
+        assert_eq!(language_of(None), Language::English);
     }
 
     #[test]

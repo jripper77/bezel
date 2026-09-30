@@ -12,7 +12,7 @@ use bezel_core::ports::ThemeLocation;
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::native::EXTENSION;
 use tauri::ipc::Response;
-use tauri::{AppHandle, Emitter as _, Runtime, State, WebviewWindow};
+use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, State, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
 
@@ -24,6 +24,7 @@ use crate::dto::{
 };
 use crate::media::{IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::storage::{ProgressThrottle, StorageResult};
+use crate::tray::LiveItem;
 
 /// State managed by Tauri.
 pub type Shared = Arc<Backend>;
@@ -89,10 +90,20 @@ pub async fn push_theme(state: State<'_, Shared>, theme: ThemeDto) -> UiResult<(
     blocking(&state, move |b| b.push(&theme, now())).await
 }
 
-/// Turns live mode on (on `screen`) or off.
+/// Turns live mode on (on `screen`) or off; the tray's live item follows.
 #[tauri::command]
-pub async fn set_live(state: State<'_, Shared>, on: bool, screen: Option<String>) -> UiResult<()> {
-    blocking(&state, move |b| b.set_live(on, screen.as_deref(), now())).await
+pub async fn set_live(
+    app: AppHandle,
+    state: State<'_, Shared>,
+    on: bool,
+    screen: Option<String>,
+) -> UiResult<()> {
+    let result = blocking(&state, move |b| b.set_live(on, screen.as_deref(), now())).await;
+    let live = state.studio().live_key().is_some();
+    if let Some(item) = app.try_state::<LiveItem>() {
+        item.sync(live);
+    }
+    result
 }
 
 /// Sets a screen's brightness, 0 to 100.

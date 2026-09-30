@@ -237,6 +237,22 @@ impl Backend {
         Ok(())
     }
 
+    /// The tray's live switch: off when a screen is live, else on for the
+    /// first connected screen (an awake one first). Whether a screen is live
+    /// after.
+    pub fn toggle_live(&self, time: LocalTime) -> UiResult<bool> {
+        if self.studio().live_key().is_some() {
+            self.set_live(false, None, time)?;
+            return Ok(false);
+        }
+        let screen = discover_screens(self.bus.as_ref())
+            .and_then(|screens| choose_screen(screens, None))
+            .map_err(text)?;
+        let key = screen.address().ok_or("the screen has no address")?;
+        self.set_live(true, Some(&key.0), time)?;
+        Ok(true)
+    }
+
     /// Remembers `orientation` as the last one used with `screen` (the file
     /// is written only when it changes).
     fn remember_orientation(&self, screen: &str, orientation: Orientation) {
@@ -759,6 +775,22 @@ mod tests {
         });
         let log = f.connector.log();
         assert_eq!((log.frames.len(), log.brightness.len()), (1, 1));
+    }
+
+    #[test]
+    fn the_tray_switches_live_mode_on_the_connected_screen() {
+        let f = fixture("tray");
+        assert!(f.backend.toggle_live(TIME).unwrap());
+        assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
+        assert_eq!(f.connector.log().frames.len(), 1);
+        assert!(!f.backend.toggle_live(TIME).unwrap());
+        assert_eq!(f.backend.sample().live, None);
+        assert_eq!(f.backend.settings.load().live_screen, None);
+
+        let mut empty = fixture("tray-empty");
+        empty.backend.bus = Arc::new(FakeBus::new(Vec::new()));
+        assert!(empty.backend.toggle_live(TIME).is_err());
+        assert_eq!(empty.backend.sample().live, None);
     }
 
     #[test]

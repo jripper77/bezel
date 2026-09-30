@@ -44,7 +44,7 @@ use crate::storage::{MediaSetup, StorageState};
 use crate::studio::Studio;
 
 /// Label of the main window in `tauri.conf.json`.
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// Set to `1` to serve a simulated Turing 8.8" and scripted sensors instead
 /// of the real machine: demos and checks that must never touch a screen.
@@ -113,8 +113,10 @@ pub fn run() -> Result<(), tauri::Error> {
             backend.restore_theme();
             app.manage(Arc::clone(&backend));
             app.manage(Unsaved::default());
-            start_refresh_loop(backend);
-            tray::create(app.handle())?;
+            let live = backend.studio().live_key().is_some();
+            let live_item = tray::create(app.handle(), live)?;
+            app.manage(live_item.clone());
+            start_refresh_loop(backend, live_item);
             if !hidden {
                 show_main_window(app.handle());
             }
@@ -298,8 +300,8 @@ impl MediaSetup for FfmpegTranscoder {
 
 /// Shows the last live screen again, then samples and refreshes the live
 /// screen at the theme's pace (the screen's I/O does not stretch it), on its
-/// own thread for the life of the app.
-fn start_refresh_loop(backend: Shared) {
+/// own thread for the life of the app. The tray's live item follows.
+fn start_refresh_loop(backend: Shared, live_item: tray::LiveItem) {
     let spawned = std::thread::Builder::new()
         .name("bezel-refresh".into())
         .spawn(move || {
@@ -310,6 +312,10 @@ fn start_refresh_loop(backend: Shared) {
             let mut pacer = Pacer::new(Instant::now());
             loop {
                 let period = backend.tick(clock::now());
+                // Not under the session's lock: the menu waits for the main
+                // thread.
+                let live = backend.studio().live_key().is_some();
+                live_item.sync(live);
                 std::thread::sleep(pacer.wait(period, Instant::now()));
             }
         });

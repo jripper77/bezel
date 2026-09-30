@@ -11,5 +11,10 @@ authors.workspace = true
 [dependencies]
 thiserror = { workspace = true }
 
+[dev-dependencies]
+# Use-case tests run through the adapters' fakes (tests/), never through a
+# port implemented inside the hexagon.
+bezel-devices = { workspace = true }
+
 [lints]
 workspace = true

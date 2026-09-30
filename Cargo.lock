@@ -314,6 +314,7 @@ dependencies = [
 name = "bezel-core"
 version = "0.0.0"
 dependencies = [
+ "bezel-devices",
  "thiserror 2.0.21",
 ]
 

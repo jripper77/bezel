@@ -156,6 +156,9 @@ pub struct FakeStorage {
     pub start_mode: Option<StartMode>,
     /// Every storage call, in order.
     pub calls: Vec<StorageCall>,
+    /// Bytes every upload loses at its end (0: none), like a transfer the
+    /// screen stored short: its stored size then fails verification.
+    pub short_by: usize,
 }
 
 impl Default for FakeStorage {
@@ -167,6 +170,7 @@ impl Default for FakeStorage {
             playback: Playback::Idle,
             start_mode: None,
             calls: Vec::new(),
+            short_by: 0,
         }
     }
 }
@@ -230,6 +234,13 @@ impl FakeStorage {
         self.playback = Playback::Idle;
         self.files.insert(path.clone(), Vec::with_capacity(bytes));
         Ok(())
+    }
+
+    /// Drops the last [`Self::short_by`] bytes of a finished upload.
+    fn end_upload(&mut self, path: &RemotePath) {
+        if let Some(data) = self.files.get_mut(path) {
+            data.truncate(data.len().saturating_sub(self.short_by));
+        }
     }
 
     /// What a cancelled upload left: the bytes received, or nothing.
@@ -397,7 +408,10 @@ impl ScreenStorage for FakeScreen {
             Ok(())
         })?;
         match sent {
-            Sent::All => Ok(()),
+            Sent::All => {
+                self.with_storage(|s| s.end_upload(path));
+                Ok(())
+            }
             Sent::Cancelled { .. } => Err(BezelError::Cancelled {
                 partial: self.with_storage(|s| s.after_cancel(path)),
             }),
@@ -633,6 +647,21 @@ mod tests {
             "{result:?}"
         );
         assert_eq!(storage.info().unwrap().card, None);
+    }
+
+    #[test]
+    fn fake_uploads_can_arrive_short() {
+        let connector = FakeConnector::with_storage(FakeStorage {
+            short_by: 2,
+            ..FakeStorage::default()
+        });
+        let mut link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
+        let storage = link.storage().unwrap();
+        let clip = remote("internal/video/clip.mp4");
+        let (result, _) = upload(storage, &clip, &[1, 2, 3, 4, 5], None);
+        result.unwrap();
+        assert_eq!(storage.size(&clip).unwrap(), Some(3));
+        assert_eq!(connector.log().storage.files[&clip], [1, 2, 3]);
     }
 
     #[test]

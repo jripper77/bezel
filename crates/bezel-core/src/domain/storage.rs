@@ -620,15 +620,10 @@ fn choose_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::storage::{
-        self as usecase, UploadRequest,
-        doubles::{Media, Screen},
-    };
     use crate::domain::geometry::Size;
-    use crate::domain::job::{CancelToken, Job, Progress};
     use crate::domain::media::MediaFormat;
     use crate::domain::media::tests::{mp4, profile, still};
-    use crate::ports::MediaLocation;
+    use crate::ports::ScreenStorage;
 
     const NATIVE: Size = Size::new(480, 1920);
     const INTERNAL_VIDEO: StorageLocation =
@@ -679,69 +674,50 @@ mod tests {
         preflight(check, &profile("turing-8.8").unwrap(), info, stored)
     }
 
+    /// The storage port's destructive methods, as the compiler sees them:
+    /// both take the proof of a confirmation.
+    type Delete =
+        fn(&mut (dyn ScreenStorage + 'static), &RemotePath, Confirmed) -> crate::Result<()>;
+    type SetStartMode =
+        fn(&mut (dyn ScreenStorage + 'static), StartMode, Confirmed) -> crate::Result<()>;
+
     #[test]
     fn destructive_operations_require_confirm_yes() {
         let video = path("internal/video/clip.mp4");
         let operations = [
-            Operation::Delete(video.clone()),
-            Operation::Overwrite(video.clone()),
-            Operation::Boot(BootMedia::File(video.clone())),
-            Operation::Boot(BootMedia::Default),
+            (
+                Operation::Delete(video.clone()),
+                "deleting internal/video/clip.mp4",
+            ),
+            (
+                Operation::Overwrite(video.clone()),
+                "replacing internal/video/clip.mp4",
+            ),
+            (
+                Operation::Boot(BootMedia::File(video.clone())),
+                "making internal/video/clip.mp4 the boot media",
+            ),
+            (
+                Operation::Boot(BootMedia::Default),
+                "restoring the default boot screen",
+            ),
         ];
-        for op in &operations {
+        for (op, text) in &operations {
             let refused = Confirmed::require(Confirm::No, op).unwrap_err();
-            assert_eq!(refused, BezelError::NotConfirmed(op.to_string()));
+            assert_eq!(refused, BezelError::NotConfirmed((*text).to_string()));
+            assert_eq!(refused.to_string(), format!("{text} needs confirmation"));
             assert!(Confirmed::require(Confirm::Yes, op).is_ok());
         }
 
-        // Through the use cases, Confirm::No never reaches the screen.
-        let mut screen = Screen::turing_88().with_file("internal/video/clip.mp4", 1000);
-        let err = usecase::delete(&mut screen, &video, Confirm::No).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "deleting internal/video/clip.mp4 needs confirmation"
-        );
-        for boot in [BootMedia::File(video.clone()), BootMedia::Default] {
-            let err = usecase::set_boot_media(&mut screen, &boot, Confirm::No).unwrap_err();
-            assert!(matches!(err, BezelError::NotConfirmed(_)), "{err}");
-        }
-        assert!(screen.calls.is_empty(), "{:?}", screen.calls);
-
-        // Overwrite: the preflight only queries; the refused upload sends nothing.
-        let mut media = Media::new(Converter::Missing).with("clip.mp4", mp4(NATIVE, 1000));
-        let request = UploadRequest {
-            source: MediaLocation("clip.mp4".into()),
-            name: "clip.mp4".into(),
-            location: INTERNAL_VIDEO,
-            options: ConvertOptions::default(),
-        };
-        let prepared = usecase::prepare_upload(&mut screen, &mut media, &request).unwrap();
-        assert_eq!(
-            prepared.plan.replaces,
-            Some(entry("internal/video/clip.mp4", Some(1000)))
-        );
-        let queried = screen.calls.len();
-        assert!(screen.calls.iter().all(|c| !c.changes_the_screen()));
-        let token = CancelToken::new();
-        let mut sink = |_: Progress| {};
-        let mut job = Job::new(&token, &mut sink);
-        let err =
-            usecase::upload(&mut screen, &mut media, &prepared, Confirm::No, &mut job).unwrap_err();
-        assert_eq!(
-            err,
-            BezelError::NotConfirmed("replacing internal/video/clip.mp4".into())
-        );
-        assert_eq!(screen.calls.len(), queried, "nothing after the refusal");
-        assert!(
-            !media
-                .calls
-                .iter()
-                .any(|c| c.starts_with("load") || c.starts_with("transcode"))
-        );
-
-        // Confirmed, the same operations go through.
-        usecase::delete(&mut screen, &video, Confirm::Yes).unwrap();
-        assert!(screen.calls.last().is_some_and(|c| c.changes_the_screen()));
+        // Only `Confirmed::require` with `Confirm::Yes` makes a `Confirmed`
+        // (its field is private), and the port's delete and start-mode
+        // writes take one: no code path reaches them unconfirmed. These
+        // coercions stop compiling if either signature loses the proof.
+        let _: Delete = <dyn ScreenStorage>::delete;
+        let _: SetStartMode = <dyn ScreenStorage>::set_start_mode;
+        // That the use cases refuse before any byte reaches the screen
+        // (overwrite included) runs through the device fake:
+        // tests/storage.rs, `replacing_deleting_and_the_boot_slot_need_confirmation`.
     }
 
     #[test]

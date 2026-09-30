@@ -281,6 +281,24 @@ pub fn blocks(data: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Wire length of the data phase of `size` payload bytes: what [`blocks`]
+/// makes of them, `ceil(size / 249)` blocks of 250 bytes.
+pub const fn data_phase_len(size: u64) -> u64 {
+    size.div_ceil(BLOCK_PAYLOAD as u64) * BLOCK as u64
+}
+
+/// Byte that completes a data phase an upload cancel cut short (Bezel's
+/// recovery, not a vendor behaviour): the START_DISPLAY_BITMAP byte, so a
+/// filler block that ever reached the command parser would read like the
+/// resync block both references send.
+pub const FILLER: u8 = 0x2C;
+
+/// `count` data-phase blocks of [`FILLER`]: 249 filler bytes and the zero
+/// separator each, framed exactly as [`blocks`] frames file data.
+pub fn filler_blocks(count: usize) -> Vec<u8> {
+    blocks(&vec![FILLER; count * BLOCK_PAYLOAD])
+}
+
 /// Pixel encoding of partial updates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelFormat {
@@ -756,6 +774,19 @@ mod tests {
         assert_eq!((b[249], b[250], b[251]), (0, 7, 0));
         // The 8.8" frame: 3,686,400 bytes -> 14,805 blocks = 3,701,250 bytes on the wire.
         assert_eq!(blocks(&vec![1u8; 3_686_400]).len(), 3_701_250);
+    }
+
+    #[test]
+    fn data_phase_lengths_and_filler_blocks() {
+        for size in [0, 1, 248, 249, 250, 498, 499, 3_686_400, 12_345_678] {
+            let framed = blocks(&vec![7u8; size]).len() as u64;
+            assert_eq!(data_phase_len(size as u64), framed, "{size}");
+        }
+        assert_eq!(data_phase_len(3_686_400), 3_701_250);
+        assert!(filler_blocks(0).is_empty());
+        let two = filler_blocks(2);
+        let block = format!("{}00", "2c".repeat(BLOCK_PAYLOAD));
+        assert_eq!(hex(&two), block.repeat(2));
     }
 
     #[test]

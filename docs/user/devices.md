@@ -38,6 +38,7 @@ bezel monitor-mode --yes    # asks the panel its model, then switches it
 ```
 
 The panel restarts as a USB screen, and `bezel devices` then lists it normally.
-In the app, the switch is behind a confirmation dialog. On Linux, the panel is
-reached through `hidraw`, which the udev rule covers
+In the app, the **Screen** tab lists these panels under **Panels in desktop
+mode**; **Back to USB monitor mode…** asks for confirmation before it switches
+one. On Linux, the panel is reached through `hidraw`, which the udev rule covers
 ([Let Bezel open the screen](permissions.md)).

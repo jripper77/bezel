@@ -13,7 +13,7 @@ Ele tem duas partes:
   serviço.
 
 A linha de comando e as mensagens dela ficam em inglês; o aplicativo segue o
-idioma do sistema.
+idioma do sistema, ou o que você escolher em **Preferências → Idioma**.
 
 ## Primeiros passos
 

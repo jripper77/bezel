@@ -70,13 +70,19 @@
   de cada tema (datas em en e pt-BR) após 60 amostras de sensores em movimento
 
 ## Hardware validation
-- Não executada por este agente (a tela 8.8" está com o `turing-smart-screen.service` do usuário; só
-  `--fake` foi usado). Pendente: `bezel run turing-8.8-horizontal` na 8.8" real por um minuto
-  (comando, duração, frames, erros) — DoD manual da phase.
+- Turing 8.8" real (ROM `chs_88inch.dev1_rom1.90`), `bezel 0.1.0-dev.70+defd814` instalado pelo
+  `install-local.sh`, `turing-smart-screen.service` parado durante o teste e religado ao final:
+  `timeout -s INT 60 bezel -v run turing-8.8-horizontal`.
+  - O serviço Python desligou a tela ao parar (TURNOFF); o primeiro handshake falhou com "Broken pipe", o
+    connector acordou a tela pelo MCU e o HELLO respondeu 16 s depois (correção `cdf3223` funcionando).
+  - 42 frames do tema "Midnight 8.8" horizontal" (1920x480) em 41,5 s, um por segundo (`refresh_seconds`),
+    `QUERY_STATUS` sempre `needReSend:0`; nenhum erro nem aviso no log.
+  - Ctrl+C (SIGINT): "released" — a tela voltou ao modo próprio.
+- **Pendente de confirmação humana (DoD manual):** que o tema aparece correto e legível na tela (a
+  verificação acima é de protocolo e log, não visual).
 
 ## Follow-ups
-- `scripts/install-local.sh` ainda não copia `themes/` para `~/.local/share/bezel/themes` (onde o CLI e
-  o Studio procuram os temas embutidos); até lá, usar caminho (`bezel run themes/turing-8.8-horizontal`)
-  ou `BEZEL_THEMES_DIR`.
-- O Studio cria o renderer só com fontes do sistema; carregar `themes/fonts` com
-  `bezel_render::font_files` na phase `studio-app` para o WYSIWYG valer em máquinas sem Inter.
+- Resolvidos no `studio-app` (`6fcbefd`): `install-local.sh` instala `themes/` em
+  `~/.local/share/bezel/themes`; o Studio carrega `themes/fonts` no renderizador.
+- Os textos fixos dos temas inclusos ("MEMORY", "NETWORK", "of 64.0 GiB") estão em inglês; variantes pt-BR
+  ou rótulos traduzidos ficam para a `release-polish`.

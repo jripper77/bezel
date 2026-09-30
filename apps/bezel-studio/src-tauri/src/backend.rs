@@ -15,12 +15,13 @@ use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::theme::Theme;
 use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink, ThemeLocation, ThemeStore};
 use bezel_themes::dto::ThemeDto;
+use bezel_themes::import::import_path;
 
 use crate::dto::{
     AddedDto, AssetDto, ImportedDto, SampleDto, SavedDto, ScreenDto, SensorDto, SessionDto,
     ThemeEntryDto,
 };
-use crate::library::ThemeLibrary;
+use crate::library::{ThemeLibrary, is_native_theme};
 use crate::media::{kind_of, thumbnail_data_url};
 use crate::settings::SettingsFile;
 use crate::studio::Studio;
@@ -317,16 +318,25 @@ impl Backend {
         Ok(ThemeDto::from(studio.theme()))
     }
 
-    /// Imports a theme file (native `.bezeltheme` or a theme folder).
+    /// Imports a theme: Bezel's own (`.bezeltheme`, or a folder with a
+    /// `theme.json`) as it is; another app's (a TURZX `.turtheme`, a
+    /// turing-smart-screen-python `theme.yaml` or its folder) converted, with
+    /// what had no exact equivalent as warnings.
     pub fn import(&self, path: &Path) -> UiResult<ImportedDto> {
-        let location = ThemeLocation(path.display().to_string());
-        let (theme, assets) = self.store.load(&location).map_err(text)?;
+        let (theme, assets, warnings) = if is_native_theme(path) {
+            let location = ThemeLocation(path.display().to_string());
+            let (theme, assets) = self.store.load(&location).map_err(text)?;
+            (theme, assets, Vec::new())
+        } else {
+            let (theme, assets, report) = import_path(path).map_err(text)?;
+            (theme, assets, report.warnings)
+        };
         let mut studio = self.studio();
         // A copy: saving writes to the user folder, not over the imported file.
         studio.start(theme, assets, None);
         Ok(ImportedDto {
             theme: ThemeDto::from(studio.theme()),
-            warnings: Vec::new(),
+            warnings,
         })
     }
 
@@ -582,10 +592,6 @@ mod tests {
         f.backend.restore_live(TIME);
         assert_eq!(f.backend.session().theme.name, "Mine");
         assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
-
-        let imported = f.backend.import(Path::new(&saved.location)).unwrap();
-        assert_eq!(imported.theme.name, "Mine");
-        assert_eq!(f.backend.session().location, None);
     }
 
     #[test]
@@ -704,6 +710,83 @@ mod tests {
         assert_eq!(
             f.backend.settings.load().orientation_for(KEY),
             Some(Orientation::Landscape)
+        );
+    }
+
+    /// A small turing-smart-screen-python theme; the LED color has no
+    /// equivalent in a Bezel theme.
+    const TINY_PYTHON_THEME: &str = r#"---
+display:
+  DISPLAY_SIZE: 3.5"
+  DISPLAY_ORIENTATION: landscape
+  DISPLAY_RGB_LED: 0, 120, 255
+static_text:
+  LABEL:
+    TEXT: "CPU"
+    X: 20
+    Y: 18
+    FONT_SIZE: 18
+    FONT_COLOR: 255, 255, 255
+    BACKGROUND_COLOR: 0, 0, 0
+"#;
+
+    /// The theme laid out like the Python repository (`res/themes/<name>`).
+    fn python_theme(root: &Path) -> PathBuf {
+        let dir = root.join("res/themes/Tiny");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("theme.yaml"), TINY_PYTHON_THEME).unwrap();
+        dir
+    }
+
+    #[test]
+    fn imports_native_and_other_apps_themes() {
+        let f = fixture("import");
+        let native = f
+            .backend
+            .save(&f.backend.session().theme, None)
+            .unwrap()
+            .location;
+        let imported = f.backend.import(Path::new(&native)).unwrap();
+        assert_eq!(imported.theme.name, "Start");
+        assert!(imported.warnings.is_empty());
+        assert_eq!(f.backend.session().location, None, "a copy, not the file");
+        let folder = f.root.join("Folder theme");
+        let target = ThemeLocation(folder.display().to_string());
+        f.backend
+            .save(&f.backend.session().theme, Some(target))
+            .unwrap();
+        assert!(folder.join("theme.json").is_file());
+        let imported = f.backend.import(&folder).unwrap();
+        assert_eq!(imported.theme.name, "Start");
+        assert!(imported.warnings.is_empty());
+
+        let dir = python_theme(&f.root);
+        for path in [dir.clone(), dir.join("theme.yaml")] {
+            let imported = f.backend.import(&path).unwrap();
+            assert_eq!(imported.theme.name, "Tiny", "{}", path.display());
+            assert_eq!(imported.theme.orientation, "landscape");
+            assert_eq!(
+                (imported.theme.canvas.width, imported.theme.canvas.height),
+                (480, 320)
+            );
+            assert!(
+                imported.warnings.iter().any(|w| w.contains("LED")),
+                "{:?}",
+                imported.warnings
+            );
+            assert_eq!(f.backend.session().theme.name, "Tiny");
+        }
+        let json = serde_json::to_value(f.backend.import(&dir).unwrap()).unwrap();
+        assert!(json["warnings"].as_array().is_some_and(|w| !w.is_empty()));
+
+        let junk = f.root.join("notes.turtheme");
+        std::fs::write(&junk, b"not a theme").unwrap();
+        assert!(f.backend.import(&junk).is_err());
+        assert!(f.backend.import(&f.root.join("missing.yaml")).is_err());
+        assert_eq!(
+            f.backend.session().theme.name,
+            "Tiny",
+            "a failed import keeps the theme"
         );
     }
 

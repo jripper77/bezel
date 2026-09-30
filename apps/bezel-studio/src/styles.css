@@ -84,7 +84,7 @@ button, input, select { font: inherit; color: inherit; }
   min-height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; padding: 0 10px;
 }
 .icon-button { width: 32px; padding: 0; }
-.icon-button svg, .chip-button svg, .text-button svg, .badge svg, .orientation-tools svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon-button svg, .chip-button svg, .text-button svg, .badge svg, .notice-head svg, .orientation-tools svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .text-button svg { width: 16px; height: 16px; }
 .icon-button:hover, .text-button:hover, .chip-button:hover { border-color: var(--accent); }
 .icon-button:disabled, .text-button:disabled { opacity: 0.45; cursor: default; }
@@ -143,6 +143,13 @@ button, input, select { font: inherit; color: inherit; }
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 5px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 0.75rem; font-weight: 600; }
 .badge svg { width: 14px; height: 14px; color: var(--accent); }
 
+.notice { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--border); border-left: 4px solid var(--warn); background: var(--surface-2); }
+.notice-head { display: flex; align-items: center; gap: 8px; }
+.notice-head > svg { color: var(--warn); }
+.notice-head h2 { flex: 1; margin: 0; font-size: 0.9rem; }
+.notice-head .icon-button { width: 28px; min-height: 28px; border-color: transparent; background: transparent; }
+.notice p { margin: 6px 0; font-size: 0.85rem; }
+.notice ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 0.85rem; overflow-wrap: anywhere; }
 .button-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .button-row.pairs { display: grid; grid-template-columns: 1fr 1fr; }
 .button-row.pairs .text-button { padding: 0 8px; gap: 4px; font-size: 0.9rem; white-space: nowrap; }

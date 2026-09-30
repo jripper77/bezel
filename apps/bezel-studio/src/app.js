@@ -267,6 +267,7 @@ async function openTheme(location) {
   try {
     const theme = await bridge.openTheme(location);
     state.location = location;
+    library.showImportReport(null);
     store.load(theme);
     await refreshAssets();
     canvasView.fit();
@@ -283,6 +284,7 @@ async function newTheme(axis) {
     const orientation = orientationOf(axis, isTurned(store.getState().theme.orientation));
     store.load(await bridge.newTheme(state.screen, t('themes.untitled'), orientation));
     state.location = null;
+    library.showImportReport(null);
     await refreshAssets();
     canvasView.fit();
   } catch (e) {
@@ -298,7 +300,10 @@ async function importTheme() {
     state.location = null;
     await refreshAssets();
     canvasView.fit();
-    toast(result.warnings?.length ? t('toast.importedWithWarnings', { count: result.warnings.length }) : t('toast.imported'));
+    const warnings = result.warnings ?? [];
+    library.showImportReport({ name: result.theme.name, warnings });
+    if (warnings.length === 0) toast(t('toast.imported'));
+    else toast(warnings.length === 1 ? t('toast.importedWithOneWarning') : t('toast.importedWithWarnings', { count: warnings.length }));
   } catch (e) {
     toast(t('toast.error', { message: errorText(e) }));
   }

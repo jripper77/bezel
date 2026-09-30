@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_SENSORS, createDemoBackend, demoFormat, demoOrientation, demoValue } from '../../src/demo-backend.js';
+import { DEMO_IMPORT_WARNINGS, DEMO_SENSORS, createDemoBackend, demoFormat, demoOrientation, demoValue } from '../../src/demo-backend.js';
 
 const fixed = { now: () => 1000 };
 
@@ -83,7 +83,9 @@ test('images, live mode and fonts', async () => {
   await demo.pushTheme({ name: 'pushed' });
   assert.equal((await demo.session()).theme.name, 'pushed');
   assert.ok((await demo.fonts()).includes('Inter'));
-  assert.equal(await demo.importTheme(), null);
+  const imported = await demo.importTheme();
+  assert.equal(imported.theme.name, 'Imported');
+  assert.deepEqual(imported.warnings, [...DEMO_IMPORT_WARNINGS]);
   await demo.setBrightness('k', 10);
   await demo.release('k');
 });

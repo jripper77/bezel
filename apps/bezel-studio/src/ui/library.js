@@ -203,6 +203,25 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
     grid.replaceChildren(...list.map(themeCard));
   }
 
+  /** Lists what an import could not map exactly, until dismissed; `null` clears it. */
+  function showImportReport(report) {
+    const root = $('import-report');
+    if (!report?.warnings?.length) {
+      root.replaceChildren();
+      return;
+    }
+    const count = report.warnings.length;
+    const dismiss = el('button', {
+      type: 'button', class: 'icon-button', title: t('import.dismiss'), 'aria-label': t('import.dismiss'),
+      onclick: () => { root.replaceChildren(); $('theme-import').focus(); },
+    }, [icon(ICONS.close, 16)]);
+    root.replaceChildren(el('section', { class: 'notice', 'aria-labelledby': 'import-report-title' }, [
+      el('div', { class: 'notice-head' }, [icon(ICONS.warning, 18), el('h2', { id: 'import-report-title', text: t('import.title') }), dismiss]),
+      el('p', { text: count === 1 ? t('import.summaryOne', { name: report.name }) : t('import.summary', { name: report.name, count }) }),
+      el('ul', {}, report.warnings.map((w) => el('li', { text: w }))),
+    ]));
+  }
+
   $('theme-new-vertical').addEventListener('click', () => actions.newTheme('vertical'));
   $('theme-new-horizontal').addEventListener('click', () => actions.newTheme('horizontal'));
   $('theme-open').addEventListener('click', () => actions.refreshThemes());
@@ -265,6 +284,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
     updateReadings,
     renderLayers,
     renderThemes,
+    showImportReport,
     renderMedia,
     renderScreen,
     selectTab: (name) => selectTab(tabs.find((x) => x.dataset.tab === name)),

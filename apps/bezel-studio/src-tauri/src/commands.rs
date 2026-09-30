@@ -167,13 +167,17 @@ pub async fn new_theme(
     .await
 }
 
+/// Theme files the import dialog offers: Bezel's own, the TURZX app's and
+/// turing-smart-screen-python's `theme.yaml` (its folder comes along).
+const IMPORT_EXTENSIONS: [&str; 4] = [EXTENSION, "turtheme", "yaml", "yml"];
+
 /// Asks for a theme file and imports it. `None` when cancelled.
 #[tauri::command]
 pub async fn import_theme<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, Shared>,
 ) -> UiResult<Option<ImportedDto>> {
-    let Some(path) = pick_file(&app, "Bezel", &[EXTENSION])? else {
+    let Some(path) = pick_file(&app, "Themes", &IMPORT_EXTENSIONS)? else {
         return Ok(None);
     };
     blocking(&state, move |b| b.import(&path).map(Some)).await

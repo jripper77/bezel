@@ -49,6 +49,12 @@ export function demoValue(base, swing, t, seed) {
   return Math.max(0, base + swing * Math.sin(t / 3 + seed) * 0.8 + swing * 0.2 * Math.sin(t * 1.7 + seed * 2));
 }
 
+/** What the demo import reports, like the Python theme importer does. */
+export const DEMO_IMPORT_WARNINGS = Object.freeze([
+  'the backplate LED color (XuanFang rev B) is not part of a Bezel theme',
+  'STATS.CPU.FAN_SPEED: Bezel does not measure this yet; the widget shows it as unavailable',
+]);
+
 /**
  * Orientation of a new theme when none is asked for, like the backend: the
  * last one used with the screen, else horizontal for bar-shaped panels (long
@@ -134,7 +140,7 @@ export function createDemoBackend(scenario, clock = {}) {
       const canvas = isHorizontal(chosenOrientation) ? { width: long, height: short } : { width: short, height: long };
       return Promise.resolve({ ...structuredClone(DEMO_THEME), name, orientation: chosenOrientation, canvas, elements: [] });
     },
-    importTheme: () => Promise.resolve(null),
+    importTheme: () => Promise.resolve({ theme: { ...structuredClone(DEMO_THEME), name: 'Imported' }, warnings: [...DEMO_IMPORT_WARNINGS] }),
     addImage: () => {
       const ref = `assets/image-${images.length + 1}.png`;
       images.push(ref);

@@ -92,11 +92,14 @@ impl ThemeLibrary {
     }
 }
 
-fn is_theme(path: &Path) -> bool {
+/// True for a theme in Bezel's own format: a `.bezeltheme` file or a folder
+/// with a `theme.json`.
+pub fn is_native_theme(path: &Path) -> bool {
     if path.is_dir() {
         path.join(MANIFEST).is_file()
     } else {
-        path.extension().is_some_and(|e| e == EXTENSION)
+        path.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION))
     }
 }
 
@@ -107,7 +110,7 @@ fn scan(dir: &Path, bundled: bool) -> Vec<ThemeEntry> {
     entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| is_theme(p))
+        .filter(|p| is_native_theme(p))
         .filter_map(|path| {
             let location = ThemeLocation(path.display().to_string());
             match load_manifest(&location) {

@@ -1,7 +1,7 @@
 // The editor in demo mode: it loads without console errors or serious
 // accessibility violations (light and dark projects), widgets and sensors
-// drag onto the canvas, keyboard edits undo, and the screen turns between
-// vertical and horizontal.
+// drag onto the canvas, keyboard edits undo, the screen turns between
+// vertical and horizontal, and imports list what had no equivalent.
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -238,5 +238,24 @@ test('new vertical and horizontal themes', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Vertical', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#inspector')).toContainText('Tela de 480×1920 pixels');
   await expectAccessible(page);
+  expect(errors).toEqual([]);
+});
+
+test('an import lists what had no equivalent', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('tab', { name: 'Temas' }).click();
+  await page.getByRole('button', { name: 'Importar…' }).click();
+  await expect(page.locator('#theme-name')).toHaveValue('Imported');
+  await expect(page.locator('#toast')).toHaveText('Tema importado com 2 avisos. A lista está na aba Temas.');
+  const report = page.getByRole('region', { name: 'Avisos da importação' });
+  await expect(report).toBeVisible();
+  await expect(report.getByRole('listitem')).toHaveCount(2);
+  await expect(report).toContainText('backplate LED');
+  await expectAccessible(page);
+  await report.getByRole('button', { name: 'Fechar avisos' }).click();
+  await expect(report).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Importar…' })).toBeFocused();
   expect(errors).toEqual([]);
 });

@@ -5,7 +5,6 @@ use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::{Endpoint, Screen, ScreenState};
 use bezel_core::ports::DeviceBus;
 use serde::Serialize;
-use std::fmt::Write as _;
 
 /// JSON shape of one screen. Field names are a public contract of the CLI.
 #[derive(Debug, Serialize)]
@@ -102,11 +101,10 @@ fn endpoint_line(out: &mut String, label: &str, e: &Endpoint) {
         .location
         .as_ref()
         .map_or_else(|| "-".to_string(), ToString::to_string);
-    let _ = writeln!(
-        out,
-        "   {label:<8} {:<14} {}  serial {serial}  usb {location}",
+    out.push_str(&format!(
+        "   {label:<8} {:<14} {}  serial {serial}  usb {location}\n",
         e.address, e.usb
-    );
+    ));
 }
 
 fn table(screens: &[Screen]) -> String {
@@ -118,8 +116,13 @@ fn table(screens: &[Screen]) -> String {
     }
     let mut out = String::new();
     for (i, s) in screens.iter().enumerate() {
-        let _ = writeln!(out, "{}. {}  [{}]", i + 1, title(s), state_name(s.state()));
-        let _ = writeln!(out, "   {:<8} {}", "family", s.family.slug());
+        out.push_str(&format!(
+            "{}. {}  [{}]\n",
+            i + 1,
+            title(s),
+            state_name(s.state())
+        ));
+        out.push_str(&format!("   {:<8} {}\n", "family", s.family.slug()));
         if let Some(d) = &s.display {
             endpoint_line(&mut out, "display", d);
         }

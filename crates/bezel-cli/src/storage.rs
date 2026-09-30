@@ -8,7 +8,6 @@
 //! the command fails before anything changes the screen: `rm` and `boot` do
 //! not even open it, and `put` only queries it to learn what it would replace.
 
-use std::fmt::Write as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -31,6 +30,7 @@ use bezel_core::ports::{DeviceBus, MediaLocation, MediaTranscoder, ScreenConnect
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use crate::messages::Messages;
 use crate::{OrientationArg, Target};
 
 /// Options of `bezel storage`.
@@ -247,7 +247,8 @@ pub struct StorageKit<'a> {
 }
 
 /// Runs a `bezel storage` command and returns what should be printed on
-/// stdout; summaries, warnings and progress go to `kit.log`.
+/// stdout; summaries, warnings and progress go to `kit.log`. A summary that
+/// cannot be written there stops the command before the screen changes.
 pub fn run<B, C>(
     args: &StorageArgs,
     bus: &B,
@@ -268,10 +269,11 @@ where
         } => ls(open(target)?.as_mut(), *folder, *json),
         StorageAction::Put(put_args) => put(open(&put_args.target)?.as_mut(), put_args, kit),
         StorageAction::Rm { target, paths, yes } => {
+            let mut log = Messages::new(&mut *kit.log);
             if !yes {
-                return refuse_delete(paths, kit.log);
+                return refuse_delete(paths, &mut log);
             }
-            rm(open(target)?.as_mut(), paths, kit.log)
+            rm(open(target)?.as_mut(), paths, &mut log)
         }
         StorageAction::Play { target, path, once } => {
             let repeat = if *once { Repeat::Once } else { Repeat::Loop };
@@ -283,14 +285,14 @@ where
             Ok(format!("{}: stopped\n", link.identity().model.name))
         }
         StorageAction::Boot(boot_args) => {
-            let _ = write!(kit.log, "{}", boot_summary(boot_args));
+            let mut log = Messages::new(&mut *kit.log);
+            write!(log, "{}", boot_summary(boot_args));
             if !boot_args.yes {
-                let _ = writeln!(
-                    kit.log,
-                    "{NOTHING_SENT} Add --yes to change the boot media."
-                );
+                writeln!(log, "{NOTHING_SENT} Add --yes to change the boot media.");
+                log.check()?;
                 anyhow::bail!("changing the boot media needs --yes");
             }
+            log.check()?;
             boot(open(&boot_args.target)?.as_mut(), boot_args)
         }
     }
@@ -399,7 +401,7 @@ impl From<&FileEntry> for FileDto {
 
 fn capacity_line(out: &mut String, label: &str, capacity: Option<Capacity>) {
     let Some(c) = capacity else {
-        let _ = writeln!(out, "{label:<9} no memory card");
+        out.push_str(&format!("{label:<9} no memory card\n"));
         return;
     };
     let used = if c.total == 0 {
@@ -407,15 +409,14 @@ fn capacity_line(out: &mut String, label: &str, capacity: Option<Capacity>) {
     } else {
         c.used as f64 / c.total as f64
     };
-    let _ = writeln!(
-        out,
-        "{label:<9} {} {:>3}%  {} used of {}, {} free",
+    out.push_str(&format!(
+        "{label:<9} {} {:>3}%  {} used of {}, {} free\n",
         bar(used),
         percent(used),
         size_text(c.used),
         size_text(c.total),
         size_text(c.free)
-    );
+    ));
 }
 
 /// `bezel storage info`.
@@ -483,33 +484,32 @@ fn listing(folders: &[StorageLocation], entries: &[FileEntry], card: bool) -> St
     let mut out = String::new();
     for e in entries {
         let size = e.size.map_or_else(|| "?".to_string(), size_text);
-        let _ = writeln!(out, "{:<width$}  {size:>10}", e.path.to_string());
+        out.push_str(&format!("{:<width$}  {size:>10}\n", e.path.to_string()));
     }
     let total: u64 = entries.iter().filter_map(|e| e.size).sum();
     let files = if entries.len() == 1 { "file" } else { "files" };
-    let _ = writeln!(
-        out,
-        "{} {files}, {}{no_card}",
+    out.push_str(&format!(
+        "{} {files}, {}{no_card}\n",
         entries.len(),
         size_text(total)
-    );
+    ));
     out
 }
 
 // ---------------------------------------------------------------- put
 
 /// Draws the progress of an upload job on stderr.
-struct ProgressView<'a> {
+struct ProgressView<'a, 'b> {
     style: ProgressStyle,
-    out: &'a mut dyn Write,
+    out: &'a mut Messages<'b>,
     /// The phase and step last drawn (percent for a bar, tenths for lines).
     shown: Option<(JobPhase, u64)>,
     /// Length of the bar line on screen; 0 when no line is open.
     open: usize,
 }
 
-impl<'a> ProgressView<'a> {
-    fn new(style: ProgressStyle, out: &'a mut dyn Write) -> Self {
+impl<'a, 'b> ProgressView<'a, 'b> {
+    fn new(style: ProgressStyle, out: &'a mut Messages<'b>) -> Self {
         Self {
             style,
             out,
@@ -537,16 +537,14 @@ impl<'a> ProgressView<'a> {
         self.shown = Some((progress.phase, step));
         let line = progress_line(progress);
         match self.style {
-            ProgressStyle::Lines => {
-                let _ = writeln!(self.out, "{line}");
-            }
+            ProgressStyle::Lines => writeln!(self.out, "{line}"),
             ProgressStyle::Bar => {
                 if new_phase {
                     self.finish();
                 }
                 let width = self.open.max(line.len());
-                let _ = write!(self.out, "\r{line:<width$}");
-                let _ = self.out.flush();
+                write!(self.out, "\r{line:<width$}");
+                self.out.flush();
                 self.open = line.len();
             }
         }
@@ -555,7 +553,7 @@ impl<'a> ProgressView<'a> {
     /// Ends the line a bar is drawn on.
     fn finish(&mut self) {
         if self.open > 0 {
-            let _ = writeln!(self.out);
+            writeln!(self.out);
             self.open = 0;
         }
     }
@@ -676,11 +674,10 @@ fn conversion_text(target: &TranscodeTarget) -> String {
         target.size.width, target.size.height, target.format
     );
     if !target.quarter_turns.is_multiple_of(4) {
-        let _ = write!(
-            out,
+        out.push_str(&format!(
             ", turned {}°",
             u32::from(target.quarter_turns % 4) * 90
-        );
+        ));
     }
     if let Some(crop) = target.crop {
         // The crop applies after the turn; the user thinks of the clip as it is.
@@ -689,13 +686,12 @@ fn conversion_text(target: &TranscodeTarget) -> String {
         } else {
             (crop.width, crop.height)
         };
-        let _ = write!(
-            out,
+        out.push_str(&format!(
             ", keeping the middle {width}x{height} of the clip (the panel's shape)"
-        );
+        ));
     }
     if let Some(fps) = target.frame_rate {
-        let _ = write!(out, ", {fps} fps");
+        out.push_str(&format!(", {fps} fps"));
     }
     out
 }
@@ -716,22 +712,28 @@ fn put_summary(file: &Path, screen: &str, prepared: &PreparedUpload) -> String {
         media.format
     );
     let medium = medium_name(plan.path.location.medium);
-    let _ = writeln!(out, "  to       {} on {screen} ({medium})", plan.path);
+    out.push_str(&format!(
+        "  to       {} on {screen} ({medium})\n",
+        plan.path
+    ));
     match &plan.action {
         UploadAction::Convert(target) => {
-            let _ = writeln!(out, "  convert  {}", conversion_text(target));
+            out.push_str(&format!("  convert  {}\n", conversion_text(target)));
         }
         UploadAction::AsIs { .. } if media.kind() == Some(MediaKind::Video) => {
-            let _ = writeln!(
-                out,
+            out.push_str(
                 "  as is    already in the screen's format; it plays in the panel's native \
-                 orientation (--orientation turns it)"
+                 orientation (--orientation turns it)\n",
             );
         }
         UploadAction::AsIs { .. } => {}
     }
     if let Some(old) = &plan.replaces {
-        let _ = writeln!(out, "  replaces {} ({})", old.path, optional_size(old.size));
+        out.push_str(&format!(
+            "  replaces {} ({})\n",
+            old.path,
+            optional_size(old.size)
+        ));
     }
     out
 }
@@ -752,7 +754,7 @@ fn explain(error: BezelError) -> anyhow::Error {
             if !candidates.is_empty() {
                 text.push_str(".\nStored on that medium, largest first:");
                 for c in &candidates {
-                    let _ = write!(text, "\n  {}  {}", c.path, optional_size(c.size));
+                    text.push_str(&format!("\n  {}  {}", c.path, optional_size(c.size)));
                 }
                 text.push_str(
                     "\nDelete what you no longer need with `bezel storage rm <PATH> --yes`, \
@@ -800,42 +802,54 @@ fn cancelled(path: &RemotePath, partial: Option<u64>) -> anyhow::Error {
 
 const UPLOADING: &str = "storing files";
 
+/// Probes the file, runs the preflight (queries only) and writes the
+/// summary of what `put` is about to do.
+fn prepare_put(
+    link: &mut dyn ScreenLink,
+    args: &PutArgs,
+    media: &mut dyn MediaTranscoder,
+    log: &mut Messages<'_>,
+) -> anyhow::Result<PreparedUpload> {
+    let source = MediaLocation(args.file.to_string_lossy().into_owned());
+    let probed = media
+        .probe(&source)
+        .with_context(|| format!("cannot read {}", args.file.display()))?;
+    if probed.kind() == Some(MediaKind::Video)
+        && let MediaTools::Missing { install_hints } = media.tools()
+    {
+        writeln!(
+            log,
+            "warning: ffmpeg was not found, so only a video already in the screen's format \
+             can be sent. Install it with: {} (or pass --ffmpeg PATH)",
+            install_hints.join(" ; ")
+        );
+    }
+    let request = upload_request(link, args, source, &probed)?;
+    let prepared =
+        usecase::prepare_upload(link, media, &request).map_err(screen_error(UPLOADING))?;
+    let screen = link.identity().model.name;
+    write!(log, "{}", put_summary(&args.file, screen, &prepared));
+    Ok(prepared)
+}
+
 /// `bezel storage put`.
 fn put(
     link: &mut dyn ScreenLink,
     args: &PutArgs,
     kit: &mut StorageKit<'_>,
 ) -> anyhow::Result<String> {
-    let source = MediaLocation(args.file.to_string_lossy().into_owned());
-    let media = kit
-        .media
-        .probe(&source)
-        .with_context(|| format!("cannot read {}", args.file.display()))?;
-    if media.kind() == Some(MediaKind::Video)
-        && let MediaTools::Missing { install_hints } = kit.media.tools()
-    {
-        let _ = writeln!(
-            kit.log,
-            "warning: ffmpeg was not found, so only a video already in the screen's format \
-             can be sent. Install it with: {} (or pass --ffmpeg PATH)",
-            install_hints.join(" ; ")
-        );
-    }
-    let request = upload_request(link, args, source, &media)?;
-    let prepared =
-        usecase::prepare_upload(link, kit.media, &request).map_err(screen_error(UPLOADING))?;
-    let screen = link.identity().model.name;
-    let _ = write!(kit.log, "{}", put_summary(&args.file, screen, &prepared));
+    let mut log = Messages::new(&mut *kit.log);
+    let prepared = prepare_put(link, args, kit.media, &mut log)?;
     let path = &prepared.plan.path;
     if prepared.plan.replaces.is_some() && !args.yes {
-        let _ = writeln!(
-            kit.log,
-            "{NOTHING_SENT} Add --yes to replace the stored file."
-        );
+        writeln!(log, "{NOTHING_SENT} Add --yes to replace the stored file.");
+        log.check()?;
         anyhow::bail!("replacing {path} needs --yes");
     }
+    // Nothing is sent unless the summary reached the user.
+    log.check()?;
     let confirm = if args.yes { Confirm::Yes } else { Confirm::No };
-    let mut view = ProgressView::new(kit.progress, kit.log);
+    let mut view = ProgressView::new(kit.progress, &mut log);
     let result = {
         let mut sink = |p: Progress| view.report(p);
         let mut job = Job::new(kit.cancel, &mut sink);
@@ -847,6 +861,11 @@ fn put(
         Err(BezelError::Cancelled { partial }) => return Err(cancelled(path, partial)),
         Err(e) => return Err(screen_error(UPLOADING)(e)),
     };
+    let screen = link.identity().model.name;
+    // The upload is not stopped for its progress bar; a line that could not
+    // be drawn still ends the command with that error, naming what was stored.
+    log.check()
+        .with_context(|| format!("{screen} stored {}", uploaded.path))?;
     let converted = if uploaded.converted {
         ", converted"
     } else {
@@ -868,23 +887,25 @@ fn joined(paths: &[RemotePath]) -> String {
 
 /// `bezel storage rm` without `--yes`: says what would go and refuses
 /// without opening the screen.
-fn refuse_delete(paths: &[RemotePath], log: &mut dyn Write) -> anyhow::Result<String> {
+fn refuse_delete(paths: &[RemotePath], log: &mut Messages<'_>) -> anyhow::Result<String> {
     for path in paths {
         let medium = medium_name(path.location.medium);
-        let _ = writeln!(log, "Delete {path} from the screen's {medium}");
+        writeln!(log, "Delete {path} from the screen's {medium}");
     }
     let them = if paths.len() == 1 { "it" } else { "them" };
-    let _ = writeln!(log, "{NOTHING_SENT} Add --yes to delete {them}.");
+    writeln!(log, "{NOTHING_SENT} Add --yes to delete {them}.");
+    log.check()?;
     anyhow::bail!("deleting {} needs --yes", joined(paths))
 }
 
 const DELETING: &str = "deleting files";
 
-/// `bezel storage rm --yes`: lists what goes (with sizes), then deletes it.
+/// `bezel storage rm --yes`: lists what goes (with sizes), then deletes it
+/// once that list reached the user.
 fn rm(
     link: &mut dyn ScreenLink,
     paths: &[RemotePath],
-    log: &mut dyn Write,
+    log: &mut Messages<'_>,
 ) -> anyhow::Result<String> {
     let screen = link.identity().model.name;
     let mut stored = Vec::new();
@@ -894,23 +915,23 @@ fn rm(
             Some(entry) => {
                 let medium = medium_name(path.location.medium);
                 let size = optional_size(entry.size);
-                let _ = writeln!(log, "Delete {path} ({size}) from {screen} ({medium})");
+                writeln!(log, "Delete {path} ({size}) from {screen} ({medium})");
                 stored.push(entry);
             }
             None => {
-                let _ = writeln!(log, "{path} is not stored on {screen}; nothing to delete");
+                writeln!(log, "{path} is not stored on {screen}; nothing to delete");
             }
         }
     }
+    log.check()?;
     let mut out = String::new();
     for entry in &stored {
         usecase::delete(link, &entry.path, Confirm::Yes).map_err(screen_error(DELETING))?;
-        let _ = writeln!(
-            out,
-            "deleted {} ({})",
+        out.push_str(&format!(
+            "deleted {} ({})\n",
             entry.path,
             optional_size(entry.size)
-        );
+        ));
     }
     if stored.is_empty() {
         out.push_str("nothing deleted\n");
@@ -955,10 +976,9 @@ fn boot_summary(args: &BootArgs) -> String {
         Some(level) => format!("{level}% (--brightness)"),
         None => "the vendor default, about 67% (170 of 255; --brightness chooses)".to_string(),
     };
-    let _ = writeln!(
-        out,
-        "  The screen keeps this choice with the brightness it boots with: {brightness}"
-    );
+    out.push_str(&format!(
+        "  The screen keeps this choice with the brightness it boots with: {brightness}\n"
+    ));
     out
 }
 
@@ -1136,6 +1156,7 @@ pub(crate) mod doubles {
 mod tests {
     use super::doubles::{StubMedia, picture, video, weact_bus};
     use super::*;
+    use crate::messages::tests::Closing;
     use crate::{Cli, Command};
     use bezel_core::domain::frame::Rect;
     use bezel_core::domain::geometry::Size;
@@ -1822,16 +1843,70 @@ mod tests {
             "verify  [------------------------]   0%  checking the stored size"
         );
         let mut out = Vec::new();
-        let mut view = ProgressView::new(ProgressStyle::Lines, &mut out);
+        let mut log = Messages::new(&mut out);
+        let mut view = ProgressView::new(ProgressStyle::Lines, &mut log);
         for done in [0, 10, 50, 90, 95, 100] {
             view.report(Progress::new(JobPhase::Upload, done, 100));
         }
         view.finish();
+        log.check().unwrap();
         let lines = String::from_utf8(out).unwrap();
         assert_eq!(
             lines.lines().count(),
             5,
             "0%, 10%, 50%, 90% and 100%: {lines}"
         );
+    }
+
+    #[test]
+    fn a_summary_that_cannot_be_written_stops_before_the_screen_changes() {
+        let clip = "internal/video/intro.mp4";
+        let connector = with_files(&[(clip, 3000)]);
+        let mut media = StubMedia::ready().with("new.png", picture(MediaFormat::Png, 100));
+        let stderr_error = "could not write to the terminal (stderr): broken pipe";
+        for args in [
+            vec!["bezel", "storage", "rm", clip],
+            vec!["bezel", "storage", "rm", clip, "--yes"],
+            vec!["bezel", "storage", "boot", clip],
+            vec!["bezel", "storage", "boot", clip, "--yes"],
+            vec!["bezel", "storage", "put", "new.png"],
+        ] {
+            let mut closed = Closing::after(0);
+            let out = storage_with(&args, &connector, &mut media, &mut closed);
+            let err = format!("{:#}", out.unwrap_err());
+            assert_eq!(err, stderr_error, "{args:?}");
+        }
+        let screen = connector.log().storage;
+        let changed: Vec<&StorageCall> = screen
+            .calls
+            .iter()
+            .filter(|c| c.changes_the_screen())
+            .collect();
+        assert!(changed.is_empty(), "{changed:?}");
+        assert!(screen.files.contains_key(&path(clip)));
+    }
+
+    #[test]
+    fn a_progress_line_that_cannot_be_written_ends_the_finished_upload_with_its_error() {
+        let connector = FakeConnector::default();
+        let mut media = StubMedia::ready().with("new.png", picture(MediaFormat::Png, 100));
+        // Room for the summary, not for the progress lines.
+        let mut closing = Closing::after(200);
+        let out = storage_with(
+            &["bezel", "storage", "put", "new.png"],
+            &connector,
+            &mut media,
+            &mut closing,
+        );
+        let err = format!("{:#}", out.unwrap_err());
+        assert_eq!(
+            err,
+            "Turing Smart Screen 8.8\" stored internal/image/new.png: \
+             could not write to the terminal (stderr): broken pipe"
+        );
+        let taken = String::from_utf8(closing.taken).unwrap();
+        assert!(taken.starts_with("Upload new.png"), "{taken}");
+        let stored = path("internal/image/new.png");
+        assert_eq!(connector.log().storage.size(&stored), Some(100));
     }
 }

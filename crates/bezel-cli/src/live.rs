@@ -22,6 +22,7 @@ use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::{DeviceBus, MediaLocation, MediaTranscoder, ScreenConnector, ScreenLink};
 use bezel_themes::native::{MANIFEST, safe_asset_path};
 
+use crate::messages::Messages;
 use crate::theme::{Loaded, describe, load, warning_lines};
 use crate::{OrientationArg, Rendering, Target};
 
@@ -137,6 +138,8 @@ struct HostSource {
 
 impl Drop for HostSource {
     fn drop(&mut self) {
+        // Best effort: a copy left in the temporary folder harms nothing,
+        // and the run already ended.
         if let Some(file) = &self.temporary {
             let _ = std::fs::remove_file(file);
         }
@@ -251,7 +254,7 @@ fn start_video(
     media: &mut dyn MediaTranscoder,
     source: Option<&HostSource>,
     theme: &Path,
-    log: &mut dyn Write,
+    log: &mut Messages<'_>,
 ) {
     if matches!(runtime.video(), VideoState::NoVideo) {
         return;
@@ -268,7 +271,7 @@ fn start_video(
         )),
     };
     if let Some(line) = line {
-        let _ = writeln!(log, "{line}");
+        writeln!(log, "{line}");
     }
 }
 
@@ -337,7 +340,8 @@ fn stream_frames(
 /// stop (or after `max_frames`), then releases the screen. A video
 /// background starts once the screen is open (`media` decodes it for screens
 /// that cannot play it). Progress goes to `log`; the returned text sums the
-/// run up.
+/// run up. When `log` cannot be written, no frame is shown: the screen is
+/// released and that is the error.
 pub fn run<B, C>(
     bus: &B,
     connector: &C,
@@ -351,15 +355,17 @@ where
     B: DeviceBus + ?Sized,
     C: ScreenConnector + ?Sized,
 {
+    let mut log = Messages::new(log);
     let loaded = load(kit.store, request.theme)?;
-    let _ = write!(log, "{}", warning_lines(&loaded.warnings));
+    write!(log, "{}", warning_lines(&loaded.warnings));
+    log.check()?;
     // Rates and usages need a first sample; take it while the screen wakes.
     kit.sensors.sample().context("cannot read the sensors")?;
     let mut link = open_for(bus, connector, request.target, &loaded.theme)?;
     let screen = link.identity().model.name;
     let every = interval(loaded.theme.refresh_seconds);
     let line = describe(&loaded.theme);
-    let _ = writeln!(
+    writeln!(
         log,
         "{screen}: showing {line}, every {:.2} s; Ctrl+C to stop",
         every.as_secs_f64()
@@ -372,11 +378,13 @@ where
         media,
         source.as_ref(),
         request.theme,
-        log,
+        &mut log,
     );
     let started = Instant::now();
     let pacing = (every, request.max_frames);
-    let (frames, outcome) = if matches!(runtime.video(), VideoState::Host) {
+    let (frames, outcome) = if log.failed() {
+        (0, Ok(()))
+    } else if matches!(runtime.video(), VideoState::Host) {
         stream_frames(&mut runtime, kit, link.as_mut(), pace, pacing)
     } else {
         show_frames(&mut runtime, kit, link.as_mut(), pace, pacing)
@@ -386,6 +394,7 @@ where
     let released = link.release();
     outcome.with_context(|| format!("stopped after {frames} frames"))?;
     released.context("could not hand the screen back")?;
+    log.check()?;
     Ok(format!(
         "{screen}: {frames} frames of {line} in {:.1} s, released\n",
         started.elapsed().as_secs_f64()
@@ -577,6 +586,43 @@ mod tests {
         assert!(pace.waits.iter().all(|w| *w <= Duration::from_millis(500)));
         // A warm-up sample, then one per frame.
         assert_eq!(sensors.samples_taken(), 4);
+    }
+
+    #[test]
+    fn a_status_that_cannot_be_written_shows_no_frame_and_releases_the_screen() {
+        let path = theme_file("mute", Size::new(480, 1920), Orientation::Portrait, 1.0);
+        let connector = FakeConnector::default();
+        let mut renderer = SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip);
+        let mut kit = Rendering {
+            store: &FsThemeStore,
+            renderer: &mut renderer,
+            sensors: &mut FakeSensors::demo(),
+            clock: &now,
+            language: Language::English,
+            bundled: None,
+        };
+        let target = Target { screen: None };
+        let request = RunRequest {
+            target: &target,
+            theme: &path,
+            max_frames: None,
+        };
+        let mut closed = crate::messages::tests::Closing::after(0);
+        let out = run(
+            &FakeBus::turing_88(),
+            &connector,
+            &mut kit,
+            request,
+            &mut StubMedia::ready(),
+            &mut scripted(usize::MAX),
+            &mut closed,
+        );
+        assert_eq!(
+            format!("{:#}", out.unwrap_err()),
+            "could not write to the terminal (stderr): broken pipe"
+        );
+        let screen = connector.log();
+        assert_eq!((screen.frames.len(), screen.releases), (0, 1));
     }
 
     #[test]

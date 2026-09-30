@@ -18,6 +18,7 @@ use bezel_themes::import::import_path;
 use bezel_themes::native::{EXTENSION, MANIFEST};
 
 use crate::Rendering;
+use crate::messages::Messages;
 
 pub use crate::sensors::WARM_UP;
 
@@ -210,7 +211,9 @@ pub fn render(
     log: &mut dyn Write,
 ) -> anyhow::Result<String> {
     let loaded = load(kit.store, path)?;
-    let _ = write!(log, "{}", warning_lines(&loaded.warnings));
+    let mut log = Messages::new(log);
+    write!(log, "{}", warning_lines(&loaded.warnings));
+    log.check()?;
     kit.sensors.sample().context("cannot read the sensors")?;
     pause(WARM_UP);
     let line = describe(&loaded.theme);

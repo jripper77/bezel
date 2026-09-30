@@ -6,6 +6,7 @@
 pub mod clock;
 mod devices;
 pub mod live;
+mod messages;
 mod screen;
 mod sensors;
 pub mod storage;

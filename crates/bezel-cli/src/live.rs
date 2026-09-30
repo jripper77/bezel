@@ -202,13 +202,17 @@ fn put_hint(theme: &Path, runtime: &ThemeRuntime, missing: &MissingVideo) -> Str
     }
 }
 
-/// A path as a shell reads it back.
+/// A path as the platform's shell reads it back: POSIX sh, or PowerShell on
+/// Windows (where `\` is plain and a quote inside quotes is doubled).
 fn quoted(text: &str) -> String {
+    let plain = if cfg!(windows) { "/._-+:\\" } else { "/._-+:" };
     if text
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "/._-+:".contains(c))
+        .all(|c| c.is_ascii_alphanumeric() || plain.contains(c))
     {
         text.to_string()
+    } else if cfg!(windows) {
+        format!("'{}'", text.replace('\'', "''"))
     } else {
         format!("'{}'", text.replace('\'', r"'\''"))
     }
@@ -726,7 +730,7 @@ mod tests {
         assert!(
             log.contains(&format!(
                 "  bezel storage put {} internal/video/clip_90.mp4 --orientation horizontal",
-                file.display()
+                quoted(&file.to_string_lossy())
             )),
             "{log}"
         );
@@ -829,7 +833,14 @@ mod tests {
     fn paths_are_quoted_for_the_shell() {
         assert_eq!(quoted("/home/me/clip.mp4"), "/home/me/clip.mp4");
         assert_eq!(quoted("/home/me/my clip.mp4"), "'/home/me/my clip.mp4'");
-        assert_eq!(quoted("it's.mp4"), r"'it'\''s.mp4'");
+        if cfg!(windows) {
+            assert_eq!(quoted(r"C:\Videos\clip.mp4"), r"C:\Videos\clip.mp4");
+            assert_eq!(quoted(r"C:\RUNNER~1\clip.mp4"), r"'C:\RUNNER~1\clip.mp4'");
+            assert_eq!(quoted("it's.mp4"), "'it''s.mp4'");
+        } else {
+            assert_eq!(quoted(r"C:\Videos\clip.mp4"), r"'C:\Videos\clip.mp4'");
+            assert_eq!(quoted("it's.mp4"), r"'it'\''s.mp4'");
+        }
     }
 
     #[test]

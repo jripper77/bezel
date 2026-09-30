@@ -710,7 +710,7 @@ host, measured by the project.
 | TURNOFF | 0x83 powers the SoC down: its gadget leaves the bus about 3 s later and only the MCU stays; turing-smart-screen-python sends it on exit. A wake right after takes about 17 s, after a few seconds of sleep about 11 s |
 | Storage info | 0x64 on the 8.8": flash 65.9 MiB after the 512 KiB reserve; a 29.7 GiB FAT32 card reported in the TF fields |
 | Uploads | PNG and MP4 to `/mnt/UDISK/{img,video}` and `/mnt/SDCARD/{img,video}` accepted and verified with GET_FILE_SIZE; `create_success` and `file_rev_done` as in section 13.4 |
-| Playback | PLAY_VIDEO (loop) and PLAY_IMAGE answered; after playback a full frame (PRE_UPDATE_BITMAP + frame) is accepted (`full_png_sucess`) and the overlay keeps its alpha |
+| Playback | PLAY_VIDEO (loop) and PLAY_IMAGE answered; after playback a full frame (PRE_UPDATE_BITMAP + frame) is accepted (`full_png_sucess`); that the overlay's alpha shows the video through is still to be confirmed by eye |
 | Cancelled upload | stopping the data phase midway leaves the firmware waiting for the declared bytes: HELLO is not answered on that link, the next connection wakes it (~10 s); the first upload afterwards received about 191 KB of stray bytes (caught by the size check) and the card reported the cancelled file's size as still used after it was deleted |
 | Host drain | writes of 64 KB to a card file can take longer than a 10 ms serial timeout to drain; a signal during the drain must not fail the write |
 

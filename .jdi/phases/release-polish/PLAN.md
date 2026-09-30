@@ -30,7 +30,8 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
   - `SensorOptions { ping_host (8.8.8.8), mangohud_dir }` + `SystemSensors::with_options` (`new()` = padrão); `with_roots`/`samples_taken` fora da API pública; importadores: `system.volume` → `Unavailable("not supported yet")`, `gpu.fps`/`net.ping` sem nota de "não medido".
 - **Dependencies:** none
 - **Test:** `linux::hwmon::tests::gpu_power_prefers_the_average_like_amdgpu`, `linux::hwmon::tests::fans_and_voltages_use_catalog_keys`
-- **Status:** pending
+- **Status:** completed (`784b106`)
+- **Nota:** `SensorOptions` é `pub` em `system.rs`, mas o reexport (`pub use system::{SensorOptions, SystemSensors};`) fica em `crates/bezel-sensors/src/lib.rs`, fora dos arquivos desta tarefa; falta essa linha antes de a CLI (T-7.5) e o studio (T-7.6) nomearem o tipo. `FakeSensors::samples_taken` segue público porque três testes da CLI o usam (`live.rs`, `theme.rs`, `tests/runtime.rs`), o que cumpre o "removidos ou usados" da D-9.
 
 #### T-7.3: Rev C: connect testável e sobras do cancelamento
 - **Specialist:** jdi-doer-bezel

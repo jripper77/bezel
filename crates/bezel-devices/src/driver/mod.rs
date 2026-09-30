@@ -162,7 +162,10 @@ pub(crate) enum Sent {
 /// Sends `data` through `send` in chunks of `chunk_len` bytes (the last one
 /// shorter), for an upload's data phase. Reports [`JobPhase::Upload`]
 /// progress (bytes sent / `data.len()`) before the first chunk and after
-/// every chunk, and checks the job's cancel token before every chunk.
+/// every chunk, and checks the job's cancel token before every chunk. A
+/// write that fails once the job was cancelled is that cancel, not a
+/// transport fault: the Ctrl+C that sets the token also interrupts the
+/// write in flight (seen on the 8.8": "timeout for retrying flush").
 pub(crate) fn send_in_chunks(
     data: &[u8],
     chunk_len: usize,
@@ -176,7 +179,13 @@ pub(crate) fn send_in_chunks(
         if job.is_cancelled() {
             return Ok(Sent::Cancelled { accepted });
         }
-        send(chunk)?;
+        if let Err(e) = send(chunk) {
+            if job.is_cancelled() {
+                tracing::debug!(error = %e, accepted, "write interrupted by the cancel");
+                return Ok(Sent::Cancelled { accepted });
+            }
+            return Err(e);
+        }
         accepted += chunk.len() as u64;
         job.report(Progress::new(JobPhase::Upload, accepted, total));
     }
@@ -287,6 +296,24 @@ mod tests {
             Err(BezelError::Transport("unplugged".into()))
         });
         assert!(matches!(failed, Err(BezelError::Transport(_))));
+
+        // The cancel interrupts the write in flight: still a cancel.
+        let token = CancelToken::new();
+        let remote = token.clone();
+        let mut sink = |_: Progress| {};
+        let mut job = Job::new(&token, &mut sink);
+        let mut writes = 0;
+        let interrupted = send_in_chunks(&[0; 9], 4, &mut job, |_| {
+            writes += 1;
+            if writes == 2 {
+                remote.cancel();
+                return Err(BezelError::Transport(
+                    "timeout for retrying flush reached".into(),
+                ));
+            }
+            Ok(())
+        });
+        assert_eq!(interrupted, Ok(Sent::Cancelled { accepted: 4 }));
     }
 
     #[test]

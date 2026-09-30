@@ -378,7 +378,7 @@ impl<W: Wire, P: Pause> TuringRevC<W, P> {
         if let Err(e) = handshake(&mut self.wire, &self.pause) {
             tracing::warn!(error = %e, %path, "no HELLO answer after a cancelled upload");
             return BezelError::Timeout(format!(
-                "the screen after a cancelled upload; reconnect it and check {path}"
+                "the screen after a cancelled upload; the next command reconnects it, then check {path} for a partial file"
             ));
         }
         match self.device_path(path).and_then(|t| self.file_size(&t)) {

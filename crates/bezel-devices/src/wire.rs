@@ -29,6 +29,12 @@ pub enum Flow {
     Hardware,
 }
 
+/// How long a write may make no progress before it fails: the SoC reads
+/// while it writes to its flash or the memory card, which can stall.
+const WRITE_STALL: Duration = Duration::from_secs(10);
+/// Drains that a signal interrupted, retried before giving up.
+const FLUSH_RETRIES: usize = 16;
+
 /// A CDC-ACM serial port.
 pub struct SerialWire {
     port: Box<dyn serialport::SerialPort>,
@@ -60,9 +66,42 @@ impl SerialWire {
 }
 
 impl Wire for SerialWire {
+    /// Writes every byte and waits until they left. The port's 10 ms timeout
+    /// only paces reads: a write that makes no progress for [`WRITE_STALL`]
+    /// fails, and a drain that a signal interrupted (Ctrl+C, a terminal
+    /// resize; serialport then reports "timeout for retrying flush reached"
+    /// although the bytes are still going out) is drained again. Seen on
+    /// the 8.8" during a memory-card upload.
     fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.port.write_all(bytes)?;
-        self.port.flush()
+        let mut rest = bytes;
+        let mut progress = Instant::now();
+        while !rest.is_empty() {
+            match self.port.write(rest) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "the port took no bytes",
+                    ));
+                }
+                Ok(n) => {
+                    rest = &rest[n..];
+                    progress = Instant::now();
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e)
+                    if e.kind() == io::ErrorKind::TimedOut && progress.elapsed() < WRITE_STALL => {}
+                Err(e) => return Err(e),
+            }
+        }
+        let mut retries = 0;
+        loop {
+            match self.port.flush() {
+                Err(e) if e.kind() == io::ErrorKind::TimedOut && retries < FLUSH_RETRIES => {
+                    retries += 1;
+                }
+                other => return other,
+            }
+        }
     }
 
     fn receive(&mut self, max: usize, timeout: Duration) -> io::Result<Vec<u8>> {

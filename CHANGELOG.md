@@ -38,6 +38,11 @@ the Conventional Commits.
 - Bundled "Midnight" themes for the 8.8" (horizontal and vertical), 5", 3.5"
   (both ways) and 2.1"/2.8" round screens, with the Inter and JetBrains Mono
   fonts (SIL Open Font License 1.1); a theme can be named instead of a path.
+- Bezel Studio: a Storage tab in the Screen panel — usage bars for the internal
+  flash and the memory card, files per folder, sending by drag-and-drop with a
+  progress bar and Cancel, play/stop, and delete or the boot media behind a
+  confirmation dialog naming the file; a theme with a video background offers
+  "Send to screen" and then plays over the video the screen loops.
 - `bezel storage info|ls|put|rm|play|stop|boot`: the screen's internal flash
   and memory card (sizes, `--json`), sending pictures and videos with a
   progress bar and Ctrl+C to cancel, device-side playback and the boot media.

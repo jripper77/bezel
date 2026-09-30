@@ -6,9 +6,9 @@ rebrands — on Linux and Windows, from one app.
 
 > Status: early development. Every protocol family is implemented and the Turing
 > 8.8" is validated on real hardware; sensors are measured on Linux and Windows;
-> the renderer and headless themes (`bezel run`) work; the theme editor is
-> landing; screen storage and video backgrounds (`bezel storage`) are being
-> validated on the 8.8".
+> the renderer, headless themes (`bezel run`) and the studio's editor work;
+> screen storage and video backgrounds (`bezel storage`, the studio's Storage
+> tab) work on the 8.8"; packaging and the 1.0 release come next.
 
 ## Quick start
 

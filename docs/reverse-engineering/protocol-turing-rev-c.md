@@ -707,10 +707,17 @@ host, measured by the project.
 | Full-frame time | about 220 ms from the HELLO answer to that reply (about 17 MB/s for 3,701,250 wire bytes, **inferred** from the timing) |
 | Partial updates | sent back to back, each followed by QUERY_STATUS, they are answered `needReSend:0\|renderCnt:0` roughly every 2.5 ms |
 | Re-enumeration | when another program that was driving the screen stopped, the SoC gadget re-enumerated (new USB device number) within about 2 s |
+| TURNOFF | 0x83 powers the SoC down: its gadget leaves the bus about 3 s later and only the MCU stays; turing-smart-screen-python sends it on exit. A wake right after takes about 17 s, after a few seconds of sleep about 11 s |
+| Storage info | 0x64 on the 8.8": flash 65.9 MiB after the 512 KiB reserve; a 29.7 GiB FAT32 card reported in the TF fields |
+| Uploads | PNG and MP4 to `/mnt/UDISK/{img,video}` and `/mnt/SDCARD/{img,video}` accepted and verified with GET_FILE_SIZE; `create_success` and `file_rev_done` as in section 13.4 |
+| Playback | PLAY_VIDEO (loop) and PLAY_IMAGE answered; after playback a full frame (PRE_UPDATE_BITMAP + frame) is accepted (`full_png_sucess`) and the overlay keeps its alpha |
+| Cancelled upload | stopping the data phase midway leaves the firmware waiting for the declared bytes: HELLO is not answered on that link, the next connection wakes it (~10 s); the first upload afterwards received about 191 KB of stray bytes (caught by the size check) and the card reported the cancelled file's size as still used after it was deleted |
+| Host drain | writes of 64 KB to a card file can take longer than a 10 ms serial timeout to drain; a signal during the drain must not fail the write |
 
 Consequences: full frames have a text reply of their own; the partial round trip is far below the vendor's 1 Hz tick;
 a host must expect the gadget to come back under a new device number and re-open it by identity
-([devices.md](devices.md) section 5.4).
+([devices.md](devices.md) section 5.4), to wake a screen another program turned off, and not to cancel an upload
+lightly: the firmware has no abort for the data phase.
 
 ## 20. Open questions
 

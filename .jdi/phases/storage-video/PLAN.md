@@ -64,7 +64,7 @@ Cartão SD/armazenamento da tela (listar, enviar, apagar, espaço), fundo em ví
 - **Acceptance:** `ScreenStorage` com os comandos 100/99/38/39/110/113 (nunca 40/98), info em LE32 KiB, raízes TF do § 6; vetores golden; `hardware_validated=false`; boot logo `/usr/data/boot.jpg` (JPEG q95 ≤ 307200 B) só como vetor, sem comando exposto; reusa os auxiliares do `driver/mod.rs` (T-6.2), sem duplicar
 - **Dependencies:** T-6.2
 - **Test:** `cargo test -p bezel-devices --lib turing_usb`
-- **Status:** pending
+- **Status:** completed (fd28155; sem o 98, `size` = presença pelo LIST_DIR + bytes gravados pelo próprio link, arquivo alheio = `Unsupported`; `delete` (42) e `set_start_mode` (125) = `Unsupported`)
 
 #### T-6.6: CLI `bezel storage`
 - **Specialist:** jdi-doer-bezel

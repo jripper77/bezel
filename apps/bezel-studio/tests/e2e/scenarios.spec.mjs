@@ -1,7 +1,8 @@
 // The editor in demo mode: it loads without console errors or serious
 // accessibility violations (light and dark projects), widgets and sensors
 // drag onto the canvas, keyboard edits undo (arrows on tabs only switch
-// tabs), the screen turns between
+// tabs), unsaved edits are asked about before they could be lost, the
+// screen turns between
 // vertical and horizontal, and imports list what had no equivalent.
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
@@ -144,6 +145,83 @@ test('arrow keys on tabs switch tabs and leave the element alone', async ({ page
   await expect(x).toHaveValue('90');
   await expect(page.locator('#status-main')).toHaveText('Tudo salvo');
   await expect(page.getByRole('button', { name: 'Desfazer (Ctrl+Z)' })).toBeDisabled();
+  expect(errors).toEqual([]);
+});
+
+test('unsaved edits are not lost to another theme', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('tab', { name: 'Camadas' }).click();
+  await page.getByRole('button', { name: /^CPU/ }).click();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#status-main')).toHaveText('Alterações não salvas');
+
+  await page.getByRole('tab', { name: 'Temas' }).click();
+  const newHorizontal = page.getByRole('button', { name: 'Novo horizontal' });
+  const dialog = page.getByRole('dialog', { name: 'Salvar as alterações?' });
+  await newHorizontal.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('“Demo” tem alterações que ainda não foram salvas');
+  await expect(dialog.getByRole('button', { name: 'Salvar' })).toBeFocused();
+  await expectAccessible(page);
+
+  // Cancel and Esc keep the edits.
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(newHorizontal).toBeFocused();
+  await newHorizontal.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await expect(page.locator('#status-main')).toHaveText('Alterações não salvas');
+
+  // Discard lets the new theme in.
+  await newHorizontal.click();
+  await dialog.getByRole('button', { name: 'Descartar' }).click();
+  await expect(page.locator('#theme-name')).toHaveValue('Sem título');
+  await expect(page.locator('#status-main')).toHaveText('Tudo salvo');
+
+  // Save keeps them, then the chosen theme opens.
+  await page.locator('#theme-name').fill('Rascunho');
+  await page.locator('#theme-name').press('Tab');
+  await expect(page.locator('#status-main')).toHaveText('Alterações não salvas');
+  await page.locator('#theme-grid .theme-card').first().click();
+  await dialog.getByRole('button', { name: 'Salvar' }).click();
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await expect(page.locator('#status-main')).toHaveText('Tudo salvo');
+  await expect(page.locator('#theme-grid .theme-card')).toHaveCount(2);
+  await expect(page.locator('#theme-grid')).toContainText('Rascunho');
+  expect(errors).toEqual([]);
+});
+
+test('closing the window over unsaved edits asks first', async ({ page }) => {
+  const errors = watchErrors(page);
+  const closeButton = () => page.evaluate(() => window.dispatchEvent(new Event('bezel-demo-close')));
+  const html = page.locator('html');
+  const dialog = page.getByRole('dialog', { name: 'Salvar as alterações?' });
+
+  // Nothing unsaved: the window closes at once.
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await closeButton();
+  await expect(html).toHaveAttribute('data-demo-window', 'closed');
+  await expect(dialog).toHaveCount(0);
+
+  await page.goto('/index.html?demo=turing88');
+  await page.getByRole('tab', { name: 'Camadas' }).click();
+  await page.getByRole('button', { name: /^CPU/ }).click();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('#status-main')).toHaveText('Alterações não salvas');
+  await closeButton();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await html.getAttribute('data-demo-window')).toBeNull();
+  await closeButton();
+  await dialog.getByRole('button', { name: 'Descartar' }).click();
+  await expect(html).toHaveAttribute('data-demo-window', 'closed');
   expect(errors).toEqual([]);
 });
 

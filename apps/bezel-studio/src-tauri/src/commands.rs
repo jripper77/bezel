@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bezel_core::domain::job::Progress;
 use bezel_core::domain::screen::Confirm;
@@ -11,7 +12,7 @@ use bezel_core::ports::ThemeLocation;
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::native::EXTENSION;
 use tauri::ipc::Response;
-use tauri::{AppHandle, Emitter as _, Runtime, State};
+use tauri::{AppHandle, Emitter as _, Runtime, State, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
 
@@ -208,6 +209,39 @@ pub async fn list_assets(state: State<'_, Shared>) -> UiResult<Vec<AssetDto>> {
 #[tauri::command]
 pub fn list_fonts(state: State<'_, Shared>) -> Vec<String> {
     state.fonts.clone()
+}
+
+/// Whether the UI holds edits that are not saved: closing the window asks
+/// first then ([`crate::on_close`]).
+#[derive(Debug, Default)]
+pub struct Unsaved(AtomicBool);
+
+impl Unsaved {
+    /// Whether edits are unsaved.
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// The UI tells whether it holds unsaved edits.
+#[tauri::command]
+pub fn set_unsaved(state: State<'_, Unsaved>, unsaved: bool) {
+    state.0.store(unsaved, Ordering::SeqCst);
+}
+
+/// Closes the window once the UI settled its unsaved edits: it hides while
+/// a screen is live (Bezel stays in the tray), else the app ends.
+#[tauri::command]
+pub fn close_window<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, Shared>,
+) -> UiResult<()> {
+    let live = state.studio().live_key().is_some();
+    match crate::on_close(live, false) {
+        crate::OnClose::Hide => window.hide(),
+        crate::OnClose::Ask | crate::OnClose::Close => window.destroy(),
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// Whether Bezel starts at login.

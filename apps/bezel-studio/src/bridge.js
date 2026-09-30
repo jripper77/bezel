@@ -19,6 +19,15 @@ export function parseFrame(buffer) {
 export const PROGRESS_EVENT = 'storage-progress';
 
 /**
+ * Event the app sends when the window's close button is pressed with unsaved
+ * edits and no screen live: the UI asks, then calls `closeWindow`.
+ */
+export const CLOSE_EVENT = 'close-requested';
+
+/** Demo mode: the window event that stands for the close button. */
+export const DEMO_CLOSE_EVENT = 'bezel-demo-close';
+
+/**
  * Subscribes to files dropped on the window from the system: Tauri owns the
  * drag and reports the paths and the pointer (physical pixels).
  */
@@ -69,7 +78,10 @@ function tauriBridge(invoke, tauri = {}) {
     playStored: (screen, path) => invoke('play_stored', { screen, path }),
     stopPlayback: (screen) => invoke('stop_playback', { screen }),
     setBootMedia: (screen, path, confirmed, brightness = null) => invoke('set_boot_media', { screen, path, confirmed, brightness }),
+    setUnsaved: (unsaved) => invoke('set_unsaved', { unsaved }),
+    closeWindow: () => invoke('close_window'),
     onJobProgress: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(PROGRESS_EVENT, (e) => cb(e.payload)) : Promise.resolve(() => {})),
+    onCloseRequested: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(CLOSE_EVENT, () => cb()) : Promise.resolve(() => {})),
     onFileDrop: (cb) => onFileDrop(tauri, cb),
     // Files dropped in the webview carry no path: the system drop above does.
     fileSource: () => null,
@@ -89,5 +101,10 @@ export function createBridge(win) {
     return new Proxy({ mode: 'unavailable' }, { get: (t, k) => (k in t ? t[k] : fail) });
   }
   const scenario = new URLSearchParams(win.location.search).get('demo') ?? 'turing88';
-  return { mode: 'demo', ...createDemoBackend(scenario) };
+  // What the window does is shown on the page (`data-demo-window`), and the
+  // close button is a window event: Playwright drives and checks both.
+  const root = win.document?.documentElement;
+  const demo = createDemoBackend(scenario, {}, { onWindow: (state) => root?.setAttribute('data-demo-window', state) });
+  win.addEventListener?.(DEMO_CLOSE_EVENT, () => demo.requestClose());
+  return { mode: 'demo', ...demo };
 }

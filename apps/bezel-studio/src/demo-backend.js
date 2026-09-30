@@ -327,8 +327,9 @@ function createDemoStorage(chosen, { delay, live, theme }) {
 /**
  * @param {string} scenario key of SCENARIOS
  * @param {{now?: () => number, delay?: (ms: number) => Promise<void>}} [clock]
+ * @param {{onWindow?: (state: 'hidden'|'closed') => void}} [hooks] what the window does
  */
-export function createDemoBackend(scenario, clock = {}) {
+export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const now = clock.now ?? (() => Date.now() / 1000);
   const delay = clock.delay ?? ((ms) => new Promise((resolve) => { setTimeout(resolve, ms); }));
   const chosen = SCENARIOS[scenario] ?? SCENARIOS.turing88;
@@ -342,6 +343,15 @@ export function createDemoBackend(scenario, clock = {}) {
   const modelOf = (key) => (chosen.screens ?? []).find((s) => s.key === key)?.models[0];
   const storage = createDemoStorage(chosen, { delay, live: () => live, theme: () => theme });
   const { videoOfTheme, ...storageApi } = storage;
+  // The window, like the app: the close button hides it while a screen is
+  // live, asks the UI when edits are unsaved, and closes it otherwise.
+  let unsaved = false;
+  let windowState = 'open';
+  const closeListeners = new Set();
+  const windowGoes = (state) => {
+    windowState = state;
+    hooks.onWindow?.(state);
+  };
 
   return {
     ...storageApi,
@@ -412,6 +422,25 @@ export function createDemoBackend(scenario, clock = {}) {
       autostart = on;
       return Promise.resolve();
     },
+    setUnsaved: (on) => {
+      unsaved = Boolean(on);
+      return Promise.resolve();
+    },
+    closeWindow: () => {
+      windowGoes(live ? 'hidden' : 'closed');
+      return Promise.resolve();
+    },
+    onCloseRequested: (cb) => {
+      closeListeners.add(cb);
+      return Promise.resolve(() => closeListeners.delete(cb));
+    },
+    /** The window's close button. */
+    requestClose: () => {
+      if (live) windowGoes('hidden');
+      else if (unsaved) for (const cb of closeListeners) cb();
+      else windowGoes('closed');
+    },
+    windowState: () => windowState,
     isLive: () => Boolean(live),
   };
 }

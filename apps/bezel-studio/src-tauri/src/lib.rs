@@ -34,10 +34,10 @@ use bezel_media::FfmpegTranscoder;
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
-use tauri::{AppHandle, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter as _, Manager, WindowEvent};
 
 use crate::backend::{Backend, DEFAULT_MODEL, Pacer, Session, UNTITLED, default_orientation};
-use crate::commands::Shared;
+use crate::commands::{Shared, Unsaved};
 use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
 use crate::storage::{MediaSetup, StorageState};
@@ -49,6 +49,33 @@ const MAIN_WINDOW: &str = "main";
 /// Set to `1` to serve a simulated Turing 8.8" and scripted sensors instead
 /// of the real machine: demos and checks that must never touch a screen.
 pub const SIMULATION_SWITCH: &str = "BEZEL_FAKE";
+
+/// Event asking the UI to settle unsaved edits before the window closes.
+pub const CLOSE_EVENT: &str = "close-requested";
+
+/// What the window's close button does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnClose {
+    /// A screen is live: the window hides and Bezel keeps driving the
+    /// screen from the tray (the edits stay in the session).
+    Hide,
+    /// Edits are unsaved: the UI asks (save, discard or cancel) and then
+    /// closes the window itself.
+    Ask,
+    /// The window closes and the app ends.
+    Close,
+}
+
+/// What closing the window does with a screen `live` and edits `unsaved`.
+pub fn on_close(live: bool, unsaved: bool) -> OnClose {
+    if live {
+        OnClose::Hide
+    } else if unsaved {
+        OnClose::Ask
+    } else {
+        OnClose::Close
+    }
+}
 
 /// Argument of the start at login: open in the tray, without the window.
 pub const HIDDEN_ARG: &str = "--hidden";
@@ -85,6 +112,7 @@ pub fn run() -> Result<(), tauri::Error> {
             // for the connected screen.
             backend.restore_theme();
             app.manage(Arc::clone(&backend));
+            app.manage(Unsaved::default());
             start_refresh_loop(backend);
             tray::create(app.handle())?;
             if !hidden {
@@ -93,18 +121,26 @@ pub fn run() -> Result<(), tauri::Error> {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // While a screen is live, closing the window keeps Bezel in the
-            // tray so the screen keeps updating.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let live = window
-                    .try_state::<Shared>()
-                    .is_some_and(|b| b.studio().live_key().is_some());
-                if live {
+            let WindowEvent::CloseRequested { api, .. } = event else {
+                return;
+            };
+            let live = window
+                .try_state::<Shared>()
+                .is_some_and(|b| b.studio().live_key().is_some());
+            let unsaved = window.try_state::<Unsaved>().is_some_and(|u| u.get());
+            match on_close(live, unsaved) {
+                OnClose::Hide => {
                     api.prevent_close();
                     // Best effort: a window that cannot hide stays open, and
                     // the screen keeps updating either way.
                     let _ = window.hide();
                 }
+                // A UI that cannot be asked does not keep the window open.
+                OnClose::Ask => match window.emit(CLOSE_EVENT, ()) {
+                    Ok(()) => api.prevent_close(),
+                    Err(e) => tracing::warn!("unsaved edits not asked about: {e}"),
+                },
+                OnClose::Close => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -139,6 +175,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::play_stored,
             commands::stop_playback,
             commands::set_boot_media,
+            commands::set_unsaved,
+            commands::close_window,
         ])
         .run(tauri::generate_context!())
 }
@@ -324,6 +362,14 @@ mod tests {
         let mut a = adapters(true);
         assert_eq!(discover_screens(a.bus.as_ref()).unwrap().len(), 1);
         assert!(!a.sensors.catalog().unwrap().is_empty());
+    }
+
+    #[test]
+    fn closing_hides_while_live_and_asks_over_unsaved_edits() {
+        assert_eq!(on_close(true, false), OnClose::Hide);
+        assert_eq!(on_close(true, true), OnClose::Hide, "the edits stay");
+        assert_eq!(on_close(false, true), OnClose::Ask);
+        assert_eq!(on_close(false, false), OnClose::Close);
     }
 
     #[test]

@@ -36,6 +36,8 @@ const COMMANDS: &[&str] = &[
     "play_stored",
     "stop_playback",
     "set_boot_media",
+    "set_unsaved",
+    "close_window",
 ];
 
 fn main() -> ExitCode {

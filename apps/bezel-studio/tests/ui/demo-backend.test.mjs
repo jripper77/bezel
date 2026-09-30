@@ -89,3 +89,30 @@ test('images, live mode and fonts', async () => {
   await demo.setBrightness('k', 10);
   await demo.release('k');
 });
+
+test('the window hides while live, asks over unsaved edits, else closes', async () => {
+  const seen = [];
+  const demo = createDemoBackend('turing88', fixed, { onWindow: (state) => seen.push(state) });
+  const asked = [];
+  const stop = await demo.onCloseRequested(() => asked.push('asked'));
+  assert.equal(demo.windowState(), 'open');
+  await demo.setUnsaved(true);
+  demo.requestClose();
+  assert.deepEqual(asked, ['asked']);
+  assert.equal(demo.windowState(), 'open', 'the UI decides');
+  await demo.setLive(true, '/dev/ttyACM1');
+  demo.requestClose();
+  assert.equal(demo.windowState(), 'hidden');
+  await demo.closeWindow();
+  assert.equal(demo.windowState(), 'hidden', 'still live');
+  await demo.setLive(false);
+  await demo.setUnsaved(false);
+  stop();
+  demo.requestClose();
+  assert.deepEqual(asked, ['asked']);
+  assert.equal(demo.windowState(), 'closed');
+  await demo.closeWindow();
+  assert.deepEqual(seen, ['hidden', 'hidden', 'closed', 'closed']);
+  // Without hooks nothing breaks.
+  await createDemoBackend('empty', fixed).closeWindow();
+});

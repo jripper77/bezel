@@ -37,6 +37,8 @@
     "allow-delete-stored",
     "allow-play-stored",
     "allow-stop-playback",
-    "allow-set-boot-media"
+    "allow-set-boot-media",
+    "allow-set-unsaved",
+    "allow-close-window"
   ]
 }

@@ -8,6 +8,7 @@ import { createLibrary } from './ui/library.js';
 import { createInspector } from './ui/inspector.js';
 import { createStoragePanel, wireSubtabs } from './ui/storage.js';
 import { el } from './ui/dom.js';
+import { askChoice } from './ui/dialog.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
 
@@ -139,8 +140,20 @@ function refreshOrientation(theme) {
   shownAxis = axis;
 }
 
+// The app asks before closing the window over unsaved edits: it learns
+// whether there are any whenever that changes.
+let reportedUnsaved = null;
+
+function reportUnsaved() {
+  const unsaved = store.isDirty();
+  if (unsaved === reportedUnsaved) return;
+  reportedUnsaved = unsaved;
+  bridge.setUnsaved(unsaved).catch(() => { reportedUnsaved = null; });
+}
+
 function refreshChrome(reason) {
   const { theme } = store.getState();
+  reportUnsaved();
   $('undo').disabled = !store.canUndo();
   $('redo').disabled = !store.canRedo();
   if (document.activeElement !== $('theme-name')) $('theme-name').value = theme.name;
@@ -282,7 +295,27 @@ async function refreshAssets() {
   }
 }
 
+/**
+ * Whether the edited theme may be replaced or closed: nothing is unsaved, or
+ * the user saved it or chose to discard the edits.
+ */
+async function settleUnsaved() {
+  if (!store.isDirty()) return true;
+  const answer = await askChoice(t, {
+    title: t('unsaved.title'),
+    body: t('unsaved.body', { name: store.getState().theme.name }),
+    actions: [
+      { id: 'discard', label: t('unsaved.discard'), kind: 'danger' },
+      { id: 'save', label: t('unsaved.save'), kind: 'primary' },
+    ],
+    initial: 'save',
+  });
+  if (answer === 'save') return save();
+  return answer === 'discard';
+}
+
 async function openTheme(location) {
+  if (!(await settleUnsaved())) return;
   try {
     const theme = await bridge.openTheme(location);
     state.location = location;
@@ -299,6 +332,7 @@ async function openTheme(location) {
 // A new theme keeps the 180° turn of the edited one: it follows how the
 // screen is mounted.
 async function newTheme(axis) {
+  if (!(await settleUnsaved())) return;
   try {
     const orientation = orientationOf(axis, isTurned(store.getState().theme.orientation));
     store.load(await bridge.newTheme(state.screen, t('themes.untitled'), orientation));
@@ -312,6 +346,7 @@ async function newTheme(axis) {
 }
 
 async function importTheme() {
+  if (!(await settleUnsaved())) return;
   try {
     const result = await bridge.importTheme();
     if (!result) return;
@@ -337,18 +372,26 @@ async function addImage() {
   }
 }
 
+/** Saves the theme; `true` once it is saved. */
 async function save(saveAs = false) {
   try {
     const saved = await bridge.saveTheme(store.getState().theme, saveAs);
-    if (!saved) return;
+    if (!saved) return false;
     state.location = saved.location;
     store.markSaved();
     toast(t('toast.saved'));
     refreshThemes();
+    return true;
   } catch (e) {
     toast(t('toast.error', { message: errorText(e) }));
+    return false;
   }
 }
+
+// The window's close button with unsaved edits (and no screen live).
+bridge.onCloseRequested(async () => {
+  if (await settleUnsaved()) await bridge.closeWindow().catch((e) => toast(t('toast.error', { message: errorText(e) })));
+}).catch(() => {});
 
 // ---------------------------------------------------------- chrome -----
 $('undo').addEventListener('click', () => store.undo());

@@ -5,7 +5,7 @@
 //! processes have it open, so the user is told which program to stop.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Processes (other than `own_pid`) that have `device` open, as
 /// `"<command> (PID <pid>)"`, scanning a `/proc`-like tree at `proc_root`.
@@ -40,10 +40,7 @@ fn holds(process: &Path, target: &Path) -> bool {
 }
 
 fn same_file(link: &Path, target: &Path) -> bool {
-    link == target
-        || fs::canonicalize(link)
-            .map(PathBuf::from)
-            .is_ok_and(|p| p == target)
+    link == target || fs::canonicalize(link).is_ok_and(|p| p == target)
 }
 
 /// `argv[0]`'s file name plus the first argument (so `python main.py` is
@@ -73,10 +70,12 @@ pub fn holders(device: &str) -> Vec<String> {
     holders_in(Path::new("/proc"), Path::new(device), std::process::id())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+    use std::path::PathBuf;
 
     fn fake_proc(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("bezel-busy-{name}-{}", std::process::id()));

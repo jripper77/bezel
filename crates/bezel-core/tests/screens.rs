@@ -22,7 +22,11 @@ fn ep(addr: &str, vid: u16, pid: u16, serial: Option<&str>) -> Endpoint {
 fn discover_groups_the_turing_88() {
     let screens = discover_screens(&FakeBus::turing_88()).expect("discovers");
     assert_eq!(screens.len(), 1);
-    assert!(discover_screens(&FakeBus::default()).expect("discovers").is_empty());
+    assert!(
+        discover_screens(&FakeBus::default())
+            .expect("discovers")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -34,8 +38,14 @@ fn choose_prefers_address_then_awake() {
     assert_eq!(chosen.address().map(|a| a.0.as_str()), Some("COM9"));
     let chosen = choose_screen(screens(), Some("COM3")).expect("by address");
     assert_eq!(chosen.state(), ScreenState::Asleep);
-    assert!(matches!(choose_screen(screens(), Some("COM1")), Err(BezelError::ScreenNotFound(_))));
-    assert!(matches!(choose_screen(vec![], None), Err(BezelError::ScreenNotFound(_))));
+    assert!(matches!(
+        choose_screen(screens(), Some("COM1")),
+        Err(BezelError::ScreenNotFound(_))
+    ));
+    assert!(matches!(
+        choose_screen(vec![], None),
+        Err(BezelError::ScreenNotFound(_))
+    ));
 }
 
 #[test]

@@ -19,5 +19,11 @@ nvml-wrapper = "0.13.0"
 # Safe statvfs (already in the tree through nusb): df-exact used/free per mount.
 rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"] }
 
+[target.'cfg(windows)'.dependencies]
+sysinfo = { version = "0.39.6", default-features = false, features = ["system", "disk", "network"] }
+# LibreHardwareMonitor publishes its sensors in WMI (root\LibreHardwareMonitor).
+wmi = "0.18.4"
+serde = { workspace = true }
+
 [lints]
 workspace = true

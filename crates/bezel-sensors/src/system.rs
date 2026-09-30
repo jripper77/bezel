@@ -84,7 +84,12 @@ fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
     (crate::linux::providers(&roots), gpus)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
+    (crate::windows::providers(), crate::nvidia::discover())
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
     (Vec::new(), crate::nvidia::discover())
 }
@@ -140,7 +145,6 @@ impl SensorSource for SystemSensors {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bezel_core::domain::sensor::Category;
 
     #[test]
     fn summary_keys_rank_before_devices_and_chips() {
@@ -156,6 +160,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn a_fake_machine_answers_for_every_catalog_entry() {
+        use bezel_core::domain::sensor::Category;
         let t = crate::testing::FakeTree::new("system");
         t.file("proc/stat", "cpu  1 0 1 8 0 0 0 0\ncpu0 1 0 1 8 0 0 0 0\n")
             .file("proc/meminfo", "MemTotal: 1024 kB\nMemAvailable: 512 kB\n")

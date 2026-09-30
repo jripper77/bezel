@@ -45,11 +45,6 @@ impl BoxF {
         }
     }
 
-    /// The box moved by `(dx, dy)`.
-    pub fn translated(self, dx: f32, dy: f32) -> Self {
-        Self::new(self.x + dx, self.y + dy, self.width, self.height)
-    }
-
     /// Center point.
     pub fn center(self) -> (f32, f32) {
         (self.x + self.width / 2.0, self.y + self.height / 2.0)
@@ -456,42 +451,9 @@ impl Theme {
         (canvas != self.canvas).then_some(canvas)
     }
 
-    /// The next free element id.
-    pub fn next_id(&self) -> ElementId {
-        ElementId(self.elements.iter().map(|e| e.id.0 + 1).max().unwrap_or(1))
-    }
-
     /// The element with `id`.
     pub fn element(&self, id: ElementId) -> Option<&Element> {
         self.elements.iter().find(|e| e.id == id)
-    }
-
-    /// Mutable access to the element with `id`.
-    pub fn element_mut(&mut self, id: ElementId) -> Option<&mut Element> {
-        self.elements.iter_mut().find(|e| e.id == id)
-    }
-
-    /// Every sensor the theme reads (for sampling only what is needed).
-    pub fn sensor_keys(&self) -> Vec<SensorKey> {
-        let mut keys: Vec<SensorKey> = self
-            .elements
-            .iter()
-            .filter(|e| e.visible)
-            .filter_map(|e| match &e.kind {
-                ElementKind::Text {
-                    content: TextContent::Sensor { key, .. },
-                    ..
-                } => Some(key.clone()),
-                ElementKind::Bar { binding, .. }
-                | ElementKind::Ring { binding, .. }
-                | ElementKind::Needle { binding, .. }
-                | ElementKind::Graph { binding, .. } => Some(binding.key.clone()),
-                _ => None,
-            })
-            .collect();
-        keys.sort();
-        keys.dedup();
-        keys
     }
 
     /// Every asset the theme references (for packaging and loading).
@@ -565,7 +527,6 @@ mod tests {
     fn blank_theme_takes_the_orientation() {
         let t = Theme::blank("x", Size::new(480, 1920), Orientation::Landscape);
         assert_eq!(t.canvas, Size::new(1920, 480));
-        assert_eq!(t.next_id(), ElementId(1));
     }
 
     #[test]
@@ -636,12 +597,6 @@ mod tests {
         hidden.visible = false;
         t.elements.push(hidden);
 
-        let keys: Vec<String> = t
-            .sensor_keys()
-            .iter()
-            .map(|k| k.as_str().to_string())
-            .collect();
-        assert_eq!(keys, vec!["cpu.temperature", "cpu.usage"]);
         let assets: Vec<String> = t.assets().into_iter().map(|a| a.0).collect();
         assert_eq!(
             assets,
@@ -654,16 +609,12 @@ mod tests {
             ]
         );
         assert_eq!(t.history_lengths(), vec![(key(keys::CPU_USAGE), 60)]);
-        assert_eq!(t.next_id(), ElementId(6));
         assert!(t.element(ElementId(3)).is_some());
-        t.element_mut(ElementId(3)).expect("exists").frame = BoxF::new(1.0, 2.0, 3.0, 4.0);
-        assert_eq!(t.element(ElementId(3)).map(|e| e.frame.x), Some(1.0));
     }
 
     #[test]
     fn box_math() {
-        let b = BoxF::new(10.0, 20.0, 100.0, 50.0).translated(5.0, -5.0);
-        assert_eq!(b, BoxF::new(15.0, 15.0, 100.0, 50.0));
+        let b = BoxF::new(15.0, 15.0, 100.0, 50.0);
         assert_eq!(b.center(), (65.0, 40.0));
         let bg = Theme::blank("x", Size::new(80, 160), Orientation::Portrait);
         assert!(bg.assets().is_empty());

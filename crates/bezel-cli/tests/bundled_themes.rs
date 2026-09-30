@@ -16,7 +16,7 @@ use bezel_core::app::ThemeRuntime;
 use bezel_core::domain::catalog::MODELS;
 use bezel_core::domain::clock::Language;
 use bezel_core::domain::frame::Frame;
-use bezel_core::domain::theme::{AssetRef, ElementKind, Theme};
+use bezel_core::domain::theme::{AssetRef, ElementKind, TextContent, Theme};
 use bezel_core::ports::{SensorSource, ThemeLocation, ThemeStore};
 use bezel_sensors::FakeSensors;
 use bezel_themes::FsThemeStore;
@@ -38,6 +38,26 @@ fn families(theme: &Theme) -> BTreeSet<String> {
         .iter()
         .filter_map(|e| match &e.kind {
             ElementKind::Text { style, .. } => Some(style.font.family.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every sensor the visible elements read.
+fn sensor_keys(theme: &Theme) -> BTreeSet<String> {
+    theme
+        .elements
+        .iter()
+        .filter(|e| e.visible)
+        .filter_map(|e| match &e.kind {
+            ElementKind::Text {
+                content: TextContent::Sensor { key, .. },
+                ..
+            } => Some(key.as_str().to_string()),
+            ElementKind::Bar { binding, .. }
+            | ElementKind::Ring { binding, .. }
+            | ElementKind::Needle { binding, .. }
+            | ElementKind::Graph { binding, .. } => Some(binding.key.as_str().to_string()),
             _ => None,
         })
         .collect()
@@ -104,11 +124,8 @@ fn every_bundled_theme_renders_cleanly() {
         for asset in theme.assets() {
             assert!(assets.contains_key(&asset), "{name}: {} missing", asset.0);
         }
-        for key in theme.sensor_keys() {
-            assert!(
-                offered.contains(key.as_str()),
-                "{name}: {key} is not a demo sensor"
-            );
+        for key in sensor_keys(&theme) {
+            assert!(offered.contains(&key), "{name}: {key} is not a demo sensor");
         }
         let fonts = families(&theme);
         assert!(

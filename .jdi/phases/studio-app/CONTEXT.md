@@ -30,7 +30,7 @@ App Tauri de janela única: dispositivos, preview ao vivo, editor drag-and-drop 
       **Verify:** `cd apps/bezel-studio && npm run test:unit >/dev/null 2>&1 && awk '/^SF:.*src\/editor\/store\.js$/{f=1} f&&/^LF:/{lf=substr($0,4)} f&&/^LH:/{lh=substr($0,4)} f&&/^end_of_record/{exit} END{exit !(lf>0 && lh/lf>=0.8)}' coverage/lcov.info && echo OK`
       **Source:** CONTEXT
 - [ ] `render_preview` returns an RGBA frame of the canvas size
-      **Verify:** `cargo test -p bezel-studio --locked -- --exact commands::tests::render_preview_returns_the_canvas_size 2>&1 | grep -q '1 passed' && echo OK`
+      **Verify:** `cargo test -p bezel-studio --locked -- --exact backend::tests::render_preview_returns_the_canvas_size 2>&1 | grep -q '1 passed' && echo OK`
       **Source:** CONTEXT
 
 ### Manual

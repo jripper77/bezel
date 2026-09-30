@@ -51,7 +51,7 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
   - Regra udev com as linhas do HID; `bezel udev-rules` imprime a regra (stdout) e o comando sudo de uma linha (stderr), sem executá-lo; ambos vêm de `bezel_devices::udev` (o studio reusa); a dica de acesso negado aponta para ele.
 - **Dependencies:** none
 - **Test:** `udev_rules::tests::printed_rule_matches_packaged_file_and_catalog`, `hid_desktop::` (devices), `hid_desktop_requires_confirm` (CLI)
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2 (paralela)
 

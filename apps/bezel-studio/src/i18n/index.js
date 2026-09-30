@@ -32,7 +32,7 @@ export function translator(locale) {
 }
 
 /**
- * Applies `data-i18n` (text), `data-i18n-title` and `data-i18n-aria-label`.
+ * Applies `data-i18n` (text), `data-i18n-title`, `data-i18n-aria-label` and `data-i18n-placeholder`.
  * @param {ParentNode} root
  * @param {(key: string) => string} t
  */
@@ -42,4 +42,5 @@ export function applyTranslations(root, t) {
   for (const el of root.querySelectorAll('[data-i18n-aria-label]')) {
     el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
   }
+  for (const el of root.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = t(el.dataset.i18nPlaceholder);
 }

@@ -1,0 +1,63 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { DEMO_SENSORS, createDemoBackend, demoFormat, demoValue } from '../../src/demo-backend.js';
+
+const fixed = { now: () => 1000 };
+
+test('demo values format like the core', () => {
+  assert.equal(demoFormat(42.4, 'percent'), '42%');
+  assert.equal(demoFormat(51.6, 'celsius'), '52°C');
+  assert.equal(demoFormat(4720, 'megahertz'), '4.72 GHz');
+  assert.equal(demoFormat(800, 'megahertz'), '800 MHz');
+  assert.equal(demoFormat(512, 'bytes'), '512 B');
+  assert.equal(demoFormat(2.5 * 1024 * 1024, 'bytesPerSecond'), '2.5 MiB/s');
+  assert.equal(demoFormat(200 * 1024, 'bytes'), '200 KiB');
+  assert.equal(demoFormat(93784, 'seconds'), '1d 02:03');
+  assert.equal(demoFormat(3700, 'seconds'), '01:01');
+  assert.equal(demoFormat(7, 'watts'), '7 W');
+  assert.equal(demoFormat(7, 'rpm'), '7');
+});
+
+test('demo values never go negative', () => {
+  for (let t = 0; t < 100; t += 0.5) assert.ok(demoValue(1, 10, t, 3) >= 0);
+});
+
+test('the catalog and samples cover every demo sensor', async () => {
+  const demo = createDemoBackend('turing88', fixed);
+  const catalog = await demo.catalog();
+  assert.equal(catalog.length, DEMO_SENSORS.length);
+  const { readings } = await demo.sample();
+  for (const entry of catalog) assert.equal(typeof readings[entry.key].display, 'string', entry.key);
+  assert.ok(readings['gpu.1.fan'].unavailable);
+});
+
+test('saving, listing and opening themes', async () => {
+  const demo = createDemoBackend('turing88', fixed);
+  const { theme } = await demo.session();
+  const { location } = await demo.saveTheme({ ...theme, name: 'Mine' }, false);
+  assert.equal(location, 'demo://Mine');
+  const names = (await demo.listThemes()).map((x) => x.name);
+  assert.deepEqual(names, ['Demo', 'Mine']);
+  assert.equal((await demo.openTheme('demo://Mine')).name, 'Mine');
+  await assert.rejects(demo.openTheme('demo://nope'), /no theme/);
+  await demo.saveTheme({ ...theme, name: 'Mine' }, false);
+  assert.equal((await demo.listThemes()).length, 2);
+  assert.equal((await demo.newTheme()).elements.length, 0);
+});
+
+test('images, live mode and fonts', async () => {
+  const demo = createDemoBackend('empty', fixed);
+  assert.deepEqual(await demo.listScreens(), []);
+  assert.deepEqual(await demo.assets(), []);
+  await demo.addImage();
+  assert.deepEqual(await demo.assets(), [{ ref: 'assets/image-1.png', kind: 'image' }]);
+  assert.equal(demo.isLive(), false);
+  await demo.setLive(true);
+  assert.equal(demo.isLive(), true);
+  await demo.pushTheme({ name: 'pushed' });
+  assert.equal((await demo.session()).theme.name, 'pushed');
+  assert.ok((await demo.fonts()).includes('Inter'));
+  assert.equal(await demo.importTheme(), null);
+  await demo.setBrightness('k', 10);
+  await demo.release('k');
+});

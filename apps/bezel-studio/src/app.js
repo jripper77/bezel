@@ -1,85 +1,330 @@
-// DOM glue: wires the bridge, the view model and the page together.
+// Bezel Studio: wires the store, the bridge and the views together.
 import { applyTranslations, pickLocale, translator } from './i18n/index.js';
 import { createBridge } from './bridge.js';
-import { countLabel, detailRows, fitPreview, screenCard, soleModel } from './view-model.js';
+import { createStore } from './editor/store.js';
+import { createCanvasView } from './ui/canvas.js';
+import { createLibrary } from './ui/library.js';
+import { createInspector } from './ui/inspector.js';
+import { el } from './ui/dom.js';
+import { shortcutFor } from './shortcuts.js';
 
 const locale = pickLocale(navigator.languages ?? [navigator.language]);
 const t = translator(locale);
 const bridge = createBridge(window);
 const $ = (id) => document.getElementById(id);
 
-const state = { screens: [], selected: null };
-
-function renderList() {
-  const list = $('screen-list');
-  list.replaceChildren(
-    ...state.screens.map((screen) => {
-      const card = screenCard(screen, t);
-      const item = document.createElement('li');
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'screen-card';
-      button.dataset.key = card.key;
-      button.setAttribute('aria-pressed', String(card.key === state.selected));
-      button.addEventListener('click', () => select(card.key));
-      const title = Object.assign(document.createElement('span'), { className: 'screen-card-title', textContent: card.title });
-      const meta = Object.assign(document.createElement('span'), { className: 'screen-card-meta', textContent: card.meta });
-      const badge = Object.assign(document.createElement('span'), { className: `badge ${card.state}`, textContent: card.stateLabel });
-      button.append(title, meta, badge);
-      item.append(button);
-      return item;
-    }),
-  );
-  $('empty').hidden = state.screens.length > 0;
-}
-
-function renderSelection() {
-  const screen = state.screens.find((s) => s.key === state.selected);
-  const frame = $('device-frame');
-  const model = screen ? soleModel(screen) : null;
-  frame.hidden = !model;
-  $('stage-hint').hidden = !screen;
-  if (model) {
-    const stage = frame.parentElement.getBoundingClientRect();
-    const size = fitPreview(model, { width: stage.width * 0.8, height: stage.height * 0.72 });
-    Object.assign($('device-screen').style, { width: `${size.width}px`, height: `${size.height}px` });
-    $('device-size').textContent = `${model.width}×${model.height}`;
-  }
-  const details = $('details');
-  details.replaceChildren(
-    ...(screen ? detailRows(screen, t) : []).flatMap(({ label, value }) => [
-      Object.assign(document.createElement('dt'), { textContent: label }),
-      Object.assign(document.createElement('dd'), { textContent: value }),
-    ]),
-  );
-}
-
-// Only the pressed state changes, so keyboard focus stays on the card.
-function select(key) {
-  state.selected = key;
-  for (const button of $('screen-list').querySelectorAll('button')) {
-    button.setAttribute('aria-pressed', String(button.dataset.key === key));
-  }
-  renderSelection();
-}
-
-async function refresh() {
-  $('status').textContent = t('screens.loading');
-  try {
-    state.screens = await bridge.listScreens();
-    if (!state.screens.some((s) => s.key === state.selected)) state.selected = state.screens[0]?.key ?? null;
-    $('status').textContent = countLabel(state.screens.length, t);
-  } catch (error) {
-    state.screens = [];
-    state.selected = null;
-    $('status').textContent = t('screens.error', { message: error?.message ?? String(error) });
-  }
-  renderList();
-  renderSelection();
-}
-
 document.documentElement.lang = locale;
 applyTranslations(document, t);
-$('refresh').addEventListener('click', refresh);
-window.addEventListener('resize', renderSelection);
-refresh();
+
+const state = {
+  screens: [],
+  screen: null,
+  screenError: null,
+  live: false,
+  catalog: [],
+  fonts: ['Inter', 'JetBrains Mono', 'Roboto', 'Roboto Mono'],
+  assets: [],
+  location: null,
+};
+
+function toast(message) {
+  const box = $('toast');
+  box.textContent = message;
+  box.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { box.hidden = true; }, 3500);
+}
+
+const errorText = (e) => e?.message ?? String(e);
+
+// ------------------------------------------------------------ store ----
+const session = await bridge.session().catch(() => null);
+const store = createStore(session?.theme ?? { schema: 1, name: 'Untitled', canvas: { width: 480, height: 1920 }, orientation: 'portrait', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] });
+state.location = session?.location ?? null;
+
+const canvasView = createCanvasView({
+  store,
+  scroll: $('stage-scroll'),
+  box: $('canvas-box'),
+  canvas: $('preview'),
+  overlay: $('overlay'),
+  onZoom: (z) => { $('zoom-label').textContent = `${Math.round(z * 100)}%`; },
+  describe: (name) => t('stage.selected', { name }),
+});
+
+const library = createLibrary({
+  store,
+  canvas: canvasView,
+  stage: $('stage'),
+  t,
+  actions: {
+    openTheme: (location) => openTheme(location),
+    newTheme: () => newTheme(),
+    refreshThemes: () => refreshThemes(),
+    importTheme: () => importTheme(),
+    addImage: () => addImage(),
+    setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
+    release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => toast(t('toast.error', { message: errorText(e) }))),
+  },
+});
+
+const inspector = createInspector({
+  root: $('inspector'),
+  store,
+  t,
+  sensors: { catalog: () => state.catalog, fonts: () => state.fonts },
+});
+
+// ----------------------------------------------------------- render ----
+let rendering = false;
+let pending = false;
+
+async function renderNow() {
+  if (rendering) {
+    pending = true;
+    return;
+  }
+  rendering = true;
+  try {
+    const frame = await bridge.render(store.getState().theme);
+    canvasView.drawFrame(frame);
+    $('status-render').textContent = t('status.render', { ms: Math.round(frame.millis) });
+  } catch (e) {
+    $('status-render').textContent = t('status.renderError', { message: errorText(e) });
+  } finally {
+    rendering = false;
+    if (pending) {
+      pending = false;
+      requestAnimationFrame(renderNow);
+    }
+  }
+}
+
+let liveTimer = null;
+function pushLive() {
+  if (!state.live) return;
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => bridge.pushTheme(store.getState().theme).catch((e) => toast(t('toast.error', { message: errorText(e) }))), 150);
+}
+
+function refreshChrome(reason) {
+  const { theme } = store.getState();
+  $('undo').disabled = !store.canUndo();
+  $('redo').disabled = !store.canRedo();
+  if (document.activeElement !== $('theme-name')) $('theme-name').value = theme.name;
+  $('save').classList.toggle('dirty', store.isDirty());
+  $('status-main').textContent = store.isDirty() ? t('status.unsaved') : t('status.saved');
+  canvasView.setCanvasSize(theme.canvas);
+  canvasView.drawOverlay();
+  library.renderLayers();
+  inspector.render(state.assets);
+  if (reason !== 'select') {
+    renderNow();
+    pushLive();
+  }
+}
+
+store.subscribe((_, reason) => refreshChrome(reason));
+
+// Clock and sensor elements change every refresh even without edits.
+function scheduleTick() {
+  const seconds = Math.max(0.25, store.getState().theme.refreshSeconds || 1);
+  setTimeout(() => {
+    renderNow();
+    scheduleTick();
+  }, seconds * 1000);
+}
+
+// ---------------------------------------------------------- sensors ----
+async function loadCatalog() {
+  try {
+    state.catalog = await bridge.catalog();
+    library.setCatalog(state.catalog);
+  } catch (e) {
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+}
+
+async function sampleLoop() {
+  try {
+    const s = await bridge.sample();
+    library.updateReadings(s.readings);
+    $('status-sensors').textContent = t('status.sensors', { ms: Math.round(s.sampleMillis) });
+  } catch {
+    $('status-sensors').textContent = t('status.sensorsError');
+  }
+  setTimeout(sampleLoop, 1000);
+}
+
+// ---------------------------------------------------------- screens ----
+function renderScreenSelect() {
+  const select = $('screen-select');
+  const options = state.screens.map((s) => {
+    const model = s.models.length === 1 ? s.models[0] : null;
+    return el('option', { value: s.key, text: model ? `${model.name} · ${model.width}×${model.height}` : s.key, selected: s.key === state.screen });
+  });
+  if (options.length === 0) options.push(el('option', { value: '', text: t('top.noScreen') }));
+  select.replaceChildren(...options);
+  const current = state.screens.find((s) => s.key === state.screen);
+  $('screen-dot').className = `dot${state.live ? ' live' : current?.state === 'awake' ? ' awake' : ''}`;
+  let device = t('top.noScreen');
+  if (state.screenError) device = t('status.devicesError', { message: state.screenError });
+  else if (current) device = state.live ? t('status.live') : t(`screen.state.${current.state}`);
+  $('status-device').textContent = device;
+  library.renderScreen(state.screens, state.screen, state.live);
+}
+
+async function refreshScreens() {
+  try {
+    state.screens = await bridge.listScreens();
+    state.screenError = null;
+  } catch (e) {
+    state.screens = [];
+    state.screenError = errorText(e);
+  }
+  if (!state.screens.some((s) => s.key === state.screen)) state.screen = state.screens[0]?.key ?? null;
+  renderScreenSelect();
+}
+
+async function setLive(on) {
+  if (on && !state.screen) {
+    toast(t('toast.noScreen'));
+    $('live').checked = false;
+    return;
+  }
+  try {
+    await bridge.setLive(on, state.screen);
+    state.live = on;
+    if (on) await bridge.pushTheme(store.getState().theme);
+  } catch (e) {
+    state.live = false;
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+  $('live').checked = state.live;
+  renderScreenSelect();
+}
+
+$('screen-select').addEventListener('change', (evt) => {
+  state.screen = evt.target.value || null;
+  if (state.live) setLive(true);
+  renderScreenSelect();
+});
+$('live').addEventListener('change', (evt) => setLive(evt.target.checked));
+
+// ----------------------------------------------------------- themes ----
+async function refreshThemes() {
+  try {
+    library.renderThemes(await bridge.listThemes());
+  } catch (e) {
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+}
+
+async function refreshAssets() {
+  try {
+    state.assets = await bridge.assets();
+    library.renderMedia(state.assets);
+  } catch (e) {
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+}
+
+async function openTheme(location) {
+  try {
+    const theme = await bridge.openTheme(location);
+    state.location = location;
+    store.load(theme);
+    await refreshAssets();
+    canvasView.fit();
+    toast(t('toast.opened', { name: theme.name }));
+  } catch (e) {
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+}
+
+async function newTheme() {
+  try {
+    store.load(await bridge.newTheme(state.screen));
+    state.location = null;
+    await refreshAssets();
+    canvasView.fit();
+  } catch (e) {
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+}
+
+async function importTheme() {
+  try {
+    const result = await bridge.importTheme();
+    if (!result) return;
+    store.load(result.theme);
+    state.location = null;
+    await refreshAssets();
+    canvasView.fit();
+    toast(result.warnings?.length ? t('toast.importedWithWarnings', { count: result.warnings.length }) : t('toast.imported'));
+  } catch (e) {
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+}
+
+async function addImage() {
+  try {
+    const added = await bridge.addImage();
+    if (added) await refreshAssets();
+  } catch (e) {
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+}
+
+async function save() {
+  try {
+    const { location } = await bridge.saveTheme(store.getState().theme, false);
+    state.location = location;
+    store.markSaved();
+    toast(t('toast.saved'));
+    refreshThemes();
+  } catch (e) {
+    toast(t('toast.error', { message: errorText(e) }));
+  }
+}
+
+// ---------------------------------------------------------- chrome -----
+$('undo').addEventListener('click', () => store.undo());
+$('redo').addEventListener('click', () => store.redo());
+$('save').addEventListener('click', save);
+$('zoom-in').addEventListener('click', () => canvasView.setZoom(canvasView.zoom() * 1.25));
+$('zoom-out').addEventListener('click', () => canvasView.setZoom(canvasView.zoom() / 1.25));
+$('zoom-fit').addEventListener('click', () => canvasView.fit());
+$('theme-name').addEventListener('change', (evt) => {
+  const name = evt.target.value.trim();
+  if (name) store.dispatch('setTheme', { patch: { name } });
+});
+
+document.addEventListener('keydown', (evt) => {
+  const action = shortcutFor(evt, document.activeElement);
+  if (!action) return;
+  evt.preventDefault();
+  const ids = store.getState().selection;
+  switch (action.type) {
+    case 'undo': store.undo(); break;
+    case 'redo': store.redo(); break;
+    case 'save': save(); break;
+    case 'remove': if (ids.length) store.dispatch('remove', { ids }); break;
+    case 'duplicate': if (ids.length) store.dispatch('duplicate', { ids }); break;
+    case 'selectAll': store.select(store.getState().theme.elements.map((e) => e.id)); break;
+    case 'deselect': store.select([]); break;
+    case 'nudge': if (ids.length) store.dispatch('move', { ids, dx: action.dx, dy: action.dy }); break;
+    default: break;
+  }
+});
+
+// ------------------------------------------------------------ start ----
+library.renderWidgets();
+refreshChrome('load');
+canvasView.fit();
+await Promise.all([loadCatalog(), refreshScreens(), refreshThemes(), refreshAssets()]);
+bridge.fonts().then((f) => { if (f?.length) state.fonts = f; }).catch(() => {});
+inspector.render(state.assets);
+sampleLoop();
+scheduleTick();
+setInterval(refreshScreens, 5000);

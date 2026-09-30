@@ -85,8 +85,11 @@ export const commands = {
     return { theme: mapElements(theme, [id], (e) => ({ ...e, kind: clone(kind) })) };
   },
 
+  /** Merges theme properties; a new background replaces the old one whole. */
   setTheme(theme, { patch }) {
-    return { theme: merge(theme, patch) };
+    const next = merge(theme, patch);
+    if (patch.background) next.background = clone(patch.background);
+    return { theme: next };
   },
 
   /** Moves one element to `index` in the z-order (0 = bottom). */
@@ -154,7 +157,9 @@ export function createStore(theme) {
   let past = [];
   let future = [];
   let gesture = null;
-  let dirty = false;
+  // Themes are immutable, so "dirty" is "not the theme last saved or loaded":
+  // undoing back to it makes the editor clean again.
+  let saved = state.theme;
   const listeners = new Set();
 
   const emit = (reason) => {
@@ -169,9 +174,9 @@ export function createStore(theme) {
 
   return {
     getState: () => state,
-    isDirty: () => dirty,
+    isDirty: () => state.theme !== saved,
     markSaved() {
-      dirty = false;
+      saved = state.theme;
       emit('saved');
     },
     subscribe(fn) {
@@ -195,7 +200,6 @@ export function createStore(theme) {
         record(before);
       }
       state = { theme: result.theme, selection: result.selection ?? state.selection.filter((id) => result.theme.elements.some((e) => e.id === id)) };
-      if (result.theme !== before) dirty = true;
       emit(name);
       return state;
     },
@@ -225,7 +229,6 @@ export function createStore(theme) {
       future.push(state.theme);
       const theme = past.pop();
       state = { theme, selection: state.selection.filter((id) => theme.elements.some((e) => e.id === id)) };
-      dirty = true;
       emit('undo');
       return state;
     },
@@ -234,7 +237,6 @@ export function createStore(theme) {
       past.push(state.theme);
       const theme = future.pop();
       state = { theme, selection: state.selection.filter((id) => theme.elements.some((e) => e.id === id)) };
-      dirty = true;
       emit('redo');
       return state;
     },
@@ -244,7 +246,7 @@ export function createStore(theme) {
       state = { theme: clone(next), selection: [] };
       past = [];
       future = [];
-      dirty = false;
+      saved = state.theme;
       emit('load');
       return state;
     },

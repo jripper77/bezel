@@ -1,15 +1,74 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createBridge } from '../../src/bridge.js';
+import { createBridge, parseFrame } from '../../src/bridge.js';
 
 const page = (search = '', hostname = 'localhost') => ({ location: { hostname, search } });
 
-test('tauri mode invokes the command', async () => {
+function frameBytes(width, height) {
+  const bytes = new Uint8Array(8 + width * height * 4);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, width, true);
+  view.setUint32(4, height, true);
+  bytes[8] = 0xab;
+  return bytes;
+}
+
+test('parseFrame reads the header and keeps the pixels', () => {
+  const frame = parseFrame(frameBytes(2, 3).buffer);
+  assert.equal(frame.width, 2);
+  assert.equal(frame.height, 3);
+  assert.equal(frame.rgba.length, 24);
+  assert.equal(frame.rgba[0], 0xab);
+});
+
+test('parseFrame accepts a view at an offset', () => {
+  const outer = new Uint8Array(4 + 8 + 4);
+  outer.set(frameBytes(1, 1), 4);
+  const frame = parseFrame(outer.subarray(4));
+  assert.deepEqual([frame.width, frame.height, frame.rgba.length], [1, 1, 4]);
+});
+
+test('parseFrame rejects short or inconsistent frames', () => {
+  assert.throws(() => parseFrame(new Uint8Array(4)), /too short/);
+  assert.throws(() => parseFrame(frameBytes(2, 2).subarray(0, 12)), /expected 16/);
+});
+
+test('tauri mode maps every call to its command', async () => {
   const calls = [];
-  const bridge = createBridge({ ...page(), __TAURI__: { core: { invoke: async (cmd) => (calls.push(cmd), []) } } });
+  const invoke = async (cmd, args) => {
+    calls.push([cmd, args]);
+    return cmd === 'render_preview' ? frameBytes(1, 1).buffer : [];
+  };
+  const bridge = createBridge({ ...page(), __TAURI__: { core: { invoke } } });
   assert.equal(bridge.mode, 'tauri');
-  assert.deepEqual(await bridge.listScreens(), []);
-  assert.deepEqual(calls, ['list_screens']);
+  const theme = { name: 'x' };
+  await bridge.listScreens();
+  await bridge.catalog();
+  await bridge.sample();
+  await bridge.session();
+  const frame = await bridge.render(theme);
+  assert.equal(frame.width, 1);
+  assert.ok(frame.millis >= 0);
+  await bridge.pushTheme(theme);
+  await bridge.setLive(true, 'k');
+  await bridge.setBrightness('k', 40);
+  await bridge.release('k');
+  await bridge.saveTheme(theme, true);
+  await bridge.listThemes();
+  await bridge.openTheme('loc');
+  await bridge.newTheme('k');
+  await bridge.importTheme();
+  await bridge.addImage();
+  await bridge.assets();
+  await bridge.fonts();
+  assert.deepEqual(calls.map((c) => c[0]), [
+    'list_screens', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
+    'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
+    'add_image', 'list_assets', 'list_fonts',
+  ]);
+  assert.deepEqual(calls[6][1], { on: true, screen: 'k' });
+  assert.deepEqual(calls[7][1], { screen: 'k', percent: 40 });
+  assert.deepEqual(calls[9][1], { theme, saveAs: true });
 });
 
 test('demo mode serves scenarios as copies', async () => {

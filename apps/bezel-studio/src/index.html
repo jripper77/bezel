@@ -10,35 +10,109 @@
   <body>
     <header class="topbar">
       <div class="brand">
-        <img src="icon.svg" alt="" width="28" height="28" />
+        <img src="icon.svg" alt="" width="26" height="26" />
         <span class="brand-name">Bezel</span>
       </div>
-      <p class="status" id="status" role="status" aria-live="polite"></p>
-      <button type="button" class="icon-button" id="refresh" data-i18n-title="action.refresh" data-i18n-aria-label="action.refresh">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" /></svg>
-      </button>
+      <label class="screen-chip">
+        <span class="visually-hidden" data-i18n="top.screen"></span>
+        <span class="dot" id="screen-dot" aria-hidden="true"></span>
+        <select id="screen-select" data-i18n-aria-label="top.screen"></select>
+      </label>
+      <label class="theme-name">
+        <span class="visually-hidden" data-i18n="top.themeName"></span>
+        <input id="theme-name" type="text" spellcheck="false" data-i18n-aria-label="top.themeName" />
+      </label>
+      <div class="toolbar" role="toolbar" data-i18n-aria-label="top.edit">
+        <button type="button" class="icon-button" id="undo" data-i18n-title="top.undo" data-i18n-aria-label="top.undo">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" /></svg>
+        </button>
+        <button type="button" class="icon-button" id="redo" data-i18n-title="top.redo" data-i18n-aria-label="top.redo">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" /></svg>
+        </button>
+      </div>
+      <div class="toolbar zoom" role="toolbar" data-i18n-aria-label="top.zoom">
+        <button type="button" class="icon-button" id="zoom-out" data-i18n-title="top.zoomOut" data-i18n-aria-label="top.zoomOut">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button type="button" class="text-button" id="zoom-fit" data-i18n-title="top.zoomFit"><span id="zoom-label">100%</span></button>
+        <button type="button" class="icon-button" id="zoom-in" data-i18n-title="top.zoomIn" data-i18n-aria-label="top.zoomIn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14" /></svg>
+        </button>
+      </div>
+      <div class="spacer"></div>
+      <label class="switch" data-i18n-title="top.liveHint">
+        <input type="checkbox" id="live" role="switch" />
+        <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+        <span data-i18n="top.live"></span>
+      </label>
+      <button type="button" class="primary-button" id="save" data-i18n="top.save"></button>
     </header>
+
     <main class="workspace">
-      <nav class="rail" data-i18n-aria-label="screens.title">
-        <h2 class="rail-title" data-i18n="screens.title"></h2>
-        <ul class="screen-list" id="screen-list"></ul>
-        <div class="empty" id="empty" hidden>
-          <p class="empty-title" data-i18n="screens.empty.title"></p>
-          <p class="empty-hint" data-i18n="screens.empty.hint"></p>
+      <nav class="library" data-i18n-aria-label="library.title">
+        <div class="tabs" role="tablist" data-i18n-aria-label="library.title">
+          <button type="button" role="tab" id="tab-widgets" aria-controls="panel-widgets" aria-selected="true" data-tab="widgets" data-i18n="library.widgets"></button>
+          <button type="button" role="tab" id="tab-sensors" aria-controls="panel-sensors" aria-selected="false" tabindex="-1" data-tab="sensors" data-i18n="library.sensors"></button>
+          <button type="button" role="tab" id="tab-layers" aria-controls="panel-layers" aria-selected="false" tabindex="-1" data-tab="layers" data-i18n="library.layers"></button>
+          <button type="button" role="tab" id="tab-themes" aria-controls="panel-themes" aria-selected="false" tabindex="-1" data-tab="themes" data-i18n="library.themes"></button>
+          <button type="button" role="tab" id="tab-media" aria-controls="panel-media" aria-selected="false" tabindex="-1" data-tab="media" data-i18n="library.media"></button>
+          <button type="button" role="tab" id="tab-screen" aria-controls="panel-screen" aria-selected="false" tabindex="-1" data-tab="screen" data-i18n="library.screen"></button>
         </div>
+        <section class="panel" role="tabpanel" id="panel-widgets" aria-labelledby="tab-widgets">
+          <p class="hint" data-i18n="library.widgetsHint"></p>
+          <ul class="widget-grid" id="widget-grid"></ul>
+        </section>
+        <section class="panel" role="tabpanel" id="panel-sensors" aria-labelledby="tab-sensors" hidden>
+          <label class="search">
+            <span class="visually-hidden" data-i18n="library.searchSensors"></span>
+            <input type="search" id="sensor-search" data-i18n-placeholder="library.searchSensors" data-i18n-aria-label="library.searchSensors" />
+          </label>
+          <p class="hint" data-i18n="library.sensorsHint"></p>
+          <div id="sensor-list" class="sensor-list"></div>
+        </section>
+        <section class="panel" role="tabpanel" id="panel-layers" aria-labelledby="tab-layers" hidden>
+          <ul class="layer-list" id="layer-list"></ul>
+        </section>
+        <section class="panel" role="tabpanel" id="panel-themes" aria-labelledby="tab-themes" hidden>
+          <div class="button-row">
+            <button type="button" class="text-button" id="theme-new" data-i18n="themes.new"></button>
+            <button type="button" class="text-button" id="theme-open" data-i18n="themes.open"></button>
+            <button type="button" class="text-button" id="theme-import" data-i18n="themes.import"></button>
+          </div>
+          <ul class="theme-grid" id="theme-grid"></ul>
+        </section>
+        <section class="panel" role="tabpanel" id="panel-media" aria-labelledby="tab-media" hidden>
+          <div class="button-row">
+            <button type="button" class="text-button" id="media-add" data-i18n="media.add"></button>
+          </div>
+          <ul class="media-list" id="media-list"></ul>
+        </section>
+        <section class="panel" role="tabpanel" id="panel-screen" aria-labelledby="tab-screen" hidden>
+          <div id="screen-panel"></div>
+        </section>
       </nav>
-      <section class="stage" data-i18n-aria-label="stage.title">
-        <div class="device-frame" id="device-frame" hidden>
-          <div class="device-screen" id="device-screen">
-            <span class="device-size" id="device-size"></span>
+
+      <section class="stage" id="stage" data-i18n-aria-label="stage.title">
+        <div class="stage-scroll" id="stage-scroll">
+          <div class="bezel" id="bezel">
+            <div class="canvas-box" id="canvas-box">
+              <canvas id="preview" width="480" height="1920" data-i18n-aria-label="stage.preview" role="img"></canvas>
+              <div class="overlay" id="overlay"></div>
+            </div>
           </div>
         </div>
-        <p class="stage-hint" id="stage-hint" data-i18n="stage.hint"></p>
       </section>
-      <aside class="inspector" data-i18n-aria-label="details.title">
-        <h2 class="inspector-title" data-i18n="details.title"></h2>
-        <dl class="details" id="details"></dl>
-      </aside>
+
+      <aside class="inspector" id="inspector" data-i18n-aria-label="inspector.title"></aside>
     </main>
+
+    <footer class="statusbar" role="status" aria-live="polite">
+      <span id="status-main"></span>
+      <span class="spacer"></span>
+      <span id="status-sensors"></span>
+      <span id="status-render"></span>
+      <span id="status-device"></span>
+    </footer>
+    <div class="toast" id="toast" role="alert" hidden></div>
   </body>
 </html>

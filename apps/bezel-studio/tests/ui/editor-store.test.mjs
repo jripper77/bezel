@@ -23,6 +23,12 @@ test('add creates a centered, named, selected element with the next id', () => {
   assert.equal(s.isDirty(), true);
   s.markSaved();
   assert.equal(s.isDirty(), false);
+  s.dispatch('move', { ids: [1], dx: 1, dy: 0 });
+  assert.equal(s.isDirty(), true);
+  s.undo();
+  assert.equal(s.isDirty(), false, 'undo back to the saved theme is clean');
+  s.redo();
+  assert.equal(s.isDirty(), true);
 });
 
 test('move skips locked elements and undo/redo walk the history', () => {
@@ -70,9 +76,12 @@ test('setFrame rounds, update merges, setKind replaces', () => {
   assert.equal(e.kind.style.align, 'center', 'siblings kept');
   s.dispatch('setKind', { id: 2, kind: { type: 'bar', binding: { key: 'cpu.usage', min: 0, max: 100 }, direction: 'leftToRight', fill: '#fff', radius: 0 } });
   assert.equal(s.getState().theme.elements[1].kind.type, 'bar');
-  s.dispatch('setTheme', { patch: { name: 'Mine', background: { color: '#000000ff' } } });
+  s.dispatch('setTheme', { patch: { name: 'Mine', background: { type: 'image', asset: 'assets/a.png', fit: 'cover' } } });
   assert.equal(s.getState().theme.name, 'Mine');
-  assert.equal(s.getState().theme.background.type, 'color');
+  s.dispatch('setTheme', { patch: { background: { type: 'color', color: '#000000ff' } } });
+  assert.deepEqual(s.getState().theme.background, { type: 'color', color: '#000000ff' }, 'replaced whole, no stale asset');
+  s.dispatch('update', { id: 2, patch: { kind: { track: null } } });
+  assert.equal(s.getState().theme.elements[1].kind.track, null, 'null clears an optional field');
 });
 
 test('duplicate, remove and selection bookkeeping', () => {

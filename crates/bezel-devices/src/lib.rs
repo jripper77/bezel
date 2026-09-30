@@ -5,8 +5,14 @@
 //! `docs/reverse-engineering/`.
 #![forbid(unsafe_code)]
 
+pub mod busy;
+pub mod connector;
 pub mod discovery;
+pub mod driver;
 pub mod fake;
+pub mod protocol;
+pub mod wire;
 
+pub use connector::SystemConnector;
 pub use discovery::SystemBus;
-pub use fake::FakeBus;
+pub use fake::{FakeBus, FakeConnector};

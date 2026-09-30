@@ -9,6 +9,7 @@ import { createInspector } from './ui/inspector.js';
 import { createStoragePanel, wireSubtabs } from './ui/storage.js';
 import { el } from './ui/dom.js';
 import { shortcutFor } from './shortcuts.js';
+import { createRenderScheduler } from './render-scheduler.js';
 
 const locale = pickLocale(navigator.languages ?? [navigator.language]);
 const t = translator(locale);
@@ -103,29 +104,19 @@ const inspector = createInspector({
 });
 
 // ----------------------------------------------------------- render ----
-let rendering = false;
-let pending = false;
-
-async function renderNow() {
-  if (rendering) {
-    pending = true;
-    return;
-  }
-  rendering = true;
+async function drawPreview() {
   try {
     const frame = await bridge.render(store.getState().theme);
     canvasView.drawFrame(frame);
     $('status-render').textContent = t('status.render', { ms: Math.round(frame.millis) });
   } catch (e) {
     $('status-render').textContent = t('status.renderError', { message: errorText(e) });
-  } finally {
-    rendering = false;
-    if (pending) {
-      pending = false;
-      requestAnimationFrame(renderNow);
-    }
   }
 }
+
+// One render at a time, at most 30 a second while dragging, the last exact.
+const previews = createRenderScheduler({ render: drawPreview, gesturing: () => store.isGesturing() });
+const renderNow = () => previews.request();
 
 let liveTimer = null;
 function pushLive() {

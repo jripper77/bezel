@@ -218,6 +218,9 @@ export function createStore(theme) {
       return state;
     },
 
+    /** Whether a gesture (a drag) is going on. */
+    isGesturing: () => gesture !== null,
+
     /** Groups the next commands (e.g. a drag) into one undo step. */
     beginGesture() {
       gesture = { start: state.theme, recorded: false };

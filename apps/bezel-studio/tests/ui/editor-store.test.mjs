@@ -52,9 +52,12 @@ test('move skips locked elements and undo/redo walk the history', () => {
 
 test('a gesture is one undo step, and a gesture that returns home is none', () => {
   const s = createStore(DEMO_THEME);
+  assert.equal(s.isGesturing(), false);
   s.beginGesture();
+  assert.equal(s.isGesturing(), true);
   for (let i = 0; i < 5; i += 1) s.dispatch('move', { ids: [1], dx: 2, dy: 0 });
   s.endGesture();
+  assert.equal(s.isGesturing(), false);
   assert.equal(frame(s, 1).x, 50);
   s.undo();
   assert.equal(frame(s, 1).x, 40);

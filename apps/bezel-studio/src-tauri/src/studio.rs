@@ -21,10 +21,11 @@
 //! source at most [`PREVIEW_FPS`] pictures a second, the runtime frames each
 //! picture as the theme says now (a framing edit never restarts it, another
 //! video does), and it ends when no picture is asked for during
-//! [`PREVIEW_IDLE`], to resume from the clock at the next one. Without
-//! ffmpeg, with motion reduced or a hidden window, the preview shows the
-//! poster. The poster is taken again on save when the theme frames its video
-//! otherwise than the poster shows.
+//! [`PREVIEW_IDLE`], to resume from the clock at the next one. A decoder that
+//! fails is tried again after [`PREVIEW_RETRY`], by itself up to
+//! [`PREVIEW_ATTEMPTS`] in a row. Without ffmpeg, with motion reduced or a
+//! hidden window, the preview shows the poster. The poster is taken again on
+//! save when the theme frames its video otherwise than the poster shows.
 //!
 //! Probing the video and taking a poster run external programs (ffprobe for
 //! a container that is not MP4 or GIF, ffmpeg for a poster): the session
@@ -126,9 +127,15 @@ struct HostPlayback {
 /// reduced, asks for none.
 pub const PREVIEW_IDLE: Duration = Duration::from_secs(2);
 
-/// After a preview decoder could not start (no ffmpeg, a file it cannot
-/// read), the next attempt waits this long; the preview shows the poster.
-const PREVIEW_RETRY: Duration = Duration::from_secs(2);
+/// After a preview decoder could not start or stopped (no ffmpeg, a file it
+/// cannot read), the next attempt waits this long; the preview shows the
+/// poster.
+pub const PREVIEW_RETRY: Duration = Duration::from_secs(2);
+
+/// Decoders of the same video that may fail in a row before the preview
+/// stops asking for another by itself (the next render, after an edit, still
+/// tries one).
+pub const PREVIEW_ATTEMPTS: u32 = 3;
 
 /// While a storage job holds the converter, the preview shows the poster
 /// and asks again this soon.
@@ -272,6 +279,9 @@ enum Playing {
     /// The poster for now: a storage job holds the converter, or the video
     /// is not probed yet.
     Busy,
+    /// The poster until another decoder is tried, this soon: the last one
+    /// failed.
+    Again(Duration),
 }
 
 /// The theme's video background as the session handles it on this computer:
@@ -295,6 +305,8 @@ struct ThemeVideo {
     epoch: Option<Instant>,
     /// No decoder starts before then (the last attempt failed).
     retry: Option<Instant>,
+    /// Decoders that failed in a row ([`PREVIEW_ATTEMPTS`]).
+    failures: u32,
 }
 
 impl ThemeVideo {
@@ -307,6 +319,27 @@ impl ThemeVideo {
             probed: false,
             epoch: None,
             retry: None,
+            failures: 0,
+        }
+    }
+
+    /// The preview's decoder could not start, or stopped, at `now`: the
+    /// next one waits [`PREVIEW_RETRY`].
+    fn failed(&mut self, now: Instant) {
+        self.decoder = None;
+        self.failures = self.failures.saturating_add(1);
+        self.retry = Some(now + PREVIEW_RETRY);
+    }
+
+    /// What the preview shows at `now` while no decoder may start: the
+    /// poster, asked again when the next one is due after a failure (up to
+    /// [`PREVIEW_ATTEMPTS`] failures in a row).
+    fn waiting(&self, now: Instant) -> Playing {
+        match self.retry {
+            Some(at) if (1..PREVIEW_ATTEMPTS).contains(&self.failures) => {
+                Playing::Again(at.saturating_duration_since(now))
+            }
+            _ => Playing::Poster,
         }
     }
 
@@ -985,14 +1018,16 @@ impl Studio {
     /// [`Motion::Allowed`] (the decoder's picture of `now`, framed as the
     /// theme says now; its next picture is due on the [`PREVIEW_FPS`] grid)
     /// and shows its poster otherwise, without ffmpeg, while the video is
-    /// not probed or a storage job holds the converter (asked again soon).
+    /// not probed or a storage job holds the converter (asked again soon),
+    /// and after a decoder failed (asked again when the next one may start,
+    /// [`PREVIEW_ATTEMPTS`] in a row at most).
     pub fn preview(
         &mut self,
         time: LocalTime,
         now: Instant,
         motion: Motion,
     ) -> Result<(Frame, Option<Duration>)> {
-        let playing = match motion {
+        let mut playing = match motion {
             Motion::Allowed if !self.video_known() => Playing::Busy,
             Motion::Allowed => self.start_preview(now),
             Motion::Reduced => {
@@ -1000,16 +1035,25 @@ impl Studio {
                 Playing::Poster
             }
         };
-        if playing == Playing::Video
-            && let Some(shown) = self.preview_picture(time, now)?
-        {
-            return Ok(shown);
+        if playing == Playing::Video {
+            if let Some(shown) = self.preview_picture(time, now)? {
+                return Ok(shown);
+            }
+            // The decoder just failed.
+            playing = self
+                .video
+                .as_ref()
+                .map_or(Playing::Poster, |v| v.waiting(now));
         }
         let clock = self.clock(now);
         let (frame, change) = self.runtime.preview(self.renderer.as_mut(), time, clock)?;
         let gifs = change.map(|at| at.saturating_sub(clock));
-        let busy = (playing == Playing::Busy).then_some(CONVERTER_BUSY);
-        Ok((frame, sooner(gifs, busy)))
+        let again = match playing {
+            Playing::Busy => Some(CONVERTER_BUSY),
+            Playing::Again(wait) => Some(wait),
+            Playing::Video | Playing::Poster => None,
+        };
+        Ok((frame, sooner(gifs, again)))
     }
 
     /// Starts the preview's decoder of the theme's video when none runs:
@@ -1023,7 +1067,7 @@ impl Studio {
             return Playing::Video;
         }
         if video.retry.is_some_and(|at| now < at) {
-            return Playing::Poster;
+            return video.waiting(now);
         }
         let Some(mut media) = converter(&host.media, Wait::No) else {
             return Playing::Busy;
@@ -1043,8 +1087,8 @@ impl Studio {
             }
             Err(e) => {
                 tracing::warn!(video = video.asset.0, "the preview does not play it: {e}");
-                video.retry = Some(now + PREVIEW_RETRY);
-                Playing::Poster
+                video.failed(now);
+                video.waiting(now)
             }
         }
     }
@@ -1070,11 +1114,11 @@ impl Studio {
             Ok(picture) => picture,
             Err(e) => {
                 tracing::warn!(video = video.asset.0, "the preview stops playing it: {e}");
-                video.decoder = None;
-                video.retry = Some(now + PREVIEW_RETRY);
+                video.failed(now);
                 return Ok(None);
             }
         };
+        video.failures = 0;
         let renderer = self.renderer.as_mut();
         let (frame, change) = self.runtime.preview_video(renderer, time, clock, picture)?;
         let gifs = change.map(|at| at.saturating_sub(clock));
@@ -2769,6 +2813,45 @@ mod tests {
         let (saved, assets) = store.load(&place).unwrap();
         assert_eq!(saved, *s.theme());
         assert_eq!(assets[&poster], before);
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A decoder that fails (ffmpeg stopped) is tried again after
+    /// [`PREVIEW_RETRY`] by itself, [`PREVIEW_ATTEMPTS`] in a row at most;
+    /// then the poster stays until a render asks again (an edit). A decoder
+    /// that shows a picture counts the failures from one again.
+    #[test]
+    fn a_failed_preview_decoder_is_tried_again_a_few_times() {
+        let media = FakeMedia::ready().failing(3);
+        let (streamed, failing) = (Arc::clone(&media.streamed), Arc::clone(&media.failing));
+        let (mut s, dir) = dragon_ball("retry", media);
+        let preview = |s: &mut Studio, ms, motion| {
+            let (frame, next) = s.preview(TIME, at(s, ms), motion).unwrap();
+            (frame.pixel(960, 240), next)
+        };
+        let retry = Some(PREVIEW_RETRY);
+        assert_eq!(
+            preview(&mut s, 0, Motion::Allowed),
+            (Some(POSTER_SHOWN), retry)
+        );
+        assert!(!s.previewing());
+        let (_, next) = preview(&mut s, 500, Motion::Allowed);
+        assert_eq!(next, Some(Duration::from_millis(1_500)), "none before then");
+        assert_eq!(preview(&mut s, 2_000, Motion::Allowed).1, retry);
+        let (shown, next) = preview(&mut s, 4_000, Motion::Allowed);
+        assert_eq!((shown, next), (Some(POSTER_SHOWN), None), "3 in a row");
+        assert_eq!(streamed.lock().unwrap().len(), 3);
+
+        // The next render (an edit) still tries one: it plays.
+        let (shown, next) = preview(&mut s, 6_000, Motion::Allowed);
+        assert_eq!(
+            (shown, next),
+            (Some(STREAMED), Some(Duration::from_millis(67)))
+        );
+        failing.store(1, Ordering::SeqCst);
+        preview(&mut s, 6_100, Motion::Reduced);
+        assert_eq!(preview(&mut s, 6_200, Motion::Allowed).1, retry, "one");
         drop(s);
         let _ = std::fs::remove_dir_all(&dir);
     }

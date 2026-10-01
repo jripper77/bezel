@@ -60,7 +60,8 @@ const CONVERTED_BYTES: usize = 5000;
 /// `native-converted-N.mp4` next to the source; a poster is a picture of
 /// [`POSTER`]; a decoded picture is [`STREAMED`] (with [`Self::two_tone`],
 /// its second half [`STREAMED_END`]). With [`Self::holding`] a call waits
-/// inside it until the test lets it go (a slow ffprobe or ffmpeg).
+/// inside it until the test lets it go (a slow ffprobe or ffmpeg); with
+/// [`Self::failing`] decoders stop at their first picture.
 #[derive(Clone)]
 pub(crate) struct FakeMedia {
     ready: bool,
@@ -80,6 +81,8 @@ pub(crate) struct FakeMedia {
     output_bytes: u64,
     /// The posters taken, and how.
     pub(crate) posters: Arc<Mutex<Vec<(MediaLocation, PosterSpec)>>>,
+    /// Decoders still to fail, each at its first picture.
+    pub(crate) failing: Arc<AtomicUsize>,
     /// Where a call waits until the test lets it go.
     gate: Option<Gate>,
 }
@@ -122,15 +125,20 @@ pub(crate) const STREAMED: Rgba = Rgba::opaque(0, 200, 0);
 pub(crate) const STREAMED_END: Rgba = Rgba::opaque(0, 0, 200);
 
 /// A decoded video whose pictures are all the same; it counts itself among
-/// the running decoders and tells the times it is asked for.
+/// the running decoders and tells the times it is asked for. A broken one
+/// fails at its first picture.
 struct Still {
     picture: Frame,
     asked: Arc<Mutex<Vec<Duration>>>,
     decoding: Arc<AtomicUsize>,
+    broken: bool,
 }
 
 impl VideoFrames for Still {
     fn frame_at(&mut self, elapsed: Duration) -> Result<&Frame> {
+        if self.broken {
+            return Err(BezelError::Transport("ffmpeg stopped".into()));
+        }
         self.asked.lock().unwrap().push(elapsed);
         Ok(&self.picture)
     }
@@ -180,6 +188,7 @@ impl FakeMedia {
             two_tone: false,
             output_bytes: CONVERTED_BYTES as u64,
             posters: Arc::default(),
+            failing: Arc::default(),
             gate: None,
         }
     }
@@ -198,6 +207,13 @@ impl FakeMedia {
     /// and bottom of a portrait picture tell where it was turned).
     pub(crate) fn two_tone(mut self) -> Self {
         self.two_tone = true;
+        self
+    }
+
+    /// Its next `decoders` decoders fail at their first picture (ffmpeg
+    /// stopped).
+    pub(crate) fn failing(self, decoders: usize) -> Self {
+        self.failing.store(decoders, Ordering::SeqCst);
         self
     }
 
@@ -314,10 +330,15 @@ impl MediaTranscoder for FakeMedia {
         }
         self.streamed.lock().unwrap().push((source.clone(), spec));
         self.decoding.fetch_add(1, Ordering::SeqCst);
+        let broken = self
+            .failing
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
         Ok(Box::new(Still {
             picture: decoded(spec.size, self.two_tone),
             asked: Arc::clone(&self.asked),
             decoding: Arc::clone(&self.decoding),
+            broken,
         }))
     }
 

@@ -1,7 +1,7 @@
 # Phase 9: Vídeo de fundo que toca e se enquadra na tela — Summary  (slug: video-background-framing)
 
 **Status:** partial
-**Tasks:** 7/8 complete, 0 blocked (T-8: hardware na 8.8" aguarda a tela livre — o studio do usuário a usa)
+**Tasks:** 8/8 complete, 0 blocked (T-8: tocou na 8.8"; a confirmação visual fica no PR)
 
 > `/jdi-issue` autônomo (card colado: relato do usuário de 2026-10-01). Branch `jdi/video-background-framing`, um
 > worktree por tarefa, cherry-picked para o branch; `/jdi-loop` convergiu na iter 1 (APPROVED_WITH_WARNINGS, crítico
@@ -53,8 +53,11 @@
 ## Hardware validation
 - Tema "Dragon Ball" do usuário (1920×480, `dragon.mp4` 480×1920 pré-girado): Auto = 270° no canvas e 0 no total;
   nome `dragon.mp4`; conversão identidade; pôster em pé — conferido em testes e com o arquivo real do fabricante.
-- **Pendente (T-8, orquestrador com a tela livre):** ao vivo na 8.8", o "Dragon Ball" toca o `dragon.mp4` guardado,
-  inteiro, em pé, sob o tema, sem envio (ou, se o tamanho guardado diferir, "Enviar para a tela" o manda como está).
+- **T-8 na 8.8" real** (2026-10-01, build `0.1.0-dev.287+4feaa0f`; o studio do usuário fechado a pedido dele e
+  reaberto na bandeja depois, retomando o ao vivo): `internal/video/dragon.mp4` guardado tem 2.588.343 bytes, o mesmo
+  do asset; `bezel run Dragon-Ball.bezeltheme` → "the screen plays internal/video/dragon.mp4 under the theme", 30
+  quadros em 29,4 s, sem envio e sem erro. A orientação em pé na tela é a do arquivo do fabricante (não visto pelo
+  orquestrador: confirmação visual no PR).
 
 ## Observações
 - A prévia ainda abre o ffmpeg e lê quadros sob o lock da sessão (D-5); a sonda e o pôster saíram dele.

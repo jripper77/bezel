@@ -95,7 +95,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - `bezel run` com o "Dragon Ball" da biblioteca acha o `dragon.mp4` guardado (`GET_FILE_SIZE` = bytes do asset), sem upload; o vídeo inteiro (10,2 s em loop) toca em pé sob o tema. SUMMARY e corpo do PR (Deferred to PR review); 2 itens visuais com o usuário.
 - **Dependencies:** T-6, T-7
 - **Test:** item 1 de "Deferred to PR review"
-- **Status:** pending
+- **Status:** completed (sem envio; visual no PR)
 
 ## Execution
 - 8 tasks em 4 waves (2 → 3 → 2 → 1); 1 wave por iteração do `/jdi-loop`

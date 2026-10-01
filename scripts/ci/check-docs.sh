@@ -14,8 +14,8 @@
 #     screen serial numbers;
 #   - README.md no longer says "early development" and links to the guide;
 #     CHANGELOG.md has an `## [Unreleased]` section with the changes of each
-#     phase (the video framing's and the live screen's "For this screen" fix
-#     included).
+#     phase (the video framing's included, and the live screen controls fix
+#     by the "Device or resource busy" it ends; a phrase may wrap).
 #
 #   bash scripts/ci/check-docs.sh
 set -euo pipefail
@@ -222,10 +222,10 @@ m = re.search(r"^## \[Unreleased\]\n(.*?)(?=^## \[|\Z)", changelog, re.M | re.S)
 if not m:
     fail("CHANGELOG.md", "no ## [Unreleased] section")
 else:
-    unreleased = m.group(1)
+    unreleased = re.sub(r"\s+", " ", m.group(1))  # a phrase may wrap
     for phrase in ("bezel udev-rules", "bezel monitor-mode", "gpu.fps", "net.ping",
                    "bezel-run@", "/usr/bin/bezel", "docs/user", "bezel storage mv",
-                   "framing", "For this screen"):
+                   "framing", "Device or resource busy"):
         if phrase not in unreleased:
             fail("CHANGELOG.md", f"## [Unreleased] does not mention {phrase!r}")
 

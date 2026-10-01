@@ -26,7 +26,9 @@
 //! the core's `UploadProfile::mismatches`.
 //!
 //! [`archive`] holds the local copies of what Bezel sends to screens, behind
-//! the core's [`ArchiveStore`](bezel_core::ports::ArchiveStore) port.
+//! the core's [`ArchiveStore`](bezel_core::ports::ArchiveStore) port: on
+//! disk in `<data>/bezel/storage/` ([`archive::DiskArchive`]: the catalog,
+//! one file per content, thumbnails made on demand), or in memory for tests.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 

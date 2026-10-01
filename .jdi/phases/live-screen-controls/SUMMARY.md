@@ -42,6 +42,8 @@ piscava.
   `.exclusive(true)` explícito, builder igual campo a campo ao de antes; numa pty segura, a 2ª abertura dá EBUSY e
   `.exclusive(false)` derruba o teste), `2a4a84f` (W5: `open_serial` numa porta segura dá `InUse`); o Verify da
   linha 2 passa a rodar `wire::tests::a_port_the_wire_holds_refuses_a_second_open` (`ok. 4 passed`).
+- No PR #2: `c7cda3d` tira o único code smell do SonarCloud (S8783, `click({ force: true })` no e2e → clique no
+  rótulo visível do interruptor); Quality Gate já OK, 0 alertas do Advanced Security.
 
 ## Blocked tasks
 - nenhuma

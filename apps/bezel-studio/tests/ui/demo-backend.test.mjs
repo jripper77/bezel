@@ -236,3 +236,229 @@ test('a flaky demo screen is away for a while once live, then back', async () =>
   assert.equal(back.live, '/dev/ttyACM1');
   assert.equal(back.liveError, null);
 });
+
+// ------------------------------------------------------ storage manager --
+// The demo's storage manager (D-2026-09-30-storage-manager-13): the user's
+// real card beside an internal memory Bezel filled, plans run one file at a
+// time (copy, check, and only then delete the source), batch deletes, the
+// association of an original and the local copies.
+const instant = { now: () => 1_790_000_000, delay: () => Promise.resolve() };
+const KEY = '/dev/ttyACM1';
+
+/** Lets every pending promise callback run. */
+const settle = async () => {
+  for (let i = 0; i < 50; i += 1) await new Promise((resolve) => { setImmediate(resolve); });
+};
+
+test('the vendor card scenario is the user\'s real card beside an internal memory Bezel filled', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  const o = await demo.managerOverview(KEY);
+  assert.deepEqual(o.internal, { total: 69_101_158, used: 19_503_514, free: 49_597_644 }, '18.6 MiB of 65.9 MiB');
+  assert.deepEqual([o.card.total, o.card.used], [31_890_132_172, 108_842_189 + 29_577_216], '103.8 MiB of 29.7 GiB, plus the partial');
+  assert.equal(o.files.length, 18);
+  const by = Object.fromEntries(o.files.map((f) => [f.name, f]));
+  assert.deepEqual([by['earth.mp4'].entry.state, by['earth.mp4'].entry.localCopy, by['earth.mp4'].finding, by['earth.mp4'].protected], ['stored', true, null, 'boot']);
+  assert.equal(by['DARIUS.mp4'].entry, null, 'its original is on the PC');
+  assert.deepEqual(by['NVI.mp427034822.mp4'].finding, { code: 'variant', prechecked: false, kept: 'sd/video/NVI.mp4', cataloged: null });
+  assert.deepEqual(by['bezel_test_cancel.mp4'].finding, { code: 'hangPartial', prechecked: true, kept: null, cataloged: null });
+  assert.deepEqual(o.files.filter((f) => f.finding?.prechecked).map((f) => f.name), ['bezel_test_cancel.mp4']);
+  assert.deepEqual(o.restorable.map((r) => [r.name, r.state, r.otherCard]), [['relogio.mp4', 'missing', false], ['foto.png', 'stored', true]]);
+  assert.deepEqual([o.deletes, o.cap, o.folderErrors], [true, 26_214_400, []]);
+  assert.deepEqual(o.cache, { copies: 6, bytes: 19_386_367, deletedCopies: 0, deletedBytes: 0, limit: 2 * 2 ** 30 });
+  assert.match(await demo.managerThumbnail(KEY, 'internal/video/earth.mp4'), /^data:image\/svg\+xml,/);
+  assert.equal(await demo.managerThumbnail(KEY, 'sd/video/AMD.mp4'), null);
+});
+
+test('a move sends the copy, checks it, and only then deletes the source', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  const seen = [];
+  demo.onJobProgress((p) => {
+    const files = demo.storageState().files;
+    seen.push([p.phase, p.step?.index, files.has(p.step?.source), files.get(p.step?.target) ?? 0, p.total]);
+  });
+  const plan = await demo.planMove(KEY, ['internal/video/earth.mp4', 'internal/video/aniya.mp4', 'internal/video/DARIUS.mp4'], 'sd');
+  assert.deepEqual(plan.steps.map((s) => s.target), ['sd/video/earth.mp4', 'sd/video/aniya.mp4']);
+  assert.deepEqual(plan.skipped.map((s) => [s.source, s.code]), [['internal/video/DARIUS.mp4', 'noLocalCopy']]);
+  assert.deepEqual(plan.warnings, [{ code: 'bootMedia', path: 'internal/video/earth.mp4' }]);
+  assert.equal('content' in plan.steps[0], false, 'no content ids reach the UI');
+  assert.equal(plan.bytes, 2_516_582 + 3_040_870);
+  const report = await demo.runPlan(plan.ticket);
+  assert.deepEqual([report.done.length, report.failed, report.cancelled, report.notStarted], [2, null, null, []]);
+  // The source is there through the upload and the check; it goes in the last phase.
+  for (const [phase, , source, target, total] of seen) {
+    if (phase !== 'delete') assert.ok(source, `${phase}: the source stays`);
+    if (phase === 'verify' || phase === 'delete') assert.ok(target === total || total === 1, phase);
+  }
+  assert.deepEqual(seen.filter(([phase]) => phase === 'delete').map(([, i, source]) => [i, source]), [[0, true], [0, false], [1, true], [1, false]]);
+  const state = demo.storageState();
+  assert.equal(state.files.has('internal/video/earth.mp4'), false);
+  assert.equal(state.files.get('sd/video/earth.mp4'), 2_516_582);
+  const moved = state.catalog.find((e) => e.path === 'sd/video/earth.mp4');
+  assert.deepEqual([moved.state, moved.card, moved.source], ['stored', 31_890_132_172, '/home/demo/Vídeos/earth.mp4']);
+  assert.equal(state.catalog.some((e) => e.path === 'internal/video/earth.mp4'), false);
+  await assert.rejects(demo.runPlan(plan.ticket), (e) => e.code === 'stale');
+});
+
+test('a cancelled or failed move keeps its source and stops the batch', async () => {
+  const demo = createDemoBackend('vendorCard', instant, { hold: true });
+  const plan = await demo.planMove(KEY, ['internal/video/earth.mp4', 'internal/video/aniya.mp4'], 'sd');
+  const running = demo.runPlan(plan.ticket);
+  await settle();
+  // Held in the middle of the first upload: both there, then cancelled.
+  assert.ok(demo.storageState().files.has('internal/video/earth.mp4'));
+  await assert.rejects(demo.managerOverview(KEY), (e) => e.code === 'busy');
+  await assert.rejects(demo.planCopy(KEY, ['internal/video/jyanme.mp4'], 'sd'), (e) => e.code === 'busy');
+  await assert.rejects(demo.deleteFiles(KEY, ['sd/video/AMD.mp4'], true), (e) => e.code === 'busy');
+  assert.equal(await demo.cancelJob(), true);
+  const report = await running;
+  assert.deepEqual(report.done, []);
+  assert.equal(report.cancelled.step.source, 'internal/video/earth.mp4');
+  assert.equal(report.cancelled.partial, Math.round(2_516_582 / 8));
+  assert.deepEqual(report.notStarted.map((s) => s.source), ['internal/video/aniya.mp4']);
+  const files = demo.storageState().files;
+  assert.ok(files.has('internal/video/earth.mp4') && files.has('internal/video/aniya.mp4'), 'the sources stay');
+  assert.equal(files.get('sd/video/earth.mp4'), report.cancelled.partial, 'the partial file stays for a confirmed delete');
+  // Its entry stays pending: the cleanup checks the partial.
+  const o = await demo.managerOverview(KEY);
+  assert.deepEqual(o.files.find((f) => f.path === 'sd/video/earth.mp4').finding.code, 'pending');
+
+  // A screen that hangs: the first file fails with the reason, the rest never starts.
+  const hung = createDemoBackend('hung', instant);
+  const failing = await hung.planMove(KEY, ['internal/image/logo.png', 'internal/video/amd_90.mp4'], 'sd');
+  const failed = await hung.runPlan(failing.ticket);
+  assert.equal(failed.failed.error.code, 'hung');
+  assert.equal(failed.failed.refusal, null);
+  assert.equal(failed.notStarted.length, 1);
+  assert.ok(hung.storageState().files.has('internal/image/logo.png'));
+});
+
+test('a copy keeps the source, a rename takes the new name, a restore sends from the copies', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  const copy = await demo.planCopy(KEY, ['internal/video/dragon.mp4'], 'sd');
+  assert.equal((await demo.runPlan(copy.ticket)).done.length, 1);
+  assert.ok(demo.storageState().files.has('internal/video/dragon.mp4'));
+  assert.ok(demo.storageState().files.has('sd/video/dragon.mp4'));
+
+  const refused = await demo.planRename(KEY, 'internal/video/jyanme.mp4', 'jyanme.mov');
+  assert.deepEqual([refused.status, refused.code, refused.args], ['refused', 'extensionChanged', { expected: 'mp4' }]);
+  const rename = await demo.planRename(KEY, 'internal/video/jyanme.mp4', 'Jyanme_2.mp4');
+  assert.equal((await demo.runPlan(rename.ticket)).transfer, 'rename');
+  assert.ok(demo.storageState().files.has('internal/video/jyanme_2.mp4'));
+  assert.ok(!demo.storageState().files.has('internal/video/jyanme.mp4'));
+
+  const { restorable } = await demo.managerOverview(KEY);
+  const restore = await demo.planRestore(KEY, restorable.map((r) => r.id), 'sd');
+  assert.deepEqual(restore.steps.map((s) => s.target), ['sd/image/foto.png', 'sd/video/relogio.mp4'], 'oldest first');
+  assert.equal((await demo.runPlan(restore.ticket)).done.length, 2);
+  const after = await demo.managerOverview(KEY);
+  assert.deepEqual(after.restorable.map((r) => r.name), ['foto.png'], 'the other card\'s entry stays for it');
+  assert.equal(after.files.find((f) => f.name === 'relogio.mp4').entry.state, 'stored');
+  // Restoring what is there skips it as present.
+  const again = await demo.planRestore(KEY, after.restorable.map((r) => r.id), 'sd');
+  assert.deepEqual(again.skipped.map((s) => s.code), ['present']);
+  await assert.rejects(demo.planRestore(KEY, [], 'usb'), (e) => e.code === 'unknownMedium' && e.args.medium === 'usb');
+});
+
+test('batch deletes go one by one, are reported and count against the cache limit', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  await assert.rejects(demo.deleteFiles(KEY, ['sd/video/bezel_test_cancel.mp4'], false), (e) => e.code === 'notConfirmed');
+  const seen = [];
+  demo.onJobProgress((p) => seen.push(p));
+  const report = await demo.deleteFiles(KEY, ['sd/video/bezel_test_cancel.mp4', 'internal/video/aniya.mp4', 'sd/video/none.mp4', 'sd/video/AMD.mp4'], true);
+  assert.deepEqual(report.deleted, ['sd/video/bezel_test_cancel.mp4', 'internal/video/aniya.mp4']);
+  assert.equal(report.freed, 29_577_216 + 3_040_870);
+  assert.deepEqual([report.failed.path, report.failed.error.code, report.notStarted], ['sd/video/none.mp4', 'invalidInput', ['sd/video/AMD.mp4']]);
+  assert.deepEqual(seen.map((p) => [p.phase, p.done, p.total, p.step.source]).slice(0, 2), [
+    ['delete', 0, 4, 'sd/video/bezel_test_cancel.mp4'], ['delete', 1, 4, 'internal/video/aniya.mp4'],
+  ]);
+  // Bezel's own file deleted: its copy stays and counts against the limit.
+  assert.equal(demo.storageState().catalog.find((e) => e.path === 'internal/video/aniya.mp4').state, 'deleted');
+  const info = await demo.cacheInfo();
+  assert.deepEqual([info.deletedCopies, info.deletedBytes], [1, 3_040_870]);
+  assert.deepEqual(await demo.setCacheLimit(1_000), { ...info, copies: 5, bytes: info.bytes - 3_040_870, deletedCopies: 0, deletedBytes: 0, limit: 1_000 }, 'evicted');
+  await assert.rejects(demo.setCacheLimit(-1), (e) => e.code === 'invalidInput');
+
+  const turzx = createDemoBackend('turzx', instant);
+  const [screen] = (await turzx.listDevices()).screens;
+  await assert.rejects(turzx.deleteFiles(screen.key, ['internal/image/logo.png'], true), (e) => e.code === 'unsupported');
+});
+
+test('a cancelled batch delete stops before the next file', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  demo.onJobProgress((p) => { if (p.step.index === 0) demo.cancelJob(); });
+  const report = await demo.deleteFiles(KEY, ['sd/video/m04.mp4', 'sd/video/AMD.mp4'], true);
+  assert.deepEqual([report.deleted, report.cancelled, report.notStarted], [['sd/video/m04.mp4'], true, ['sd/video/AMD.mp4']]);
+});
+
+test('associating an original copies it into the store; clearing the cache keeps entries and thumbnails', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  const files = await demo.pickOriginals(false);
+  const folder = await demo.pickOriginals(true);
+  assert.equal(folder.length, 1);
+  const { candidates } = await demo.associateCandidates(KEY, 'internal/video/DARIUS.mp4', folder);
+  assert.deepEqual(candidates.map((c) => [c.name, c.sameName]), [['DARIUS.mp4', true], ['abertura.mp4', false]]);
+  assert.deepEqual((await demo.associateCandidates(KEY, 'internal/video/DARIUS.mp4', files)).candidates.length, 2);
+  await assert.rejects(demo.associateCandidates(KEY, 'internal/video/none.mp4', files), (e) => e.code === 'invalidInput');
+  await assert.rejects(demo.associateOriginal(KEY, 'internal/video/DARIUS.mp4', candidates[0].source, false), (e) => e.code === 'notConfirmed');
+  await assert.rejects(demo.associateOriginal(KEY, 'internal/video/DARIUS.mp4', '/home/demo/Vídeos/darius_final.mp4', true), (e) => e.code === 'invalidInput');
+  const done = await demo.associateOriginal(KEY, 'internal/video/DARIUS.mp4', candidates[0].source, true);
+  assert.deepEqual([done.entry.localCopy, done.entry.source, done.finding], [true, '/home/demo/Vídeos/DARIUS.mp4', null]);
+  assert.match(await demo.managerThumbnail(KEY, 'internal/video/DARIUS.mp4'), /^data:/);
+  // Movable now.
+  assert.equal((await demo.planMove(KEY, ['internal/video/DARIUS.mp4'], 'sd')).steps[0].target, 'sd/video/darius.mp4');
+
+  await assert.rejects(demo.clearCache('deleted', false), (e) => e.code === 'notConfirmed');
+  await assert.rejects(demo.clearCache('some', true), (e) => e.code === 'invalidInput');
+  assert.deepEqual(await demo.clearCache('deleted', true), { removed: 0, bytes: 0 });
+  const all = await demo.clearCache('all', true);
+  assert.equal(all.removed, 7);
+  const o = await demo.managerOverview(KEY);
+  const earth = o.files.find((f) => f.name === 'earth.mp4');
+  assert.deepEqual([earth.entry.state, earth.entry.localCopy], ['stored', false]);
+  assert.match(await demo.managerThumbnail(KEY, 'internal/video/earth.mp4'), /^data:/, 'the thumbnail stays');
+  assert.deepEqual((await demo.planMove(KEY, ['internal/video/earth.mp4'], 'sd')).skipped.map((s) => s.code), ['noLocalCopy']);
+});
+
+test('uploads are recorded pending before the first byte and stored once checked', async () => {
+  const demo = createDemoBackend('turing88', instant, { hold: true });
+  const ready = await demo.prepareUpload(KEY, 'demo://relogio.mp4', 'sd');
+  const running = demo.runUpload(ready.ticket, false);
+  await settle();
+  const pending = demo.storageState().catalog.find((e) => e.path === 'sd/video/relogio.mp4');
+  assert.deepEqual([pending.state, pending.size, pending.source], ['pending', 6_291_456, 'demo://relogio.mp4']);
+  demo.letGo();
+  assert.equal((await running).status, 'done');
+  assert.equal(demo.storageState().catalog.find((e) => e.path === 'sd/video/relogio.mp4').state, 'stored');
+  // A file deleted through Bezel keeps its entry, deleted, with its copy.
+  await demo.deleteStored(KEY, 'sd/video/relogio.mp4', true);
+  assert.equal(demo.storageState().catalog.find((e) => e.path === 'sd/video/relogio.mp4').state, 'deleted');
+});
+
+test('the manager refuses like the overview, and a theme\'s video and the boot media are protected', async () => {
+  const denied = createDemoBackend('denied', instant);
+  await assert.rejects(denied.managerOverview(KEY), (e) => e.code === 'accessDenied');
+  const demo = createDemoBackend('video', instant);
+  await assert.rejects(demo.managerOverview('COM9'), (e) => e.code === 'unsupported');
+  await assert.rejects(demo.associateCandidates('COM9', 'x', []), (e) => e.code === 'unsupported');
+  await assert.rejects(demo.associateOriginal('COM9', 'x', 'y', true), (e) => e.code === 'unsupported');
+  await assert.rejects(demo.planRestore('COM9', [], 'sd'), (e) => e.code === 'unsupported');
+  // The theme plays nebula.mp4: its turned names on the screen are protected.
+  await demo.setLive(true, KEY);
+  const ready = await demo.prepareThemeVideo(KEY);
+  await demo.runUpload(ready.ticket, false);
+  await demo.setLive(false, KEY);
+  const o = await demo.managerOverview(KEY);
+  const nebula = o.files.find((f) => f.name === 'nebula_90.mp4');
+  assert.deepEqual([nebula.protected, nebula.finding, nebula.entry.source], ['themeVideo', null, 'assets/nebula.mp4']);
+  const rename = await demo.planRename(KEY, 'sd/video/nebula_90.mp4', 'nebula_b.mp4');
+  assert.deepEqual(rename.warnings, [{ code: 'themeVideo', path: 'sd/video/nebula_90.mp4' }]);
+  await demo.setBootMedia(KEY, 'sd/video/chuva.mp4', true);
+  assert.equal((await demo.managerOverview(KEY)).files.find((f) => f.name === 'chuva.mp4').protected, 'boot');
+  // A TUR_USB screen lists sizes only from the catalog.
+  const turzx = createDemoBackend('turzx', instant);
+  const [screen] = (await turzx.listDevices()).screens;
+  const usb = await turzx.managerOverview(screen.key);
+  assert.equal(usb.deletes, false);
+  assert.deepEqual(usb.files.map((f) => [f.name, f.size]), [['logo.png', 184_320], ['amd_90.mp4', 18_874_368], ['chuva.mp4', null]]);
+  assert.deepEqual((await turzx.planMove(screen.key, ['internal/image/logo.png'], 'sd')).skipped.map((s) => s.code), ['deleteUnsupported']);
+});

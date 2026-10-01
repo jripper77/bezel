@@ -23,8 +23,112 @@ export function parseFrame(buffer) {
   return { width, height, rgba, nextMs: next === STILL ? null : next };
 }
 
-/** Event of a running upload's progress (`storage-progress` in the backend). */
+/**
+ * Event of a running storage job's progress (`storage-progress` in the
+ * backend): an upload, or a storage manager job (a plan run or a batch
+ * delete), whose reports also name the file they are at.
+ * @typedef {{
+ *   phase: 'convert'|'upload'|'verify'|'delete',
+ *   done: number,
+ *   total: number,
+ *   step?: {index: number, count: number, source: string, target: string|null},
+ * }} ProgressDto `step` (manager jobs only): the file's place in the job
+ *   (0-based `index` of `count`), its screen path and where its copy goes
+ *   (`null` for a delete). `upload` counts bytes; `verify` and a plan's
+ *   `delete` go 0 → 1; a batch delete's `delete` counts files.
+ */
 export const PROGRESS_EVENT = 'storage-progress';
+
+// ------------------------------------------------- storage manager DTOs --
+// The storage manager (D-2026-09-30-storage-manager-4, -13). Every call
+// takes the screen's key like the storage tab's; the backend keys the catalog
+// by the screen's model (and the user's name for it). Paths are
+// `<internal|sd>/<image|video>/<name>`. Errors reject like every command,
+// as `{code, args, message}` (`busy`, `notConfirmed`, `stale`, `unsupported`,
+// `invalidInput`, `unknownMedium`, ...); refusals of a plan are answers.
+/**
+ * @typedef {'internal'|'sd'} MediumCode
+ * @typedef {{total: number, used: number, free: number}} CapacityDto
+ * @typedef {{path: string, medium: MediumCode, kind: 'image'|'video', name: string, size: number|null}} StoredFileDto
+ *   `size` is `null` when the screen cannot tell it and the catalog has none (TUR_USB).
+ * @typedef {{
+ *   state: 'pending'|'stored'|'missing'|'deleted',
+ *   localCopy: boolean,
+ *   sentAt: number,
+ *   source: string|null,
+ *   durationMs: number|null,
+ *   resolution: {width: number, height: number}|null,
+ * }} CatalogEntryDto A file Bezel sent (or associated): `localCopy` when the
+ *   store holds its exact bytes; `sentAt` in seconds since the epoch.
+ * @typedef {{
+ *   code: 'duplicate'|'hangPartial'|'pending'|'variant'|'sizeDiffers'|'sameSize'|'unused',
+ *   prechecked: boolean,
+ *   kept: string|null,
+ *   cataloged: number|null,
+ * }} FindingDto A cleanup finding (core `cleanup::Finding`): `kept` is the
+ *   path of the file that stays (`duplicate`, `variant`, `sameSize`),
+ *   `cataloged` the size Bezel stored (`sizeDiffers`).
+ * @typedef {StoredFileDto & {
+ *   entry: CatalogEntryDto|null,
+ *   finding: FindingDto|null,
+ *   protected: 'boot'|'themeVideo'|null,
+ * }} ManagedFileDto A listed file with its catalog entry at that place (none
+ *   when Bezel did not send it), its cleanup finding, and whether it is the
+ *   boot media Bezel set or a video a theme plays.
+ * @typedef {StoredFileDto & {
+ *   id: string, size: number, sentAt: number, localCopy: boolean, otherCard: boolean,
+ *   state: 'pending'|'stored'|'missing',
+ * }} RestorableDto A cataloged file the screen does not store now: missing
+ *   from its medium, or on another card (`otherCard`). `id` names it to
+ *   `planRestore`.
+ * @typedef {{copies: number, bytes: number, deletedCopies: number, deletedBytes: number, limit: number}} CacheDto
+ *   The local copies; those of files deleted through Bezel count against `limit`.
+ * @typedef {{
+ *   internal: CapacityDto,
+ *   card: CapacityDto|null,
+ *   files: ManagedFileDto[],
+ *   folderErrors: {medium: MediumCode, kind: 'image'|'video', error: {code: string, args: object, message: string}}[],
+ *   restorable: RestorableDto[],
+ *   deletes: boolean,
+ *   cap: number,
+ *   cache: CacheDto,
+ * }} ManagerOverviewDto Both media, listed and reconciled with the catalog;
+ *   `deletes` is false on screens that cannot delete through Bezel (TUR_USB);
+ *   `cap` is the screen's per-file limit in bytes.
+ * @typedef {{source: string, target: string, size: number, replaces: StoredFileDto|null}} PlanStepDto
+ *   One file of a plan: its copy goes to `target`, is checked, and then (move,
+ *   rename) `source` is deleted. `replaces`: the file there whose overwrite was asked.
+ * @typedef {{source: string, target: string, code: 'conflict'|'noLocalCopy'|'deleteUnsupported'|'present', conflict: StoredFileDto|null}} SkippedDto
+ *   A file the plan leaves out; `conflict` is the file of that name already
+ *   there (or sent by another step). A conflict is planned again with its
+ *   `target` in `overwrite` once the user confirms the overwrite.
+ * @typedef {{code: 'bootMedia'|'themeVideo', path: string}} PlanWarningDto
+ * @typedef {{
+ *   status: 'ready', ticket: number, transfer: 'move'|'copy'|'rename'|'restore', to: MediumCode,
+ *   steps: PlanStepDto[], skipped: SkippedDto[], warnings: PlanWarningDto[], bytes: number, free: number,
+ * }} PlanReadyDto What the one confirmation lists; `free` is the target medium's free space.
+ * @typedef {{
+ *   status: 'refused',
+ *   code: 'noCard'|'notListed'|'sameMedium'|'invalidName'|'extensionChanged'|'sameName'|'unsendable'|'noSpace',
+ *   args: object,
+ *   message: string,
+ * }} PlanRefusedDto Nothing was sent. `args`: `notListed`/`sameMedium` `{path}`;
+ *   `invalidName` `{char?}`; `extensionChanged` `{expected: string|null}`;
+ *   `unsendable` `{path, refusal}` (a preflight refusal, as `prepareUpload`'s);
+ *   `noSpace` `{needed, free}`.
+ * @typedef {{
+ *   transfer: 'move'|'copy'|'rename'|'restore',
+ *   done: PlanStepDto[],
+ *   failed: {step: PlanStepDto, error: {code: string, args: object, message: string}|null, refusal: object|null}|null,
+ *   cancelled: {step: PlanStepDto, partial: number|null}|null,
+ *   notStarted: PlanStepDto[],
+ * }} TransferReportDto A run stops at the first failure (a backend error, or
+ *   the preflight's refusal on the target) or on Cancel; that file's source
+ *   stays. `partial`: bytes a cancelled upload left at the target.
+ * @typedef {{deleted: string[], failed: {path: string, error: {code: string, args: object, message: string}}|null, cancelled: boolean, notStarted: string[], freed: number}} DeleteReportDto
+ * @typedef {{source: string, name: string, size: number, kind: 'image'|'video', durationMs: number|null, resolution: {width: number, height: number}|null, sameName: boolean}} CandidateDto
+ *   A file on the PC of exactly the screen file's size and kind.
+ */
 
 /**
  * Event the app sends when the window's close button is pressed with unsaved
@@ -105,6 +209,35 @@ function tauriBridge(invoke, tauri = {}) {
     playStored: (screen, path) => invoke('play_stored', { screen, path }),
     stopPlayback: (screen) => invoke('stop_playback', { screen }),
     setBootMedia: (screen, path, confirmed, brightness = null) => invoke('set_boot_media', { screen, path, confirmed, brightness }),
+    // ------------------------------------------- the storage manager --
+    /** @returns {Promise<ManagerOverviewDto>} */
+    managerOverview: (screen) => invoke('manager_overview', { screen }),
+    /** A file's thumbnail from its local copy, as a `data:` URL, or `null`. @returns {Promise<string|null>} */
+    managerThumbnail: (screen, path) => invoke('manager_thumbnail', { screen, path }),
+    /** @returns {Promise<PlanReadyDto|PlanRefusedDto>} */
+    planMove: (screen, paths, to, overwrite = []) => invoke('plan_move', { screen, paths, to, overwrite }),
+    /** @returns {Promise<PlanReadyDto|PlanRefusedDto>} */
+    planCopy: (screen, paths, to, overwrite = []) => invoke('plan_copy', { screen, paths, to, overwrite }),
+    /** @returns {Promise<PlanReadyDto|PlanRefusedDto>} */
+    planRename: (screen, path, newName, overwrite = []) => invoke('plan_rename', { screen, path, newName, overwrite }),
+    /** `ids`: `RestorableDto.id`s. @returns {Promise<PlanReadyDto|PlanRefusedDto>} */
+    planRestore: (screen, ids, to, overwrite = []) => invoke('plan_restore', { screen, ids, to, overwrite }),
+    /** Runs a confirmed plan; progress comes as `storage-progress`, Cancel is `cancelJob`. @returns {Promise<TransferReportDto>} */
+    runPlan: (ticket) => invoke('run_plan', { ticket }),
+    /** Deletes the confirmed files one by one (a cleanup or a selection). @returns {Promise<DeleteReportDto>} */
+    deleteFiles: (screen, paths, confirmed) => invoke('delete_files', { screen, paths, confirmed }),
+    /** Originals chosen on the PC: files, or one folder (`folder`); `[]` when cancelled. @returns {Promise<string[]>} */
+    pickOriginals: (folder) => invoke('pick_originals', { folder }),
+    /** The originals among `sources` (files or folders), likeliest first. @returns {Promise<{candidates: CandidateDto[]}>} */
+    associateCandidates: (screen, path, sources) => invoke('associate_candidates', { screen, path, sources }),
+    /** Copies a confirmed original into the store. @returns {Promise<ManagedFileDto>} */
+    associateOriginal: (screen, path, source, confirmed) => invoke('associate_original', { screen, path, source, confirmed }),
+    /** @returns {Promise<CacheDto>} */
+    cacheInfo: () => invoke('cache_info'),
+    /** `scope`: `deleted` (copies of deleted files) or `all`. @returns {Promise<{removed: number, bytes: number}>} */
+    clearCache: (scope, confirmed) => invoke('clear_cache', { scope, confirmed }),
+    /** @returns {Promise<CacheDto>} */
+    setCacheLimit: (bytes) => invoke('set_cache_limit', { bytes }),
     setUnsaved: (unsaved) => invoke('set_unsaved', { unsaved }),
     closeWindow: () => invoke('close_window'),
     quitApp: () => invoke('quit_app'),

@@ -317,6 +317,71 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .boot-slot { padding: 10px; border: 1.5px dashed var(--border); border-radius: var(--radius); background: var(--surface-2); }
 .boot-slot.drop-target { border-color: var(--accent); background: var(--accent-soft); }
 
+/* ---------------------------------------------- storage manager (wide) -- */
+/* The Storage tab takes the whole window (D-2026-09-30-storage-manager-4). */
+.workspace.storage-wide { grid-template-columns: minmax(0, 1fr); }
+.workspace.storage-wide > .stage, .workspace.storage-wide > .inspector { display: none; }
+.workspace.storage-wide > .library { border-right: 0; }
+.workspace.storage-wide #panel-screen { padding: 12px 20px 20px; }
+.workspace.storage-wide #panel-screen .subtabs { max-width: 360px; }
+.storage-toolbar .text-button svg { width: 16px; height: 16px; }
+
+.manager-top { display: grid; gap: 10px; }
+.manager-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
+.manager-filters .field { flex: 1 1 140px; margin: 0; }
+.workspace.storage-wide .boot-slot { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 8px 12px; }
+.workspace.storage-wide .boot-slot .hint { margin: 0; }
+.workspace.storage-wide .drop-zone { padding: 6px 10px; }
+.manager-filters .field.search { flex: 2 1 220px; }
+.manager-filters input, .manager-filters select { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+
+.manager-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.medium.manager-column { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.medium.manager-column + .medium.manager-column { padding-top: 12px; border-top: 1px solid var(--border); }
+.manager-column.drop-target { outline: 3px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
+.column-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; }
+.column-head .text-button svg { width: 16px; height: 16px; }
+.manager-actions { gap: 4px; }
+.manager-actions .text-button { padding: 0 8px; gap: 4px; }
+.manager-actions .text-button svg { width: 16px; height: 16px; }
+.list-count { margin: 0; color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+
+.file-list { list-style: none; margin: 0; padding: 4px; display: grid; gap: 2px; max-height: min(52vh, 520px); overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.file-option { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; cursor: default; user-select: none; touch-action: none; }
+.file-option:hover { background: var(--surface-3); }
+.file-option[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.file-list:focus-visible .file-option.focused { box-shadow: inset 0 0 0 2px var(--select); }
+.file-thumb { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 6px; background: #0b1020; color: #94a3b8; overflow: hidden; }
+.file-thumb svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.file-thumb img { display: none; width: 100%; height: 100%; object-fit: contain; }
+.file-thumb.has-picture img { display: block; }
+.file-thumb.has-picture svg { display: none; }
+.file-main { display: grid; gap: 2px; min-width: 0; }
+.file-main .file-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.file-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.file-tags:empty { display: none; }
+.tag { padding: 0 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 0.72rem; font-weight: 600; }
+.tag.warn { border-color: var(--warn); color: var(--warn); }
+.tag.protected { border-color: var(--accent); }
+.tag.muted, .tag.finding { color: var(--muted); }
+
+.wide-dialog { width: min(720px, calc(100vw - 32px)); }
+.wide-dialog .dialog-body { max-height: min(62vh, 640px); overflow: auto; }
+.dialog-subtitle { margin: 12px 0 4px; font-size: 0.9rem; }
+.plan-list { display: grid; gap: 4px; margin: 6px 0; padding-left: 18px; overflow-wrap: anywhere; }
+.plan-list small { display: block; color: var(--muted); }
+.plan-list .check { margin: 2px 0 0; }
+.plan-total { font-weight: 600; }
+.check-list { display: grid; gap: 2px; margin: 4px 0; padding: 0; border: 0; list-style: none; }
+.check-list legend { margin-bottom: 4px; font-weight: 600; }
+.check-list .check { align-items: flex-start; }
+.check-list .check input { margin-top: 3px; }
+.check-list .check > span { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.check-list small { color: var(--muted); }
+.cleanup-group + .cleanup-group { margin-top: 8px; border-top: 1px solid var(--border); }
+.cleanup-group .hint { margin: 0 0 4px; }
+
 /* ------------------------------------------------------ confirm dialog -- */
 .confirm-dialog { width: min(440px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .confirm-dialog::backdrop { background: rgb(10 14 26 / 55%); }
@@ -358,7 +423,7 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .icon-button, .text-button, .widget-tile, .sensor-row, .theme-card, .switch .thumb, .orientation-tools .segmented button, .subtabs [role="tab"], .drop-zone { transition: border-color 120ms ease, background 120ms ease, color 120ms ease, left 120ms ease; }
+  .icon-button, .text-button, .widget-tile, .sensor-row, .theme-card, .switch .thumb, .orientation-tools .segmented button, .subtabs [role="tab"], .drop-zone, .file-option { transition: border-color 120ms ease, background 120ms ease, color 120ms ease, left 120ms ease; }
   .usage > span { transition: width 200ms ease; }
   .theme-card .thumb-screen[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
 }

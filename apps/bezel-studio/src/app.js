@@ -141,7 +141,24 @@ const storage = createStoragePanel({
   }),
   restart: (screen) => restartScreen(screen),
 });
-wireSubtabs(document.querySelector('#panel-screen .subtabs'), (name) => (name === 'storage' ? storage.show() : storage.hide()));
+// The Storage tab is the storage manager: shown, it takes the whole width of
+// the window (D-2026-09-30-storage-manager-4); the editor comes back with
+// any other tab.
+const workspace = document.querySelector('.workspace');
+const storageWide = () => workspace.classList.contains('storage-wide');
+function syncStorageWide() {
+  const wide = !$('panel-screen').hidden && !$('screen-storage').hidden;
+  if (wide === storageWide()) return;
+  workspace.classList.toggle('storage-wide', wide);
+  if (wide) storage.show();
+  else {
+    storage.hide();
+    canvasView.fit();
+  }
+}
+const panelWatch = new MutationObserver(syncStorageWide);
+for (const id of ['panel-screen', 'screen-storage']) panelWatch.observe($(id), { attributes: true, attributeFilter: ['hidden'] });
+wireSubtabs(document.querySelector('#panel-screen .subtabs'), syncStorageWide);
 
 const inspector = createInspector({
   root: $('inspector'),
@@ -671,6 +688,12 @@ bridge.onQuitRequested(async () => {
 }).catch(() => {});
 
 // ---------------------------------------------------------- chrome -----
+// The editor's own controls bring it back from the storage manager.
+for (const id of ['undo', 'redo', 'zoom-in', 'zoom-out', 'zoom-fit', 'orient-vertical', 'orient-horizontal', 'orient-turn']) {
+  $(id).addEventListener('click', () => {
+    if (storageWide()) $('subtab-device').click();
+  });
+}
 $('undo').addEventListener('click', () => store.undo());
 $('redo').addEventListener('click', () => store.redo());
 $('save').addEventListener('click', () => save());
@@ -695,6 +718,8 @@ document.addEventListener('keydown', (evt) => {
   if (document.querySelector('dialog[open]')) return;
   const action = shortcutFor(evt, document.activeElement);
   if (!action) return;
+  // The storage manager hides the editor: only saving acts on the theme.
+  if (storageWide() && action.type !== 'save' && action.type !== 'saveAs') return;
   evt.preventDefault();
   const ids = store.getState().selection;
   switch (action.type) {

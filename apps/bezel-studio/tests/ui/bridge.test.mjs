@@ -129,6 +129,58 @@ test('tauri mode maps every call to its command', async () => {
   assert.deepEqual(calls[12][1], { screen: 'k', name: 'Novo', orientation: 'landscape' });
 });
 
+test('tauri mode maps the storage manager to its commands, with their arguments', async () => {
+  const calls = [];
+  const invoke = async (cmd, args) => {
+    calls.push([cmd, args]);
+    return null;
+  };
+  const bridge = createBridge({ ...page(), __TAURI__: { core: { invoke } } });
+  await bridge.managerOverview('k');
+  await bridge.managerThumbnail('k', 'sd/video/a.mp4');
+  await bridge.planMove('k', ['internal/video/a.mp4'], 'sd');
+  await bridge.planCopy('k', ['sd/video/a.mp4'], 'internal', ['internal/video/a.mp4']);
+  await bridge.planRename('k', 'sd/video/a.mp4', 'b.mp4');
+  await bridge.planRestore('k', ['sd/video/a.mp4@31890132172'], 'sd');
+  await bridge.runPlan(3);
+  await bridge.deleteFiles('k', ['sd/video/a.mp4'], true);
+  await bridge.pickOriginals(true);
+  await bridge.associateCandidates('k', 'sd/video/a.mp4', ['/home/me/Vídeos']);
+  await bridge.associateOriginal('k', 'sd/video/a.mp4', '/home/me/Vídeos/a.mp4', true);
+  await bridge.cacheInfo();
+  await bridge.clearCache('deleted', true);
+  await bridge.setCacheLimit(2 ** 30);
+  assert.deepEqual(calls, [
+    ['manager_overview', { screen: 'k' }],
+    ['manager_thumbnail', { screen: 'k', path: 'sd/video/a.mp4' }],
+    ['plan_move', { screen: 'k', paths: ['internal/video/a.mp4'], to: 'sd', overwrite: [] }],
+    ['plan_copy', { screen: 'k', paths: ['sd/video/a.mp4'], to: 'internal', overwrite: ['internal/video/a.mp4'] }],
+    ['plan_rename', { screen: 'k', path: 'sd/video/a.mp4', newName: 'b.mp4', overwrite: [] }],
+    ['plan_restore', { screen: 'k', ids: ['sd/video/a.mp4@31890132172'], to: 'sd', overwrite: [] }],
+    ['run_plan', { ticket: 3 }],
+    ['delete_files', { screen: 'k', paths: ['sd/video/a.mp4'], confirmed: true }],
+    ['pick_originals', { folder: true }],
+    ['associate_candidates', { screen: 'k', path: 'sd/video/a.mp4', sources: ['/home/me/Vídeos'] }],
+    ['associate_original', { screen: 'k', path: 'sd/video/a.mp4', source: '/home/me/Vídeos/a.mp4', confirmed: true }],
+    ['cache_info', undefined],
+    ['clear_cache', { scope: 'deleted', confirmed: true }],
+    ['set_cache_limit', { bytes: 2 ** 30 }],
+  ]);
+});
+
+test('demo mode with hold lets each file of a manager job go on a window event', async () => {
+  const listeners = {};
+  const bridge = createBridge({ ...page('?demo=vendorCard&hold'), addEventListener: (name, cb) => { listeners[name] = cb; } });
+  const steps = [];
+  bridge.onJobProgress((p) => steps.push(p.step?.index));
+  const plan = await bridge.planMove('/dev/ttyACM1', ['internal/video/earth.mp4', 'internal/video/aniya.mp4'], 'sd');
+  listeners[DEMO_LET_GO_EVENT]();
+  listeners[DEMO_LET_GO_EVENT]();
+  const report = await bridge.runPlan(plan.ticket);
+  assert.equal(report.done.length, 2);
+  assert.deepEqual([...new Set(steps)], [0, 1]);
+});
+
 test('tauri mode listens to upload progress and system file drops', async () => {
   const listened = [];
   const listen = async (name, cb) => {

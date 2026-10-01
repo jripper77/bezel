@@ -1,66 +1,22 @@
-// The storage tab of the "Tela" panel (D-2026-09-30-storage-video-6): usage
-// of the internal flash and the SD card, the files of each, sending a file
-// (dropped on a medium or chosen) with a progress bar and Cancel, Play/Stop,
-// and Delete and the boot media behind a dialog that names the file. Sending
-// always shows a summary first (file, target, size, conversion, replaced
-// file); nothing is deleted or sent on its own.
+// The storage tab of the "Tela" panel (D-2026-09-30-storage-video-6), grown
+// into the full-width storage manager (D-2026-09-30-storage-manager-4, -13):
+// usage and files of the internal flash and the SD card side by side, sending
+// a file (dropped on a medium or chosen) with a progress bar and Cancel,
+// Play/Stop, Delete and the boot media behind a dialog that names the file,
+// and the manager's jobs (move, copy, rename, restore, cleanup) with their
+// progress announced and their report. Sending always shows a summary first;
+// nothing is deleted or sent on its own. The lists and the manager's dialogs
+// are drawn by `manager.js`.
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
-import { makeDraggable } from './dragdrop.js';
 import { errorText } from '../messages.js';
 import { udevCommand } from './udev.js';
+import { GLYPHS, createManagerView } from './manager.js';
+import {
+  KINDS, MEDIA, baseName, formatBytes, formatMiB, mismatchText, refusalText, reportLines, storageFeatures,
+} from '../storage-manager.js';
 
-export const MEDIA = Object.freeze(['internal', 'sd']);
-export const KINDS = Object.freeze(['image', 'video']);
-
-/**
- * Decimal sizes, like the screens' limits ("120 MB"): 184 kB, 24.1 MB.
- * @param {number|null|undefined} bytes
- * @param {string} locale
- */
-export function formatBytes(bytes, locale = 'en') {
-  if (bytes === null || bytes === undefined) return '—';
-  const units = ['B', 'kB', 'MB', 'GB', 'TB'];
-  let value = bytes;
-  let i = 0;
-  while (value >= 1000 && i < units.length - 1) {
-    value /= 1000;
-    i += 1;
-  }
-  const digits = i === 0 || value >= 100 ? 0 : 1;
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: digits }).format(value)} ${units[i]}`;
-}
-
-/** Bytes in a MiB, the unit the screens' per-file limits are shown in. */
-const MIB = 1024 * 1024;
-
-/**
- * A size in MiB, like the core shows the per-file limits: whole when exact,
- * else one decimal, rounded `up` (a file over a limit never reads as equal
- * to it) or `down` (a limit never reads larger than it is).
- * @param {number|null|undefined} bytes
- * @param {string} locale
- * @param {'up'|'down'} rounding
- */
-export function formatMiB(bytes, locale = 'en', rounding = 'down') {
-  if (bytes === null || bytes === undefined) return '—';
-  const scaled = (bytes * 10) / MIB;
-  const tenths = rounding === 'up' ? Math.ceil(scaled) : Math.floor(scaled);
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(tenths / 10)} MiB`;
-}
-
-/**
- * What the storage tab offers for a screen. TUR_USB screens take uploads and
- * play files but neither delete nor set the boot media through Bezel
- * (D-2026-09-30-storage-video-7).
- * @param {{family?: string, models?: {capabilities?: {storage?: boolean}}[]}|null} screen
- */
-export function storageFeatures(screen) {
-  const models = screen?.models ?? [];
-  const storage = models.length > 0 && models.every((m) => Boolean(m.capabilities?.storage));
-  const full = storage && screen.family !== 'turing-usb';
-  return { storage, remove: full, boot: full };
-}
+export { KINDS, MEDIA, baseName, formatBytes, formatMiB, mismatchText, refusalText, storageFeatures };
 
 /** Share of a medium in use, 0..1. */
 export function usedFraction(capacity) {
@@ -98,45 +54,16 @@ export function bootKeepsText(t, brightness) {
   return Number.isInteger(brightness) ? t('storage.bootKeeps', { percent: brightness }) : t('storage.bootKeepsDefault');
 }
 
-/** One way a file differs from what the screen takes. */
-export function mismatchText(t, m) {
-  const params = { found: m.found ?? t('storage.unknownSize'), expected: m.expected ?? '' };
-  return t(`storage.mismatch.${m.code}`, params);
-}
-
 /**
- * Why the preflight refused a file, in one or two sentences.
+ * The title of a running job: the upload, or the file a manager job is at
+ * and its place in the job.
  * @param {(k: string, p?: object) => string} t
- * @param {string} locale
- * @param {object} r the refusal
+ * @param {{kind: string, transfer?: string, name: string, step?: {index: number, count: number}|null}} job
  */
-export function refusalText(t, locale, r) {
-  const details = (r.mismatches ?? []).map((m) => mismatchText(t, m)).join('; ');
-  switch (r.code) {
-    case 'invalidName':
-      return r.name ? t('storage.refused.invalidChar', { char: r.name }) : t('storage.refused.invalidName');
-    case 'wrongExtension':
-      return t('storage.refused.wrongExtension', { accepted: (r.accepted ?? []).map((e) => `.${e}`).join(', ') });
-    case 'wrongProfile':
-    case 'needsConverter':
-      return t(`storage.refused.${r.code}`, { details });
-    case 'tooLarge':
-    case 'convertedTooLarge':
-      return t(`storage.refused.${r.code}`, { size: formatMiB(r.bytes, locale, 'up'), limit: formatMiB(r.limit, locale, 'down') });
-    case 'noSpace':
-      return t('storage.refused.noSpace', { size: formatBytes(r.bytes, locale), free: formatBytes(r.limit, locale) });
-    case 'wrongKind':
-    case 'emptyFile':
-    case 'noCard':
-      return t(`storage.refused.${r.code}`);
-    default:
-      return r.message ?? String(r.code);
-  }
-}
-
-/** The file name at the end of a local path or demo source. */
-export function baseName(source) {
-  return String(source).split(/[/\\]/).pop();
+export function jobTitle(t, job) {
+  if (job.kind === 'upload') return t('storage.jobTitle', { name: job.name });
+  const place = { name: job.name, index: (job.step?.index ?? 0) + 1, count: job.step?.count ?? 1 };
+  return job.kind === 'plan' ? t(`storage.job.${job.transfer}`, place) : t('storage.job.delete', place);
 }
 
 /**
@@ -173,7 +100,7 @@ export function wireSubtabs(tablist, onSelect) {
  * Esc cancels, focus returns to the button that opened it).
  * @returns {(opts: {title: string, body: Node[], action: string, danger?: boolean}) => Promise<boolean>}
  */
-export function createConfirm(t) {
+export function createConfirm(t, { refocus = () => {} } = {}) {
   return ({ title, body, action, danger = false }) => new Promise((resolve) => {
     const opener = document.activeElement;
     const cancel = el('button', { type: 'button', class: 'text-button', text: t('dialog.cancel') });
@@ -191,6 +118,7 @@ export function createConfirm(t) {
       const yes = dialog.returnValue === 'ok';
       dialog.remove();
       if (opener?.isConnected) opener.focus();
+      else refocus();
       resolve(yes);
     }, { once: true });
     document.body.append(dialog);
@@ -211,7 +139,6 @@ export function createConfirm(t) {
  * @param {(key: string) => void} [deps.restart] restarts a screen that stopped responding
  */
 export function createStoragePanel({ root, t, locale, bridge, notify, context, restart = () => {} }) {
-  const confirm = createConfirm(t);
   const view = {
     key: null,
     shown: false,
@@ -223,16 +150,37 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     working: false,
     notice: null,
     signature: '',
+    // The control that had the focus last, to give it back when the tab is drawn again.
+    focusKey: null,
   };
   // New notices are read out; each one is a region named by its heading.
   const notices = el('div', { class: 'storage-notices', 'aria-live': 'polite' });
   const jobBox = el('div', { class: 'storage-job', hidden: true });
+  // A manager job's progress, file by file, for screen readers.
+  const announcer = el('p', { class: 'visually-hidden', role: 'status', 'aria-live': 'polite' });
   const body = el('div', { class: 'storage-body' });
-  root.replaceChildren(notices, jobBox, body);
+  root.replaceChildren(notices, jobBox, announcer, body);
+  root.addEventListener('focusin', (evt) => {
+    const key = evt.target.closest?.('[data-focus]')?.dataset.focus;
+    if (key) view.focusKey = key;
+  });
 
+  /** Gives the focus back to the control that had it, when it was lost with a redraw. */
+  function refocus() {
+    if (document.querySelector('dialog[open]')) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const next = view.focusKey && root.querySelector(`[data-focus="${view.focusKey}"]`);
+    if (next && !next.disabled) next.focus();
+  }
+
+  const confirm = createConfirm(t, { refocus });
   const screen = () => context().screen;
   const busy = () => Boolean(view.job) || view.working;
   const bytes = (n) => formatBytes(n, locale());
+  const announce = (text) => {
+    announcer.textContent = text;
+  };
 
   /**
    * A command's error as a notice (with the udev command when it fixes it,
@@ -252,7 +200,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     view.status = 'loading';
     renderBody();
     try {
-      const [data, tools] = await Promise.all([bridge.storageOverview(key), bridge.mediaTools()]);
+      const [data, tools] = await Promise.all([bridge.managerOverview(key), bridge.mediaTools()]);
       if (key !== view.key) return;
       Object.assign(view, { data, tools, status: 'ready', error: null });
     } catch (e) {
@@ -351,7 +299,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
   }
 
   async function runJob(prepared) {
-    view.job = { name: prepared.target.name, phase: prepared.convert ? 'convert' : 'upload', done: 0, total: 0, cancelling: false };
+    view.job = { kind: 'upload', name: prepared.target.name, phase: prepared.convert ? 'convert' : 'upload', done: 0, total: 0, step: null, cancelling: false };
     view.notice = null;
     renderAll();
     let result = null;
@@ -374,6 +322,44 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     await load();
   }
 
+  // ---------------------------------------------------- the manager's jobs --
+  /** Starts a manager job: the job box shows the first file, the status region names it. */
+  function startJob(job) {
+    view.job = { phase: job.kind === 'plan' ? 'upload' : 'delete', done: 0, total: 0, cancelling: false, ...job };
+    view.notice = null;
+    renderAll();
+    announce(jobTitle(t, view.job));
+  }
+
+  /**
+   * Runs a confirmed plan one file at a time (D-2026-09-30-storage-manager-7,
+   * -8): the report lists what was done, what failed and why, and what never
+   * started; a cancelled upload's partial file is offered for a delete.
+   */
+  async function runPlan(plan) {
+    const first = plan.steps[0];
+    startJob({ kind: 'plan', transfer: plan.transfer, name: baseName(first.source), step: { index: 0, count: plan.steps.length, source: first.source, target: first.target } });
+    try {
+      view.notice = { kind: 'report', report: await bridge.runPlan(plan.ticket) };
+    } catch (e) {
+      view.notice = errorNotice(e);
+    }
+    view.job = null;
+    await load();
+  }
+
+  /** Deletes the confirmed files one by one (a selection, or the cleanup's list). */
+  async function runDeletes(paths) {
+    startJob({ kind: 'delete', name: baseName(paths[0]), step: { index: 0, count: paths.length, source: paths[0], target: null } });
+    try {
+      view.notice = { kind: 'deleteReport', report: await bridge.deleteFiles(view.key, paths, true) };
+    } catch (e) {
+      view.notice = errorNotice(e);
+    }
+    view.job = null;
+    await load();
+  }
+
   function cancelJob() {
     if (!view.job || view.job.cancelling) return;
     view.job.cancelling = true;
@@ -383,8 +369,11 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
 
   bridge.onJobProgress?.((p) => {
     if (!view.job) return;
+    const next = p.step && p.step.index !== view.job.step?.index;
     Object.assign(view.job, p);
+    if (p.step) view.job.name = baseName(p.step.source);
     updateJob();
+    if (next) announce(jobTitle(t, view.job));
   });
 
   // ------------------------------------------------------ files and boot --
@@ -411,7 +400,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
       body: [el('p', { text: t('storage.confirmBoot', { name: file.name }) }), el('p', { text: bootKeepsText(t, brightness) })],
       action: t('storage.bootAction'),
     });
-    if (ok) await act(() => bridge.setBootMedia(view.key, file.path, true, brightness), t('storage.bootSet', { name: file.name }), { reload: false });
+    if (ok) await act(() => bridge.setBootMedia(view.key, file.path, true, brightness), t('storage.bootSet', { name: file.name }));
   }
 
   async function askBootDefault() {
@@ -421,7 +410,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
       body: [el('p', { text: t('storage.confirmDefault') }), el('p', { text: bootKeepsText(t, brightness) })],
       action: t('storage.defaultAction'),
     });
-    if (ok) await act(() => bridge.setBootMedia(view.key, null, true, brightness), t('storage.bootReset'), { reload: false });
+    if (ok) await act(() => bridge.setBootMedia(view.key, null, true, brightness), t('storage.bootReset'));
   }
 
   const play = (file) => act(() => bridge.playStored(view.key, file.path), t('storage.playing', { name: file.name }), { reload: false });
@@ -453,16 +442,39 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     return el('section', { class: `notice ${kind}`, 'aria-labelledby': id }, [el('div', { class: 'notice-head' }, head), ...children]);
   }
 
+  const buttonRow = (...buttons) => el('div', { class: 'button-row' }, buttons);
+  const deletePartialButton = (path) => el('button', { type: 'button', class: 'text-button', text: t('storage.deletePartial'), disabled: busy(), onclick: () => askDelete(fileOf(path)) });
+  const restartButton = () => el('button', { type: 'button', class: 'primary-button', text: t('screen.restart'), disabled: busy(), onclick: () => restart(view.key) });
+
+  /** What a plan run did: done, failed, cancelled, not started (D-2026-09-30-storage-manager-7). */
+  function reportNotice(report) {
+    const stopped = Boolean(report.failed || report.cancelled);
+    const children = reportLines(t, locale(), report, errorText).map((text) => el('p', { text }));
+    const partial = report.cancelled?.partial ? report.cancelled.step.target : null;
+    if (partial && storageFeatures(screen()).remove) {
+      children.push(el('p', { text: t('storage.partial', { size: bytes(report.cancelled.partial), name: baseName(partial) }) }), buttonRow(deletePartialButton(partial)));
+    }
+    if (report.failed?.error?.code === 'hung' && screen()?.restartable) children.push(buttonRow(restartButton()));
+    return notice(stopped ? 'error' : 'report', stopped ? ICONS.warning : ICONS.info, t(stopped ? 'storage.report.stopped' : 'storage.report.finished'), children, { dismiss: true });
+  }
+
+  function deleteReportNotice(report) {
+    const stopped = Boolean(report.failed || report.cancelled);
+    const children = [el('p', { text: t('storage.report.deleted', { count: report.deleted.length, size: bytes(report.freed) }) })];
+    if (report.failed) children.push(el('p', { text: t('storage.report.deleteFailed', { name: baseName(report.failed.path), reason: errorText(t, report.failed.error) }) }));
+    if (report.notStarted.length) children.push(el('p', { text: t('storage.report.notStarted', { count: report.notStarted.length }) }));
+    return notice(stopped ? 'error' : 'report', stopped ? ICONS.warning : ICONS.info, t(stopped ? 'storage.report.stopped' : 'storage.report.finished'), children, { dismiss: true });
+  }
+
   function resultNotice() {
     const n = view.notice;
     if (!n) return null;
+    if (n.kind === 'report') return reportNotice(n.report);
+    if (n.kind === 'deleteReport') return deleteReportNotice(n.report);
+    if (n.kind === 'planRefused') return notice('refused', ICONS.warning, t('storage.plan.refusedTitle'), [el('p', { text: n.text })], { dismiss: true });
     if (n.kind === 'cancelled') {
       const children = [el('p', { text: n.partial ? t('storage.partial', { size: bytes(n.partial), name: n.name }) : t('storage.nothingLeft') })];
-      if (n.partial && storageFeatures(screen()).remove) {
-        children.push(el('div', { class: 'button-row' }, [
-          el('button', { type: 'button', class: 'text-button', text: t('storage.deletePartial'), disabled: busy(), onclick: () => askDelete(fileOf(n.path)) }),
-        ]));
-      }
+      if (n.partial && storageFeatures(screen()).remove) children.push(buttonRow(deletePartialButton(n.path)));
       return notice('cancelled', ICONS.info, t('storage.cancelled'), children, { dismiss: true });
     }
     if (n.kind === 'refused') {
@@ -482,16 +494,10 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     // A file stored with the wrong size is deleted on request, never on its own.
     const children = [el('p', { text: n.text })];
     if (n.command) children.push(el('p', { text: t('udev.explain') }), udevCommand(t, n.command, notify));
-    if (n.hung && screen()?.restartable) {
-      children.push(el('div', { class: 'button-row' }, [
-        el('button', { type: 'button', class: 'primary-button', text: t('screen.restart'), disabled: busy(), onclick: () => restart(view.key) }),
-      ]));
-    }
+    if (n.hung && screen()?.restartable) children.push(buttonRow(restartButton()));
     if (n.path && storageFeatures(screen()).remove) {
       const file = fileOf(n.path);
-      children.push(el('div', { class: 'button-row' }, [
-        el('button', { type: 'button', class: 'text-button', text: t('storage.delete', { name: file.name }), disabled: busy(), onclick: () => askDelete(file) }),
-      ]));
+      children.push(buttonRow(el('button', { type: 'button', class: 'text-button', text: t('storage.delete', { name: file.name }), disabled: busy(), onclick: () => askDelete(file) })));
     }
     return notice('error', ICONS.warning, t('storage.errorTitle'), children, { dismiss: true });
   }
@@ -500,9 +506,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     const hints = view.tools?.installHints ?? [];
     return el('div', { class: 'ffmpeg-help' }, [
       hints.length ? el('ul', { class: 'hints' }, hints.map((h) => el('li', {}, [el('code', { text: h })]))) : null,
-      el('div', { class: 'button-row' }, [
-        el('button', { type: 'button', class: 'text-button', text: t('storage.ffmpegLocate'), disabled: busy(), onclick: locate }),
-      ]),
+      buttonRow(el('button', { type: 'button', class: 'text-button', text: t('storage.ffmpegLocate'), disabled: busy(), onclick: locate })),
     ]);
   }
 
@@ -514,9 +518,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     if (features.storage && live && liveVideo?.state === 'missing') {
       parts.push(notice('video', ICONS.film, t('storage.videoMissingTitle'), [
         el('p', { text: t('storage.videoMissing') }),
-        el('div', { class: 'button-row' }, [
-          el('button', { type: 'button', class: 'primary-button', text: t('storage.sendVideo'), disabled: busy(), onclick: sendThemeVideo }),
-        ]),
+        buttonRow(el('button', { type: 'button', class: 'primary-button', text: t('storage.sendVideo'), disabled: busy(), onclick: sendThemeVideo })),
       ]));
     }
     if (features.storage && view.tools && !view.tools.ready && view.notice?.refusal?.code !== 'needsConverter') {
@@ -526,18 +528,18 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
   }
 
   // ----------------------------------------------------------------- job --
-  const jobTitle = el('strong', { class: 'job-title' });
+  const jobTitleEl = el('strong', { class: 'job-title' });
   const jobPhase = el('span', { class: 'job-phase', 'aria-live': 'polite' });
   const jobAmount = el('span', { class: 'job-amount' });
   const jobBar = el('progress', { class: 'job-bar', max: 1, 'aria-label': t('storage.progressLabel') });
-  const jobCancel = el('button', { type: 'button', class: 'text-button', text: t('storage.cancel'), onclick: cancelJob });
-  const jobHint = el('p', { class: 'hint', text: t('storage.busy') });
+  const jobCancel = el('button', { type: 'button', class: 'text-button', onclick: cancelJob });
+  const jobHint = el('p', { class: 'hint' });
   jobBox.replaceChildren(
-    el('div', { class: 'job-head' }, [icon(ICONS.upload, 18), jobTitle]),
+    el('div', { class: 'job-head' }, [icon(ICONS.upload, 18), jobTitleEl]),
     jobBar,
     el('div', { class: 'job-status' }, [jobPhase, jobAmount]),
     jobHint,
-    el('div', { class: 'button-row' }, [jobCancel]),
+    buttonRow(jobCancel),
   );
 
   function updateJob() {
@@ -545,58 +547,22 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     jobBox.hidden = !job;
     if (!job) return;
     const parts = progressParts(t, locale(), job);
-    jobTitle.textContent = t('storage.jobTitle', { name: job.name });
+    jobTitleEl.textContent = jobTitle(t, job);
     jobPhase.textContent = job.cancelling ? t('storage.cancelling') : parts.phase;
     jobAmount.textContent = parts.amount;
     if (parts.fraction === null) jobBar.removeAttribute('value');
     else jobBar.value = parts.fraction;
     jobCancel.disabled = job.cancelling;
+    jobCancel.textContent = job.kind === 'upload' ? t('storage.cancel') : t('storage.job.cancel');
+    jobHint.textContent = { upload: t('storage.busy'), plan: t('storage.job.planHint'), delete: t('storage.job.deleteHint') }[job.kind];
   }
 
-  // ---------------------------------------------------------------- body --
-  function bootSlot(features) {
-    if (!features.boot) return null;
-    const slot = el('section', { class: 'boot-slot', 'aria-labelledby': 'storage-boot-title' }, [
-      el('h3', { id: 'storage-boot-title' }, [icon(ICONS.power, 16), t('storage.bootTitle')]),
-      el('p', { class: 'hint', text: t('storage.bootHelp') }),
-      el('div', { class: 'button-row' }, [
-        el('button', { type: 'button', class: 'text-button', text: t('storage.defaultAction'), disabled: busy(), onclick: askBootDefault }),
-      ]),
-    ]);
-    return slot;
-  }
-
-  function fileRow(file, features, slot) {
-    const { live } = context();
-    const name = el('span', { class: `file-name${slot && !busy() ? ' draggable' : ''}`, title: file.name, text: file.name });
-    if (slot && !busy()) {
-      const target = {
-        containsClient: (x, y) => {
-          const r = slot.getBoundingClientRect();
-          return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-        },
-        point: () => ({ x: 0, y: 0 }),
-      };
-      makeDraggable(name, { label: file.name, canvas: target, stage: slot, onDrop: () => askBoot(file), onClick: () => {} });
-    }
-    const button = (label, paths, onclick, disabled, reason) => el('button', {
-      type: 'button', class: 'icon-button', title: disabled && reason ? reason : label, 'aria-label': label, disabled, onclick,
-    }, [icon(paths, 16)]);
-    return el('li', { class: 'stored-file' }, [
-      icon(file.kind === 'video' ? ICONS.film : ICONS.image, 16),
-      name,
-      el('span', { class: 'file-size', text: bytes(file.size) }),
-      button(t('storage.play', { name: file.name }), ICONS.play, () => play(file), busy() || live, live ? t('storage.liveReason') : null),
-      features.boot ? button(t('storage.boot', { name: file.name }), ICONS.power, () => askBoot(file), busy()) : null,
-      features.remove ? button(t('storage.delete', { name: file.name }), ICONS.trash, () => askDelete(file), busy()) : null,
-    ]);
-  }
-
+  // ------------------------------------------------------------- manager --
   function dropZone(medium) {
     const zone = el('div', { class: 'drop-zone', dataset: { medium } }, [
       icon(ICONS.upload, 20),
       el('span', { text: t('storage.dropHere') }),
-      el('button', { type: 'button', class: 'text-button', text: t('storage.choose'), disabled: busy(), onclick: () => choose(medium) }),
+      el('button', { type: 'button', class: 'text-button', text: t('storage.choose'), disabled: busy(), dataset: { focus: `send-${medium}` }, onclick: () => choose(medium) }),
     ]);
     zone.addEventListener('dragover', (evt) => {
       evt.preventDefault();
@@ -612,41 +578,60 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     return zone;
   }
 
-  function folder(f, features, slot) {
-    const id = `storage-${f.medium}-${f.kind}`;
-    let content;
-    if (f.error) content = el('p', { class: 'empty-note', text: t('storage.folderError', { reason: errorText(t, f.error) }) });
-    else if (!f.files.length) content = el('p', { class: 'empty-note', text: t(`storage.empty.${f.kind}`) });
-    else content = el('ul', { class: 'stored-files', 'aria-labelledby': id }, f.files.map((file) => fileRow(file, features, slot)));
-    return el('div', { class: 'folder' }, [
-      el('h4', { id, text: `${t(`storage.kind.${f.kind}`)} (${f.files.length})` }),
-      content,
+  const manager = createManagerView({
+    t,
+    locale,
+    bridge,
+    host: {
+      key: () => view.key,
+      data: () => view.data,
+      features: () => ({ ...storageFeatures(screen()), remove: storageFeatures(screen()).remove && view.data?.deletes !== false }),
+      busy,
+      live: () => context().live,
+      notify,
+      notice: (n) => {
+        view.notice = n;
+        renderNotices();
+      },
+      reload: load,
+      runPlan,
+      runDeletes,
+      askBoot,
+      askDelete,
+      play,
+      dropZone,
+      confirm,
+      refocus,
+    },
+  });
+
+  // ---------------------------------------------------------------- body --
+  function bootSlot(features) {
+    if (!features.boot) return null;
+    return el('section', { class: 'boot-slot', 'aria-labelledby': 'storage-boot-title' }, [
+      el('h3', { id: 'storage-boot-title' }, [icon(ICONS.power, 16), t('storage.bootTitle')]),
+      el('p', { class: 'hint', text: t('storage.bootHelp') }),
+      buttonRow(el('button', { type: 'button', class: 'text-button', text: t('storage.defaultAction'), disabled: busy(), dataset: { focus: 'boot-default' }, onclick: askBootDefault })),
     ]);
   }
 
-  function mediumSection(medium, features, slot) {
-    const capacity = medium === 'internal' ? view.data.internal : view.data.card;
-    const id = `storage-${medium}-title`;
-    const children = [el('h3', { id }, [icon(medium === 'sd' ? ICONS.card : ICONS.chip, 16), t(`storage.medium.${medium}`)])];
-    if (!capacity) {
-      children.push(el('p', { class: 'empty-note', text: t('storage.noCard') }));
-    } else {
-      const fraction = usedFraction(capacity);
-      children.push(
-        // A sliver stays visible for a little use.
-        el('div', { class: `usage${fraction > 0.9 ? ' full' : ''}`, 'aria-hidden': 'true' }, [el('span', { style: { width: capacity.used ? `max(4px, ${(fraction * 100).toFixed(1)}%)` : '0' } })]),
-        el('p', { class: 'usage-text', text: t('storage.usage', { used: bytes(capacity.used), total: bytes(capacity.total), free: bytes(capacity.free) }) }),
-        dropZone(medium),
-        ...view.data.folders.filter((f) => f.medium === medium).map((f) => folder(f, features, slot)),
-      );
-    }
-    if (medium === 'sd') children.push(el('p', { class: 'hint', text: t('storage.cardHelp') }));
-    return el('section', { class: 'medium', 'aria-labelledby': id }, children);
+  function toolbar(features) {
+    const { live } = context();
+    const tool = (focus, paths, label, onclick, disabled, reason = null) => el('button', {
+      type: 'button', class: 'text-button', disabled, title: disabled && reason ? reason : null, dataset: { focus }, onclick,
+    }, [icon(paths, 16), el('span', { text: label })]);
+    const cleanupReason = features.remove ? null : t('storage.reason.deleteUnsupported');
+    return el('div', { class: 'button-row storage-toolbar' }, [
+      tool('tool-refresh', ICONS.refresh, t('storage.refresh'), load, busy()),
+      tool('tool-stop', ICONS.stop, t('storage.stop'), stop, busy() || live, live ? t('storage.liveReason') : null),
+      tool('tool-cleanup', GLYPHS.sweep, t('storage.cleanup.open'), () => manager.cleanup(), busy() || !features.remove, cleanupReason),
+      tool('tool-cache', GLYPHS.box, t('storage.cache.open'), () => manager.cache(), busy()),
+    ]);
   }
 
   function renderBody() {
     const current = screen();
-    const features = storageFeatures(current);
+    const features = { ...storageFeatures(current), remove: storageFeatures(current).remove && view.data?.deletes !== false };
     body.setAttribute('aria-busy', String(view.status === 'loading'));
     if (!current) {
       body.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }));
@@ -665,29 +650,27 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
       body.replaceChildren(
         el('p', { class: 'empty-note', role: 'alert', text: t('storage.loadError', { message: errorText(t, view.error) }) }),
         ...(command ? [el('p', { class: 'hint', text: t('udev.explain') }), udevCommand(t, command, notify)] : []),
-        el('div', { class: 'button-row' }, [el('button', { type: 'button', class: 'text-button', text: t('storage.retry'), onclick: load })]),
+        buttonRow(el('button', { type: 'button', class: 'text-button', text: t('storage.retry'), onclick: load })),
       );
       return;
     }
-    if (!view.data) {
-      body.replaceChildren();
+    if (!view.data || manager.dragging()) {
+      if (!view.data) body.replaceChildren();
       return;
     }
     const { live } = context();
-    const slot = bootSlot(features);
     const hints = [];
     if (live) hints.push(el('p', { class: 'hint', text: t('storage.liveHint') }));
-    if (!features.remove) hints.push(el('p', { class: 'hint', text: t('storage.limitedHint') }));
+    if (!features.remove) hints.push(el('p', { class: 'hint', text: t('storage.limitedHint') }), el('p', { class: 'hint', text: t('storage.managerLimitedHint') }));
     if (view.tools?.ready) hints.push(el('p', { class: 'hint' }, [t('storage.ffmpegReady', { version: view.tools.version ?? '' })]));
+    const slot = bootSlot(features);
     body.replaceChildren(
-      el('div', { class: 'button-row storage-toolbar' }, [
-        el('button', { type: 'button', class: 'text-button', disabled: busy(), onclick: load }, [icon(ICONS.refresh, 16), el('span', { text: t('storage.refresh') })]),
-        el('button', { type: 'button', class: 'text-button', disabled: busy() || live, title: live ? t('storage.liveReason') : null, onclick: stop }, [icon(ICONS.stop, 16), el('span', { text: t('storage.stop') })]),
-      ]),
+      el('div', { class: 'manager-top' }, [toolbar(features), manager.filterBar()]),
       ...hints,
       ...(slot ? [slot] : []),
-      ...MEDIA.map((m) => mediumSection(m, features, slot)),
+      el('div', { class: 'manager-columns' }, MEDIA.map((m) => manager.column(m))),
     );
+    refocus();
   }
 
   function renderAll() {
@@ -724,6 +707,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
       const key = current?.key ?? null;
       if (key !== view.key) {
         Object.assign(view, { key, data: null, error: null, notice: null, status: 'idle' });
+        manager.reset();
         if (view.shown && !busy()) load();
         else renderAll();
         return;
@@ -745,8 +729,6 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     /** The UI's language changed: every text is drawn again. */
     retranslate() {
       jobBar.setAttribute('aria-label', t('storage.progressLabel'));
-      jobCancel.textContent = t('storage.cancel');
-      jobHint.textContent = t('storage.busy');
       renderAll();
     },
   };

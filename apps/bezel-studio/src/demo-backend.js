@@ -1,6 +1,7 @@
 // An in-memory backend for demo mode: a simulated screen, sensors that move,
 // themes, media and an approximate renderer. Nothing here reaches hardware.
-import { DEMO_BACK_FROM_DESKTOP, DEMO_LIBRARY, DEMO_LOCAL_FILES, DEMO_PANELS, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
+import { DEMO_BACK_FROM_DESKTOP, DEMO_LIBRARY, DEMO_LOCAL_FILES, DEMO_ORIGINALS, DEMO_ORIGINALS_FOLDER, DEMO_PANELS, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
+import { demoFindings, demoPlanAcross, demoPlanRename, demoPlanRestore, demoRank, demoSameFile } from './demo-manager.js';
 import { DEMO_THEME } from './demo-theme.js';
 import { DEMO_GIF_FRAME_MS, renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
@@ -167,6 +168,8 @@ const UPLOAD_STEPS = 16;
 export const DEMO_REV_C_CAP = 26_214_400;
 /** Largest file a TUR_USB screen takes, bytes (the vendor's 120 MB). */
 export const DEMO_USB_CAP = 120_000_000;
+/** The default limit of the local copies of deleted files: 2 GiB (D-2026-09-30-storage-manager-6). */
+export const DEMO_CACHE_LIMIT = 2 * 2 ** 30;
 /** The 8.8"'s videos: its panel in its native orientation. */
 const NATIVE = { width: 480, height: 1920 };
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'bmp', 'gif'];
@@ -258,23 +261,67 @@ export function createDemoGate(holding) {
   };
 }
 
+/** Steps of one file's upload in a manager job (move, copy, rename, restore). */
+const MANAGER_STEPS = 8;
+
+/** A stand-in for a content id (the core's SHA-256): the same source and size, the same id. */
+export function demoContent(source, size) {
+  let hash = 0x811c9dc5;
+  for (const c of `${source}|${size}`) hash = Math.imul(hash ^ c.charCodeAt(0), 0x01000193) >>> 0;
+  return hash.toString(16).padStart(8, '0').repeat(8);
+}
+
+/** A demo file's thumbnail: a gradient of its name's color, a play mark on a video. */
+export function demoFileThumbnail(name, kind) {
+  let hue = 0;
+  for (const c of name.toLowerCase()) hue = (hue * 31 + c.charCodeAt(0)) % 360;
+  const [w, h] = kind === 'video' ? [40, 160] : [160, 120];
+  const mark = kind === 'video'
+    ? `<path d="M14 68v24l16-12z" fill="#ffffffcc"/>`
+    : `<circle cx="118" cy="34" r="14" fill="#fde68a"/><path d="M0 120 52 58l34 38 22-20 52 44z" fill="#0f172acc"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">`
+    + `<stop offset="0" stop-color="hsl(${hue},70%,30%)"/><stop offset="1" stop-color="hsl(${(hue + 70) % 360},80%,62%)"/></linearGradient></defs>`
+    + `<rect width="${w}" height="${h}" fill="url(#g)"/>${mark}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
+}
+
+/** The names a theme's video `asset` may have on the 8.8", in all four turns. */
+export function demoThemeVideoNames(asset) {
+  const file = asset.split('/').pop();
+  const stem = file.includes('.') ? file.slice(0, file.lastIndexOf('.')) : file;
+  return ['', '_90', '_180', '_270'].map((turn) => demoSuggestName(`${stem}${turn}.mp4`, 'mp4'));
+}
+
 /**
  * A simulated screen storage: capacity, files, uploads with progress over
  * time and cancel, deletes, playback and the boot media, with the same
- * confirmations and refusals as the app. With `hold`, every phase of a job
- * waits after its first step until `letGo` (tests only).
+ * confirmations and refusals as the app; and the storage manager's catalog
+ * of what Bezel sent, with local copies (D-2026-09-30-storage-manager-2,
+ * -5): overview, cleanup findings, move/copy/rename/restore plans run one
+ * file at a time, batch deletes, associating an original and the cache.
+ * With `hold`, every phase of a job waits after its first step until
+ * `letGo` (tests only).
  */
-function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, hung = () => false }) {
+function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, hold = false, hung = () => false }) {
+  const layout = chosen.storage ?? DEMO_STORAGE;
   const card = chosen.card !== false;
-  const files = new Map(DEMO_STORAGE.files.filter(([p]) => card || !p.startsWith('sd/')));
+  const files = new Map(layout.files.filter(([p]) => card || !p.startsWith('sd/')));
   const locals = new Map(Object.entries(DEMO_LOCAL_FILES).map(([name, f]) => [`demo://${name}`, { name, ...f }]));
   const listeners = new Set();
   const pending = new Map();
+  const plans = new Map();
   const tools = { ready: chosen.ffmpeg !== false, configured: null };
   let tickets = 0;
   let job = null;
   const gate = createDemoGate(hold);
-  const state = { playback: null, boot: null, bootBrightness: null };
+  const state = { playback: null, boot: layout.boot ?? null, bootBrightness: null };
+  // The catalog of the 8.8" model (the demo's only model with storage).
+  const catalog = {
+    limit: DEMO_CACHE_LIMIT,
+    entries: (layout.catalog ?? []).map((e) => ({
+      card: null, state: 'stored', localCopy: true, thumb: true, source: null, durationMs: null, resolution: null, ...e, content: demoContent(e.source ?? e.path, e.size),
+    })),
+  };
 
   // Errors like the app's: a code, its arguments and the English text.
   const refuse = (code, message, args = {}) => Promise.reject(Object.assign(new Error(message), { code, args }));
@@ -287,11 +334,130 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
     const [medium, kind, name] = path.split('/');
     return { path, medium, kind, name, size };
   };
-  const totalOf = (medium) => (medium === 'sd' ? DEMO_STORAGE.cardTotal : chosen.internalTotal ?? DEMO_STORAGE.internalTotal);
+  const totalOf = (medium) => (medium === 'sd' ? layout.cardTotal : chosen.internalTotal ?? layout.internalTotal);
   function capacity(medium) {
-    const used = [...files].filter(([p]) => p.startsWith(`${medium}/`)).reduce((sum, [, size]) => sum + size, 0);
+    const sum = [...files].filter(([p]) => p.startsWith(`${medium}/`)).reduce((total, [, size]) => total + size, 0);
     const total = totalOf(medium);
+    const used = sum + (layout.usedExtra?.[medium] ?? 0);
     return { total, used, free: total - used };
+  }
+  const nowSec = () => Math.floor(now());
+  const cardNow = () => (card ? layout.cardTotal : null);
+
+  // ------------------------------------------------------------ catalog --
+  /** Whether `e` is on the media the screen shows now (its card only when inserted). */
+  const shown = (e) => e.path.startsWith('internal/') || (card && e.card === cardNow());
+  /** The entry at `path` on this screen now, not deleted. */
+  const entryAt = (path) => catalog.entries.find((e) => e.state !== 'deleted' && e.path === path && shown(e)) ?? null;
+  function record(next) {
+    catalog.entries = catalog.entries.filter((e) => !(e.path === next.path && e.card === next.card));
+    catalog.entries.push({ thumb: true, durationMs: null, resolution: null, source: null, ...next });
+  }
+  const setState = (path, value) => {
+    const found = entryAt(path);
+    if (found) found.state = value;
+  };
+  /** Copies whose every entry is deleted, oldest first, with their size. */
+  function deletedCopies() {
+    const seen = new Map();
+    for (const e of catalog.entries.filter((x) => x.localCopy)) {
+      const slot = seen.get(e.content) ?? { content: e.content, all: true, size: e.size, sentAt: 0 };
+      slot.all &&= e.state === 'deleted';
+      slot.sentAt = Math.max(slot.sentAt, e.sentAt);
+      seen.set(e.content, slot);
+    }
+    return [...seen.values()].filter((c) => c.all).sort((a, b) => a.sentAt - b.sentAt);
+  }
+  const dropCopies = (contents) => catalog.entries.forEach((e) => {
+    if (contents.has(e.content)) e.localCopy = false;
+  });
+  /** Drops copies of deleted files, oldest first, until they fit the limit. */
+  function evict() {
+    let total = deletedCopies().reduce((sum, c) => sum + c.size, 0);
+    const gone = new Set();
+    for (const c of deletedCopies()) {
+      if (total <= catalog.limit) break;
+      total -= c.size;
+      gone.add(c.content);
+    }
+    dropCopies(gone);
+  }
+  function markDeleted(path) {
+    setState(path, 'deleted');
+    evict();
+  }
+  function cacheInfo() {
+    const sizes = new Map(catalog.entries.filter((e) => e.localCopy).map((e) => [e.content, e.size]));
+    const deleted = deletedCopies();
+    const sum = (list) => list.reduce((total, size) => total + size, 0);
+    return { copies: sizes.size, bytes: sum([...sizes.values()]), deletedCopies: deleted.length, deletedBytes: sum(deleted.map((c) => c.size)), limit: catalog.limit };
+  }
+  /** Listed entries become stored (pending ones stay), absent ones missing. */
+  function reconcile() {
+    for (const e of catalog.entries.filter((x) => x.state !== 'deleted' && shown(x))) {
+      if (!files.has(e.path)) e.state = 'missing';
+      else if (e.state !== 'pending') e.state = 'stored';
+    }
+  }
+  /** The boot media Bezel set and every video a theme plays (D-2026-09-30-storage-manager-9). */
+  function guarded() {
+    const names = new Set(themes().filter((t) => t?.background?.type === 'video').flatMap((t) => demoThemeVideoNames(t.background.asset)));
+    const isBoot = (path) => Boolean(state.boot) && demoSameFile(state.boot, path);
+    const isThemeVideo = (path) => path.split('/')[1] === 'video' && names.has(path.split('/')[2].toLowerCase());
+    return { isBoot, isThemeVideo };
+  }
+  /** Sizes as listed: a TUR_USB screen tells none, the catalog's stand in (D-2026-09-30-storage-manager-11). */
+  const listedSize = (key, path) => (limited(key) ? entryAt(path)?.size ?? null : files.get(path));
+  const entryDto = (e) => (e ? { state: e.state, localCopy: e.localCopy, sentAt: e.sentAt, source: e.source, durationMs: e.durationMs, resolution: e.resolution } : null);
+
+  function managedFiles(key) {
+    reconcile();
+    const listed = [...files.keys()].map((path) => ({ path, size: listedSize(key, path) }));
+    const { isBoot, isThemeVideo } = guarded();
+    const found = demoFindings(listed, entryAt, (p) => isBoot(p) || isThemeVideo(p));
+    return listed.map(({ path, size }) => ({
+      ...entry(path, size),
+      entry: entryDto(entryAt(path)),
+      finding: found.get(path) ?? null,
+      protected: (isBoot(path) && 'boot') || (isThemeVideo(path) && 'themeVideo') || null,
+    }));
+  }
+  /** Cataloged files that can be sent again: missing here, or on another card. */
+  function restorable() {
+    const away = (e) => e.state !== 'deleted' && ((shown(e) && e.state === 'missing') || (e.path.startsWith('sd/') && !shown(e)));
+    return catalog.entries.filter(away).map((e) => ({
+      ...entry(e.path, e.size), id: `${e.path}@${e.card ?? ''}`, sentAt: e.sentAt, localCopy: e.localCopy, otherCard: e.path.startsWith('sd/') && e.card !== cardNow(), state: e.state, content: e.content,
+    }));
+  }
+  function planView(key) {
+    const { isBoot, isThemeVideo } = guarded();
+    const sized = new Map([...files.keys()].map((p) => [p, listedSize(key, p)]));
+    const clash = (target) => {
+      const path = [...files.keys()].find((p) => demoSameFile(p, target));
+      return path ? entry(path, sized.get(path)) : null;
+    };
+    const copyOf = (path) => {
+      const e = entryAt(path);
+      const size = sized.get(path);
+      return e && e.state !== 'pending' && e.localCopy && (size === null || size === e.size) ? e : null;
+    };
+    return { files: sized, card: cardNow(), deletes: !limited(key), clash, copyOf, isBoot, isThemeVideo };
+  }
+  /** A ready plan is kept under a ticket; what the UI gets has no content ids. */
+  function keepPlan(key, plan) {
+    if (plan.status !== 'ready') return plan;
+    const ticket = (tickets += 1);
+    plans.set(ticket, { key, plan });
+    const steps = plan.steps.map(({ content, ...step }) => step);
+    return { ...plan, ticket, steps, bytes: steps.reduce((sum, s) => sum + s.size, 0), free: capacity(plan.to).free };
+  }
+  /** Why the manager cannot read or plan now (like the overview's refusals). */
+  function blocked(key, to = 'internal') {
+    if (chosen.denied) return Promise.reject(demoDenied(key));
+    if (!screenOf(key)?.models.every((m) => m.capabilities.storage)) return refuse('unsupported', 'not supported: no storage', { detail: 'no storage' });
+    if (job) return refuse('busy', 'a storage operation is using the screen');
+    if (!['internal', 'sd'].includes(to)) return refuse('unknownMedium', `unknown medium "${to}" (internal or sd)`, { medium: String(to) });
+    return null;
   }
 
   function videoOfTheme() {
@@ -306,7 +472,7 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
   function readyAnswer(local, path, convert, cap) {
     const ticket = (tickets += 1);
     const replaces = files.get(path) > 0 ? entry(path) : null;
-    pending.set(ticket, { path, bytes: local.size, convert, cap, convertedSize: local.convertedSize ?? null, storedShort: Boolean(local.storedShort) });
+    pending.set(ticket, { path, bytes: local.size, convert, cap, convertedSize: local.convertedSize ?? null, storedShort: Boolean(local.storedShort), source: local.source ?? `/home/demo/${local.name}` });
     return {
       status: 'ready',
       ticket,
@@ -342,13 +508,14 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
     return readyAnswer(local, path, convert, cap);
   }
 
-  const emit = (phase, done, total) => listeners.forEach((cb) => cb({ phase, done: Math.round(done), total }));
+  /** A progress report; a manager job's names the file it is at (`step`). */
+  const emit = (phase, done, total, step = null) => listeners.forEach((cb) => cb({ phase, done: Math.round(done), total, ...(step ? { step } : {}) }));
 
   /** Reports `steps` steps of `phase`; `true` when cancelled meanwhile. */
-  async function steps(phase, total, count, each = () => {}) {
+  async function steps(phase, total, count, each = () => {}, step = null) {
     for (let i = 0; i <= count; i += 1) {
       each((total * i) / count);
-      emit(phase, (total * i) / count, total);
+      emit(phase, (total * i) / count, total, step);
       if (i === count) return false;
       if (i === 1) await gate.hold();
       await delay(DEMO_STEP_MS);
@@ -367,6 +534,8 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
     }
     // A hung screen stops reading in the middle of the upload.
     if (hung()) throw demoHung();
+    // Recorded before the first byte, with the exact bytes sent (D-2026-09-30-storage-manager-5).
+    record({ path: p.path, card: p.path.startsWith('sd/') ? cardNow() : null, size, content: demoContent(p.source, size), localCopy: true, sentAt: nowSec(), source: p.source, state: 'pending' });
     const cancelled = await steps('upload', size, UPLOAD_STEPS, (done) => files.set(p.path, Math.round(done)));
     if (cancelled) {
       const partial = files.get(p.path) || null;
@@ -381,9 +550,114 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
       const message = `${p.path} was stored with ${stored} bytes, not the file's ${size}: the stored size differs; delete it and send it again`;
       throw Object.assign(new Error(message), { code: 'sizeMismatch', args: { file: p.path, stored: String(stored), expected: String(size) } });
     }
+    setState(p.path, 'stored');
     emit('verify', 1, 1);
     state.playback = null;
     return { status: 'done', file: entry(p.path, size), converted: Boolean(p.convert) };
+  }
+
+  /** The preflight of one step on its target: the per-file limit and the free space (D-2026-09-30-storage-manager-7). */
+  function stepRefusal(key, step, to) {
+    const cap = capOf(key);
+    if (step.size > cap) return refused('tooLarge', { bytes: step.size, limit: cap });
+    const free = capacity(to).free + (step.replaces ? files.get(step.replaces.path) ?? 0 : 0);
+    if (step.size >= free) return refused('noSpace', { bytes: step.size, limit: free, candidates: [] });
+    return null;
+  }
+
+  /**
+   * One file of a plan: send its copy, check the stored size, and only then
+   * delete the source (move, rename). `'done'`, `{cancelled, partial}` or
+   * `{failed}`; the source stays unless done.
+   */
+  async function runStep(key, transfer, step, info) {
+    const to = step.target.split('/')[0];
+    const refusal = stepRefusal(key, step, to);
+    if (refusal) return { failed: { error: null, refusal } };
+    if (hung()) {
+      const { code, args, message } = demoHung();
+      return { failed: { error: { code, args, message }, refusal: null } };
+    }
+    const from = transfer === 'restore' ? catalog.entries.find((e) => e.content === step.content) : entryAt(step.source);
+    if (step.replaces) files.delete(step.replaces.path);
+    record({ path: step.target, card: to === 'sd' ? cardNow() : null, size: step.size, content: step.content, localCopy: true, sentAt: nowSec(), source: from?.source ?? null, durationMs: from?.durationMs ?? null, resolution: from?.resolution ?? null, state: 'pending' });
+    const cancelled = await steps('upload', step.size, MANAGER_STEPS, (done) => files.set(step.target, Math.round(done)), info);
+    if (cancelled) {
+      const partial = files.get(step.target) || null;
+      if (!partial) files.delete(step.target);
+      return { cancelled: true, partial };
+    }
+    emit('verify', 0, 1, info);
+    await delay(DEMO_STEP_MS);
+    setState(step.target, 'stored');
+    emit('verify', 1, 1, info);
+    if (transfer === 'move' || transfer === 'rename') {
+      emit('delete', 0, 1, info);
+      await delay(DEMO_STEP_MS);
+      files.delete(step.source);
+      catalog.entries = catalog.entries.filter((e) => e !== from);
+      emit('delete', 1, 1, info);
+    }
+    return 'done';
+  }
+
+  async function runPlanSteps(key, plan) {
+    const strip = ({ content, ...step }) => step;
+    const report = { transfer: plan.transfer, done: [], failed: null, cancelled: null, notStarted: [] };
+    const count = plan.steps.length;
+    for (let i = 0; i < count; i += 1) {
+      const step = plan.steps[i];
+      const rest = () => plan.steps.slice(i + 1).map(strip);
+      if (job.cancelled) {
+        report.notStarted = plan.steps.slice(i).map(strip);
+        break;
+      }
+      const outcome = await runStep(key, plan.transfer, step, { index: i, count, source: step.source, target: step.target });
+      if (outcome === 'done') {
+        report.done.push(strip(step));
+        continue;
+      }
+      if (outcome.cancelled) report.cancelled = { step: strip(step), partial: outcome.partial };
+      else report.failed = { step: strip(step), ...outcome.failed };
+      report.notStarted = rest();
+      break;
+    }
+    state.playback = null;
+    return report;
+  }
+
+  /** Runs `work` as the one storage job. */
+  async function asJob(work) {
+    job = { cancelled: false };
+    try {
+      return await work();
+    } finally {
+      job = null;
+    }
+  }
+
+  async function deleteEach(paths) {
+    const report = { deleted: [], failed: null, cancelled: false, notStarted: [], freed: 0 };
+    for (let i = 0; i < paths.length; i += 1) {
+      const path = paths[i];
+      if (job.cancelled) {
+        Object.assign(report, { cancelled: true, notStarted: paths.slice(i) });
+        break;
+      }
+      emit('delete', i, paths.length, { index: i, count: paths.length, source: path, target: null });
+      await delay(DEMO_STEP_MS);
+      if (!files.has(path)) {
+        const detail = `${path} is not stored on the screen`;
+        report.failed = { path, error: { code: 'invalidInput', args: { detail }, message: `invalid input: ${detail}` } };
+        report.notStarted = paths.slice(i + 1);
+        break;
+      }
+      report.freed += files.get(path);
+      files.delete(path);
+      markDeleted(path);
+      report.deleted.push(path);
+    }
+    return report;
   }
 
   const toolsDto = () => ({
@@ -407,6 +681,91 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
       })));
       return Promise.resolve({ internal: capacity('internal'), card: card ? capacity('sd') : null, folders });
     },
+    /** Both media with the catalog beside them (the storage manager's view). */
+    managerOverview: (key) => blocked(key) ?? Promise.resolve({
+      internal: capacity('internal'),
+      card: card ? capacity('sd') : null,
+      files: managedFiles(key),
+      folderErrors: [],
+      restorable: restorable().map(({ content, ...r }) => r),
+      deletes: !limited(key),
+      cap: capOf(key),
+      cache: cacheInfo(),
+    }),
+    /** A file's thumbnail from its local copy (kept when the copy is cleared), else `null`. */
+    managerThumbnail: (key, path) => {
+      const found = entryAt(path);
+      return Promise.resolve(found?.thumb ? demoFileThumbnail(found.path.split('/')[2], found.path.split('/')[1]) : null);
+    },
+    planMove: (key, paths, to, overwrite = []) => blocked(key, to) ?? Promise.resolve(keepPlan(key, demoPlanAcross(planView(key), 'move', paths, to, overwrite))),
+    planCopy: (key, paths, to, overwrite = []) => blocked(key, to) ?? Promise.resolve(keepPlan(key, demoPlanAcross(planView(key), 'copy', paths, to, overwrite))),
+    planRename: (key, path, newName, overwrite = []) => blocked(key) ?? Promise.resolve(keepPlan(key, demoPlanRename(planView(key), path, newName, overwrite))),
+    planRestore: (key, ids, to, overwrite = []) => {
+      const refusal = blocked(key, to);
+      if (refusal) return refusal;
+      const chosenEntries = restorable().filter((r) => ids.includes(r.id));
+      const room = { free: capacity(to).free, cap: capOf(key) };
+      return Promise.resolve(keepPlan(key, demoPlanRestore(planView(key), chosenEntries, to, room, overwrite)));
+    },
+    /** Runs a confirmed plan one file at a time; the report says what was done, failed and never started. */
+    runPlan: (ticket) => {
+      const held = plans.get(ticket);
+      if (!held) return refuse('stale', 'this operation is no longer prepared');
+      plans.delete(ticket);
+      if (job) return refuse('busy', 'a storage operation is using the screen');
+      return asJob(() => runPlanSteps(held.key, held.plan));
+    },
+    /** Deletes the confirmed files one by one (the cleanup's list, or a selection). */
+    deleteFiles: (key, paths, confirmed) => {
+      if (limited(key)) return refuse('unsupported', 'not supported: deleting files', { detail: 'deleting files' });
+      if (!confirmed) return refuse('notConfirmed', `deleting ${paths.length} files needs confirmation`, { detail: `deleting ${paths.length} files` });
+      if (job) return refuse('busy', 'a storage operation is using the screen');
+      return asJob(() => deleteEach(paths));
+    },
+    /** The originals the demo's picker returns: files, or their folder. */
+    pickOriginals: (folder) => Promise.resolve(folder ? [DEMO_ORIGINALS_FOLDER] : Object.keys(DEMO_ORIGINALS)),
+    associateCandidates: (key, path, sources) => {
+      const refusal = blocked(key);
+      if (refusal) return refusal;
+      const size = listedSize(key, path);
+      if (!files.has(path) || size === null) return refuse('invalidInput', `invalid input: ${path} is not stored on the screen`, { detail: `${path} is not stored on the screen` });
+      const known = (source) => (DEMO_ORIGINALS[source] ? [source] : Object.keys(DEMO_ORIGINALS).filter((p) => p.startsWith(`${source}/`)));
+      const candidates = [...new Set(sources.flatMap(known))].map((source) => ({ source, name: source.split('/').pop(), ...DEMO_ORIGINALS[source] }));
+      const kind = path.split('/')[1];
+      const sought = { path, size, resolution: kind === 'video' ? { ...NATIVE } : null, durationMs: null };
+      return Promise.resolve({ candidates: demoRank(sought, candidates) });
+    },
+    /** Copies a confirmed original into the store: the file gets a thumbnail and becomes movable. */
+    associateOriginal: (key, path, source, confirmed) => {
+      if (!confirmed) return refuse('notConfirmed', `associating ${path} needs confirmation`, { detail: `associating ${path}` });
+      const refusal = blocked(key);
+      if (refusal) return refusal;
+      const original = DEMO_ORIGINALS[source];
+      const size = listedSize(key, path);
+      if (!original || original.size !== size || original.kind !== path.split('/')[1]) {
+        const detail = `${source} is not the original of ${path}: another size or kind`;
+        return refuse('invalidInput', `invalid input: ${detail}`, { detail });
+      }
+      record({ path, card: path.startsWith('sd/') ? cardNow() : null, size, content: demoContent(source, size), localCopy: true, sentAt: nowSec(), source, durationMs: original.durationMs, resolution: original.resolution, state: 'stored' });
+      return Promise.resolve(managedFiles(key).find((f) => f.path === path));
+    },
+    cacheInfo: () => Promise.resolve(cacheInfo()),
+    /** "Clear cache": the copies of deleted files (`all`: every copy); entries and thumbnails stay. */
+    clearCache: (scope, confirmed) => {
+      if (!['deleted', 'all'].includes(scope)) return refuse('invalidInput', `invalid input: cache scope "${scope}"`, { detail: `cache scope "${scope}"` });
+      if (!confirmed) return refuse('notConfirmed', 'clearing the local copies needs confirmation', { detail: 'clearing the local copies' });
+      const before = cacheInfo();
+      const gone = scope === 'all' ? new Set(catalog.entries.map((e) => e.content)) : new Set(deletedCopies().map((c) => c.content));
+      dropCopies(gone);
+      const after = cacheInfo();
+      return Promise.resolve({ removed: before.copies - after.copies, bytes: before.bytes - after.bytes });
+    },
+    setCacheLimit: (bytes) => {
+      if (!Number.isSafeInteger(bytes) || bytes <= 0) return refuse('invalidInput', `invalid input: cache limit ${bytes}`, { detail: `cache limit ${bytes}` });
+      catalog.limit = bytes;
+      evict();
+      return Promise.resolve(cacheInfo());
+    },
     mediaTools: () => Promise.resolve(toolsDto()),
     locateFfmpeg: () => {
       Object.assign(tools, { ready: true, configured: '/opt/ffmpeg/bin/ffmpeg' });
@@ -424,13 +783,14 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
       if (job) return refuse('busy', 'a storage operation is using the screen');
       const local = locals.get(source);
       if (!local || !screenOf(key)) return refuse('fileError', `${source}: no such file`, { file: source, reason: 'no such file' });
-      return Promise.resolve(check(local, medium, capOf(key)));
+      return Promise.resolve(check({ ...local, source }, medium, capOf(key)));
     },
     prepareThemeVideo: (key) => {
       const video = videoOfTheme();
       if (live() !== key || video?.state !== 'missing') return refuse('noVideo', 'the live screen is not missing the theme video');
       const [medium, , name] = video.path.split('/');
-      const local = { name: theme().background.asset.split('/').pop(), size: 18_874_368, format: 'MP4', width: 1920, height: 480, native: false };
+      const asset = theme().background.asset;
+      const local = { name: asset.split('/').pop(), source: asset, size: 18_874_368, format: 'MP4', width: 1920, height: 480, native: false };
       return Promise.resolve(check(local, medium, capOf(key), name));
     },
     runUpload: async (ticket, overwrite) => {
@@ -439,12 +799,7 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
       pending.delete(ticket);
       if (files.get(p.path) > 0 && !overwrite) return refuse('notConfirmed', `replacing ${p.path} needs confirmation`);
       if (job) return refuse('busy', 'a storage operation is using the screen');
-      job = { cancelled: false };
-      try {
-        return await upload(p);
-      } finally {
-        job = null;
-      }
+      return asJob(() => upload(p));
     },
     cancelJob: () => {
       if (job) {
@@ -459,6 +814,7 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
       if (limited(key)) return refuse('unsupported', 'not supported: deleting files', { detail: 'deleting files' });
       if (!confirmed) return refuse('notConfirmed', `deleting ${path} needs confirmation`);
       files.delete(path);
+      markDeleted(path);
       return Promise.resolve();
     },
     playStored: (key, path) => {
@@ -486,8 +842,8 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, 
       return () => listeners.delete(cb);
     },
     videoOfTheme,
-    /** What the simulated screen plays, shows at power-up and starts with. */
-    storageState: () => ({ ...state, files: new Map(files) }),
+    /** What the simulated screen plays, shows at power-up and starts with, and the catalog. */
+    storageState: () => ({ ...state, files: new Map(files), catalog: catalog.entries.map((e) => ({ ...e })), limit: catalog.limit }),
   };
 }
 
@@ -529,7 +885,15 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   // `flaky` one: it drops once after going live and comes back by itself.
   const screenState = { hung: Boolean(chosen.hung), away: chosen.flaky ? DEMO_AWAY_SAMPLES : 0 };
   const storage = createDemoStorage(chosen, {
-    delay, live: () => live, theme: () => theme, screens: () => devices.screens, hold: Boolean(hooks.hold), hung: () => screenState.hung,
+    delay,
+    now,
+    live: () => live,
+    theme: () => theme,
+    // Every theme whose video is protected: the edited one and the library's.
+    themes: () => [theme, ...saved.map((s) => s.theme)],
+    screens: () => devices.screens,
+    hold: Boolean(hooks.hold),
+    hung: () => screenState.hung,
   });
   const { videoOfTheme, ...storageApi } = storage;
   const taken = () => new Set([...images, ...posters, ...videos.keys()]);

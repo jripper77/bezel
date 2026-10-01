@@ -83,7 +83,15 @@ export const DEMO_BACK_FROM_DESKTOP = Object.freeze({
   display: { ...turzx.display, address: '3-1.6', usb: '1cbe:0088', location: '3-1.6' },
 });
 
-/** What the demo screens store: sizes in bytes (internal already net of the reserve). */
+/** Noon UTC of a day, in seconds: when the demo's files were sent. */
+const day = (date) => Date.parse(`${date}T12:00:00Z`) / 1000;
+
+/**
+ * What the demo screens store: sizes in bytes (internal already net of the
+ * reserve), and the catalog of what Bezel sent them, with local copies
+ * (D-2026-09-30-storage-manager-5). A catalog entry is stored and has its
+ * copy unless it says otherwise; a card entry names its card's capacity.
+ */
 export const DEMO_STORAGE = Object.freeze({
   internalTotal: 7_516_192_768,
   cardTotal: 31_914_983_424,
@@ -92,6 +100,78 @@ export const DEMO_STORAGE = Object.freeze({
     ['internal/video/amd_90.mp4', 18_874_368],
     ['sd/video/chuva.mp4', 23_068_672],
   ]),
+  catalog: Object.freeze([
+    { path: 'internal/image/logo.png', size: 184_320, sentAt: day('2026-09-20'), source: '/home/demo/Imagens/logo.png', resolution: { width: 480, height: 480 } },
+    { path: 'internal/video/amd_90.mp4', size: 18_874_368, sentAt: day('2026-09-14'), source: '/home/demo/Vídeos/amd.mp4', durationMs: 15_000, resolution: { width: 480, height: 1920 } },
+  ]),
+});
+
+/** The capacity of the user's card (29.7 GiB), the only trait the protocol shows of a card. */
+export const VENDOR_CARD_TOTAL = 31_890_132_172;
+/** Another card the demo's catalog remembers a file on. */
+export const OTHER_CARD_TOTAL = 7_948_206_080;
+const SENT_VIDEO = { durationMs: 10_000, resolution: { width: 480, height: 1920 } };
+
+/**
+ * The user's real 8.8" (`bezel storage ls --json`, 2026-09-30, exact bytes):
+ * the vendor app's videos on the card, re-converted copies included
+ * (`demon_open.mp4.mp4.mp4`, `NVI.mp427034822.mp4`, ...), next to an
+ * internal memory Bezel filled (but `DARIUS.mp4`, whose original is on the
+ * PC: it can be associated). One synthetic file of exactly 29,577,216 bytes is
+ * what a rev C upload that hung leaves. The screen reports 18.6 MiB used of
+ * 65.9 MiB inside and 103.8 MiB of 29.7 GiB on the card for the real files:
+ * `usedExtra` is what it counts beyond (or short of, the listing rounds the
+ * internal sizes) their sum. The catalog also remembers a file of this card
+ * that is gone and an image on another card: both restorable.
+ */
+export const VENDOR_STORAGE = Object.freeze({
+  internalTotal: 69_101_158,
+  cardTotal: VENDOR_CARD_TOTAL,
+  usedExtra: Object.freeze({ internal: -524_286, sd: 317_992 }),
+  files: Object.freeze([
+    ['internal/video/earth.mp4', 2_516_582],
+    ['internal/video/DARIUS.mp4', 7_444_889],
+    ['internal/video/jyanme.mp4', 4_404_019],
+    ['internal/video/dragon.mp4', 2_621_440],
+    ['internal/video/aniya.mp4', 3_040_870],
+    ['sd/video/demon_open.mp4.mp4.mp4', 25_483_784],
+    ['sd/video/demon.mp4.mp4.mp4', 13_237_564],
+    ['sd/video/demon.mp401115025.mp4', 13_257_991],
+    ['sd/video/8.8APEX_2.mp4', 2_259_535],
+    ['sd/video/demon_open.mp4.mp4', 25_800_984],
+    ['sd/video/AMD.mp4', 4_079_432],
+    ['sd/video/NVI.mp427034822.mp4', 5_352_433],
+    ['sd/video/NVI.mp4', 5_680_675],
+    ['sd/video/Rani.mp4', 6_007_182],
+    ['sd/video/m04.mp4', 876_578],
+    ['sd/video/Rani.mp417075004.mp4', 5_646_986],
+    ['sd/video/m04.mp424045157.mp4', 841_053],
+    ['sd/video/bezel_test_cancel.mp4', 29_577_216],
+  ]),
+  catalog: Object.freeze([
+    { path: 'internal/video/earth.mp4', size: 2_516_582, sentAt: day('2026-09-12'), source: '/home/demo/Vídeos/earth.mp4', ...SENT_VIDEO },
+    { path: 'internal/video/jyanme.mp4', size: 4_404_019, sentAt: day('2026-09-14'), source: '/home/demo/Vídeos/jyanme.mp4', ...SENT_VIDEO },
+    { path: 'internal/video/dragon.mp4', size: 2_621_440, sentAt: day('2026-09-15'), source: '/home/demo/Vídeos/dragon.mp4', ...SENT_VIDEO },
+    { path: 'internal/video/aniya.mp4', size: 3_040_870, sentAt: day('2026-09-18'), source: '/home/demo/Vídeos/aniya.mp4', ...SENT_VIDEO },
+    { path: 'sd/video/relogio.mp4', size: 6_291_456, sentAt: day('2026-09-05'), source: '/home/demo/Vídeos/relogio.mp4', card: VENDOR_CARD_TOTAL, state: 'missing', ...SENT_VIDEO },
+    { path: 'sd/image/foto.png', size: 512_000, sentAt: day('2026-08-30'), source: '/home/demo/Imagens/foto.png', card: OTHER_CARD_TOTAL, resolution: { width: 480, height: 1920 } },
+  ]),
+  boot: 'internal/video/earth.mp4',
+});
+
+/** Where the demo's originals on the PC are (the folder its picker returns). */
+export const DEMO_ORIGINALS_FOLDER = '/home/demo/Vídeos';
+
+/**
+ * Files on the PC the demo offers as originals of screen files
+ * (D-2026-09-30-storage-manager-10): `DARIUS.mp4` is the internal file's,
+ * `abertura.mp4` only has its size, `darius_final.mp4` is a byte longer.
+ */
+export const DEMO_ORIGINALS = Object.freeze({
+  '/home/demo/Vídeos/DARIUS.mp4': { size: 7_444_889, kind: 'video', durationMs: 12_000, resolution: { width: 480, height: 1920 } },
+  '/home/demo/Vídeos/abertura.mp4': { size: 7_444_889, kind: 'video', durationMs: 31_000, resolution: { width: 1920, height: 1080 } },
+  '/home/demo/Vídeos/darius_final.mp4': { size: 7_444_890, kind: 'video', durationMs: 12_000, resolution: { width: 480, height: 1920 } },
+  '/home/demo/Vídeos/AMD.mp4': { size: 4_079_432, kind: 'video', durationMs: 9_000, resolution: { width: 480, height: 1920 } },
 });
 
 /**
@@ -229,10 +309,13 @@ export const DEMO_LIBRARY = Object.freeze([
 export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules && sudo udevadm control --reload && sudo udevadm trigger';
 
 /**
- * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean, flaky?: boolean}>}
+ * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: object, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean, flaky?: boolean}>}
  */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
+  // The user's real card with the vendor app's copies, beside an internal
+  // memory Bezel filled (D-2026-09-30-storage-manager-13).
+  vendorCard: { screens: [turing88], storage: VENDOR_STORAGE },
   two: { screens: [turing88, asleep21] },
   empty: { screens: [] },
   error: { error: 'serial port enumeration: permission denied' },

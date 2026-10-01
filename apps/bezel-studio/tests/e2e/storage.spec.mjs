@@ -2,8 +2,10 @@
 // and dark: usage and files per medium, sending with a summary, a progress
 // bar and Cancel, Delete and the boot media behind a dialog that names the
 // file, a missing ffmpeg and a missing theme video explained inline, a file
-// stored with the wrong size, and what a TUR_USB screen does not offer. No
-// console errors, no serious or critical accessibility violations.
+// stored with the wrong size, and what a TUR_USB screen does not offer. The
+// files are options of each medium's list, and the actions act on the one
+// selected (the storage manager's toolbar). No console errors, no serious or
+// critical accessibility violations.
 import { test, expect, watchErrors, expectAccessible, prefixOf, suffixOf } from './helpers.mjs';
 import { formatBytes, formatMiB } from '../../src/ui/storage.js';
 import { DEMO_LET_GO_EVENT } from '../../src/bridge.js';
@@ -32,6 +34,15 @@ async function dropFile(page, zone, name, type) {
     return dt;
   }, { fileName: name, fileType: type });
   await zone.locator('.drop-zone').dispatchEvent('drop', { dataTransfer });
+}
+
+/** The option of the file called `name` in a medium's list. */
+const option = (medium, name) => medium.getByRole('option').filter({ hasText: name });
+
+/** Selects the file called `name` and presses the toolbar's `action` (`storage.action.*`). */
+async function actOn(t, medium, name, action) {
+  await option(medium, name).click();
+  await medium.getByRole('button', { name: t(`storage.action.${action}`) }).click();
 }
 
 /** Where the summary says a file goes: "in the internal memory (videos)". */
@@ -77,13 +88,13 @@ test('storage tab upload progress and confirmed delete', async ({ page, t, lang 
   await expect(page.getByText(t('storage.phase.upload'), { exact: true })).toBeVisible();
   await expect.poll(() => bar.evaluate((b) => b.value)).toBeGreaterThan(0);
   await expect(internal.getByRole('button', { name: t('storage.choose') })).toBeDisabled();
-  await expect(internal.getByRole('button', { name: t('storage.delete', { name: 'logo.png' }) })).toBeDisabled();
+  await expect(internal.getByRole('button', { name: t('storage.action.delete') })).toBeDisabled();
   await expectAccessible(page);
   await page.getByRole('button', { name: t('storage.cancel') }).click();
   const cancelled = page.getByRole('region', { name: t('storage.cancelled') });
   await expect(cancelled).toContainText(prefixOf(t, 'storage.partial', ['size', 'name']));
   await expect(bar).toBeHidden();
-  await expect(internal.getByRole('listitem').filter({ hasText: 'ferias.mp4' })).toHaveCount(1);
+  await expect(option(internal, 'ferias.mp4')).toHaveCount(1);
 
   // Deleting asks first and names the file; Esc keeps it.
   await cancelled.getByRole('button', { name: t('storage.deletePartial') }).click();
@@ -97,20 +108,20 @@ test('storage tab upload progress and confirmed delete', async ({ page, t, lang 
   await page.keyboard.press('Escape');
   await expect(confirm).toHaveCount(0);
   await expect(cancelled.getByRole('button', { name: t('storage.deletePartial') })).toBeFocused();
-  await expect(internal.getByRole('listitem').filter({ hasText: 'ferias.mp4' })).toHaveCount(1);
+  await expect(option(internal, 'ferias.mp4')).toHaveCount(1);
 
-  await internal.getByRole('button', { name: t('storage.delete', { name: 'ferias.mp4' }) }).click();
+  await actOn(t, internal, 'ferias.mp4', 'delete');
   confirm = page.getByRole('dialog', { name: t('storage.confirmDeleteTitle', { name: 'ferias.mp4' }) });
   await confirm.getByRole('button', { name: t('storage.deleteAction'), exact: true }).click();
   await expect(toast(page)).toHaveText(t('storage.deleted', { name: 'ferias.mp4' }));
-  await expect(internal.getByRole('listitem').filter({ hasText: 'ferias.mp4' })).toHaveCount(0);
+  await expect(option(internal, 'ferias.mp4')).toHaveCount(0);
 
   // A complete upload lists the stored file.
   await internal.getByRole('button', { name: t('storage.choose') }).click();
   await page.getByRole('dialog').getByRole('button', { name: t('storage.confirmUploadAction'), exact: true }).click();
   await letGo(page, 2);
   await expect(toast(page)).toHaveText(t('storage.uploaded', { name: 'ferias.mp4' }), UPLOAD);
-  await expect(internal.getByRole('listitem').filter({ hasText: 'ferias.mp4' })).toContainText('MB');
+  await expect(option(internal, 'ferias.mp4')).toContainText('MB');
 
   // The same file again replaces it, and the summary says so.
   await internal.getByRole('button', { name: t('storage.choose') }).click();
@@ -159,7 +170,8 @@ test('a live theme video missing on the screen is sent on request', async ({ pag
   await expect(page.locator('#status-device')).toHaveText(t('status.liveVideoMissing'));
   // While live, the theme covers what the screen plays.
   const internal = page.getByRole('region', { name: t('storage.medium.internal') });
-  await expect(internal.getByRole('button', { name: t('storage.play', { name: 'logo.png' }) })).toBeDisabled();
+  await option(internal, 'logo.png').click();
+  await expect(internal.getByRole('button', { name: t('storage.action.play') })).toBeDisabled();
   await expect(page.getByText(t('storage.liveHint'))).toBeVisible();
   await expectAccessible(page);
 
@@ -182,7 +194,7 @@ test('the boot media asks first, files drop on a medium and TUR_USB keeps its ow
   const card = page.getByRole('region', { name: t('storage.medium.sd') });
   const slot = page.getByRole('region', { name: t('storage.bootTitle') });
 
-  await card.getByRole('button', { name: t('storage.boot', { name: 'chuva.mp4' }) }).click();
+  await actOn(t, card, 'chuva.mp4', 'boot');
   const boot = page.getByRole('dialog', { name: t('storage.confirmBootTitle', { name: 'chuva.mp4' }) });
   await expect(boot).toContainText(t('storage.confirmBoot', { name: 'chuva.mp4' }));
   // No brightness set in this session: the screen keeps its own default.
@@ -206,7 +218,7 @@ test('the boot media asks first, files drop on a medium and TUR_USB keeps its ow
   await dragged.getByRole('button', { name: t('dialog.cancel') }).click();
   await expect(dragged).toHaveCount(0);
 
-  await internal.getByRole('button', { name: t('storage.play', { name: 'logo.png' }) }).click();
+  await actOn(t, internal, 'logo.png', 'play');
   await expect(toast(page)).toHaveText(t('storage.playing', { name: 'logo.png' }));
 
   // A file dropped on a medium goes to its folder of that kind.
@@ -219,11 +231,17 @@ test('the boot media asks first, files drop on a medium and TUR_USB keeps its ow
   await expect(card).toContainText('mapa_novo.png');
 
   // A TUR_USB screen takes files and plays them, but Bezel neither deletes
-  // them nor sets its boot media.
+  // them nor sets its boot media: Delete is there, disabled with the reason
+  // (D-2026-09-30-storage-manager-11).
   await page.goto('/index.html?demo=turzx');
   await openStorage(page, t);
   await expect(page.getByText(t('storage.limitedHint'))).toBeVisible();
-  await expect(page.getByRole('button', { name: new RegExp(`^${t('storage.deleteAction')}`) })).toHaveCount(0);
+  const usbInternal = page.getByRole('region', { name: t('storage.medium.internal') });
+  await option(usbInternal, 'logo.png').click();
+  const remove = usbInternal.getByRole('button', { name: t('storage.action.delete') });
+  await expect(remove).toBeDisabled();
+  await expect(remove).toHaveAttribute('title', t('storage.reason.deleteUnsupported'));
+  await expect(usbInternal.getByRole('button', { name: t('storage.action.play') })).toBeEnabled();
   await expect(page.getByRole('region', { name: t('storage.bootTitle') })).toHaveCount(0);
   await expect(page.locator('#storage-panel')).not.toContainText('null');
   await expectAccessible(page);
@@ -244,12 +262,12 @@ test('a file stored with the wrong size is explained and deleted on request', as
   await expectAccessible(page);
 
   // Nothing is deleted on its own: the button asks first.
-  await expect(internal.getByRole('listitem').filter({ hasText: 'torto.png' })).toHaveCount(1);
+  await expect(option(internal, 'torto.png')).toHaveCount(1);
   await failed.getByRole('button', { name: t('storage.delete', { name: 'torto.png' }) }).click();
   await page.getByRole('dialog', { name: t('storage.confirmDeleteTitle', { name: 'torto.png' }) })
     .getByRole('button', { name: t('storage.deleteAction'), exact: true }).click();
   await expect(toast(page)).toHaveText(t('storage.deleted', { name: 'torto.png' }));
-  await expect(internal.getByRole('listitem').filter({ hasText: 'torto.png' })).toHaveCount(0);
+  await expect(option(internal, 'torto.png')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -273,7 +291,7 @@ test('files over the screen\'s limit are refused in MiB, before and after conver
   await summary.getByRole('button', { name: t('storage.confirmUploadAction'), exact: true }).click();
   const converted = page.getByRole('region', { name: t('storage.refusedTitle', { name: 'show.mp4' }) });
   await expect(converted).toContainText(t('storage.refused.convertedTooLarge', { size: formatMiB(27_262_976, lang, 'up'), limit }), UPLOAD);
-  await expect(internal.getByRole('listitem').filter({ hasText: 'show.mp4' })).toHaveCount(0);
+  await expect(option(internal, 'show.mp4')).toHaveCount(0);
   await expectAccessible(page);
   expect(errors).toEqual([]);
 });

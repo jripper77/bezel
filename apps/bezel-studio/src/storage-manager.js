@@ -25,6 +25,8 @@ export const WARNING_CODES = Object.freeze(['bootMedia', 'themeVideo']);
 export const PLAN_REFUSALS = Object.freeze(['noCard', 'notListed', 'sameMedium', 'invalidName', 'extensionChanged', 'sameName', 'unsendable', 'noSpace']);
 /** What a plan does (core `archive::Transfer`). */
 export const TRANSFERS = Object.freeze(['move', 'copy', 'rename', 'restore']);
+/** Where a cataloged file stands (core `archive::EntryState`). */
+export const ENTRY_STATES = Object.freeze(['pending', 'stored', 'missing', 'deleted']);
 /** Why a file stopped its batch (core `manager::Halt`). */
 export const HALT_CODES = Object.freeze(['cancelled', 'sourceChanged', 'conflict', 'noLocalCopy', 'refused', 'failed']);
 /** How far a stopped file had come (core `manager::Stage`), in order. */

@@ -264,6 +264,14 @@
       "unused",
       "variant"
     ],
+    "halts": [
+      "cancelled",
+      "conflict",
+      "failed",
+      "noLocalCopy",
+      "refused",
+      "sourceChanged"
+    ],
     "planRefusals": [
       "extensionChanged",
       "invalidName",
@@ -279,6 +287,13 @@
       "deleteUnsupported",
       "noLocalCopy",
       "present"
+    ],
+    "stages": [
+      "catalog",
+      "delete",
+      "preflight",
+      "upload",
+      "verify"
     ],
     "transfers": [
       "copy",

@@ -374,8 +374,10 @@ mod tests {
 
     /// The storage manager's codes (D-2026-09-30-storage-manager-7..-9),
     /// which the UI translates: cleanup findings, plan refusals, skips,
-    /// warnings, what a plan does and an entry's state.
+    /// warnings, what a plan does, an entry's state, why a file stopped its
+    /// batch and how far it came.
     fn manager_codes() -> Value {
+        use bezel_core::app::manager::{Halt, Stage};
         use bezel_core::domain::archive::{EntryState, PlanRefusal, Skip, Transfer, Warning};
         use bezel_core::domain::cleanup::Code;
         use bezel_core::domain::storage::{FileEntry, RemotePath};
@@ -384,6 +386,14 @@ mod tests {
             path: path.clone(),
             size: None,
         };
+        let halts = [
+            Halt::Cancelled { partial: None },
+            Halt::SourceChanged,
+            Halt::Conflict(file.clone()),
+            Halt::NoLocalCopy,
+            Halt::Refused(Refusal::NoCard),
+            Halt::Failed(BezelError::Timeout(String::new())),
+        ];
         let refusals = [
             PlanRefusal::NoCard,
             PlanRefusal::NotListed(path.clone()),
@@ -413,8 +423,10 @@ mod tests {
         json!({
             "entryStates": sorted(EntryState::ALL.iter().map(|s| s.slug()).collect()),
             "findings": sorted(Code::ALL.iter().map(|c| c.slug()).collect()),
+            "halts": sorted(halts.iter().map(Halt::code).collect()),
             "planRefusals": sorted(refusals.iter().map(PlanRefusal::code).collect()),
             "skips": sorted(skips.iter().map(Skip::code).collect()),
+            "stages": sorted(Stage::ALL.iter().map(|s| s.slug()).collect()),
             "transfers": sorted(transfers.iter().map(|t| t.slug()).collect()),
             "warnings": sorted(warnings.iter().map(Warning::code).collect()),
         })

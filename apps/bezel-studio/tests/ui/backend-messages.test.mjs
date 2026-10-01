@@ -8,6 +8,9 @@ import { readFileSync } from 'node:fs';
 import { LOCALES, placeholders, translator } from '../../src/i18n/index.js';
 import { errorText, sensorLabel, warningText } from '../../src/messages.js';
 import { refusalText } from '../../src/ui/storage.js';
+import {
+  ENTRY_STATES, FINDING_CODES, HALT_CODES, PLAN_REFUSALS, SKIP_CODES, STAGES, TRANSFERS, WARNING_CODES, haltText, planRefusalText,
+} from '../../src/storage-manager.js';
 
 const codes = JSON.parse(readFileSync(new URL('fixtures/backend-codes.json', import.meta.url), 'utf8'));
 const pt = translator('pt-BR');
@@ -105,4 +108,47 @@ test('every sensor named by the UI is a key of the core catalog', () => {
   const named = Object.keys(LOCALES.en).filter((k) => k.startsWith('sensor.')).map((k) => k.slice('sensor.'.length));
   assert.deepEqual(named.filter((k) => !keys.has(k)), []);
   assert.deepEqual([...keys].filter((k) => !named.includes(k)), [], 'every well-known key has a name');
+});
+
+test('every storage manager code has its sentence in each language and the UI knows it', () => {
+  const { manager } = codes;
+  // A new kind of code in the fixture needs its check below.
+  assert.deepEqual(Object.keys(manager).sort(), ['entryStates', 'findings', 'halts', 'planRefusals', 'skips', 'stages', 'transfers', 'warnings']);
+  const known = {
+    entryStates: ENTRY_STATES, findings: FINDING_CODES, halts: HALT_CODES, planRefusals: PLAN_REFUSALS,
+    skips: SKIP_CODES, stages: STAGES, transfers: TRANSFERS, warnings: WARNING_CODES,
+  };
+  for (const [kind, list] of Object.entries(known)) assert.deepEqual([...list].sort(), manager[kind], `storage-manager.js knows exactly the backend's ${kind}`);
+
+  // Codes the UI reads through keys of their own.
+  const keysOf = {
+    entryStates: (c) => [`storage.state.${c}`],
+    findings: (c) => [`storage.finding.${c}`, `storage.findingGroup.${c}`, `storage.findingHelp.${c}`],
+    skips: (c) => [`storage.skip.${c}`],
+    stages: (c) => [`storage.report.stage.${c}`],
+    transfers: (c) => [`storage.plan.title.${c}`, `storage.plan.action.${c}`, `storage.plan.intro.${c}`, `storage.report.done.${c}`, `storage.job.${c}`],
+    warnings: (c) => [`storage.warning.${c}`],
+  };
+  for (const [kind, keys] of Object.entries(keysOf)) {
+    for (const key of manager[kind].flatMap(keys)) {
+      for (const [locale, strings] of Object.entries(LOCALES)) assert.ok(key in strings, `${locale}: ${key} is missing`);
+      assert.deepEqual(placeholders(LOCALES.en[key]), placeholders(LOCALES['pt-BR'][key]), `${key}: en and pt-BR use other {params}`);
+    }
+  }
+
+  // Codes the UI reads through a function: a sentence of their own, no key
+  // or {param} left, never the backend's English.
+  const plain = (text) => !text.includes('core text') && !text.includes('storage.') && !/\{\w+\}/.test(text);
+  for (const [locale, t] of [['pt-BR', pt], ['en', en]]) {
+    for (const code of manager.planRefusals) {
+      const text = planRefusalText(t, locale, { code, args: { path: 'sd/video/a.mp4', needed: 10, free: 4, refusal: { code: 'emptyFile' } }, message: 'core text' });
+      assert.ok(plain(text), `${locale}: ${code}: ${text}`);
+    }
+    const unknown = errorText(t, { code: 'somethingNew', message: 'core text' });
+    for (const halt of manager.halts) {
+      const why = { halt, error: { code: 'timeout', args: { detail: 'x' }, message: 'core text' }, refusal: { code: 'noCard', message: 'core text' }, conflict: { path: 'sd/video/a.mp4' } };
+      const text = haltText(t, locale, why, errorText);
+      assert.ok(plain(text) && text !== unknown, `${locale}: ${halt}: ${text}`);
+    }
+  }
 });

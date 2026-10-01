@@ -31,7 +31,7 @@ Gerenciar os arquivos da memória interna e do cartão SD da tela no studio e na
   - Miniaturas sob demanda: imagem cabendo em 160 px; vídeo = quadro em 1 s pelo ffmpeg (reusa `poster`); sem ffmpeg = `None`. Testes só com `Path`/tempdir (passam no Windows).
 - **Dependencies:** T-1
 - **Test:** `archive::tests::copies_are_the_exact_bytes_sent_and_survive_a_reload`, `archive::tests::thumbnails_fit_160_px_and_videos_need_ffmpeg`
-- **Status:** pending
+- **Status:** completed
 
 #### T-3: Casos de uso do gerenciador no core
 - **Specialist:** jdi-doer-bezel

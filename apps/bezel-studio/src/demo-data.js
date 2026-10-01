@@ -215,7 +215,7 @@ const POSTER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="192" height="
   + '<rect width="192" height="48" fill="url(#g)"/><path d="M0 36 Q48 20 96 34 T192 30 V48 H0Z" fill="#0f172a" opacity="0.6"/></svg>';
 
 /** The demo poster as a data URL (parentheses escaped for CSS `url()`). */
-export const DEMO_POSTER_URL = `data:image/svg+xml,${encodeURIComponent(POSTER_SVG).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
+export const DEMO_POSTER_URL = `data:image/svg+xml,${encodeURIComponent(POSTER_SVG).replaceAll('(', '%28').replaceAll(')', '%29')}`;
 
 /** A theme with a video background (the TURZX kind), for `?demo=video`. */
 export const DEMO_VIDEO_THEME = Object.freeze({
@@ -254,7 +254,7 @@ const DRAGON_POSTER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="192" h
   + '<circle cx="48" cy="15" r="5" fill="#f97316"/></svg>';
 
 /** The Dragon Ball-like poster as a data URL (parentheses escaped for CSS `url()`). */
-export const DEMO_DRAGON_POSTER_URL = `data:image/svg+xml,${encodeURIComponent(DRAGON_POSTER_SVG).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
+export const DEMO_DRAGON_POSTER_URL = `data:image/svg+xml,${encodeURIComponent(DRAGON_POSTER_SVG).replaceAll('(', '%28').replaceAll(')', '%29')}`;
 
 /**
  * The videos of the demo's themes, by asset: their own size (what

@@ -238,7 +238,7 @@ export function demoFramingSuffix(framing) {
   const pad = framing.fit === 'contain' ? framing.padColor : '';
   const canonical = [framing.fit, Math.round(framing.zoom * 100), Math.round(framing.position.x * 1000), Math.round(framing.position.y * 1000), pad].join(';');
   let hash = 0x811c9dc5;
-  for (const c of canonical) hash = Math.imul(hash ^ c.charCodeAt(0), 0x01000193) >>> 0;
+  for (const c of canonical) hash = Math.imul(hash ^ c.codePointAt(0), 0x01000193) >>> 0;
   return `_f${hash.toString(16).padStart(8, '0')}`;
 }
 
@@ -265,7 +265,13 @@ export function demoVideoName(theme, auto = null) {
 
 /** Whether a screen file named `fileName` is one of `asset`'s: any turn, any framing. */
 export function demoIsThemeVideo(asset, fileName) {
-  return new RegExp(`^${videoStem(asset)}(_90|_180|_270)?(_f[0-9a-f]{8})?\\.mp4$`).test(String(fileName).toLowerCase());
+  const name = String(fileName).toLowerCase();
+  const stem = videoStem(asset);
+  if (!name.startsWith(stem) || !name.endsWith('.mp4')) return false;
+  let rest = name.slice(stem.length, -'.mp4'.length);
+  const turn = ['_90', '_180', '_270'].find((suffix) => rest.startsWith(suffix));
+  if (turn) rest = rest.slice(turn.length);
+  return rest === '' || /^_f[0-9a-f]{8}$/.test(rest);
 }
 
 /**
@@ -1052,7 +1058,12 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const remembered = new Map();
   const modelOf = (key) => devices.screens.find((s) => s.key === key)?.models[0];
   /** What Auto is for a theme, told against the live screen's panel (`video_auto`). */
-  const autoOf = (t) => demoVideoAuto(t, videoFiles.get(t?.background?.asset) ?? null, t?.canvas ? demoPanelFor(t, live ? modelOf(live) : null) : null);
+  const autoOf = (t) => {
+    const info = videoFiles.get(t?.background?.asset) ?? null;
+    if (!t?.canvas) return demoVideoAuto(t, info, null);
+    const model = live ? modelOf(live) : null;
+    return demoVideoAuto(t, info, demoPanelFor(t, model));
+  };
   // The `hung` scenario: the screen stops reading until it is restarted. The
   // `flaky` one: it drops once after going live and comes back by itself.
   const screenState = { hung: Boolean(chosen.hung), away: chosen.flaky ? DEMO_AWAY_SAMPLES : 0 };

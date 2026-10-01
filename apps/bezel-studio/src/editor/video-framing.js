@@ -93,7 +93,7 @@ export function isPlainFraming(full) {
  */
 export function withFraming(background, patch) {
   const current = framingOf(background);
-  const merged = { ...current, ...patch, position: { ...current.position, ...(patch.position ?? {}) } };
+  const merged = { ...current, ...patch, position: { ...current.position, ...patch.position } };
   const compact = compactFraming(framingOf({ framing: merged }));
   const { framing, ...rest } = background;
   return compact ? { ...rest, framing: compact } : rest;
@@ -135,7 +135,8 @@ export function resolvedRotation(framing, auto) {
 export function pictureBox(source, rotation, framing, canvas) {
   const known = source?.width > 0 && source?.height > 0;
   const sideways = rotation % 180 === 90;
-  const turned = !known ? canvas : sideways ? { width: source.height, height: source.width } : source;
+  let turned = canvas;
+  if (known) turned = sideways ? { width: source.height, height: source.width } : source;
   const sx = canvas.width / turned.width;
   const sy = canvas.height / turned.height;
   const scale = (framing.fit === 'contain' ? Math.min(sx, sy) : Math.max(sx, sy)) * framing.zoom;

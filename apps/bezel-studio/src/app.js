@@ -329,7 +329,7 @@ function refreshChrome(reason) {
   refreshOrientation(theme);
   canvasView.drawOverlay();
   library.renderLayers();
-  refreshAuto();
+  void refreshAuto();
   inspector.render(state.assets);
   updateFramingReadout();
   if (reason !== 'select') {
@@ -399,7 +399,7 @@ function renderScreenSelect() {
   library.renderScreen(state.screens, state.screen, state.live, state.brightness, state.desktopMode, { restarting: state.restarting, hung: state.hung });
   storage.update();
   inspector.contextChanged();
-  refreshAuto();
+  void refreshAuto();
 }
 
 async function refreshScreens() {

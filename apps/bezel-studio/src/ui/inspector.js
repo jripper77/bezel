@@ -36,6 +36,15 @@ const NO_VIDEO_ACTIONS = Object.freeze({
  *   background, pick a picture, show the storage tab (where the missing
  *   video is sent), frame it on the canvas, and open the ffmpeg guide
  */
+/** Buttons of one choice (`aria-pressed`), each with a stable id so focus stays on it. */
+function choice(id, label, value, options, onChange) {
+  const group = el('div', { class: `segmented framing-choice ${id}`, role: 'group', 'aria-label': label });
+  for (const [v, text] of options) {
+    group.append(el('button', { type: 'button', id: `${id}-${v}`, text, 'aria-pressed': String(v === value), onclick: () => v !== value && onChange(v) }));
+  }
+  return el('div', { class: 'field' }, [el('span', { text: label }), group]);
+}
+
 export function createInspector({ root, store, t, sensors, minRefresh, video = NO_VIDEO_ACTIONS }) {
   const update = (id, patch) => store.dispatch('update', { id, patch });
   // A framing slider being dragged: its moves are one gesture (one undo
@@ -107,15 +116,6 @@ export function createInspector({ root, store, t, sensors, minRefresh, video = N
     return el('label', { class: 'field', for: id }, [el('span', {}, [label, ' ', out]), input]);
   }
 
-  /** Buttons of one choice (`aria-pressed`), each with a stable id so focus stays on it. */
-  function choice(id, label, value, options, onChange) {
-    const group = el('div', { class: `segmented framing-choice ${id}`, role: 'group', 'aria-label': label });
-    for (const [v, text] of options) {
-      group.append(el('button', { type: 'button', id: `${id}-${v}`, text, 'aria-pressed': String(v === value), onclick: () => v !== value && onChange(v) }));
-    }
-    return el('div', { class: 'field' }, [el('span', { text: label }), group]);
-  }
-
   /** The pad color: a picker and its hex, opaque. */
   function padField(color) {
     const rgb = color.slice(0, 7);
@@ -182,8 +182,10 @@ export function createInspector({ root, store, t, sensors, minRefresh, video = N
       ]),
     ];
     if (context.tools && !context.tools.ready) {
-      nodes.push(el('p', { class: 'hint framing-note', text: t('framing.noFfmpeg') }));
-      nodes.push(el('div', { class: 'button-row' }, [el('button', { type: 'button', id: 'framing-guide', class: 'text-button', text: t('framing.guide'), onclick: () => video.openGuide() })]));
+      nodes.push(
+        el('p', { class: 'hint framing-note', text: t('framing.noFfmpeg') }),
+        el('div', { class: 'button-row' }, [el('button', { type: 'button', id: 'framing-guide', class: 'text-button', text: t('framing.guide'), onclick: () => video.openGuide() })]),
+      );
     } else if (context.motion === false) {
       nodes.push(el('p', { class: 'hint framing-note', text: t('framing.reducedMotion') }));
     }

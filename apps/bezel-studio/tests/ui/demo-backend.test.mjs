@@ -244,6 +244,8 @@ test('a flaky demo screen is away for a while once live, then back', async () =>
 // association of an original and the local copies.
 const instant = { now: () => 1_790_000_000, delay: () => Promise.resolve() };
 const KEY = '/dev/ttyACM1';
+/** `paths` as a delete confirmation lists them: with the sizes the screen lists now. */
+const listed = (demo, paths) => paths.map((path) => ({ path, size: demo.storageState().files.get(path) ?? null }));
 
 /** Lets every pending promise callback run. */
 const settle = async () => {
@@ -320,7 +322,7 @@ test('a cancelled or failed move keeps its source and stops the batch', async ()
   assert.ok(demo.storageState().files.has('internal/video/earth.mp4'));
   await assert.rejects(demo.managerOverview(KEY), (e) => e.code === 'busy');
   await assert.rejects(demo.planCopy(KEY, ['internal/video/jyanme.mp4'], 'sd'), (e) => e.code === 'busy');
-  await assert.rejects(demo.deleteFiles(KEY, ['sd/video/AMD.mp4'], true), (e) => e.code === 'busy');
+  await assert.rejects(demo.deleteFiles(KEY, listed(demo, ['sd/video/AMD.mp4']), true), (e) => e.code === 'busy');
   assert.equal(await demo.cancelJob(), true);
   const report = await running;
   assert.deepEqual(report.done, []);
@@ -373,10 +375,10 @@ test('a copy keeps the source, a rename takes the new name, a restore sends from
 
 test('batch deletes go one by one, are reported and count against the cache limit', async () => {
   const demo = createDemoBackend('vendorCard', instant);
-  await assert.rejects(demo.deleteFiles(KEY, ['sd/video/bezel_test_cancel.mp4'], false), (e) => e.code === 'notConfirmed');
+  await assert.rejects(demo.deleteFiles(KEY, listed(demo, ['sd/video/bezel_test_cancel.mp4']), false), (e) => e.code === 'notConfirmed');
   const seen = [];
   demo.onJobProgress((p) => seen.push(p));
-  const report = await demo.deleteFiles(KEY, ['sd/video/bezel_test_cancel.mp4', 'internal/video/aniya.mp4', 'sd/video/none.mp4', 'sd/video/AMD.mp4'], true);
+  const report = await demo.deleteFiles(KEY, listed(demo, ['sd/video/bezel_test_cancel.mp4', 'internal/video/aniya.mp4', 'sd/video/none.mp4', 'sd/video/AMD.mp4']), true);
   assert.deepEqual(report.deleted, ['sd/video/bezel_test_cancel.mp4', 'internal/video/aniya.mp4']);
   assert.equal(report.freed, 29_577_216 + 3_040_870);
   assert.deepEqual([report.failed.path, report.failed.halt, report.failed.error, report.notStarted], ['sd/video/none.mp4', 'sourceChanged', null, ['sd/video/AMD.mp4']]);
@@ -392,13 +394,21 @@ test('batch deletes go one by one, are reported and count against the cache limi
 
   const turzx = createDemoBackend('turzx', instant);
   const [screen] = (await turzx.listDevices()).screens;
-  await assert.rejects(turzx.deleteFiles(screen.key, ['internal/image/logo.png'], true), (e) => e.code === 'unsupported');
+  await assert.rejects(turzx.deleteFiles(screen.key, listed(turzx, ['internal/image/logo.png']), true), (e) => e.code === 'unsupported');
+});
+
+test('a file of another size than confirmed is not deleted, like the app', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  const amd = demo.storageState().files.get('sd/video/AMD.mp4');
+  const report = await demo.deleteFiles(KEY, [{ path: 'sd/video/AMD.mp4', size: amd - 1 }, ...listed(demo, ['sd/video/m04.mp4'])], true);
+  assert.deepEqual([report.deleted, report.failed.path, report.failed.halt, report.notStarted], [[], 'sd/video/AMD.mp4', 'sourceChanged', ['sd/video/m04.mp4']]);
+  assert.equal(demo.storageState().files.get('sd/video/AMD.mp4'), amd, 'still there');
 });
 
 test('a cancelled batch delete stops before the next file', async () => {
   const demo = createDemoBackend('vendorCard', instant);
   demo.onJobProgress((p) => { if (p.step.index === 0) demo.cancelJob(); });
-  const report = await demo.deleteFiles(KEY, ['sd/video/m04.mp4', 'sd/video/AMD.mp4'], true);
+  const report = await demo.deleteFiles(KEY, listed(demo, ['sd/video/m04.mp4', 'sd/video/AMD.mp4']), true);
   assert.deepEqual([report.deleted, report.cancelled, report.notStarted], [['sd/video/m04.mp4'], true, ['sd/video/AMD.mp4']]);
 });
 

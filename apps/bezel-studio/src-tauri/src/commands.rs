@@ -24,8 +24,8 @@ use crate::dto::{
     SensorDto, SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
 };
 use crate::manager::{
-    Ask, CacheDto, CandidatesDto, ClearedDto, DeleteReportDto, ManagedFileDto, ManagerOverviewDto,
-    PlanDto, RunDto,
+    Ask, CacheDto, CandidatesDto, ClearedDto, ConfirmedFileDto, DeleteReportDto, ManagedFileDto,
+    ManagerOverviewDto, PlanDto, RunDto,
 };
 use crate::media::{BACKGROUND_EXTENSIONS, IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
@@ -675,19 +675,20 @@ pub async fn run_plan<R: Runtime>(
     .await
 }
 
-/// Deletes the files the user confirmed, one by one; `confirmed` comes from
-/// the dialog that listed them and the space freed.
+/// Deletes the files the user confirmed, one by one, each only while it has
+/// the size the dialog listed; `confirmed` comes from that dialog, which
+/// listed them and the space freed.
 #[tauri::command]
 pub async fn delete_files<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, Shared>,
     screen: String,
-    paths: Vec<String>,
+    files: Vec<ConfirmedFileDto>,
     confirmed: bool,
 ) -> UiResult<DeleteReportDto> {
     blocking(&state, move |b| {
         let confirm = confirm_of(confirmed);
-        b.delete_files(&screen, &paths, confirm, now(), &mut |p| {
+        b.delete_files(&screen, &files, confirm, now(), &mut |p| {
             emit_progress(&app, p);
         })
     })

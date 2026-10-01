@@ -12,8 +12,8 @@ use bezel_core::domain::screen::Confirm;
 use bezel_core::domain::storage::{FileEntry, Medium, RemotePath};
 
 use super::{
-    DeleteReportDto, Desk, PlanDto, PlanReadyDto, PlanRefusedDto, RunDto, TransferReportDto,
-    restore_id,
+    ConfirmedFileDto, DeleteReportDto, Desk, PlanDto, PlanReadyDto, PlanRefusedDto, RunDto,
+    TransferReportDto, restore_id,
 };
 use crate::backend::Backend;
 use crate::clock::unix_seconds;
@@ -63,6 +63,17 @@ fn medium(slug: &str) -> UiResult<Medium> {
 
 fn remotes(paths: &[String]) -> UiResult<Vec<RemotePath>> {
     paths.iter().map(|p| remote(p)).collect()
+}
+
+/// The files as the user confirmed them, sizes included.
+fn confirmed_files(files: &[ConfirmedFileDto]) -> UiResult<Vec<FileEntry>> {
+    let file = |f: &ConfirmedFileDto| {
+        Ok(FileEntry {
+            path: remote(&f.path)?,
+            size: f.size,
+        })
+    };
+    files.iter().map(file).collect()
 }
 
 /// The cataloged entries of the screen behind `desk` that `ids` name (not
@@ -267,19 +278,20 @@ impl Backend {
         }
     }
 
-    /// Deletes exactly the files `paths` the user confirmed, one by one
+    /// Deletes exactly the `files` the user confirmed, one by one
     /// (`delete` progress counts files), each entry marked deleted. A file
-    /// gone or changed since stops the batch, as do a failure and Cancel.
-    /// With `Confirm::No` nothing reaches the screen.
+    /// gone or of another size than the confirmation listed stops the
+    /// batch undeleted, as do a failure and Cancel. With `Confirm::No`
+    /// nothing reaches the screen.
     pub fn delete_files(
         &self,
         screen: &str,
-        paths: &[String],
+        files: &[ConfirmedFileDto],
         confirm: Confirm,
         time: LocalTime,
         progress: &mut dyn FnMut(ProgressDto),
     ) -> UiResult<DeleteReportDto> {
-        let paths = remotes(paths)?;
+        let files = confirmed_files(files)?;
         let _claim = self.storage.claim()?;
         self.storage.forget_plan();
         let token = self.storage.start_job();
@@ -290,7 +302,7 @@ impl Backend {
                 store: store.as_mut(),
                 videos: &[],
             };
-            desk.delete_each(&paths, confirm, &token, progress)
+            desk.delete_each(&files, confirm, &token, progress)
         });
         self.storage.end_job();
         deleted?
@@ -299,57 +311,42 @@ impl Backend {
 
 impl Desk<'_> {
     /// The core's batch delete, one file per call so that each one's
-    /// progress is reported.
+    /// progress is reported. Each file goes with the size its confirmation
+    /// listed: the core deletes it only while the screen still lists that
+    /// size (D-2026-09-30-storage-manager-9).
     fn delete_each(
         &mut self,
-        paths: &[RemotePath],
+        files: &[FileEntry],
         confirm: Confirm,
         cancel: &CancelToken,
         progress: &mut dyn FnMut(ProgressDto),
     ) -> UiResult<DeleteReportDto> {
         if confirm == Confirm::No {
             // The core refuses before it calls the screen.
-            let unsized_files: Vec<FileEntry> = paths.iter().map(size_unknown).collect();
-            let report = self
-                .manager()
-                .delete_files(&unsized_files, confirm, cancel)?;
+            let report = self.manager().delete_files(files, confirm, cancel)?;
             let mut dto = DeleteReportDto::default();
             dto.add(&report, &[]);
             return Ok(dto);
         }
-        let listing = self.manager().inventory()?.listing;
+        let paths: Vec<RemotePath> = files.iter().map(|f| f.path.clone()).collect();
         let mut dto = DeleteReportDto::default();
-        for (index, path) in paths.iter().enumerate() {
-            progress(deleting(paths, index, index));
-            // As confirmed: the size listed now (none when it is gone: the
-            // core then stops the batch).
-            let size = listing.file(path).and_then(|f| f.size);
-            let file = FileEntry {
-                path: path.clone(),
-                size,
-            };
+        for (index, file) in files.iter().enumerate() {
+            progress(deleting(&paths, index, index));
             let rest = &paths[index + 1..];
-            let report = match self.manager().delete_files(&[file], confirm, cancel) {
+            let one = std::slice::from_ref(file);
+            let report = match self.manager().delete_files(one, confirm, cancel) {
                 Ok(report) => report,
                 Err(e) if index == 0 => return Err(e.into()),
-                Err(e) => return Ok(dto.failed_at(path, e.into(), rest)),
+                Err(e) => return Ok(dto.failed_at(&file.path, e.into(), rest)),
             };
             if !dto.add(&report, rest) {
                 return Ok(dto);
             }
         }
         if let Some(last) = paths.len().checked_sub(1) {
-            progress(deleting(paths, last, paths.len()));
+            progress(deleting(&paths, last, paths.len()));
         }
         Ok(dto)
-    }
-}
-
-/// `path` as a file of unknown size.
-fn size_unknown(path: &RemotePath) -> FileEntry {
-    FileEntry {
-        path: path.clone(),
-        size: None,
     }
 }
 

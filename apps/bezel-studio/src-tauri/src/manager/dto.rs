@@ -10,7 +10,7 @@ use bezel_core::domain::archive::{
 use bezel_core::domain::cleanup::{Finding, Protected, Reason, artifact_base};
 use bezel_core::domain::storage::{Medium, RemotePath};
 use bezel_themes::dto::SizeDto;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::dto::{CapacityDto, RefusalDto, StoredFileDto, name_error_char};
@@ -552,6 +552,18 @@ impl From<&TransferReport> for TransferReportDto {
         }
         dto
     }
+}
+
+/// A file the user confirmed deleting, as the confirmation listed it: its
+/// path and its size then. A file that is gone or has another size when its
+/// turn comes is not deleted (`sourceChanged`, D-2026-09-30-storage-manager-9).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmedFileDto {
+    /// The screen path (`sd/video/a.mp4`).
+    pub path: String,
+    /// Its size in the confirmation, bytes (`None`: unknown).
+    pub size: Option<u64>,
 }
 
 /// The file that stopped a batch delete.

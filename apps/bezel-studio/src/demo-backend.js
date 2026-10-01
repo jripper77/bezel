@@ -655,7 +655,9 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
     }
   }
 
-  async function deleteEach(paths) {
+  /** Deletes the confirmed files `{path, size}` one by one; one gone or of another size stops the batch undeleted. */
+  async function deleteEach(chosen) {
+    const paths = chosen.map((c) => c.path);
     const report = { deleted: [], failed: null, cancelled: false, notStarted: [], freed: 0 };
     for (let i = 0; i < paths.length; i += 1) {
       const path = paths[i];
@@ -665,7 +667,7 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       }
       emit('delete', i, paths.length, { index: i, count: paths.length, source: path, target: null });
       await delay(DEMO_STEP_MS);
-      if (!files.has(path)) {
+      if (!files.has(path) || files.get(path) !== chosen[i].size) {
         report.failed = { path, ...halted('sourceChanged') };
         report.notStarted = paths.slice(i + 1);
         break;
@@ -745,12 +747,12 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       if (refusal) return Promise.resolve(refusal);
       return asJob(() => runPlanSteps(held.key, held.plan));
     },
-    /** Deletes the confirmed files one by one (the cleanup's list, or a selection). */
-    deleteFiles: (key, paths, confirmed) => {
+    /** Deletes the confirmed files `{path, size}` one by one (the cleanup's list, or a selection). */
+    deleteFiles: (key, chosen, confirmed) => {
       if (limited(key)) return refuse('unsupported', 'not supported: deleting files', { detail: 'deleting files' });
-      if (!confirmed) return refuse('notConfirmed', `deleting ${paths.length} files needs confirmation`, { detail: `deleting ${paths.length} files` });
+      if (!confirmed) return refuse('notConfirmed', `deleting ${chosen.length} files needs confirmation`, { detail: `deleting ${chosen.length} files` });
       if (job) return refuse('busy', 'a storage operation is using the screen');
-      return asJob(() => deleteEach(paths));
+      return asJob(() => deleteEach(chosen));
     },
     /** The originals the demo's picker returns: files, or their folder. */
     pickOriginals: (folder) => Promise.resolve(folder ? [DEMO_ORIGINALS_FOLDER] : Object.keys(DEMO_ORIGINALS)),

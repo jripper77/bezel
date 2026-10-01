@@ -621,12 +621,13 @@ fn deleting_files_needs_the_confirmation_and_reports_each_file() {
     let b = send(&f, "native-b.mp4", 600, "internal");
     let calls = f.storage().calls.len();
     let paths = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
-    let all = paths(&[
-        &a,
-        "internal/video/vendor.mp4",
-        "internal/video/gone.mp4",
-        &b,
-    ]);
+    // As the confirmation listed them, with their sizes.
+    let all = [
+        confirmed(&a, Some(700)),
+        confirmed("internal/video/vendor.mp4", Some(800)),
+        confirmed("internal/video/gone.mp4", Some(500)),
+        confirmed(&b, Some(600)),
+    ];
 
     let err = f
         .backend
@@ -666,7 +667,7 @@ fn deleting_files_needs_the_confirmation_and_reports_each_file() {
     // Cancel: the files left are not started.
     let report = f
         .backend
-        .delete_files(KEY, &paths(&[&b]), Confirm::Yes, TIME, &mut |_| {
+        .delete_files(KEY, &all[3..], Confirm::Yes, TIME, &mut |_| {
             assert!(f.backend.cancel_job());
         })
         .unwrap();
@@ -676,6 +677,59 @@ fn deleting_files_needs_the_confirmation_and_reports_each_file() {
         (0, paths(&[&b]))
     );
     assert!(f.storage().files.contains_key(&remote_path(&b)));
+}
+
+/// A file as a delete confirmation lists it.
+fn confirmed(path: &str, size: Option<u64>) -> ConfirmedFileDto {
+    ConfirmedFileDto {
+        path: path.to_string(),
+        size,
+    }
+}
+
+#[test]
+fn a_file_changed_since_the_confirmation_is_not_deleted() {
+    let f = fixture("delete-changed", FakeStorage::default());
+    let a = send(&f, "native-a.mp4", 700, "internal");
+    let b = send(&f, "native-b.mp4", 600, "internal");
+    // Listed and confirmed at 700 bytes; another app wrote 900 since.
+    store_elsewhere(&f, &a, 900);
+    let before = f.writes().len();
+    let report = f
+        .backend
+        .delete_files(
+            KEY,
+            &[confirmed(&a, Some(700)), confirmed(&b, Some(600))],
+            Confirm::Yes,
+            TIME,
+            &mut |_| {},
+        )
+        .unwrap();
+    assert!(report.deleted.is_empty());
+    let failed = report.failed.clone().unwrap();
+    assert_eq!(
+        (failed.path.as_str(), failed.why.halt),
+        (a.as_str(), "sourceChanged")
+    );
+    assert_eq!(
+        report.not_started,
+        std::slice::from_ref(&b),
+        "the batch stops there"
+    );
+    assert_eq!(f.writes().len(), before, "nothing deleted");
+    assert_eq!(f.storage().files[&remote_path(&a)].len(), 900);
+    // A file of unknown size in the confirmation is not deleted either.
+    let report = f
+        .backend
+        .delete_files(KEY, &[confirmed(&b, None)], Confirm::Yes, TIME, &mut |_| {})
+        .unwrap();
+    assert_eq!(report.failed.unwrap().why.halt, "sourceChanged");
+    assert!(f.storage().files.contains_key(&remote_path(&b)));
+    // The JSON the UI sends.
+    let sent: Vec<ConfirmedFileDto> =
+        serde_json::from_value(json!([{"path": b, "size": 600}, {"path": a, "size": null}]))
+            .unwrap();
+    assert_eq!(sent, [confirmed(&b, Some(600)), confirmed(&a, None)]);
 }
 
 #[test]
@@ -893,7 +947,7 @@ fn turing_usb_screens_never_delete_move_or_clean_up() {
         .backend
         .delete_files(
             USB,
-            std::slice::from_ref(&sent),
+            &[confirmed(&sent, Some(900))],
             Confirm::Yes,
             TIME,
             &mut |_| {},

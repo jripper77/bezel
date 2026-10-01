@@ -39,7 +39,7 @@ let dialogs = 0;
  * @param {object} deps.bridge
  * @param {object} deps.host what the storage panel lends: `key()`, `data()`,
  *   `features()`, `busy()`, `live()`, `notify(text)`, `notice(n)`,
- *   `reload()`, `runPlan(plan)`, `runDeletes(paths)`, `askBoot(file)`,
+ *   `reload()`, `runPlan(plan)`, `runDeletes(files)`, `askBoot(file)`,
  *   `askDelete(file)`, `play(file)`, `dropZone(medium)`, `confirm(opts)`,
  *   `bootSlot()`
  */
@@ -620,7 +620,7 @@ export function createManagerView({ t, locale, bridge, host }) {
       action: t('storage.deleteAction'),
       danger: true,
     });
-    if (ok) host.runDeletes(chosen.map((f) => f.path));
+    if (ok) host.runDeletes(chosen);
   }
 
   // ------------------------------------------------------------- cleanup --
@@ -678,7 +678,7 @@ export function createManagerView({ t, locale, bridge, host }) {
       action: t('storage.cleanup.deleteAction'),
       danger: true,
     });
-    if (yes) host.runDeletes(picked.map((f) => f.path));
+    if (yes) host.runDeletes(picked);
   }
 
   // ----------------------------------------------------------- associate --

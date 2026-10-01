@@ -143,7 +143,7 @@ test('tauri mode maps the storage manager to its commands, with their arguments'
   await bridge.planRename('k', 'sd/video/a.mp4', 'b.mp4');
   await bridge.planRestore('k', ['sd/video/a.mp4@31890132172'], 'sd');
   await bridge.runPlan(3, true);
-  await bridge.deleteFiles('k', ['sd/video/a.mp4'], true);
+  await bridge.deleteFiles('k', [{ path: 'sd/video/a.mp4', size: 10 }], true);
   await bridge.pickOriginals(true);
   await bridge.associateCandidates('k', 'sd/video/a.mp4', ['/home/me/Vídeos']);
   await bridge.associateOriginal('k', 'sd/video/a.mp4', '/home/me/Vídeos/a.mp4', true);
@@ -158,7 +158,7 @@ test('tauri mode maps the storage manager to its commands, with their arguments'
     ['plan_rename', { screen: 'k', path: 'sd/video/a.mp4', newName: 'b.mp4', overwrite: [] }],
     ['plan_restore', { screen: 'k', ids: ['sd/video/a.mp4@31890132172'], to: 'sd', overwrite: [] }],
     ['run_plan', { ticket: 3, confirmed: true }],
-    ['delete_files', { screen: 'k', paths: ['sd/video/a.mp4'], confirmed: true }],
+    ['delete_files', { screen: 'k', files: [{ path: 'sd/video/a.mp4', size: 10 }], confirmed: true }],
     ['pick_originals', { folder: true }],
     ['associate_candidates', { screen: 'k', path: 'sd/video/a.mp4', sources: ['/home/me/Vídeos'] }],
     ['associate_original', { screen: 'k', path: 'sd/video/a.mp4', source: '/home/me/Vídeos/a.mp4', confirmed: true }],

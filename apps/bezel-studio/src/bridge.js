@@ -245,8 +245,11 @@ function tauriBridge(invoke, tauri = {}) {
      * Progress comes as `storage-progress`, Cancel is `cancelJob`. @returns {Promise<RunDto>}
      */
     runPlan: (ticket, confirmed) => invoke('run_plan', { ticket, confirmed }),
-    /** Deletes the confirmed files one by one (a cleanup or a selection). @returns {Promise<DeleteReportDto>} */
-    deleteFiles: (screen, paths, confirmed) => invoke('delete_files', { screen, paths, confirmed }),
+    /**
+     * Deletes the confirmed files one by one (a cleanup or a selection): `files` as the dialog listed them,
+     * `{path, size}`; one gone or of another size by then is not deleted. @returns {Promise<DeleteReportDto>}
+     */
+    deleteFiles: (screen, files, confirmed) => invoke('delete_files', { screen, files, confirmed }),
     /** Originals chosen on the PC: files, or one folder (`folder`); `[]` when cancelled. @returns {Promise<string[]>} */
     pickOriginals: (folder) => invoke('pick_originals', { folder }),
     /** The originals among `sources` (files or folders), likeliest first. @returns {Promise<{candidates: CandidateDto[]}>} */

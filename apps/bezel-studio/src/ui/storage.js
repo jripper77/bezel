@@ -353,11 +353,17 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     await load();
   }
 
-  /** Deletes the confirmed files one by one (a selection, or the cleanup's list). */
-  async function runDeletes(paths) {
-    startJob({ kind: 'delete', name: baseName(paths[0]), step: { index: 0, count: paths.length, source: paths[0], target: null } });
+  /**
+   * Deletes the confirmed files one by one (a selection, or the cleanup's
+   * list), each with the size its dialog listed: one that changed since is
+   * not deleted.
+   */
+  async function runDeletes(files) {
+    const first = files[0].path;
+    startJob({ kind: 'delete', name: baseName(first), step: { index: 0, count: files.length, source: first, target: null } });
     try {
-      view.notice = { kind: 'deleteReport', report: await bridge.deleteFiles(view.key, paths, true) };
+      const confirmed = files.map(({ path, size }) => ({ path, size }));
+      view.notice = { kind: 'deleteReport', report: await bridge.deleteFiles(view.key, confirmed, true) };
     } catch (e) {
       view.notice = errorNotice(e);
     }

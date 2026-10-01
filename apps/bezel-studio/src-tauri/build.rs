@@ -49,6 +49,20 @@ const COMMANDS: &[&str] = &[
     "restart_screen",
     "theme_thumbnail",
     "set_theme_filter",
+    "manager_overview",
+    "manager_thumbnail",
+    "plan_move",
+    "plan_copy",
+    "plan_rename",
+    "plan_restore",
+    "run_plan",
+    "delete_files",
+    "pick_originals",
+    "associate_candidates",
+    "associate_original",
+    "cache_info",
+    "clear_cache",
+    "set_cache_limit",
 ];
 
 fn main() -> ExitCode {

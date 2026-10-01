@@ -13,6 +13,7 @@ pub mod clock;
 pub mod commands;
 pub mod dto;
 pub mod library;
+pub mod manager;
 pub mod media;
 pub mod messages;
 pub mod settings;
@@ -25,7 +26,7 @@ pub mod udev_help;
 pub mod video;
 
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -36,6 +37,7 @@ use bezel_core::ports::{DesktopModeHid, DeviceBus, ScreenConnector};
 use bezel_devices::fake::FakeStorage;
 use bezel_devices::{FakeBus, FakeConnector, FakeHid, SystemBus, SystemConnector, SystemHid};
 use bezel_media::FfmpegTranscoder;
+use bezel_media::archive::{DiskArchive, MemoryArchive, storage_dir};
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
@@ -46,6 +48,7 @@ use crate::backend::{
 };
 use crate::commands::{Shared, Unsaved};
 use crate::library::ThemeLibrary;
+use crate::manager::Copies;
 use crate::settings::SettingsFile;
 use crate::storage::{MediaSetup, StorageState};
 use crate::studio::Studio;
@@ -220,6 +223,20 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::restart_screen,
             commands::theme_thumbnail,
             commands::set_theme_filter,
+            commands::manager_overview,
+            commands::manager_thumbnail,
+            commands::plan_move,
+            commands::plan_copy,
+            commands::plan_rename,
+            commands::plan_restore,
+            commands::run_plan,
+            commands::delete_files,
+            commands::pick_originals,
+            commands::associate_candidates,
+            commands::associate_original,
+            commands::cache_info,
+            commands::clear_cache,
+            commands::set_cache_limit,
         ])
         .run(tauri::generate_context!())
 }
@@ -311,8 +328,16 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     let language = settings.load().language().unwrap_or(system_language);
     let ffmpeg = settings.load().ffmpeg_path.map(PathBuf::from);
     let cache = path.app_cache_dir()?;
+    let copies = if simulate {
+        // The simulated 8.8" is keyed like a real one: never in the
+        // user's catalog.
+        Copies::in_memory(MemoryArchive::new())
+    } else {
+        copies(&path.data_dir()?)
+    };
     let storage = StorageState::new(
         Box::new(FfmpegTranscoder::new(ffmpeg)),
+        copies,
         cache.join("sending"),
     );
     // Screens that cannot play videos get the theme's video decoded here by
@@ -339,6 +364,19 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     })
 }
 
+/// The local copies of what the studio sends, in `<data>/bezel/storage`
+/// shared with the CLI (D-2026-09-30-storage-manager-5); in memory for this
+/// run when that folder cannot be made.
+fn copies(data: &Path) -> Copies {
+    match DiskArchive::open(storage_dir(data)) {
+        Ok(archive) => Copies::on_disk(archive),
+        Err(e) => {
+            tracing::error!("local copies are kept for this run only: {e}");
+            Copies::in_memory(MemoryArchive::new())
+        }
+    }
+}
+
 /// The library's thumbnails, kept in `dir`: drawn with the bundled themes'
 /// fonts and the installed ones (loaded on the first thumbnail drawn) and the
 /// demo sensor values.
@@ -362,6 +400,12 @@ impl MediaSetup for FfmpegTranscoder {
 
     fn tool_in_use(&mut self) -> Option<PathBuf> {
         self.ffmpeg_in_use()
+    }
+
+    fn spare(&self) -> Box<dyn MediaSetup> {
+        Box::new(FfmpegTranscoder::new(
+            self.ffmpeg_path().map(Path::to_path_buf),
+        ))
     }
 }
 
@@ -450,6 +494,36 @@ mod tests {
     fn quitting_asks_over_unsaved_edits_only() {
         assert_eq!(on_quit(true), OnQuit::Ask);
         assert_eq!(on_quit(false), OnQuit::Exit);
+    }
+
+    /// The `allow-<command>` permissions of the window's capability, and
+    /// the commands `build.rs` generates them for.
+    fn permissions() -> (Vec<String>, Vec<String>) {
+        let build = include_str!("../build.rs");
+        let list = &build[build.find("const COMMANDS").unwrap()..];
+        let list = &list[..list.find("];").unwrap()];
+        let commands = list
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(|c| format!("allow-{}", c.replace('_', "-")))
+            .collect();
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let allowed = capability["permissions"].as_array().unwrap().iter();
+        let allowed = allowed
+            .filter_map(|p| p.as_str())
+            .filter(|p| p.starts_with("allow-"))
+            .map(str::to_string)
+            .collect();
+        (commands, allowed)
+    }
+
+    #[test]
+    fn every_command_is_allowed_by_name() {
+        let (commands, allowed) = permissions();
+        assert!(commands.contains(&"allow-run-plan".to_string()));
+        assert_eq!(commands, allowed, "build.rs and capabilities/default.json");
     }
 
     #[test]

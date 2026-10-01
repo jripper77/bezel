@@ -903,6 +903,7 @@ mod tests {
             studio: Session::new(studio),
             storage: StorageState::new(
                 Box::new(crate::storage::tests::FakeMedia::ready()),
+                crate::manager::Copies::in_memory(bezel_media::archive::MemoryArchive::new()),
                 root.join("scratch"),
             ),
             thumbnails: crate::thumbnails::tests::thumbnails(root.join("thumbnails")),

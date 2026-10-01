@@ -214,7 +214,11 @@ mod tests {
             udev: None,
             fonts: Vec::new(),
             studio: Session::new(studio),
-            storage: StorageState::new(Box::new(media), root.join("scratch")),
+            storage: StorageState::new(
+                Box::new(media),
+                crate::manager::Copies::in_memory(bezel_media::archive::MemoryArchive::new()),
+                root.join("scratch"),
+            ),
             thumbnails: crate::thumbnails::tests::thumbnails(root.join("thumbnails")),
         };
         Fixture {

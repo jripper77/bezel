@@ -23,6 +23,10 @@ use crate::dto::{
     MonitorModeDto, PreferencesDto, PrepareDto, ProgressDto, RestartedDto, SampleDto, SavedDto,
     SensorDto, SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
 };
+use crate::manager::{
+    Ask, CacheDto, CandidatesDto, ClearedDto, DeleteReportDto, ManagedFileDto, ManagerOverviewDto,
+    PlanDto, TransferReportDto,
+};
 use crate::media::{BACKGROUND_EXTENSIONS, IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
 use crate::storage::ProgressThrottle;
@@ -562,6 +566,212 @@ pub async fn set_boot_media(
         b.set_boot_media(&screen, path.as_deref(), brightness, confirm, now())
     })
     .await
+}
+
+// ----------------------------------------------------- storage manager --
+
+/// Sends a storage manager job's progress as [`PROGRESS_EVENT`].
+fn emit_progress<R: Runtime>(app: &AppHandle<R>, progress: ProgressDto) {
+    if let Err(e) = app.emit(PROGRESS_EVENT, progress) {
+        tracing::warn!("storage progress not sent: {e}");
+    }
+}
+
+/// Both media of a screen next to the catalog of what Bezel sent.
+#[tauri::command]
+pub async fn manager_overview(
+    state: State<'_, Shared>,
+    screen: String,
+) -> UiResult<ManagerOverviewDto> {
+    blocking(&state, move |b| b.manager_overview(&screen, now())).await
+}
+
+/// A listed file's thumbnail from its local copy, as a `data:` URL.
+#[tauri::command]
+pub async fn manager_thumbnail(
+    state: State<'_, Shared>,
+    screen: String,
+    path: String,
+) -> UiResult<Option<String>> {
+    blocking(&state, move |b| Ok(b.manager_thumbnail(&screen, &path))).await
+}
+
+/// Runs [`Backend::plan_transfer`] for `ask`.
+async fn plan(
+    state: State<'_, Shared>,
+    screen: String,
+    ask: Ask,
+    overwrite: Vec<String>,
+) -> UiResult<PlanDto> {
+    blocking(&state, move |b| {
+        b.plan_transfer(&screen, &ask, &overwrite, now())
+    })
+    .await
+}
+
+/// Plans moving `paths` to the medium `to`; `overwrite`: targets whose
+/// replacement the user confirmed.
+#[tauri::command]
+pub async fn plan_move(
+    state: State<'_, Shared>,
+    screen: String,
+    paths: Vec<String>,
+    to: String,
+    overwrite: Vec<String>,
+) -> UiResult<PlanDto> {
+    plan(state, screen, Ask::Move { paths, to }, overwrite).await
+}
+
+/// Plans copying `paths` to the medium `to`.
+#[tauri::command]
+pub async fn plan_copy(
+    state: State<'_, Shared>,
+    screen: String,
+    paths: Vec<String>,
+    to: String,
+    overwrite: Vec<String>,
+) -> UiResult<PlanDto> {
+    plan(state, screen, Ask::Copy { paths, to }, overwrite).await
+}
+
+/// Plans renaming `path` to `new_name`.
+#[tauri::command]
+pub async fn plan_rename(
+    state: State<'_, Shared>,
+    screen: String,
+    path: String,
+    new_name: String,
+    overwrite: Vec<String>,
+) -> UiResult<PlanDto> {
+    plan(state, screen, Ask::Rename { path, new_name }, overwrite).await
+}
+
+/// Plans restoring the cataloged entries `ids` onto the medium `to`.
+#[tauri::command]
+pub async fn plan_restore(
+    state: State<'_, Shared>,
+    screen: String,
+    ids: Vec<String>,
+    to: String,
+    overwrite: Vec<String>,
+) -> UiResult<PlanDto> {
+    plan(state, screen, Ask::Restore { ids, to }, overwrite).await
+}
+
+/// Runs the plan the user confirmed; progress goes out as
+/// [`PROGRESS_EVENT`], Cancel is `cancel_job`.
+#[tauri::command]
+pub async fn run_plan<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+    ticket: u64,
+) -> UiResult<TransferReportDto> {
+    blocking(&state, move |b| {
+        b.run_plan(ticket, now(), &mut |p| emit_progress(&app, p))
+    })
+    .await
+}
+
+/// Deletes the files the user confirmed, one by one; `confirmed` comes from
+/// the dialog that listed them and the space freed.
+#[tauri::command]
+pub async fn delete_files<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+    screen: String,
+    paths: Vec<String>,
+    confirmed: bool,
+) -> UiResult<DeleteReportDto> {
+    blocking(&state, move |b| {
+        let confirm = confirm_of(confirmed);
+        b.delete_files(&screen, &paths, confirm, now(), &mut |p| {
+            emit_progress(&app, p);
+        })
+    })
+    .await
+}
+
+/// Asks for the originals of a screen file: media files, or one folder
+/// (`folder`). Empty when cancelled.
+#[tauri::command]
+pub async fn pick_originals<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+    folder: bool,
+) -> UiResult<Vec<String>> {
+    let dialog = app.dialog().file();
+    let picked = if folder {
+        dialog.blocking_pick_folder().map(|p| vec![p])
+    } else {
+        let filter = state.texts().media;
+        dialog
+            .add_filter(filter, MEDIA_EXTENSIONS)
+            .blocking_pick_files()
+    };
+    picked
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| {
+            p.into_path()
+                .map(|p| p.display().to_string())
+                .map_err(UiError::system)
+        })
+        .collect()
+}
+
+/// The originals of a screen file among the picked `sources`.
+#[tauri::command]
+pub async fn associate_candidates(
+    state: State<'_, Shared>,
+    screen: String,
+    path: String,
+    sources: Vec<String>,
+) -> UiResult<CandidatesDto> {
+    blocking(&state, move |b| {
+        b.associate_candidates(&screen, &path, &sources, now())
+    })
+    .await
+}
+
+/// Associates a screen file with the original the user confirmed.
+#[tauri::command]
+pub async fn associate_original(
+    state: State<'_, Shared>,
+    screen: String,
+    path: String,
+    source: String,
+    confirmed: bool,
+) -> UiResult<ManagedFileDto> {
+    blocking(&state, move |b| {
+        b.associate_original(&screen, &path, &source, confirm_of(confirmed), now())
+    })
+    .await
+}
+
+/// The local copies in numbers.
+#[tauri::command]
+pub async fn cache_info(state: State<'_, Shared>) -> UiResult<CacheDto> {
+    blocking(&state, Backend::cache_info).await
+}
+
+/// "Clear cache" (`deleted` or `all`); `confirmed` comes from the dialog
+/// that listed the copies and their size.
+#[tauri::command]
+pub async fn clear_cache(
+    state: State<'_, Shared>,
+    scope: String,
+    confirmed: bool,
+) -> UiResult<ClearedDto> {
+    blocking(&state, move |b| {
+        b.clear_cache(&scope, confirm_of(confirmed))
+    })
+    .await
+}
+
+/// Sets the limit of the copies of deleted files, bytes.
+#[tauri::command]
+pub async fn set_cache_limit(state: State<'_, Shared>, bytes: u64) -> UiResult<CacheDto> {
+    blocking(&state, move |b| b.set_cache_limit(bytes)).await
 }
 
 #[cfg(test)]

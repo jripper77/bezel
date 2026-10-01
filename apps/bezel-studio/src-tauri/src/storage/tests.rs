@@ -21,16 +21,18 @@ use bezel_core::ports::{MediaLocation, MediaTranscoder, VideoFrames};
 use bezel_core::{BezelError, Result};
 use bezel_devices::fake::{FAKE_UPLOAD_CHUNK, FakeStorage, Playback, StorageCall};
 use bezel_devices::{FakeBus, FakeConnector};
+use bezel_media::archive::MemoryArchive;
 use bezel_render::{SkiaRenderer, SystemFonts};
 use bezel_sensors::FakeSensors;
 use bezel_themes::FsThemeStore;
 
 use super::*;
 use crate::library::ThemeLibrary;
+use crate::manager::Copies;
 use crate::settings::SettingsFile;
 use crate::studio::Studio;
 
-const TIME: LocalTime = LocalTime {
+pub(crate) const TIME: LocalTime = LocalTime {
     year: 2026,
     month: 9,
     day: 30,
@@ -39,7 +41,7 @@ const TIME: LocalTime = LocalTime {
     second: 0,
     weekday: 2,
 };
-const KEY: &str = "/dev/ttyACM1";
+pub(crate) const KEY: &str = "/dev/ttyACM1";
 /// The 8.8" panel in its native orientation.
 const NATIVE: Size = Size::new(480, 1920);
 /// Picture size of the local videos that need a conversion.
@@ -53,6 +55,7 @@ const CONVERTED_BYTES: usize = 5000;
 /// animated 1920x480 GIF (`still*.gif`: one picture), anything else is
 /// unknown. A conversion writes a `native-converted-N.mp4` next to the
 /// source; a poster is a picture of [`POSTER`].
+#[derive(Clone)]
 pub(crate) struct FakeMedia {
     ready: bool,
     tool: Option<PathBuf>,
@@ -235,14 +238,18 @@ impl MediaSetup for FakeMedia {
     fn tool_in_use(&mut self) -> Option<PathBuf> {
         self.tool.clone().filter(|_| self.ready)
     }
+
+    fn spare(&self) -> Box<dyn MediaSetup> {
+        Box::new(self.clone())
+    }
 }
 
-struct Fixture {
-    backend: Backend,
-    connector: FakeConnector,
+pub(crate) struct Fixture {
+    pub(crate) backend: Backend,
+    pub(crate) connector: FakeConnector,
     /// The conversions the scripted converter ran.
     converted: Arc<Mutex<Vec<TranscodeTarget>>>,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
 }
 
 impl Drop for Fixture {
@@ -253,7 +260,7 @@ impl Drop for Fixture {
 
 impl Fixture {
     /// A local file of `bytes` bytes called `name`.
-    fn local(&self, name: &str, bytes: usize) -> PathBuf {
+    pub(crate) fn local(&self, name: &str, bytes: usize) -> PathBuf {
         let path = self.root.join("local").join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let data: Vec<u8> = (0..bytes).map(|i| (i % 251) as u8).collect();
@@ -261,12 +268,12 @@ impl Fixture {
         path
     }
 
-    fn storage(&self) -> FakeStorage {
+    pub(crate) fn storage(&self) -> FakeStorage {
         self.connector.log().storage
     }
 
     /// Storage calls that change what the screen stores, shows or keeps.
-    fn writes(&self) -> Vec<StorageCall> {
+    pub(crate) fn writes(&self) -> Vec<StorageCall> {
         let calls = self.storage().calls;
         calls
             .into_iter()
@@ -280,14 +287,14 @@ impl Fixture {
             .unwrap()
     }
 
-    fn ready(&self, local: &Path, medium: &str) -> PreparedDto {
+    pub(crate) fn ready(&self, local: &Path, medium: &str) -> PreparedDto {
         match self.prepare(local, medium) {
             PrepareDto::Ready(ready) => ready,
             PrepareDto::Refused(refusal) => panic!("refused: {refusal:?}"),
         }
     }
 
-    fn run(&self, ticket: u64, overwrite: Confirm) -> (UiResult<JobDto>, Vec<Progress>) {
+    pub(crate) fn run(&self, ticket: u64, overwrite: Confirm) -> (UiResult<JobDto>, Vec<Progress>) {
         let mut seen = Vec::new();
         let result = self
             .backend
@@ -297,6 +304,19 @@ impl Fixture {
 }
 
 fn fixture_with(name: &str, storage: FakeStorage, media: FakeMedia) -> Fixture {
+    let copies = Copies::in_memory(MemoryArchive::new());
+    fixture_on(name, FakeBus::turing_88(), storage, media, copies)
+}
+
+/// A fixture whose bus is `bus`, its screens storing `storage`, recording
+/// in `copies`.
+pub(crate) fn fixture_on(
+    name: &str,
+    bus: FakeBus,
+    storage: FakeStorage,
+    media: FakeMedia,
+    copies: Copies,
+) -> Fixture {
     let root = std::env::temp_dir().join(format!("bezel-storage-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let connector = FakeConnector::with_storage(storage);
@@ -309,7 +329,7 @@ fn fixture_with(name: &str, storage: FakeStorage, media: FakeMedia) -> Fixture {
         theme,
     );
     let backend = Backend {
-        bus: Arc::new(FakeBus::turing_88()),
+        bus: Arc::new(bus),
         connector: Arc::new(connector.clone()),
         hid: Arc::new(bezel_devices::FakeHid::default()),
         store: Arc::new(FsThemeStore),
@@ -320,7 +340,7 @@ fn fixture_with(name: &str, storage: FakeStorage, media: FakeMedia) -> Fixture {
         udev: None,
         fonts: Vec::new(),
         studio: crate::backend::Session::new(studio),
-        storage: StorageState::new(Box::new(media), root.join("scratch")),
+        storage: StorageState::new(Box::new(media), copies, root.join("scratch")),
         thumbnails: crate::thumbnails::tests::thumbnails(root.join("thumbnails")),
     };
     Fixture {
@@ -335,7 +355,7 @@ fn fixture(name: &str) -> Fixture {
     fixture_with(name, FakeStorage::default(), FakeMedia::ready())
 }
 
-fn remote_path(text: &str) -> RemotePath {
+pub(crate) fn remote_path(text: &str) -> RemotePath {
     RemotePath::parse(text).unwrap()
 }
 
@@ -509,6 +529,102 @@ fn an_upload_is_prepared_confirmed_sent_and_verified() {
         .prepare_upload(KEY, &f.local("x.png", 1), "cloud", TIME)
         .unwrap_err();
     assert_eq!(err.code(), "unknownMedium");
+}
+
+/// Every upload, delete and boot media goes into the catalog
+/// (D-2026-09-30-storage-manager-5): the exact bytes sent, kept as the local
+/// copy; with `Confirm::No` neither the screen nor the catalog changes.
+#[test]
+fn uploads_deletes_and_the_boot_media_are_recorded() {
+    use bezel_core::domain::archive::{EntryState, ScreenKey};
+    use bezel_core::domain::device::ModelId;
+    let f = fixture("recorded");
+    let record = |f: &Fixture| {
+        let catalog = f.backend.storage.archive().load().unwrap();
+        let record = catalog
+            .screen(&ScreenKey::new(ModelId("turing-8.8")))
+            .cloned();
+        (catalog, record.unwrap_or_default())
+    };
+    let before = crate::clock::unix_seconds();
+    let local = f.local("Native Clip.mp4", 3000);
+    let ready = f.ready(&local, "internal");
+    assert!(record(&f).1.entries.is_empty(), "preparing records nothing");
+    f.run(ready.ticket, Confirm::No).0.unwrap();
+    let (catalog, saved) = record(&f);
+    let entry = &saved.entries[0];
+    let clip = remote_path("internal/video/native_clip.mp4");
+    assert_eq!(
+        (&entry.path, entry.size, entry.state),
+        (&clip, 3000, EntryState::Stored)
+    );
+    let sent = std::fs::read(&local).unwrap();
+    assert_eq!(entry.content, bezel_media::archive::content_id(&sent));
+    assert!(catalog.has_copy(&entry.content));
+    let copy = f.backend.storage.archive().read(&entry.content).unwrap();
+    assert_eq!(
+        copy.as_deref(),
+        Some(sent.as_slice()),
+        "the exact bytes sent"
+    );
+    assert_eq!(
+        entry.source.as_deref(),
+        Some(local.display().to_string().as_str())
+    );
+    assert!(entry.sent_at >= before);
+    assert_eq!(entry.resolution, Some(NATIVE));
+
+    // A converted video: what is kept is the conversion's output.
+    let ready = f.ready(&f.local("trip.mov", 9000), "internal");
+    f.run(ready.ticket, Confirm::No).0.unwrap();
+    let (_, saved) = record(&f);
+    assert_eq!(saved.entries[1].size, CONVERTED_BYTES as u64);
+
+    // The boot media, and a delete, follow only a confirmed dialog.
+    let path = clip.to_string();
+    let err = f
+        .backend
+        .set_boot_media(KEY, Some(&path), None, Confirm::No, TIME)
+        .unwrap_err();
+    assert_eq!(err.code(), "notConfirmed");
+    assert_eq!(record(&f).1.boot, None);
+    f.backend
+        .set_boot_media(KEY, Some(&path), None, Confirm::Yes, TIME)
+        .unwrap();
+    assert_eq!(record(&f).1.boot, Some(clip.clone()));
+    let err = f
+        .backend
+        .delete_stored(KEY, &path, Confirm::No, TIME)
+        .unwrap_err();
+    assert_eq!(err.code(), "notConfirmed");
+    assert_eq!(record(&f).1.entries[0].state, EntryState::Stored);
+    f.backend
+        .delete_stored(KEY, &path, Confirm::Yes, TIME)
+        .unwrap();
+    let (catalog, saved) = record(&f);
+    assert_eq!(saved.entries[0].state, EntryState::Deleted);
+    assert!(
+        catalog.has_copy(&saved.entries[0].content),
+        "kept for a restore"
+    );
+    f.backend
+        .set_boot_media(KEY, None, None, Confirm::Yes, TIME)
+        .unwrap();
+    assert_eq!(record(&f).1.boot, None);
+
+    // The theme's video, sent to the live screen, is recorded too.
+    let (theme, assets) = video_theme();
+    f.backend.studio().start(theme, assets, None);
+    f.backend.set_live(true, Some(KEY), TIME).unwrap();
+    let ready = match f.backend.prepare_theme_video(KEY, TIME).unwrap() {
+        PrepareDto::Ready(ready) => ready,
+        PrepareDto::Refused(r) => panic!("refused: {r:?}"),
+    };
+    f.run(ready.ticket, Confirm::No).0.unwrap();
+    let (_, saved) = record(&f);
+    let video = saved.entries.last().unwrap();
+    assert_eq!(video.path, remote_path("internal/video/intro.mp4"));
+    assert_eq!(video.state, EntryState::Stored);
 }
 
 #[test]

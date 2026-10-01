@@ -248,6 +248,49 @@
       "format"
     ]
   },
+  "manager": {
+    "entryStates": [
+      "deleted",
+      "missing",
+      "pending",
+      "stored"
+    ],
+    "findings": [
+      "duplicate",
+      "hangPartial",
+      "pending",
+      "sameSize",
+      "sizeDiffers",
+      "unused",
+      "variant"
+    ],
+    "planRefusals": [
+      "extensionChanged",
+      "invalidName",
+      "noCard",
+      "noSpace",
+      "notListed",
+      "sameMedium",
+      "sameName",
+      "unsendable"
+    ],
+    "skips": [
+      "conflict",
+      "deleteUnsupported",
+      "noLocalCopy",
+      "present"
+    ],
+    "transfers": [
+      "copy",
+      "move",
+      "rename",
+      "restore"
+    ],
+    "warnings": [
+      "bootMedia",
+      "themeVideo"
+    ]
+  },
   "mismatches": [
     "audio",
     "bFrames",

@@ -15,11 +15,13 @@ use std::time::{Duration, Instant};
 use bezel_core::domain::geometry::Orientation;
 use bezel_devices::{SystemBus, SystemConnector};
 use bezel_media::FfmpegTranscoder;
+use bezel_media::archive::MemoryArchive;
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::SystemSensors;
 use bezel_studio::backend::{Backend, Session, sleep_until};
 use bezel_studio::clock::{language, now};
 use bezel_studio::library::ThemeLibrary;
+use bezel_studio::manager::Copies;
 use bezel_studio::settings::SettingsFile;
 use bezel_studio::storage::StorageState;
 use bezel_studio::studio::Studio;
@@ -55,7 +57,12 @@ fn backend(scratch: &Path) -> Backend {
             language(),
             blank,
         )),
-        storage: StorageState::new(Box::new(FfmpegTranscoder::new(None)), scratch.join("media")),
+        // Nothing it sends goes into the user's catalog.
+        storage: StorageState::new(
+            Box::new(FfmpegTranscoder::new(None)),
+            Copies::in_memory(MemoryArchive::new()),
+            scratch.join("media"),
+        ),
         thumbnails: Thumbnails::new(
             scratch.join("thumbnails"),
             Box::new(|| Box::new(SkiaRenderer::new())),

@@ -18,7 +18,7 @@ use std::time::UNIX_EPOCH;
 
 use bezel_core::domain::catalog::MODELS;
 use bezel_core::domain::device::DeviceModel;
-use bezel_core::domain::theme::Theme;
+use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::ThemeLocation;
 use bezel_themes::native::{EXTENSION, is_native, load_manifest};
 
@@ -232,6 +232,19 @@ impl ThemeLibrary {
         user
     }
 
+    /// The video every theme of the library plays as its background (the
+    /// storage manager protects them, D-2026-09-30-storage-manager-9): read
+    /// from their manifests alone.
+    pub fn videos(&self) -> Vec<AssetRef> {
+        let dirs = std::iter::once(&self.user).chain(&self.bundled);
+        dirs.flat_map(|dir| manifests(dir))
+            .filter_map(|theme| match theme.background {
+                Background::Video { asset, .. } => Some(asset),
+                Background::Color(_) | Background::Image { .. } => None,
+            })
+            .collect()
+    }
+
     /// True for a location inside a bundled folder.
     pub fn is_bundled(&self, location: &ThemeLocation) -> bool {
         let path = Path::new(&location.0);
@@ -268,6 +281,19 @@ impl ThemeLibrary {
             _ => self.new_location(name),
         }
     }
+}
+
+/// The manifests of the themes in `dir` (unreadable ones skipped).
+fn manifests(dir: &Path) -> Vec<Theme> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| is_native(p))
+        .filter_map(|path| load_manifest(&ThemeLocation(path.display().to_string())).ok())
+        .collect()
 }
 
 fn scan(dir: &Path, bundled: bool) -> Vec<ThemeEntry> {

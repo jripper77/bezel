@@ -18,13 +18,20 @@
 //! the user's [`Confirm`], which only the Tauri commands make (from the
 //! answer of the UI's confirmation dialog, which names the file); the core
 //! refuses `Confirm::No` before any byte is sent.
+//!
+//! The catalog (D-2026-09-30-storage-manager-5): every upload (a file, the
+//! theme's video), delete and boot media goes through the core's
+//! `app::manager`, which records it with the exact bytes sent in the store
+//! of local copies the storage manager ([`crate::manager`]) shows.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bezel_core::BezelError;
+use bezel_core::app::manager::Manager;
 use bezel_core::app::storage::{self, PreparedUpload, UploadRequest};
+use bezel_core::domain::archive::TransferPlan;
 use bezel_core::domain::clock::LocalTime;
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::geometry::Orientation;
@@ -37,13 +44,15 @@ use bezel_core::domain::storage::{
     BootMedia, Medium, RemotePath, Repeat, StorageLocation, UploadAction,
 };
 use bezel_core::domain::theme::AssetRef;
-use bezel_core::ports::{MediaLocation, MediaTranscoder, ScreenLink};
+use bezel_core::ports::{ArchiveStore, MediaLocation, MediaTranscoder, ScreenLink};
 
 use crate::backend::Backend;
+use crate::clock::unix_seconds;
 use crate::dto::{
     ConversionDto, FolderDto, JobDto, MediaToolsDto, PrepareDto, PreparedDto, RefusalDto,
     StorageDto, StoredFileDto, media_summary,
 };
+use crate::manager::{Copies, PendingPlan, Pictures, Shown};
 use crate::messages::{ErrorCode, UiError, UiResult};
 use crate::studio::{Resume, SharedMedia};
 
@@ -56,6 +65,9 @@ pub trait MediaSetup: MediaTranscoder {
     fn set_tool_path(&mut self, path: Option<PathBuf>);
     /// The tool in use, when a usable one exists.
     fn tool_in_use(&mut self) -> Option<PathBuf>;
+    /// Another converter looking for its tool where this one does: the
+    /// thumbnails' own, so that they never wait for a running job.
+    fn spare(&self) -> Box<dyn MediaSetup>;
 }
 
 /// An upload that passed its preflight, waiting for the user's confirmation.
@@ -81,14 +93,21 @@ fn remove_scratch(file: Option<&Path>) {
     }
 }
 
-/// What the storage commands share: the media converter, the one running
-/// operation, its cancel token and the upload waiting for confirmation.
+/// What the storage commands share: the media converter, the store of local
+/// copies, the one running operation, its cancel token, and the upload or
+/// plan waiting for confirmation.
 pub struct StorageState {
     media: SharedMedia,
+    /// The thumbnails' converter ([`MediaSetup::spare`]).
+    picture_media: Mutex<Box<dyn MediaSetup>>,
+    archive: Mutex<Box<dyn ArchiveStore>>,
+    pictures: Box<dyn Pictures>,
     scratch: PathBuf,
     busy: AtomicBool,
     cancel: Mutex<Option<CancelToken>>,
     pending: Mutex<Option<Pending>>,
+    plan: Mutex<Option<PendingPlan>>,
+    shown: Mutex<Shown>,
     tickets: AtomicU64,
 }
 
@@ -106,14 +125,20 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl StorageState {
-    /// Storage commands over `media`; copies of theme videos go to `scratch`.
-    pub fn new(media: Box<dyn MediaSetup>, scratch: PathBuf) -> Self {
+    /// Storage commands over `media`, recording what they send in
+    /// `copies`; copies of theme videos to send go to `scratch`.
+    pub fn new(media: Box<dyn MediaSetup>, copies: Copies, scratch: PathBuf) -> Self {
         Self {
+            picture_media: Mutex::new(media.spare()),
             media: Arc::new(Mutex::new(media)),
+            archive: Mutex::new(copies.store),
+            pictures: copies.pictures,
             scratch,
             busy: AtomicBool::new(false),
             cancel: Mutex::new(None),
             pending: Mutex::new(None),
+            plan: Mutex::new(None),
+            shown: Mutex::default(),
             tickets: AtomicU64::new(0),
         }
     }
@@ -151,6 +176,73 @@ impl StorageState {
         lock(&self.media)
     }
 
+    /// The thumbnails' converter.
+    pub(crate) fn picture_media(&self) -> MutexGuard<'_, Box<dyn MediaSetup>> {
+        lock(&self.picture_media)
+    }
+
+    /// The catalog and the local copies; only under the claim.
+    pub(crate) fn archive(&self) -> MutexGuard<'_, Box<dyn ArchiveStore>> {
+        lock(&self.archive)
+    }
+
+    /// The thumbnails of the local copies.
+    pub(crate) fn pictures(&self) -> &dyn Pictures {
+        self.pictures.as_ref()
+    }
+
+    /// What the last storage manager overview listed.
+    pub(crate) fn shown(&self) -> MutexGuard<'_, Shown> {
+        lock(&self.shown)
+    }
+
+    /// Registers the cancel token of the job that starts.
+    pub(crate) fn start_job(&self) -> CancelToken {
+        let token = CancelToken::new();
+        *lock(&self.cancel) = Some(token.clone());
+        token
+    }
+
+    /// The running job ended: Cancel has nothing to stop.
+    pub(crate) fn end_job(&self) {
+        *lock(&self.cancel) = None;
+    }
+
+    fn ticket(&self) -> u64 {
+        self.tickets.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Keeps `plan` of `screen` for its confirmation (replacing any other)
+    /// and names it.
+    pub(crate) fn keep_plan(&self, screen: &str, plan: TransferPlan) -> u64 {
+        let ticket = self.ticket();
+        *lock(&self.plan) = Some(PendingPlan {
+            ticket,
+            screen: screen.to_string(),
+            plan,
+        });
+        ticket
+    }
+
+    /// The plan `ticket` names, once; `stale` when it was run, replaced or
+    /// dropped since.
+    pub(crate) fn take_plan(&self, ticket: u64) -> UiResult<PendingPlan> {
+        let mut plan = lock(&self.plan);
+        match plan.take() {
+            Some(p) if p.ticket == ticket => Ok(p),
+            other => {
+                *plan = other;
+                Err(UiError::new(ErrorCode::Stale))
+            }
+        }
+    }
+
+    /// Drops the plan waiting for confirmation: a job that may change the
+    /// screen is about to run, after which the plan no longer holds.
+    pub(crate) fn forget_plan(&self) {
+        *lock(&self.plan) = None;
+    }
+
     /// Asks the running upload to stop; `false` when none runs.
     pub fn cancel(&self) -> bool {
         match lock(&self.cancel).as_ref() {
@@ -163,7 +255,7 @@ impl StorageState {
     }
 
     fn keep(&self, screen: &str, prepared: PreparedUpload, scratch: Option<PathBuf>) -> u64 {
-        let ticket = self.tickets.fetch_add(1, Ordering::SeqCst) + 1;
+        let ticket = self.ticket();
         let previous = lock(&self.pending).replace(Pending {
             ticket,
             screen: screen.to_string(),
@@ -214,7 +306,8 @@ impl Access {
     }
 }
 
-fn remote(path: &str) -> UiResult<RemotePath> {
+/// A screen path the UI sent (`internal/video/a.mp4`).
+pub(crate) fn remote(path: &str) -> UiResult<RemotePath> {
     Ok(RemotePath::parse(path)?)
 }
 
@@ -322,7 +415,7 @@ impl Backend {
     }
 
     /// Runs `work` on `screen` (the claim already held).
-    fn on_screen<R>(
+    pub(crate) fn on_screen<R>(
         &self,
         screen: &str,
         resume: Resume,
@@ -335,7 +428,9 @@ impl Backend {
         Ok(result)
     }
 
-    /// Runs `work` on `screen` as the one storage operation.
+    /// Runs `work` on `screen` as the one storage operation. One that may
+    /// change the screen (`Resume::Video`) drops the plan waiting for
+    /// confirmation.
     fn with_screen<T>(
         &self,
         screen: &str,
@@ -344,6 +439,9 @@ impl Backend {
         work: impl FnOnce(&mut dyn ScreenLink) -> bezel_core::Result<T>,
     ) -> UiResult<T> {
         let _claim = self.storage.claim()?;
+        if resume == Resume::Video {
+            self.storage.forget_plan();
+        }
         self.on_screen(screen, resume, time, work).and_then(flat)
     }
 
@@ -387,6 +485,9 @@ impl Backend {
             (media.tools(), accepted)
         };
         if accepted {
+            self.storage
+                .picture_media()
+                .set_tool_path(Some(path.to_path_buf()));
             let chosen = path.display().to_string();
             self.settings.update(|s| s.ffmpeg_path = Some(chosen));
             return MediaToolsDto::of(&tools, self.settings.load().ffmpeg_path);
@@ -510,6 +611,7 @@ impl Backend {
     ) -> UiResult<JobDto> {
         let _claim = self.storage.claim()?;
         let pending = self.storage.take(ticket)?;
+        self.storage.forget_plan();
         let path = pending.prepared.plan.path.to_string();
         let result = self.upload_pending(&pending, overwrite, time, progress);
         pending.discard();
@@ -525,7 +627,8 @@ impl Backend {
     }
 
     /// Runs `pending` on its screen (the claim already held), cancellable
-    /// through [`Self::cancel_job`].
+    /// through [`Self::cancel_job`], recorded in the catalog with the exact
+    /// bytes sent (D-2026-09-30-storage-manager-5).
     fn upload_pending(
         &self,
         pending: &Pending,
@@ -533,14 +636,21 @@ impl Backend {
         time: LocalTime,
         progress: &mut dyn FnMut(Progress),
     ) -> UiResult<bezel_core::Result<storage::Uploaded>> {
-        let token = CancelToken::new();
-        *lock(&self.storage.cancel) = Some(token.clone());
+        let token = self.storage.start_job();
+        let sent_at = unix_seconds();
         let result = self.on_screen(&pending.screen, Resume::Video, time, |link| {
+            let mut store = self.storage.archive();
             let mut media = self.storage.media();
             let mut job = Job::new(&token, progress);
-            storage::upload(link, media.as_mut(), &pending.prepared, confirm, &mut job)
+            Manager::new(link, store.as_mut()).upload(
+                media.as_mut(),
+                &pending.prepared,
+                confirm,
+                sent_at,
+                &mut job,
+            )
         });
-        *lock(&self.storage.cancel) = None;
+        self.storage.end_job();
         result
     }
 
@@ -551,8 +661,8 @@ impl Backend {
 
     // --------------------------------------------------- files and boot --
 
-    /// Deletes a stored file; `confirm` is the user's answer to the dialog
-    /// naming it.
+    /// Deletes a stored file and marks its catalog entry deleted; `confirm`
+    /// is the user's answer to the dialog naming it.
     pub fn delete_stored(
         &self,
         screen: &str,
@@ -562,7 +672,8 @@ impl Backend {
     ) -> UiResult<()> {
         let path = remote(path)?;
         self.with_screen(screen, Resume::Video, time, |link| {
-            storage::delete(link, &path, confirm)
+            let mut store = self.storage.archive();
+            Manager::new(link, store.as_mut()).delete(&path, confirm)
         })
     }
 
@@ -605,7 +716,8 @@ impl Backend {
             })
             .transpose()?;
         self.with_screen(screen, Resume::Video, time, |link| {
-            storage::set_boot_media(link, &boot, brightness, confirm)
+            let mut store = self.storage.archive();
+            Manager::new(link, store.as_mut()).set_boot_media(&boot, brightness, confirm)
         })
     }
 }

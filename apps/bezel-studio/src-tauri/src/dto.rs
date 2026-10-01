@@ -800,7 +800,7 @@ impl From<&Refusal> for RefusalDto {
 }
 
 /// The character that made a name invalid, when one did.
-fn name_error_char(e: &NameError) -> Option<String> {
+pub(crate) fn name_error_char(e: &NameError) -> Option<String> {
     match e {
         NameError::Forbidden(c) => Some(c.to_string()),
         _ => None,
@@ -844,15 +844,32 @@ pub enum JobDto {
 }
 
 /// One progress report of a running job (the `storage-progress` event).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressDto {
-    /// `convert`, `upload` or `verify`.
+    /// `convert`, `upload`, `verify` or `delete`.
     pub phase: &'static str,
-    /// Units done (ms of video, bytes or checks).
+    /// Units done (ms of video, bytes, checks, or files deleted).
     pub done: u64,
     /// Units in the phase; 0 when unknown.
     pub total: u64,
+    /// The file a storage manager job is at; absent for an upload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<ProgressStepDto>,
+}
+
+/// Which file of a storage manager job a progress report is about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressStepDto {
+    /// Its place in the job, from 0.
+    pub index: usize,
+    /// Files in the job.
+    pub count: usize,
+    /// Its screen path.
+    pub source: String,
+    /// Where its copy goes; `None` for a delete.
+    pub target: Option<String>,
 }
 
 impl From<Progress> for ProgressDto {
@@ -861,6 +878,7 @@ impl From<Progress> for ProgressDto {
             phase: p.phase.slug(),
             done: p.done,
             total: p.total,
+            step: None,
         }
     }
 }

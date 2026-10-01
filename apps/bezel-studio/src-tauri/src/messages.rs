@@ -366,8 +366,57 @@ mod tests {
             "errors": errors,
             "importLayers": sorted(LAYER_NAMES.to_vec()),
             "importWarnings": warnings,
+            "manager": manager_codes(),
             "mismatches": sorted::<&str>(mismatches),
             "refusals": sorted::<&str>(refusals),
+        })
+    }
+
+    /// The storage manager's codes (D-2026-09-30-storage-manager-7..-9),
+    /// which the UI translates: cleanup findings, plan refusals, skips,
+    /// warnings, what a plan does and an entry's state.
+    fn manager_codes() -> Value {
+        use bezel_core::domain::archive::{EntryState, PlanRefusal, Skip, Transfer, Warning};
+        use bezel_core::domain::cleanup::Code;
+        use bezel_core::domain::storage::{FileEntry, RemotePath};
+        let path = RemotePath::parse("sd/video/a.mp4").unwrap();
+        let file = FileEntry {
+            path: path.clone(),
+            size: None,
+        };
+        let refusals = [
+            PlanRefusal::NoCard,
+            PlanRefusal::NotListed(path.clone()),
+            PlanRefusal::SameMedium(path.clone()),
+            PlanRefusal::InvalidName(NameError::Empty),
+            PlanRefusal::ExtensionChanged { expected: None },
+            PlanRefusal::SameName,
+            PlanRefusal::Unsendable {
+                path: path.clone(),
+                refusal: Refusal::EmptyFile,
+            },
+            PlanRefusal::NoSpace { needed: 2, free: 1 },
+        ];
+        let skips = [
+            Skip::Conflict(file),
+            Skip::NoLocalCopy,
+            Skip::DeleteUnsupported,
+            Skip::Present,
+        ];
+        let warnings = [Warning::BootMedia(path.clone()), Warning::ThemeVideo(path)];
+        let transfers = [
+            Transfer::Move,
+            Transfer::Copy,
+            Transfer::Rename,
+            Transfer::Restore,
+        ];
+        json!({
+            "entryStates": sorted(EntryState::ALL.iter().map(|s| s.slug()).collect()),
+            "findings": sorted(Code::ALL.iter().map(|c| c.slug()).collect()),
+            "planRefusals": sorted(refusals.iter().map(PlanRefusal::code).collect()),
+            "skips": sorted(skips.iter().map(Skip::code).collect()),
+            "transfers": sorted(transfers.iter().map(|t| t.slug()).collect()),
+            "warnings": sorted(warnings.iter().map(Warning::code).collect()),
         })
     }
 

@@ -50,6 +50,20 @@
     "allow-show-sensors",
     "allow-restart-screen",
     "allow-theme-thumbnail",
-    "allow-set-theme-filter"
+    "allow-set-theme-filter",
+    "allow-manager-overview",
+    "allow-manager-thumbnail",
+    "allow-plan-move",
+    "allow-plan-copy",
+    "allow-plan-rename",
+    "allow-plan-restore",
+    "allow-run-plan",
+    "allow-delete-files",
+    "allow-pick-originals",
+    "allow-associate-candidates",
+    "allow-associate-original",
+    "allow-cache-info",
+    "allow-clear-cache",
+    "allow-set-cache-limit"
   ]
 }

@@ -38,20 +38,24 @@ piscava.
 - Iter 4 (crítico da iter 3: nenhum teste da linha 2 rodava `SystemPorts::open`): `872283e` (o teste do `/proc` real
   abre a porta segura por `SystemPorts::open` e pelo caminho rev C com `SystemPorts`, sem `/dev/tty*`: `InUse`, zero
   pausas; um `open` sobrescrito ou `this: None` derrubam a linha), `05c8630` (W4: sai `busy::holders_in`).
+- Iter 5 (crítico da iter 4: nada fixava a abertura exclusiva): `7883e97` (`SerialWire::open` por `settings()` com
+  `.exclusive(true)` explícito, builder igual campo a campo ao de antes; numa pty segura, a 2ª abertura dá EBUSY e
+  `.exclusive(false)` derruba o teste), `2a4a84f` (W5: `open_serial` numa porta segura dá `InUse`); o Verify da
+  linha 2 passa a rodar `wire::tests::a_port_the_wire_holds_refuses_a_second_open` (`ok. 4 passed`).
 
 ## Blocked tasks
 - nenhuma
 
 ## Files modified
 - `crates/bezel-core/src/{domain/discovery,app/screens,app/mod}.rs`, `crates/bezel-core/tests/screens.rs`
-- `crates/bezel-devices/src/{busy,connector}.rs`
+- `crates/bezel-devices/src/{busy,connector,wire}.rs`
 - `apps/bezel-studio/src-tauri/src/{studio,backend,storage}.rs`, `apps/bezel-studio/src-tauri/src/{storage,manager}/tests.rs`
 - `apps/bezel-studio/src/{live-screen,app,demo-backend,demo-data}.js`,
   `apps/bezel-studio/tests/{ui/live-screen.test.mjs,ui/demo-backend.test.mjs,e2e/live-screen-controls.spec.mjs}`
 - `CHANGELOG.md`, `scripts/ci/check-docs.sh`
 
 ## Tests
-- `cargo test --workspace --locked`: 878 passando, 0 falhando, 11 ignorados (hardware e ffmpeg real)
+- `cargo test --workspace --locked`: 879 passando, 0 falhando, 11 ignorados (hardware e ffmpeg real)
 - DoD 1–5: OK a cada iteração; DoD 6: runs 36900540628 (`483c842`, Windows 811/0/11), 36904730390 (`a566e80`,
   812/0/11) e 36908306551 (`19913fa`, 812/0/11) verdes
 - UI: 186 unitários (99,93% de linhas); Playwright 184/184 (claro/escuro × pt-BR/en, axe), 8 novos

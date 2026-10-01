@@ -32,6 +32,9 @@ piscava.
   este processo e os outros; outros programas seguem recusados antes de tocar a porta), `9311ba4` (a cola
   `SystemPorts::holders` → `/proc` real com teste), `43921ff` (`check-docs.sh` exige "Device or resource busy", só
   da entrada desta fase).
+- Iter 3 (crítico da iter 2: DoD 2 oca e objetiva → BLOCKED): o Verify da linha 2 passa a rodar também
+  `the_host_ports_name_this_process_for_a_port_it_holds` (`0acd3f1`; com `this: None` a linha agora falha);
+  `2a58bf1` (W3: saem `busy::holders` e `busy::held_here`, sem chamador; os testes usam `on_this_machine`).
 
 ## Blocked tasks
 - nenhuma

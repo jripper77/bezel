@@ -19,7 +19,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - `device_video_name` recebe o resolvido: padrão = nomes do fornecedor pelas voltas totais (`dragon.mp4`, `amd_90.mp4`); outro = `_f` + 8 hex FNV-1a do canônico (fit, zoom×100, posição×1000, pad se aparece). `Protected::theme_video` cobre também `<nome>_f<8 hex>`.
 - **Dependencies:** none
 - **Test:** `domain::framing::tests::{a_panel_native_video_in_a_turned_theme_counts_as_turned,geometry_covers_contains_zooms_and_positions_on_even_edges}`, `domain::media::tests::device_video_names_carry_the_framing`, `app::runtime::tests::device_video_names_follow_the_vendor` (esperado de hoje)
-- **Status:** pending
+- **Status:** completed (41215c3)
 
 #### T-2: Studio UI (demo): Enquadramento no inspetor e no canvas, vídeo que toca
 - **Specialist:** jdi-doer-bezel

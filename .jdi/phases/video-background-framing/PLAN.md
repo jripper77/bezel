@@ -63,7 +63,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - `bezel run` sonda o vídeo (cabeçalho MP4, sem ffmpeg) e o passa à runtime; a dica do `put` nomeia o arquivo procurado (identidade sem `--orientation`; outro enquadramento: "Enviar para a tela" do studio).
 - **Dependencies:** T-1
 - **Test:** `--test runtime_video`: `the_stored_dragon_ball_video_loops_without_an_upload`, `a_stored_file_of_another_size_is_not_reused`, `a_reframed_video_is_looked_for_under_its_own_name`, `the_host_decodes_the_video_with_its_framing`; CLI `live::tests::run_honours_the_video_framing`
-- **Status:** pending
+- **Status:** completed (8f6ef44)
 
 ### Wave 3 (paralela)
 

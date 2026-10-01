@@ -106,6 +106,15 @@ export const DEMO_STORAGE = Object.freeze({
   ]),
 });
 
+/**
+ * The 8.8" of the Dragon Ball scenario: the demo's storage plus the video
+ * the vendor app sent for that theme, as it is (the asset's own bytes).
+ */
+const DRAGON_STORAGE = Object.freeze({
+  ...DEMO_STORAGE,
+  files: Object.freeze([...DEMO_STORAGE.files, ['internal/video/dragon.mp4', 2_588_343]]),
+});
+
 /** The capacity of the user's card (29.7 GiB), the only trait the protocol shows of a card. */
 export const VENDOR_CARD_TOTAL = 31_890_132_172;
 /** Another card the demo's catalog remembers a file on. */
@@ -233,6 +242,62 @@ export const DEMO_VIDEO_THEME = Object.freeze({
   ],
 });
 
+/**
+ * The poster of the demo's Dragon Ball-like video: its first picture upright
+ * on the landscape canvas (a dusk sky, hills on grass, an orange orb).
+ */
+const DRAGON_POSTER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="192" height="48" viewBox="0 0 192 48">'
+  + '<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e3a8a"/>'
+  + '<stop offset="0.55" stop-color="#7c3aed"/><stop offset="0.85" stop-color="#f59e0b"/></linearGradient></defs>'
+  + '<rect width="192" height="48" fill="url(#s)"/><circle cx="150" cy="30" r="8" fill="#fde68a"/>'
+  + '<path d="M0 34 Q30 24 60 33 T120 31 T192 30 V48 H0Z" fill="#312e81"/><rect y="41" width="192" height="7" fill="#16a34a"/>'
+  + '<circle cx="48" cy="15" r="5" fill="#f97316"/></svg>';
+
+/** The Dragon Ball-like poster as a data URL (parentheses escaped for CSS `url()`). */
+export const DEMO_DRAGON_POSTER_URL = `data:image/svg+xml,${encodeURIComponent(DRAGON_POSTER_SVG).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
+
+/**
+ * The videos of the demo's themes, by asset: their own size (what
+ * `video_auto` reads from the MP4 header), play time and bytes, the poster a
+ * theme names, and whether the picture is stored turned for the 8.8"'s
+ * panel, the vendor's way for horizontal themes (the user's Dragon Ball
+ * video: 480x1920 in a 1920x480 theme).
+ */
+export const DEMO_THEME_VIDEOS = Object.freeze({
+  'assets/dragon.mp4': Object.freeze({ width: 480, height: 1920, durationMs: 10_200, bytes: 2_588_343, poster: 'assets/poster-195.png', posterUrl: DEMO_DRAGON_POSTER_URL, preTurned: true }),
+  'assets/nebula.mp4': Object.freeze({ width: 1920, height: 480, durationMs: 15_000, bytes: 18_874_368 }),
+});
+
+/**
+ * A theme like the user's imported "Dragon Ball", for `?demo=dragon`: a
+ * landscape canvas whose video is panel-native (480x1920, the picture turned
+ * for the panel): Auto turns it back upright (D-2026-10-01-video-background-framing-2).
+ * Its one element stays still, so a still preview keeps every pixel.
+ */
+export const DEMO_DRAGON_THEME = Object.freeze({
+  schema: 1,
+  name: 'Dragon Ball',
+  canvas: { width: 1920, height: 480 },
+  orientation: 'landscape',
+  refreshSeconds: 1,
+  background: { type: 'video', asset: 'assets/dragon.mp4', poster: 'assets/poster-195.png' },
+  elements: [
+    {
+      id: 1,
+      name: 'Title',
+      frame: { x: 1380, y: 330, width: 500, height: 110 },
+      opacity: 1,
+      visible: true,
+      locked: false,
+      kind: {
+        type: 'text',
+        content: { type: 'static', text: 'Dragon Ball' },
+        style: { font: { family: 'Inter', weight: 800, italic: false }, size: 80, paint: '#ffffffff', align: 'right', valign: 'middle', letterSpacing: 0 },
+      },
+    },
+  ],
+});
+
 /** A theme with an animated GIF element, for `?demo=gif` (T-7.11). */
 export const DEMO_GIF_THEME = Object.freeze({
   ...DEMO_VIDEO_THEME,
@@ -330,6 +395,11 @@ export const SCENARIOS = Object.freeze({
   hung: { screens: [turing88], hung: true },
   // A theme with an animated GIF, which moves in the preview (T-7.11).
   gif: { screens: [turing88], theme: DEMO_GIF_THEME },
+  // The user's Dragon Ball: a pre-turned video Auto turns upright, which the
+  // screen already stores as the vendor sent it (dragon.mp4, the asset's
+  // exact bytes); without ffmpeg the preview shows its poster.
+  dragon: { screens: [turing88], theme: DEMO_DRAGON_THEME, storage: DRAGON_STORAGE },
+  dragonNoFfmpeg: { screens: [turing88], theme: DEMO_DRAGON_THEME, storage: DRAGON_STORAGE, ffmpeg: false },
   // A live screen that drops once and is connected again by itself (T-7.11).
   flaky: { screens: [turing88], flaky: true },
   desktop: { screens: [turing88], desktopMode: [desktopPanel] },

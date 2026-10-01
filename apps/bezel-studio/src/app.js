@@ -17,6 +17,7 @@ import { createRenderScheduler } from './render-scheduler.js';
 import { createPreviewAnimation } from './preview-animation.js';
 import { errorText, sensorLabel } from './messages.js';
 import { backgroundOf, droppable, fileNameOf, videoFacts } from './editor/background.js';
+import { framingOf, framingPercents } from './editor/video-framing.js';
 
 const bridge = createBridge(window);
 const $ = (id) => document.getElementById(id);
@@ -60,6 +61,9 @@ const state = {
   // The live screen's link failed and the backend connects it again
   // (`{attempt, attempts}`), else null.
   reconnecting: null,
+  // What Auto turns the video background (`video_auto`), for the theme,
+  // video and screen named by `key`; `value` is null until it is known.
+  auto: { key: null, value: null },
 };
 
 function toast(message) {
@@ -99,6 +103,7 @@ const canvasView = createCanvasView({
   overlay: $('overlay'),
   onZoom: (z) => { $('zoom-label').textContent = `${Math.round(z * 100)}%`; },
   describe: (name) => t('stage.selected', { name }),
+  onFrameRequest: () => setFramingMode(true),
 });
 
 const library = createLibrary({
@@ -150,8 +155,10 @@ function syncStorageWide() {
   const wide = !$('panel-screen').hidden && !$('screen-storage').hidden;
   if (wide === storageWide()) return;
   workspace.classList.toggle('storage-wide', wide);
-  if (wide) storage.show();
-  else {
+  if (wide) {
+    setFramingMode(false, { restoreFocus: false });
+    storage.show();
+  } else {
     storage.hide();
     canvasView.fit();
   }
@@ -160,6 +167,11 @@ const panelWatch = new MutationObserver(syncStorageWide);
 for (const id of ['panel-screen', 'screen-storage']) panelWatch.observe($(id), { attributes: true, attributeFilter: ['hidden'] });
 wireSubtabs(document.querySelector('#panel-screen .subtabs'), syncStorageWide);
 
+// The preview moves (animated GIFs, a video background) only while the
+// window is shown and motion is not reduced.
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const motionAllowed = () => !document.hidden && !reducedMotion?.matches;
+
 const inspector = createInspector({
   root: $('inspector'),
   store,
@@ -167,26 +179,92 @@ const inspector = createInspector({
   sensors: { catalog: () => labelledCatalog(), fonts: () => state.fonts },
   minRefresh,
   video: {
-    context: () => ({ screen: currentScreen(), live: state.live, liveVideo: state.liveVideo, tools: state.mediaTools, locale }),
+    context: () => ({
+      screen: currentScreen(), live: state.live, liveVideo: state.liveVideo, tools: state.mediaTools, locale,
+      auto: state.auto.value, framing: canvasView.framing(), motion: !reducedMotion?.matches,
+    }),
     useVideo: () => addMedia(null, { asBackground: true }),
     useImage: () => useImage(),
     openStorage: () => openStorage(),
+    setFraming: (on) => setFramingMode(on),
+    openGuide: () => bridge.openGuide('ffmpeg', locale).catch((e) => fail(e)),
   },
 });
 
+// ---------------------------------------------------------- framing ----
+// "Frame on canvas" (D-2026-10-01-video-background-framing-6): the editing
+// area frames the video background; the bar over it says how, and a live
+// region reads the zoom and position out once each change settles.
+function framingReadout() {
+  return t('framing.readout', framingPercents(framingOf(store.getState().theme.background)));
+}
+
+function updateFramingReadout() {
+  const on = canvasView.framing();
+  const text = on ? framingReadout() : '';
+  $('framing-numbers').textContent = text;
+  if (!store.isGesturing() && $('framing-live').textContent !== text) $('framing-live').textContent = text;
+}
+
+/**
+ * Framing mode on or off: on only for a video background, with no element
+ * selected (none can be meanwhile); off gives the focus back to the
+ * inspector's toggle unless something else took it.
+ */
+function setFramingMode(on, { restoreFocus = true } = {}) {
+  const next = Boolean(on) && store.getState().theme.background.type === 'video' && !storageWide();
+  if (next === canvasView.framing()) return;
+  if (next && store.getState().selection.length) store.select([]);
+  canvasView.setFraming(next ? { auto: () => state.auto.value, label: t('framing.surface'), describedBy: 'framing-keys', onLeave: () => setFramingMode(false) } : null);
+  $('framing-hud').hidden = !next;
+  $('stage').classList.toggle('framing', next);
+  updateFramingReadout();
+  inspector.contextChanged();
+  if (next) canvasView.focusFraming();
+  else if (restoreFocus) $('framing-canvas')?.focus();
+}
+
+$('framing-done').addEventListener('click', () => setFramingMode(false));
+// A selection, another background or another theme ends framing mode.
+store.subscribe((s, reason) => {
+  if (!canvasView.framing()) return;
+  if (reason === 'load' || s.selection.length || s.theme.background.type !== 'video') setFramingMode(false, { restoreFocus: false });
+});
+
+/** What identifies Auto's answer: the theme's video, its turn and size, and the live screen. */
+function autoKey(theme) {
+  const bg = theme.background;
+  if (bg.type !== 'video') return null;
+  return JSON.stringify([bg.asset, theme.orientation, theme.canvas.width, theme.canvas.height, state.live ? state.screen : null]);
+}
+
+/** Asks the backend what Auto is when the video, the theme's turn or the live screen changed. */
+async function refreshAuto() {
+  const theme = store.getState().theme;
+  const key = autoKey(theme);
+  if (key === state.auto.key) return;
+  state.auto = { key, value: null };
+  if (key === null) return;
+  const value = await bridge.videoAuto(theme).catch(() => null);
+  if (state.auto.key !== key) return;
+  state.auto = { key, value };
+  inspector.contextChanged();
+  canvasView.drawOverlay();
+}
+
 // ----------------------------------------------------------- render ----
-// Animated GIFs move in the preview at their own pace (T-7.11), at most 15
-// frames a second; not while the window is hidden or motion is reduced.
-const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+// Animated GIFs and a video background move in the preview at their own
+// pace (T-7.11, D-2026-10-01-video-background-framing-5), at most 15 frames
+// a second; not while the window is hidden or motion is reduced.
 const animation = createPreviewAnimation({
   request: () => renderNow(),
-  enabled: () => !document.hidden && !reducedMotion?.matches,
+  enabled: motionAllowed,
 });
 
 async function drawPreview() {
   const started = performance.now();
   try {
-    const frame = await bridge.render(store.getState().theme);
+    const frame = await bridge.render(store.getState().theme, { motion: motionAllowed() });
     canvasView.drawFrame(frame);
     $('status-render').textContent = t('status.render', { ms: Math.round(frame.millis) });
     animation.shown({ nextMs: frame.nextMs ?? null, elapsed: performance.now() - started });
@@ -201,6 +279,10 @@ const previews = createRenderScheduler({ render: drawPreview, gesturing: () => s
 const renderNow = () => previews.request();
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) renderNow();
+});
+reducedMotion?.addEventListener?.('change', () => {
+  inspector.contextChanged();
+  renderNow();
 });
 
 let liveTimer = null;
@@ -247,7 +329,9 @@ function refreshChrome(reason) {
   refreshOrientation(theme);
   canvasView.drawOverlay();
   library.renderLayers();
+  refreshAuto();
   inspector.render(state.assets);
+  updateFramingReadout();
   if (reason !== 'select') {
     renderNow();
     pushLive();
@@ -315,6 +399,7 @@ function renderScreenSelect() {
   library.renderScreen(state.screens, state.screen, state.live, state.brightness, state.desktopMode, { restarting: state.restarting, hung: state.hung });
   storage.update();
   inspector.contextChanged();
+  refreshAuto();
 }
 
 async function refreshScreens() {
@@ -720,6 +805,8 @@ document.addEventListener('keydown', (evt) => {
   if (!action) return;
   // The storage manager hides the editor: only saving acts on the theme.
   if (storageWide() && action.type !== 'save' && action.type !== 'saveAs') return;
+  // Framing the video, elements stay out of reach: only undo, redo and save act.
+  if (canvasView.framing() && !['undo', 'redo', 'save', 'saveAs'].includes(action.type)) return;
   evt.preventDefault();
   const ids = store.getState().selection;
   switch (action.type) {
@@ -746,6 +833,7 @@ function setLocale(next) {
   library.setCatalog(labelledCatalog());
   library.retranslate();
   storage.retranslate();
+  if (canvasView.framing()) $('overlay').setAttribute('aria-label', t('framing.surface'));
   refreshChrome('select');
   renderScreenSelect();
   renderNow();

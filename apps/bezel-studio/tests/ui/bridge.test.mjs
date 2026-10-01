@@ -97,6 +97,9 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.addMedia('/home/me/Ondas.gif');
   await bridge.themeThumbnail('/home/me/t.bezeltheme');
   await bridge.setThemeFilter(null, 'vertical');
+  await bridge.render(theme, { motion: false });
+  await bridge.videoAuto(theme);
+  await bridge.openGuide('ffmpeg', 'pt-BR');
   assert.deepEqual(calls.map((c) => c[0]), [
     'list_devices', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
@@ -105,8 +108,12 @@ test('tauri mode maps every call to its command', async () => {
     'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media', 'set_boot_media',
     'set_unsaved', 'close_window', 'preferences', 'set_language', 'set_sensor_options', 'pick_folder',
     'leave_desktop_mode', 'quit_app', 'show_sensors', 'restart_screen', 'add_media', 'add_media',
-    'theme_thumbnail', 'set_theme_filter',
+    'theme_thumbnail', 'set_theme_filter', 'render_preview', 'video_auto', 'open_guide',
   ]);
+  assert.deepEqual(calls[4][1], { theme, motion: true }, 'the preview plays a video background by default');
+  assert.deepEqual(calls[46][1], { theme, motion: false }, 'reduced motion: the poster');
+  assert.deepEqual(calls[47][1], { theme });
+  assert.deepEqual(calls[48][1], { page: 'ffmpeg', language: 'pt-BR' });
   assert.deepEqual(calls[44][1], { location: '/home/me/t.bezeltheme' });
   assert.deepEqual(calls[45][1], { scope: null, axis: 'vertical' });
   assert.deepEqual(calls[42][1], { path: null }, 'the native dialog asks');
@@ -237,6 +244,16 @@ test('demo mode shows what the window does and takes the close button as an even
   assert.equal(quitting, 1, 'the tray Quit asks too');
   await bridge.quitApp();
   assert.equal(attributes['data-demo-window'], 'quit');
+});
+
+test('demo mode shows on the page the preview\'s video decoder and the guide pages opened', async () => {
+  const attributes = {};
+  const bridge = createBridge({ ...page('?demo=dragonNoFfmpeg'), document: { documentElement: { setAttribute: (k, v) => { attributes[k] = v; } } } });
+  await bridge.openGuide('ffmpeg', 'en');
+  assert.equal(attributes['data-demo-guide'], 'ffmpeg en');
+  const { theme } = await bridge.session();
+  assert.deepEqual(await bridge.videoAuto(theme), { rotation: 270, size: { width: 480, height: 1920 } });
+  assert.equal(attributes['data-demo-decoder'], undefined, 'nothing decodes yet');
 });
 
 test('demo mode shows on the page which sensors the list shows', async () => {

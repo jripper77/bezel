@@ -190,6 +190,28 @@ button, input, select { font: inherit; color: inherit; }
 .bg-video .thumb { width: 96px; height: 54px; border-radius: 6px; background: #000 center / contain no-repeat; border: 1px solid var(--border); }
 .video-status { margin: 0 0 8px; }
 
+/* The Framing group of a video background. */
+.inspector .framing { margin: 4px 0 12px; padding: 10px 12px 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.inspector .framing h3 { margin: 0 0 8px; }
+.framing .hint { margin: 2px 0 8px; }
+.framing-toggle { width: 100%; justify-content: center; border-color: var(--accent); font-weight: 600; }
+.framing-toggle svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.framing-toggle[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
+.framing-choice { display: flex; width: 100%; }
+.framing-choice button { flex: 1 1 auto; padding: 5px 6px; white-space: nowrap; background: var(--surface); }
+.framing-choice button + button { border-left: 1px solid var(--border); }
+.framing-choice button[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
+/* Rotation: Auto (with the angle it found) on top, the four angles below. */
+.framing-choice.framing-rotation { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.framing-choice.framing-rotation button:first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--border); }
+.framing-choice.framing-rotation button:nth-child(2) { border-left: 0; }
+.framing-zoom { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 8px; align-items: end; }
+.framing-zoom input[type="number"] { width: 100%; margin-bottom: 8px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); }
+.framing .field output { font-variant-numeric: tabular-nums; color: var(--text); }
+.color-field.opaque { grid-template-columns: 40px 1fr; }
+.framing .button-row { margin-bottom: 8px; }
+.framing-note { padding: 6px 8px; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; background: var(--surface); }
+
 /* ---------------------------------------------------------------- stage -- */
 .stage { min-width: 0; min-height: 0; position: relative; background: radial-gradient(circle at 50% 40%, var(--surface-3), var(--bg) 70%); }
 .stage-scroll { position: absolute; inset: 0; overflow: auto; display: grid; place-items: center; padding: 32px; }
@@ -209,6 +231,22 @@ button, input, select { font: inherit; color: inherit; }
 .guide.x { top: 0; bottom: 0; width: 1px; }
 .guide.y { left: 0; right: 0; height: 1px; }
 .marquee { position: absolute; border: 1px solid var(--select); background: rgb(99 102 241 / 12%); pointer-events: none; }
+/* Framing the video background on the canvas: the overlay is the surface. */
+.overlay.framing { overflow: hidden; cursor: grab; }
+.overlay.framing.grabbing { cursor: grabbing; }
+.overlay.framing:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.framing-picture { position: absolute; border: 2px dashed #ffffff; box-shadow: 0 0 0 1px rgb(0 0 0 / 55%); pointer-events: none; }
+.framing-grid { position: absolute; inset: 0; pointer-events: none; }
+.framing-grid::before, .framing-grid::after { content: ""; position: absolute; border: 0 solid rgb(255 255 255 / 45%); }
+.framing-grid::before { top: 0; bottom: 0; left: 33.333%; right: 33.333%; border-left-width: 1px; border-right-width: 1px; }
+.framing-grid::after { left: 0; right: 0; top: 33.333%; bottom: 33.333%; border-top-width: 1px; border-bottom-width: 1px; }
+.stage.framing .bezel { outline: 2px solid var(--accent); outline-offset: 4px; }
+.framing-hud { position: absolute; z-index: 2; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: max-content; max-width: calc(100% - 24px); padding: 8px 10px 8px 12px; border: 1px solid var(--accent); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.framing-hud > svg { flex: none; width: 22px; height: 22px; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.framing-hud-text { display: grid; gap: 2px; min-width: 0; }
+.framing-numbers { font-weight: 600; font-variant-numeric: tabular-nums; }
+.framing-keys { color: var(--muted); font-size: 0.78rem; }
+.framing-hud .primary-button { flex: none; }
 .drop-ghost { position: fixed; z-index: 10; pointer-events: none; padding: 6px 10px; border-radius: 8px; background: var(--accent); color: var(--accent-text); font-weight: 600; box-shadow: var(--shadow); transform: translate(-50%, -50%); }
 .stage.drop-target .bezel { outline: 3px dashed var(--accent); outline-offset: 6px; }
 

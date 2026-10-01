@@ -1,9 +1,14 @@
 // The canvas: shows the rendered frame at a zoom level and handles direct
 // manipulation on a DOM overlay (selection, eight resize handles, snapping
-// guides, marquee). Everything is in canvas pixels until drawn.
+// guides, marquee). Everything is in canvas pixels until drawn. In framing
+// mode the overlay frames the video background instead
+// (D-2026-10-01-video-background-framing-6): drag pans it, the wheel zooms
+// around the pointer, keys nudge, zoom, reset and leave; each drag or wheel
+// burst is one undo step, and no element can be selected meanwhile.
 import { el } from './dom.js';
 import { HANDLES, boxFromPoints, handlePoints, hitTest, marqueeSelect, resize, unionBox } from '../editor/geometry.js';
 import { snapEdge, snapMove } from '../editor/snap.js';
+import { applyFramingKey, createBurst, framingKey, framingOf, panned, pictureBox, reframed, resolvedRotation, wheelPixels, wheelZoom, zoomedAt } from '../editor/video-framing.js';
 
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 8;
@@ -19,8 +24,9 @@ const DRAG_THRESHOLD = 3;
  * @param {HTMLElement} opts.overlay
  * @param {(zoom:number) => void} [opts.onZoom]
  * @param {(label:string) => string} [opts.describe] accessible label of an element box
+ * @param {() => void} [opts.onFrameRequest] a double click on the video background, off any element
  */
-export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom = () => {}, describe = (n) => n }) {
+export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom = () => {}, describe = (n) => n, onFrameRequest = () => {} }) {
   const ctx = canvas.getContext('2d');
   let size = { width: canvas.width, height: canvas.height };
   let zoom = 1;
@@ -29,9 +35,29 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   let marquee = null;
   let hoverId = null;
   let press = null;
+  // Framing mode: what Auto is, how the surface is named and described, and
+  // how it is left (Esc, Enter); `null` while editing elements.
+  let framing = null;
 
   const theme = () => store.getState().theme;
   const selection = () => store.getState().selection;
+  // A burst of wheel turns is one gesture: one undo step.
+  const wheelBurst = createBurst({ begin: () => store.beginGesture(), end: () => store.endGesture() });
+
+  /** The video background's framing and what it is drawn against, or `null` without a video. */
+  function framingView() {
+    const bg = theme().background;
+    if (bg.type !== 'video') return null;
+    const current = framingOf(bg);
+    const auto = framing?.auto() ?? null;
+    return { framing: current, view: { source: auto?.size ?? null, rotation: resolvedRotation(current, auto), canvas: size } };
+  }
+
+  /** Frames the video background with `next` (one store command), unless nothing changes. */
+  function applyFraming(next) {
+    const framed = reframed(theme().background, next);
+    if (framed) store.dispatch('setTheme', { patch: { background: framed } });
+  }
 
   function layout() {
     box.style.width = `${Math.round(size.width * zoom)}px`;
@@ -85,7 +111,19 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   const px = (v) => `${v * zoom}px`;
   const boxStyle = (f) => ({ left: px(f.x), top: px(f.y), width: px(f.width), height: px(f.height) });
 
+  /** Framing mode's overlay: the turned picture's edges and a rule-of-thirds grid. */
+  function drawFramingOverlay() {
+    const fv = framingView();
+    const nodes = [el('div', { class: 'framing-grid' })];
+    if (fv) nodes.unshift(el('div', { class: 'framing-picture', style: boxStyle(pictureBox(fv.view.source, fv.view.rotation, fv.framing, size)) }));
+    overlay.replaceChildren(...nodes);
+  }
+
   function drawOverlay() {
+    if (framing) {
+      drawFramingOverlay();
+      return;
+    }
     const t = theme();
     const sel = new Set(selection());
     const nodes = [];
@@ -115,9 +153,30 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     return theme().elements.filter((e) => !set.has(e.id) && e.visible !== false).map((e) => e.frame);
   }
 
+  /** A press in framing mode: the drag that follows pans the video. */
+  function framePress(evt) {
+    const fv = framingView();
+    if (!fv) return;
+    overlay.focus({ preventScroll: true });
+    const picture = pictureBox(fv.view.source, fv.view.rotation, fv.framing, size);
+    press = { mode: 'frame', start: fv.framing, picture, client: [evt.clientX, evt.clientY], started: false };
+    overlay.classList.add('grabbing');
+  }
+
+  /** The picture follows the pointer from where the drag began. */
+  function onFrame(evt) {
+    const dx = (evt.clientX - press.client[0]) / zoom;
+    const dy = (evt.clientY - press.client[1]) / zoom;
+    applyFraming({ position: panned(press.start, press.picture, size, dx, dy) });
+  }
+
   function onPointerDown(evt) {
     if (evt.button !== 0) return;
     overlay.setPointerCapture?.(evt.pointerId);
+    if (framing) {
+      framePress(evt);
+      return;
+    }
     const start = point(evt.clientX, evt.clientY);
     const handle = evt.target?.dataset?.h;
     const state = store.getState();
@@ -202,7 +261,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   function onPointerMove(evt) {
     const p = point(evt.clientX, evt.clientY);
     if (!press) {
-      const id = hitTest(theme().elements, p.x, p.y);
+      const id = framing ? null : hitTest(theme().elements, p.x, p.y);
       if (id !== hoverId) {
         hoverId = id;
         drawOverlay();
@@ -210,7 +269,8 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
       return;
     }
     if (!beginIfMoved(evt)) return;
-    if (press.mode === 'move') onMove(evt, p);
+    if (press.mode === 'frame') onFrame(evt);
+    else if (press.mode === 'move') onMove(evt, p);
     else if (press.mode === 'resize') onResize(evt, p);
     else {
       marquee = boxFromPoints(press.start.x, press.start.y, p.x, p.y);
@@ -225,6 +285,67 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     press = null;
     guides = [];
     marquee = null;
+    overlay.classList.remove('grabbing');
+    drawOverlay();
+  }
+
+  /** The wheel in framing mode zooms the video around the pointer (Ctrl+wheel still zooms the view). */
+  function onFramingWheel(evt) {
+    if (!framing || evt.ctrlKey) return;
+    const fv = framingView();
+    if (!fv) return;
+    evt.preventDefault();
+    wheelBurst.touch();
+    applyFraming(zoomedAt(fv.framing, fv.view, wheelZoom(fv.framing.zoom, wheelPixels(evt)), point(evt.clientX, evt.clientY)));
+  }
+
+  /** Framing mode's keys: arrows, + and -, 0, Esc and Enter; the rest (undo, save) goes on to the editor. */
+  function onFramingKey(evt) {
+    if (!framing) return;
+    const action = framingKey(evt);
+    if (!action) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    if (action.type === 'leave') {
+      framing.onLeave();
+      return;
+    }
+    const fv = framingView();
+    if (fv) applyFraming(applyFramingKey(fv.framing, action, fv.view));
+  }
+
+  /** A double click on the video background, off any element, asks for framing mode. */
+  function onDoubleClick(evt) {
+    if (framing || theme().background.type !== 'video') return;
+    const p = point(evt.clientX, evt.clientY);
+    if (hitTest(theme().elements, p.x, p.y) === null) onFrameRequest();
+  }
+
+  /**
+   * Framing mode on (`mode`) or off (`null`). On, the overlay is a focusable
+   * surface named `mode.label` and described by the element `mode.describedBy`
+   * (the keys); `mode.auto()` is what Auto is now (`video_auto`), and
+   * `mode.onLeave()` is asked for by Esc or Enter.
+   * @param {{auto: () => {rotation: number, size: {width: number, height: number}|null}|null, label: string, describedBy: string, onLeave: () => void}|null} mode
+   */
+  function setFraming(mode) {
+    wheelBurst.flush();
+    if (press?.started && press.mode !== 'marquee') store.endGesture();
+    framing = mode;
+    press = null;
+    hoverId = null;
+    guides = [];
+    marquee = null;
+    overlay.classList.toggle('framing', Boolean(mode));
+    overlay.classList.remove('grabbing');
+    if (mode) {
+      overlay.tabIndex = 0;
+      overlay.setAttribute('role', 'application');
+      overlay.setAttribute('aria-label', mode.label);
+      overlay.setAttribute('aria-describedby', mode.describedBy);
+    } else {
+      for (const name of ['tabindex', 'role', 'aria-label', 'aria-describedby']) overlay.removeAttribute(name);
+    }
     drawOverlay();
   }
 
@@ -238,6 +359,9 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
       drawOverlay();
     }
   });
+  overlay.addEventListener('wheel', onFramingWheel, { passive: false });
+  overlay.addEventListener('keydown', onFramingKey);
+  overlay.addEventListener('dblclick', onDoubleClick);
   scroll.addEventListener('wheel', (evt) => {
     if (!evt.ctrlKey) return;
     evt.preventDefault();
@@ -254,5 +378,9 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     drawOverlay,
     point,
     containsClient,
+    setFraming,
+    framing: () => framing !== null,
+    /** Focuses the framing surface (framing mode only). */
+    focusFraming: () => framing && overlay.focus({ preventScroll: true }),
   };
 }

@@ -75,7 +75,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - Pôster com o enquadramento ao adicionar; refeito ao salvar se o enquadramento mudou (sem ffmpeg, fica). "Enviar para a tela" usa `MissingVideo.options`: vídeo nativo do painel em tema girado vai como está (teto de 25 MiB igual); outro enquadramento sem ffmpeg é recusado com as dicas.
 - **Dependencies:** T-2, T-3, T-4, T-5
 - **Test:** `studio::tests::{the_preview_plays_the_framed_video_at_most_15_fps,the_preview_decoder_stops_when_no_frame_is_asked,without_ffmpeg_the_preview_shows_the_poster,saving_retakes_the_poster_with_the_framing}`, `storage::tests::a_panel_native_theme_video_is_sent_as_it_is`; `npm test`
-- **Status:** pending
+- **Status:** completed
 
 #### T-7: Guia en/pt-BR e CHANGELOG
 - **Specialist:** jdi-doer-bezel

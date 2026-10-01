@@ -726,6 +726,71 @@ fn video_backgrounds_use_the_poster_and_bundle_the_video_when_found() {
 }
 
 #[test]
+fn vendor_video_backgrounds_import_with_auto_framing() {
+    use bezel_core::domain::framing::{PanelLayout, ResolvedFraming, VideoFraming};
+
+    // The vendor's own transform (a crop, a quarter turn) and the source
+    // size, as a theme saved with a pre-turned 480x1920 video carries them.
+    let rectangle = |x, y, w, h| {
+        O(
+            "System.Drawing.Rectangle",
+            vec![("x", I(x)), ("y", I(y)), ("width", I(w)), ("height", I(h))],
+        )
+    };
+    let animation = || {
+        layer(
+            "UsbMonitorL.GraphAnimation",
+            "Animation",
+            (0, 0),
+            vec![
+                ("bitmap", bitmap(1920, 480)),
+                ("videoName", s("dragon.mp4")),
+                (
+                    "crop",
+                    O(
+                        "UsbMonitorL.TransFormInfo",
+                        vec![
+                            ("ret", I(1)),
+                            ("rotate", I(1)),
+                            ("rect", rectangle(0, 240, 480, 1440)),
+                        ],
+                    ),
+                ),
+                ("direction", I(3)),
+                ("FilePath", s("D:\\8.8\\video\\4801920\\dragon.mp4")),
+                ("SWith", I(480)),
+                ("SHeight", I(1920)),
+            ],
+            Null,
+            Null,
+        )
+    };
+    let video = Size::new(480, 1920);
+    for (w, h, auto_turns) in [(1920, 480, 3), (480, 1920, 0)] {
+        let (t, assets, report) = run(&theme(w, h, None, vec![animation()]), Some(b"MP4"));
+        let Background::Video { asset, framing, .. } = &t.background else {
+            panic!("{:?}", t.background)
+        };
+        assert_eq!(asset.0, "assets/dragon.mp4");
+        assert_eq!(assets[asset], b"MP4".to_vec());
+        assert_eq!(*framing, None, "{w}x{h}: Auto");
+        assert!(report.is_clean(), "{:?}", report.warnings);
+        // Auto: the landscape theme turns the panel-native video 270
+        // degrees on its canvas, the portrait one leaves it.
+        let resolved = VideoFraming::default().resolve(
+            Some(video),
+            t.orientation,
+            PanelLayout::for_canvas(t.canvas),
+        );
+        assert_eq!(resolved, ResolvedFraming::plain(auto_turns), "{w}x{h}");
+        // A .bezeltheme of it writes no framing.
+        let json = String::from_utf8(crate::native::manifest(&t).expect("manifest")).expect("utf8");
+        assert!(!json.contains("framing"), "{json}");
+        assert_eq!(crate::native::parse_manifest(json.as_bytes()).ok(), Some(t));
+    }
+}
+
+#[test]
 fn backgrounds_that_do_not_cover_the_canvas_become_layers() {
     let (t, _, _) = run(
         &theme(480, 1920, None, vec![image((0, 0), 470, 1880)]),

@@ -476,6 +476,10 @@ impl Importer {
 
     /// Background from the first layer: a still image covering the canvas,
     /// or a video (with its poster). Returns the layers left to import.
+    ///
+    /// A video gets no framing: the vendor zeroes its own `crop`
+    /// (`TransFormInfo`) and `direction` when it loads a theme, so the video
+    /// is framed by Auto (D-2026-10-01-video-background-framing-2).
     fn background<'g, 'i>(
         &mut self,
         root: Obj<'g>,

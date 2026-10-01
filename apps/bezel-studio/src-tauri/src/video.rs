@@ -361,6 +361,7 @@ mod tests {
         theme.background = bezel_themes::dto::BackgroundDto::Video {
             asset: added.reference.clone(),
             poster: added.poster.clone(),
+            framing: None,
         };
         let frame = f
             .backend

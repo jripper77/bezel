@@ -35,7 +35,8 @@ async function goLive(page, t) {
   await page.clock.install();
   await page.goto('/index.html?demo=mcuLive');
   await expect(page.locator('#theme-name')).toHaveValue('Demo');
-  await page.getByRole('switch').click({ force: true });
+  // The visible switch, as a user clicks it (its input is visually hidden).
+  await page.locator('label.switch').click();
   await expect(page.getByRole('switch')).toBeChecked();
   await expect(page.locator('#status-device')).toHaveText(t('status.live'));
 }

@@ -19,7 +19,6 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Dependencies:** none
 - **Test:** `app::storage::tests::unknown_size_counts_as_present`, `domain::media::tests::fitting_options_turn_and_cover_crop`
 - **Status:** completed (`41f647d`..`99e7c92`, 8 commits)
-- **Nota:** fora de `files_modified`, sinalizados: `ports/mod.rs` (só doc), `bezel-devices/src/fake.rs` (arquivo de tamanho desconhecido), testes de integração do core e da CLI que usavam a duplicação removida. Erros de tema viram `theme file: …`.
 
 #### T-7.2: Sensores: chaves únicas, hwmon/amdgpu unificados, chaves importadas
 - **Specialist:** jdi-doer-bezel
@@ -31,7 +30,6 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Dependencies:** none
 - **Test:** `linux::hwmon::tests::gpu_power_prefers_the_average_like_amdgpu`, `linux::hwmon::tests::fans_and_voltages_use_catalog_keys`
 - **Status:** completed (`fbea521`; reexport de `SensorOptions` em `ef8e8da`)
-- **Nota:** `FakeSensors::samples_taken` segue público porque testes da CLI o usam ("usados" da D-9).
 
 #### T-7.3: Rev C: connect testável e sobras do cancelamento
 - **Specialist:** jdi-doer-bezel
@@ -66,7 +64,6 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Dependencies:** T-7.2, T-7.4
 - **Test:** `cargo test -p bezel-sensors fps::`, `-- ping:: imported_keys_are_published`; clippy `--target x86_64-pc-windows-gnu`
 - **Status:** completed (`9071262`; FPS com jogo real fica para a T-7.8)
-- **Nota:** fora de `files_modified`, permitido: `docs/reverse-engineering/sensors.md` § 8. O `unsafe` do RTSS inclui `GetTickCount` (mesmo módulo `cfg(windows)`, `allow` + `// SAFETY:`); `lib.rs` passa de `forbid` a `deny(unsafe_code)`.
 
 #### T-7.6: Studio: i18n completo, mensagens por código e telas novas
 - **Specialist:** jdi-doer-bezel
@@ -79,7 +76,6 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Dependencies:** T-7.1, T-7.2, T-7.4
 - **Test:** `node --test tests/ui/i18n.test.mjs tests/ui/backend-messages.test.mjs`; `npm test`
 - **Status:** completed (`01f6177`..`a9efb90`, 12 commits)
-- **Nota:** fora de `files_modified`, sinalizados: `build.rs`/`capabilities/default.json` (`allow-*` dos comandos novos), `tests/hardware.rs` (campos novos do `Backend`), `bezel-themes/tests/import_corpus.rs` (ignorado). `sizeMismatch` é reconhecido pelo texto do `Transport` (variante no core fica no backlog).
 
 ### Wave 3
 
@@ -92,7 +88,6 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Dependencies:** T-7.1..T-7.6
 - **Test:** `bash scripts/ci/check-packaging.sh && bash scripts/ci/check-docs.sh`
 - **Status:** completed (`0fd7f0f` empacotamento, `4762377` docs; `b063681` docs do studio após a T-7.6)
-- **Nota:** fora de `files_modified`, permitido: `packaging/linux/postinstall.sh` (gatilho `hidraw`). Os deb/rpm também levam `/usr/share/bezel/themes`; provado com deb e rpm construídos localmente.
 
 ### Wave 3b (achados da T-7.8 e pedido do usuário)
 
@@ -105,12 +100,18 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 
 #### T-7.10: Limite de 25 MiB (D-12) e reinício pelo MCU (D-13)
 - **Specialist:** jdi-doer-bezel
-- **Files modified:** core (perfil, pré-voo, porta de conexão), `bezel-media`, `connector.rs`, CLI (`bezel restart`), studio (aba Tela), docs, `CHANGELOG.md`
-- **Acceptance:** envio rev C > 25 MiB recusado antes de enviar e conversão com bitrate limitado; `00 00 00 00 00 c9` no MCU por 8 s e espera o SoC voltar; automático uma vez quando o SoC não responde; `bezel restart` e ação no studio.
+- **Files modified:** core (perfil, pré-voo, porta de conexão, `BezelError::Hung`), `bezel-media`, `connector.rs`, `wire.rs`, CLI (`bezel restart`), studio (aba Tela), docs, `CHANGELOG.md`
+- **Acceptance:** envio rev C > 25 MiB recusado antes de enviar; conversão com bitrate limitado; `00 00 00 00 00 c9` no MCU por 8 s e espera o SoC voltar; automático uma vez quando o SoC não responde.
 - **Dependencies:** T-7.3
-- **Test:** `domain::storage::tests::each_file_is_capped_at_the_profiles_limit`, `transcode::tests::the_bitrate_is_capped_so_the_output_fits_the_screen`, `a_converted_video_over_the_limit_is_refused_before_a_byte_is_sent` (core), `connector::tests::the_mcu_restart_sends_six_bytes_holds_8_s_and_waits_for_the_soc`, `connector::tests::a_soc_on_the_bus_without_hello_is_restarted_once_then_connected`, `connector::tests::a_screen_that_answers_is_never_restarted`, e2e `a hung screen offers the restart…`
-- **Status:** completed (`d207730` D-12, `b6a2f7b` D-13; validação no hardware com o orquestrador)
-- **Nota:** fora do escopo natural, sinalizados: `wire.rs` (`Stalled` tipado → `BezelError::Hung`, e a porta serial descarta ao fechar a saída que um dispositivo travado não leu, para o fechamento não esperar até 30 s), `driver/mod.rs` (`io_err`), `README.md` (`bezel restart` no início rápido), `demo-data.js` (`chuva.mp4` de 64 MiB → 22 MiB, coerente com o limite; cenário `noffmpeg` com 32 MB internos para o `noSpace` continuar testável).
+- **Test:** `each_file_is_capped_at_the_profiles_limit`, `the_bitrate_is_capped_so_the_output_fits_the_screen`, testes do `RevCHost` (bytes, 8 s, volta, uma vez)
+- **Status:** completed (`777c0d7`, `2829fa8`); validado na 8.8": `bezel restart` 10,4 s; 40 MiB recusado; tela travada → comando comum reinicia sozinho (28 s); 1080p de 157 MiB → 21,2 MiB, tocado.
+
+#### T-7.11: GIF com cadência própria e ao vivo que se recupera
+- **Specialist:** jdi-doer-bezel
+- **Files modified:** core `app/runtime.rs`, CLI `live.rs`, studio `studio.rs`/`backend.rs`/preview, docs, `CHANGELOG.md`
+- **Acceptance:** GIF visível redesenha só o seu retângulo no ritmo dele (≤ ~30 fps, pula quadros sem atrasar), sensores no `refreshSeconds`; `bezel run` e o ao vivo do studio reconectam após `Hung` (reinício automático) com recuo limitado.
+- **Dependencies:** T-7.10
+- **Status:** in progress
 
 ### Wave 4
 
@@ -142,5 +143,6 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - `cargo test --workspace --locked`; `cargo fmt --check`; clippy `-D warnings`; `npm test`; `scripts/ci/check-{packaging,docs}.sh`; cobertura ≥ 80% (`cargo llvm-cov`)
 
 ## Notes
+- Arquivos fora de `files_modified` das T-7.1..T-7.7: SUMMARY § Files modified e as notas dos commits.
 - Worktree por task + cherry-pick; um dono por arquivo compartilhado na wave.
 - Ritmo e cancelamento do rev C e o HID só valem como validados na T-7.8 (D-8).

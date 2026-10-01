@@ -1257,6 +1257,39 @@ fn a_panel_native_theme_video_is_sent_as_it_is() {
     assert!(f.writes().is_empty());
 }
 
+/// D-2026-10-01-video-background-framing-5: without ffmpeg, "Send to
+/// screen" still sends a theme video whose framing is the identity (the
+/// Dragon Ball video in Auto), as it is.
+#[test]
+fn a_panel_native_theme_video_is_sent_without_ffmpeg() {
+    let f = fixture_with(
+        "dragon-no-ffmpeg",
+        FakeStorage::default(),
+        FakeMedia::missing(),
+    );
+    assert!(!f.backend.media_tools().ready);
+    let (theme, assets) = dragon_ball(4096, None);
+    let video = assets.values().next().unwrap().clone();
+    let PrepareDto::Ready(ready) = send_theme_video(&f, (theme, assets)) else {
+        panic!("refused without ffmpeg");
+    };
+    assert_eq!(
+        (ready.target.path.as_str(), ready.bytes, ready.convert),
+        ("internal/video/dragon.mp4", 4096, None)
+    );
+    let (result, _) = f.run(ready.ticket, Confirm::No);
+    assert!(matches!(
+        result,
+        Ok(JobDto::Done {
+            converted: false,
+            ..
+        })
+    ));
+    let stored = &f.storage().files[&remote_path("internal/video/dragon.mp4")];
+    assert_eq!(*stored, video, "the asset's own bytes");
+    assert_eq!(f.backend.sample().video.unwrap().state, "onDevice");
+}
+
 #[test]
 fn an_animated_gif_background_is_sent_as_a_video_at_a_constant_rate() {
     let f = fixture("theme-gif");

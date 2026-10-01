@@ -1,20 +1,33 @@
 //! `bezel storage`: the files a screen stores (internal flash and memory
 //! card), uploads with progress and cancellation, deletes, device-side
-//! playback and the boot media, over the core's `app::storage` use cases.
+//! playback and the boot media, over the core's `app::storage` use cases;
+//! and the storage manager over `app::manager`
+//! (D-2026-09-30-storage-manager-12): moving, renaming and restoring files
+//! from Bezel's local copies, the cleanup assistant, the catalog of what
+//! Bezel sent and the cache of local copies. `put`, `rm` and `boot` are
+//! recorded in that catalog.
 //!
 //! Deleting, replacing a stored file and changing the boot media need
 //! `--yes` (`Confirm::Yes`, D-2026-09-30-storage-video-1 and -5). Every one
 //! of them first prints what it is about to do, `--yes` or not; without it
 //! the command fails before anything changes the screen: `rm` and `boot` do
-//! not even open it, and `put` only queries it to learn what it would replace.
+//! not even open it, and `put`, `mv`, `rename`, `restore` and `cleanup` only
+//! query it to learn what they would do.
+
+mod catalog;
+mod cleanup;
+pub mod demo;
+mod transfer;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
 use bezel_core::BezelError;
+use bezel_core::app::manager::{Halt, Inventory, Manager, ManagerError, StepProgress};
 use bezel_core::app::open_screen;
 use bezel_core::app::storage::{self as usecase, PreparedUpload, UploadRequest};
+use bezel_core::domain::archive::{Listed, PlanRefusal};
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::job::{CancelToken, Job, JobPhase, Progress};
@@ -24,15 +37,22 @@ use bezel_core::domain::media::{
 };
 use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::storage::{
-    BootMedia, Capacity, FileEntry, Medium, Refusal, RemotePath, Repeat, Rounding, StorageInfo,
+    BootMedia, Capacity, Medium, Refusal, RemotePath, Repeat, Rounding, StorageInfo,
     StorageLocation, UploadAction, mib_text,
 };
-use bezel_core::ports::{DeviceBus, MediaLocation, MediaTranscoder, ScreenConnector, ScreenLink};
+use bezel_core::domain::theme::AssetRef;
+use bezel_core::ports::{
+    ArchiveStore, DeviceBus, MediaLocation, MediaTranscoder, ScreenConnector, ScreenLink,
+};
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use crate::messages::Messages;
 use crate::{OrientationArg, Target};
+
+pub use catalog::{AssociateArgs, CacheAction, CacheArgs, CatalogAction, CatalogArgs, parse_size};
+pub use cleanup::CleanupArgs;
+pub use transfer::{MoveArgs, RenameArgs, RestoreArgs};
 
 /// Options of `bezel storage`.
 #[derive(Debug, Args)]
@@ -51,9 +71,34 @@ impl StorageArgs {
         }
     }
 
-    /// True for the commands Ctrl+C cancels cleanly (a running upload).
+    /// True for the commands Ctrl+C cancels cleanly: a running upload, a
+    /// batch of moves, renames or restores, the deletes of a cleanup.
     pub fn cancellable(&self) -> bool {
-        matches!(self.action, StorageAction::Put(_))
+        self.cancel_note().is_some()
+    }
+
+    /// What the first Ctrl+C does, said on stderr when it is pressed; `None`
+    /// for the commands that are not cancelled that way.
+    pub fn cancel_note(&self) -> Option<&'static str> {
+        match &self.action {
+            StorageAction::Put(_) => Some("cancelling the upload..."),
+            StorageAction::Mv(_) | StorageAction::Rename(_) | StorageAction::Restore(_) => Some(
+                "cancelling: the file being sent stops at its next block and its source stays...",
+            ),
+            StorageAction::Cleanup(args) if !args.dry_run => {
+                Some("cancelling: nothing after the file being deleted is deleted...")
+            }
+            _ => None,
+        }
+    }
+
+    /// True for the commands that read or write Bezel's catalog of local
+    /// copies (all but `info`, `play` and `stop`).
+    pub fn uses_catalog(&self) -> bool {
+        !matches!(
+            self.action,
+            StorageAction::Info { .. } | StorageAction::Play { .. } | StorageAction::Stop { .. }
+        )
     }
 }
 
@@ -70,7 +115,9 @@ pub enum StorageAction {
         json: bool,
     },
     /// List the stored files: every folder, or one of internal/image,
-    /// internal/video, sd/image and sd/video.
+    /// internal/video, sd/image and sd/video. Files Bezel sent show their
+    /// catalog state (stored, or pending: an upload that did not finish) and
+    /// whether Bezel keeps a local copy of them.
     Ls {
         /// Screen to use.
         #[command(flatten)]
@@ -122,6 +169,31 @@ pub enum StorageAction {
     /// (it starts playing now) or `default` for its built-in start screen.
     /// Persistent: needs --yes.
     Boot(BootArgs),
+    /// Move files to the other medium (internal flash or memory card): each
+    /// one is sent again from Bezel's local copy, its stored size checked,
+    /// and only then deleted from where it was. Prints the list first; needs
+    /// --yes. Ctrl+C cancels: the file being sent stays at its source.
+    Mv(MoveArgs),
+    /// Rename a stored file: sent again under the new name from Bezel's
+    /// local copy, checked, and only then the old one deleted. Prints what it
+    /// does first; needs --yes.
+    Rename(RenameArgs),
+    /// Send files Bezel sent before back to a medium from their local
+    /// copies (after formatting it, or onto a new card): by default the ones
+    /// missing from it. The space is checked before the first byte; nothing
+    /// is deleted. Prints the list first; needs --yes.
+    Restore(RestoreArgs),
+    /// The cleanup assistant: lists likely leftovers (the vendor app's
+    /// duplicate copies, interrupted uploads, files no theme plays) and
+    /// deletes only the pre-checked ones it printed, with --yes. Never
+    /// suggests the boot media Bezel set nor a video your themes play.
+    Cleanup(CleanupArgs),
+    /// Bezel's catalog of what it sent to this screen: list it, associate a
+    /// stored file with its original on this computer, or forget an entry.
+    Catalog(CatalogArgs),
+    /// The local copies Bezel keeps of what it sends: their use, clearing
+    /// them, and the size limit of the copies of deleted files.
+    Cache(CacheArgs),
 }
 
 /// Options of `bezel storage put`.
@@ -237,14 +309,35 @@ pub enum ProgressStyle {
 /// What `bezel storage` works with besides the screen, built by the
 /// composition root.
 pub struct StorageKit<'a> {
-    /// Inspects and converts local media files (`put`).
+    /// Inspects and converts local media files (`put`, `catalog associate`).
     pub media: &'a mut dyn MediaTranscoder,
-    /// Cancels a running upload (the Ctrl+C handler holds a clone).
+    /// Cancels a running upload or batch (the Ctrl+C handler holds a clone).
     pub cancel: &'a CancelToken,
     /// How upload progress is drawn.
     pub progress: ProgressStyle,
     /// Confirmation summaries, warnings and progress (stderr).
     pub log: &'a mut dyn Write,
+    /// Bezel's catalog and local copies (D-2026-09-30-storage-manager-5).
+    pub archive: &'a mut dyn ArchiveStore,
+    /// Where the local copies are kept, as `cache` names it; `None`: in
+    /// memory (`--fake`).
+    pub archive_dir: Option<&'a Path>,
+    /// The videos your themes play: the cleanup assistant never suggests
+    /// them and renaming one warns.
+    pub theme_videos: &'a [AssetRef],
+    /// The time recorded for what is sent now, in seconds since the Unix
+    /// epoch.
+    pub now: u64,
+}
+
+/// The storage manager on the screen behind `link`, protecting the videos
+/// of `kit`'s themes.
+fn manager<'m>(
+    link: &'m mut dyn ScreenLink,
+    archive: &'m mut dyn ArchiveStore,
+    theme_videos: &[AssetRef],
+) -> Manager<'m> {
+    Manager::new(link, archive).protecting(theme_videos.iter().cloned())
 }
 
 /// Runs a `bezel storage` command and returns what should be printed on
@@ -267,14 +360,13 @@ where
             target,
             folder,
             json,
-        } => ls(open(target)?.as_mut(), *folder, *json),
+        } => ls(open(target)?.as_mut(), kit, *folder, *json),
         StorageAction::Put(put_args) => put(open(&put_args.target)?.as_mut(), put_args, kit),
         StorageAction::Rm { target, paths, yes } => {
-            let mut log = Messages::new(&mut *kit.log);
             if !yes {
-                return refuse_delete(paths, &mut log);
+                return refuse_delete(paths, &mut Messages::new(&mut *kit.log));
             }
-            rm(open(target)?.as_mut(), paths, &mut log)
+            rm(open(target)?.as_mut(), paths, kit)
         }
         StorageAction::Play { target, path, once } => {
             let repeat = if *once { Repeat::Once } else { Repeat::Loop };
@@ -294,12 +386,71 @@ where
                 anyhow::bail!("changing the boot media needs --yes");
             }
             log.check()?;
-            boot(open(&boot_args.target)?.as_mut(), boot_args)
+            boot(open(&boot_args.target)?.as_mut(), boot_args, kit)
         }
+        StorageAction::Mv(mv) => transfer::mv(open(&mv.target)?.as_mut(), mv, kit),
+        StorageAction::Rename(r) => transfer::rename(open(&r.target)?.as_mut(), r, kit),
+        StorageAction::Restore(r) => transfer::restore(open(&r.target)?.as_mut(), r, kit),
+        StorageAction::Cleanup(c) => cleanup::run(open(&c.target)?.as_mut(), c, kit),
+        StorageAction::Catalog(c) => catalog::run(open(c.target())?.as_mut(), c, kit),
+        StorageAction::Cache(c) => catalog::cache(c, kit),
     }
 }
 
 const NOTHING_SENT: &str = "Nothing was sent to the screen.";
+
+/// Said when a command that only queried the screen stops for `--yes`.
+const NOTHING_CHANGED: &str = "Nothing on the screen was changed.";
+
+/// "1 file", "3 files".
+fn files(count: usize) -> String {
+    if count == 1 {
+        "1 file".to_string()
+    } else {
+        format!("{count} files")
+    }
+}
+
+/// A manager error as the user reads it: screen errors as [`screen_error`]
+/// says them, refused plans with what to do.
+fn manager_error(what: &'static str) -> impl Fn(ManagerError) -> anyhow::Error {
+    move |error| match error {
+        ManagerError::Failed(error) => screen_error(what)(error),
+        ManagerError::Refused(refusal) => refused_plan(refusal),
+    }
+}
+
+/// Why a file stopped a batch, as the user reads it; screen errors as
+/// [`screen_error`] says them about `what`.
+fn halt_text(halt: &Halt, what: &'static str) -> String {
+    match halt {
+        Halt::Cancelled { .. } => "cancelled".to_string(),
+        Halt::Conflict(file) => format!(
+            "{} is there now ({}) and replacing it was not confirmed (--overwrite)",
+            file.path,
+            optional_size(file.size)
+        ),
+        Halt::Refused(refusal) => explain(BezelError::Refused(refusal.clone())).to_string(),
+        Halt::Failed(error) => screen_error(what)(error.clone()).to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// A plan that could not be made (nothing was sent or deleted).
+fn refused_plan(refusal: PlanRefusal) -> anyhow::Error {
+    match refusal {
+        PlanRefusal::NoSpace { needed, free } => anyhow!(
+            "refused: the files need {} and {} is free ({} short); nothing was sent or deleted",
+            size_text(needed),
+            size_text(free),
+            size_text(needed.saturating_add(1).saturating_sub(free))
+        ),
+        PlanRefusal::Unsendable { path, refusal } => {
+            anyhow!("{path}: {}", explain(BezelError::Refused(refusal)))
+        }
+        other => anyhow!("refused: {other}; nothing was sent or deleted"),
+    }
+}
 
 fn connect<B, C>(bus: &B, connector: &C, target: &Target) -> anyhow::Result<Box<dyn ScreenLink>>
 where
@@ -386,16 +537,25 @@ struct FileDto {
     folder: &'static str,
     name: String,
     size_bytes: Option<u64>,
+    /// The catalog state (`stored`, `pending`) of a file Bezel sent; `null`
+    /// for any other file.
+    state: Option<&'static str>,
+    /// Whether Bezel keeps a local copy of it (it can be moved, renamed and
+    /// restored).
+    local_copy: bool,
 }
 
-impl From<&FileEntry> for FileDto {
-    fn from(e: &FileEntry) -> Self {
+impl FileDto {
+    fn new(listed: &Listed, local_copy: bool) -> Self {
+        let path = &listed.file.path;
         Self {
-            path: e.path.to_string(),
-            medium: e.path.location.medium.slug(),
-            folder: e.path.location.kind.slug(),
-            name: e.path.name.to_string(),
-            size_bytes: e.size,
+            path: path.to_string(),
+            medium: path.location.medium.slug(),
+            folder: path.location.kind.slug(),
+            name: path.name.to_string(),
+            size_bytes: Inventory::size(listed),
+            state: listed.entry.as_ref().map(|e| e.state.slug()),
+            local_copy,
         }
     }
 }
@@ -440,66 +600,126 @@ fn info(link: &mut dyn ScreenLink, json: bool) -> anyhow::Result<String> {
 
 const LISTING: &str = "listing its files";
 
-/// `bezel storage ls`: one folder, or every folder of the media present.
+/// `bezel storage ls`: one folder, or every folder of the media present,
+/// next to Bezel's catalog (which the listing updates: stored or missing).
 fn ls(
     link: &mut dyn ScreenLink,
+    kit: &mut StorageKit<'_>,
     folder: Option<StorageLocation>,
     json: bool,
 ) -> anyhow::Result<String> {
-    let (folders, card) = match folder {
-        Some(folder) => (vec![folder], true),
-        None => {
-            let report = usecase::info(link).map_err(screen_error(LISTING))?;
-            let card = report.card.is_some();
-            let present = StorageLocation::ALL.into_iter();
-            (
-                present
-                    .filter(|l| card || l.medium == Medium::Internal)
-                    .collect(),
-                card,
-            )
-        }
-    };
-    let mut entries = Vec::new();
-    for folder in &folders {
-        entries.extend(usecase::list(link, *folder).map_err(screen_error(LISTING))?);
+    let inventory = manager(link, kit.archive, kit.theme_videos)
+        .inventory()
+        .map_err(screen_error(LISTING))?;
+    let card = inventory.listing.card.is_some();
+    if folder.is_some_and(|f| f.medium == Medium::Card) && !card {
+        return Err(screen_error(LISTING)(BezelError::Refused(Refusal::NoCard)));
     }
+    let folders: Vec<StorageLocation> = match folder {
+        Some(folder) => vec![folder],
+        None => StorageLocation::ALL
+            .into_iter()
+            .filter(|l| card || l.medium == Medium::Internal)
+            .collect(),
+    };
+    let shown = |path: &RemotePath| folders.contains(&path.location);
+    let listed: Vec<&Listed> = inventory
+        .overview
+        .listed
+        .iter()
+        .filter(|l| shown(&l.file.path))
+        .collect();
+    let copy = |l: &Listed| l.entry.as_ref().is_some_and(|e| inventory.has_copy(e));
     if json {
-        let dtos: Vec<FileDto> = entries.iter().map(FileDto::from).collect();
+        let dtos: Vec<FileDto> = listed.iter().map(|l| FileDto::new(l, copy(l))).collect();
         return Ok(serde_json::to_string_pretty(&dtos)? + "\n");
     }
-    Ok(listing(&folders, &entries, card))
+    let missing: Vec<&RemotePath> = inventory
+        .overview
+        .missing
+        .iter()
+        .map(|e| &e.path)
+        .filter(|p| shown(p))
+        .collect();
+    let rows: Vec<Row> = listed
+        .iter()
+        .map(|l| Row {
+            path: l.file.path.to_string(),
+            size: Inventory::size(l),
+            sent: l.entry.is_some(),
+            catalog: catalog_column(l, copy(l)),
+        })
+        .collect();
+    Ok(listing(&folders, &rows, card, &missing))
 }
 
-fn listing(folders: &[StorageLocation], entries: &[FileEntry], card: bool) -> String {
+/// What `ls` says of a listed file next to the catalog: its state and
+/// whether a local copy is kept; `-` for a file Bezel did not send.
+fn catalog_column(listed: &Listed, copy: bool) -> String {
+    match &listed.entry {
+        None => "-".to_string(),
+        Some(entry) => {
+            let copy = if copy { "local copy" } else { "no local copy" };
+            format!("{:<7}  {copy}", entry.state.slug())
+        }
+    }
+}
+
+/// One line of `ls`.
+struct Row {
+    path: String,
+    size: Option<u64>,
+    /// Whether Bezel sent the file (its catalog has it).
+    sent: bool,
+    catalog: String,
+}
+
+fn listing(
+    folders: &[StorageLocation],
+    rows: &[Row],
+    card: bool,
+    missing: &[&RemotePath],
+) -> String {
     let no_card = if card { "" } else { " (no memory card)" };
-    if entries.is_empty() {
-        let names: Vec<String> = folders.iter().map(ToString::to_string).collect();
-        return format!("No files in {}{no_card}.\n", names.join(", "));
-    }
-    let width = entries
-        .iter()
-        .map(|e| e.path.to_string().len())
-        .max()
-        .unwrap_or(0);
     let mut out = String::new();
-    for e in entries {
-        let size = e.size.map_or_else(|| "?".to_string(), size_text);
-        out.push_str(&format!("{:<width$}  {size:>10}\n", e.path.to_string()));
+    if rows.is_empty() {
+        let names: Vec<String> = folders.iter().map(ToString::to_string).collect();
+        out.push_str(&format!("No files in {}{no_card}.\n", names.join(", ")));
+    } else {
+        let width = rows.iter().map(|r| r.path.len()).max().unwrap_or(0);
+        for row in rows {
+            let size = row.size.map_or_else(|| "?".to_string(), size_text);
+            out.push_str(&format!(
+                "{:<width$}  {size:>10}  {}\n",
+                row.path, row.catalog
+            ));
+        }
+        let total: u64 = rows.iter().filter_map(|r| r.size).sum();
+        let sent = rows.iter().filter(|r| r.sent).count();
+        let sent = if sent == 0 {
+            String::new()
+        } else {
+            format!("; {sent} sent by Bezel")
+        };
+        out.push_str(&format!(
+            "{}, {}{sent}{no_card}\n",
+            files(rows.len()),
+            size_text(total)
+        ));
     }
-    let total: u64 = entries.iter().filter_map(|e| e.size).sum();
-    let files = if entries.len() == 1 { "file" } else { "files" };
-    out.push_str(&format!(
-        "{} {files}, {}{no_card}\n",
-        entries.len(),
-        size_text(total)
-    ));
+    if !missing.is_empty() {
+        let names: Vec<String> = missing.iter().map(ToString::to_string).collect();
+        out.push_str(&format!(
+            "Missing from the screen, sent by Bezel: {} (`bezel storage restore` sends them again)\n",
+            names.join(", ")
+        ));
+    }
     out
 }
 
 // ---------------------------------------------------------------- put
 
-/// Draws the progress of an upload job on stderr.
+/// Draws the progress of an upload job, or of a batch of them, on stderr.
 struct ProgressView<'a, 'b> {
     style: ProgressStyle,
     out: &'a mut Messages<'b>,
@@ -507,6 +727,8 @@ struct ProgressView<'a, 'b> {
     shown: Option<(JobPhase, u64)>,
     /// Length of the bar line on screen; 0 when no line is open.
     open: usize,
+    /// `[2/5] ` before every line of a batch's second of five files.
+    prefix: String,
 }
 
 impl<'a, 'b> ProgressView<'a, 'b> {
@@ -516,7 +738,19 @@ impl<'a, 'b> ProgressView<'a, 'b> {
             out,
             shown: None,
             open: 0,
+            prefix: String::new(),
         }
+    }
+
+    /// The progress of one file of a batch, its lines numbered.
+    fn report_step(&mut self, step: StepProgress) {
+        let prefix = format!("[{}/{}] ", step.step + 1, step.steps);
+        if prefix != self.prefix {
+            self.finish();
+            self.prefix = prefix;
+            self.shown = None;
+        }
+        self.report(step.progress);
     }
 
     /// Percent done (seconds of video when the length is unknown); lines
@@ -536,7 +770,7 @@ impl<'a, 'b> ProgressView<'a, 'b> {
         }
         let new_phase = self.shown.map(|(phase, _)| phase) != Some(progress.phase);
         self.shown = Some((progress.phase, step));
-        let line = progress_line(progress);
+        let line = format!("{}{}", self.prefix, progress_line(progress));
         match self.style {
             ProgressStyle::Lines => writeln!(self.out, "{line}"),
             ProgressStyle::Bar => {
@@ -860,11 +1094,15 @@ fn put(
     // Nothing is sent unless the summary reached the user.
     log.check()?;
     let confirm = if args.yes { Confirm::Yes } else { Confirm::No };
+    let screen = link.identity().model.name;
     let mut view = ProgressView::new(kit.progress, &mut log);
+    // Recorded in the catalog: the exact bytes sent are kept as the local
+    // copy before the first byte, the entry stored once its size is checked.
     let result = {
         let mut sink = |p: Progress| view.report(p);
         let mut job = Job::new(kit.cancel, &mut sink);
-        usecase::upload(link, kit.media, &prepared, confirm, &mut job)
+        let mut manager = manager(link, kit.archive, kit.theme_videos);
+        manager.upload(kit.media, &prepared, confirm, kit.now, &mut job)
     };
     view.finish();
     let uploaded = match result {
@@ -872,7 +1110,6 @@ fn put(
         Err(BezelError::Cancelled { partial }) => return Err(cancelled(path, partial)),
         Err(e) => return Err(screen_error(UPLOADING)(e)),
     };
-    let screen = link.identity().model.name;
     // The upload is not stopped for its progress bar; a line that could not
     // be drawn still ends the command with that error, naming what was stored.
     log.check()
@@ -916,8 +1153,9 @@ const DELETING: &str = "deleting files";
 fn rm(
     link: &mut dyn ScreenLink,
     paths: &[RemotePath],
-    log: &mut Messages<'_>,
+    kit: &mut StorageKit<'_>,
 ) -> anyhow::Result<String> {
+    let log = &mut Messages::new(&mut *kit.log);
     let screen = link.identity().model.name;
     let mut stored = Vec::new();
     for path in paths {
@@ -936,8 +1174,13 @@ fn rm(
     }
     log.check()?;
     let mut out = String::new();
+    // Recorded: each entry is marked deleted, its copy kept for a restore
+    // within the cache limit.
+    let mut manager = manager(link, kit.archive, kit.theme_videos);
     for entry in &stored {
-        usecase::delete(link, &entry.path, Confirm::Yes).map_err(screen_error(DELETING))?;
+        manager
+            .delete(&entry.path, Confirm::Yes)
+            .map_err(screen_error(DELETING))?;
         out.push_str(&format!(
             "deleted {} ({})\n",
             entry.path,
@@ -996,15 +1239,21 @@ fn boot_summary(args: &BootArgs) -> String {
     out
 }
 
-/// `bezel storage boot --yes`.
-fn boot(link: &mut dyn ScreenLink, args: &BootArgs) -> anyhow::Result<String> {
+/// `bezel storage boot --yes`. The boot media is recorded in the catalog:
+/// the cleanup assistant never suggests it and moving it warns.
+fn boot(
+    link: &mut dyn ScreenLink,
+    args: &BootArgs,
+    kit: &mut StorageKit<'_>,
+) -> anyhow::Result<String> {
     let brightness = args
         .brightness
         .map(|level| Brightness::new(level).context("brightness is 0-100"))
         .transpose()?;
-    usecase::set_boot_media(link, &args.media, brightness, Confirm::Yes)
-        .map_err(screen_error("changing the boot media"))?;
     let screen = link.identity().model.name;
+    manager(link, kit.archive, kit.theme_videos)
+        .set_boot_media(&args.media, brightness, Confirm::Yes)
+        .map_err(screen_error("changing the boot media"))?;
     let what = match &args.media {
         BootMedia::Default => "its built-in start screen".to_string(),
         BootMedia::File(path) => path.to_string(),
@@ -1013,965 +1262,7 @@ fn boot(link: &mut dyn ScreenLink, args: &BootArgs) -> anyhow::Result<String> {
 }
 
 #[cfg(test)]
-pub(crate) mod doubles {
-    //! A media transcoder that keeps its files in memory, for the CLI's
-    //! tests (the real one runs ffmpeg).
-
-    use std::collections::BTreeMap;
-    use std::time::Duration;
-
-    use bezel_core::domain::device::{Transport, UsbId};
-    use bezel_core::domain::discovery::{DeviceAddress, Endpoint};
-    use bezel_core::domain::frame::{Frame, Rgba};
-    use bezel_core::domain::geometry::Size;
-    use bezel_core::domain::job::{Job, JobPhase, Progress};
-    use bezel_core::domain::media::{
-        FrameRate, MediaFormat, MediaInfo, MediaTools, StreamSpec, TranscodeTarget, VideoCodec,
-        VideoPixelFormat, VideoTrack,
-    };
-    use bezel_core::ports::{MediaLocation, MediaTranscoder, VideoFrames};
-    use bezel_core::{BezelError, Result};
-    use bezel_devices::FakeBus;
-
-    /// A bus with a WeAct 0.96" (80x160): no storage, no device playback.
-    pub(crate) fn weact_bus() -> FakeBus {
-        FakeBus::new(vec![Endpoint {
-            address: DeviceAddress("/dev/ttyACM0".into()),
-            transport: Transport::Serial,
-            usb: UsbId::new(0x1a86, 0xfe0c),
-            serial_number: Some("AD0001".into()),
-            manufacturer: None,
-            product: None,
-            location: None,
-        }])
-    }
-
-    /// The colour of every picture a stub stream decodes.
-    pub(crate) const STREAMED: Rgba = Rgba::opaque(200, 10, 10);
-
-    /// An H.264 yuv420p MP4 of `size`, 10 s long.
-    pub(crate) fn video(size: Size, bytes: u64, audio: bool) -> MediaInfo {
-        MediaInfo {
-            format: MediaFormat::Mp4,
-            bytes,
-            dimensions: Some(size),
-            video: Some(VideoTrack {
-                codec: VideoCodec::H264,
-                pixel_format: Some(VideoPixelFormat::Yuv420p),
-                b_frames: Some(false),
-                frame_rate: FrameRate::new(24, 1),
-                duration: Some(Duration::from_secs(10)),
-            }),
-            has_audio: audio,
-        }
-    }
-
-    /// A still picture.
-    pub(crate) fn picture(format: MediaFormat, bytes: u64) -> MediaInfo {
-        MediaInfo {
-            format,
-            bytes,
-            dimensions: Some(Size::new(64, 64)),
-            video: None,
-            has_audio: false,
-        }
-    }
-
-    /// Local files held in memory; conversions produce an MP4 of the target
-    /// size, streams a solid [`STREAMED`] picture.
-    pub(crate) struct StubMedia {
-        pub(crate) tools: MediaTools,
-        pub(crate) files: BTreeMap<String, MediaInfo>,
-        pub(crate) targets: Vec<TranscodeTarget>,
-        pub(crate) streamed: Vec<(MediaLocation, StreamSpec)>,
-        /// Bytes of every conversion's output.
-        pub(crate) output_bytes: u64,
-    }
-
-    impl StubMedia {
-        pub(crate) fn ready() -> Self {
-            Self::with_tools(MediaTools::Ready {
-                version: "stub".into(),
-            })
-        }
-
-        pub(crate) fn missing() -> Self {
-            Self::with_tools(MediaTools::Missing {
-                install_hints: vec!["sudo dnf install ffmpeg".into()],
-            })
-        }
-
-        fn with_tools(tools: MediaTools) -> Self {
-            Self {
-                tools,
-                files: BTreeMap::new(),
-                targets: Vec::new(),
-                streamed: Vec::new(),
-                output_bytes: 300_000,
-            }
-        }
-
-        pub(crate) fn with(mut self, location: &str, info: MediaInfo) -> Self {
-            self.files.insert(location.to_string(), info);
-            self
-        }
-    }
-
-    struct Solid(Frame);
-
-    impl VideoFrames for Solid {
-        fn frame_at(&mut self, _: Duration) -> Result<&Frame> {
-            Ok(&self.0)
-        }
-    }
-
-    impl MediaTranscoder for StubMedia {
-        fn tools(&mut self) -> MediaTools {
-            self.tools.clone()
-        }
-
-        fn probe(&mut self, source: &MediaLocation) -> Result<MediaInfo> {
-            self.files
-                .get(&source.0)
-                .cloned()
-                .ok_or_else(|| BezelError::InvalidInput(format!("no file {}", source.0)))
-        }
-
-        fn transcode(
-            &mut self,
-            source: &MediaLocation,
-            target: &TranscodeTarget,
-            job: &mut Job<'_>,
-        ) -> Result<MediaLocation> {
-            self.targets.push(*target);
-            job.report(Progress::new(JobPhase::Convert, 0, 10_000));
-            job.checkpoint()?;
-            job.report(Progress::new(JobPhase::Convert, 10_000, 10_000));
-            let output = format!("{}.converted.mp4", source.0);
-            self.files
-                .insert(output.clone(), video(target.size, self.output_bytes, false));
-            Ok(MediaLocation(output))
-        }
-
-        fn load(&mut self, source: &MediaLocation) -> Result<Vec<u8>> {
-            let info = self.probe(source)?;
-            Ok(vec![0x42; usize::try_from(info.bytes).unwrap_or(0)])
-        }
-
-        fn stream(
-            &mut self,
-            source: &MediaLocation,
-            spec: StreamSpec,
-        ) -> Result<Box<dyn VideoFrames>> {
-            self.streamed.push((source.clone(), spec));
-            Ok(Box::new(Solid(Frame::filled(spec.size, STREAMED))))
-        }
-    }
-}
+pub(crate) mod doubles;
 
 #[cfg(test)]
-mod tests {
-    use super::doubles::{StubMedia, picture, video, weact_bus};
-    use super::*;
-    use crate::messages::tests::Closing;
-    use crate::{Cli, Command};
-    use bezel_core::domain::frame::Rect;
-    use bezel_core::domain::geometry::Size;
-    use bezel_core::domain::media::MediaFormat;
-    use bezel_core::domain::storage::StartMode;
-    use bezel_devices::fake::{FakeStorage, Playback, StorageCall};
-    use bezel_devices::{FakeBus, FakeConnector};
-    use clap::Parser;
-
-    fn path(text: &str) -> RemotePath {
-        RemotePath::parse(text).unwrap()
-    }
-
-    fn with_files(files: &[(&str, usize)]) -> FakeConnector {
-        let mut storage = FakeStorage::default();
-        for (p, bytes) in files {
-            storage = storage.with_file(path(p), vec![7; *bytes]);
-        }
-        FakeConnector::with_storage(storage)
-    }
-
-    /// Runs `bezel storage …` on the simulated 8.8": stdout (or the error)
-    /// and what went to stderr.
-    fn storage_with(
-        args: &[&str],
-        connector: &FakeConnector,
-        media: &mut StubMedia,
-        log: &mut dyn Write,
-    ) -> anyhow::Result<String> {
-        let cli = Cli::try_parse_from(args)?;
-        let Command::Storage(storage) = &cli.command else {
-            anyhow::bail!("not a storage command")
-        };
-        let cancel = CancelToken::new();
-        let mut kit = StorageKit {
-            media,
-            cancel: &cancel,
-            progress: ProgressStyle::Lines,
-            log,
-        };
-        run(storage, &FakeBus::turing_88(), connector, &mut kit)
-    }
-
-    fn storage(
-        args: &[&str],
-        connector: &FakeConnector,
-        media: &mut StubMedia,
-    ) -> (anyhow::Result<String>, String) {
-        let mut log = Vec::new();
-        let out = storage_with(args, connector, media, &mut log);
-        (out, String::from_utf8(log).unwrap())
-    }
-
-    #[test]
-    fn rm_without_yes_is_refused() {
-        let connector = with_files(&[("internal/video/intro.mp4", 3000)]);
-        let (out, log) = storage(
-            &["bezel", "storage", "rm", "internal/video/intro.mp4"],
-            &connector,
-            &mut StubMedia::ready(),
-        );
-        let err = out.unwrap_err().to_string();
-        assert!(err.contains("needs --yes"), "{err}");
-        assert!(
-            log.contains("Delete internal/video/intro.mp4 from the screen's internal flash"),
-            "{log}"
-        );
-        assert!(log.contains("Nothing was sent to the screen"), "{log}");
-        let screen = connector.log().storage;
-        assert!(screen.calls.is_empty(), "the screen was not even opened");
-        assert!(screen.files.contains_key(&path("internal/video/intro.mp4")));
-    }
-
-    #[test]
-    fn rm_with_yes_summarizes_then_deletes() {
-        let connector = with_files(&[
-            ("internal/video/intro.mp4", 3000),
-            ("internal/image/a.png", 10),
-        ]);
-        let (out, log) = storage(
-            &[
-                "bezel",
-                "storage",
-                "rm",
-                "internal/video/intro.mp4",
-                "internal/video/gone.mp4",
-                "--yes",
-            ],
-            &connector,
-            &mut StubMedia::ready(),
-        );
-        assert_eq!(out.unwrap(), "deleted internal/video/intro.mp4 (2.9 KiB)\n");
-        assert!(
-            log.contains(
-                "Delete internal/video/intro.mp4 (2.9 KiB) from Turing Smart Screen 8.8\" \
-                 (internal flash)"
-            ),
-            "{log}"
-        );
-        assert!(
-            log.contains("internal/video/gone.mp4 is not stored on Turing Smart Screen 8.8\""),
-            "{log}"
-        );
-        let screen = connector.log().storage;
-        assert_eq!(screen.files.len(), 1);
-        let changes: Vec<_> = screen
-            .calls
-            .iter()
-            .filter(|c| c.changes_the_screen())
-            .collect();
-        assert_eq!(
-            changes,
-            [&StorageCall::Delete(path("internal/video/intro.mp4"))]
-        );
-
-        let (out, _) = storage(
-            &["bezel", "storage", "rm", "internal/image/nope.png", "--yes"],
-            &connector,
-            &mut StubMedia::ready(),
-        );
-        assert_eq!(out.unwrap(), "nothing deleted\n");
-        // A card file without a card: refused, nothing deleted.
-        let (out, _) = storage(
-            &[
-                "bezel",
-                "storage",
-                "rm",
-                "sd/image/a.png",
-                "internal/image/a.png",
-                "--yes",
-            ],
-            &connector,
-            &mut StubMedia::ready(),
-        );
-        assert!(out.unwrap_err().to_string().contains("no memory card"));
-        assert_eq!(connector.log().storage.files.len(), 1);
-    }
-
-    #[test]
-    fn info_and_ls_as_text_and_json() {
-        let storage_with_card = FakeStorage::default()
-            .with_card(8 << 30)
-            .with_file(path("internal/video/intro.mp4"), vec![1; 3 << 20])
-            .with_file(path("sd/image/logo.png"), vec![1; 512]);
-        let connector = FakeConnector::with_storage(storage_with_card);
-        let mut media = StubMedia::ready();
-        let (out, _) = storage(&["bezel", "storage", "info"], &connector, &mut media);
-        let out = out.unwrap();
-        assert!(out.starts_with("Turing Smart Screen 8.8\"\n"), "{out}");
-        assert!(out.contains("internal  ["), "{out}");
-        assert!(out.contains("3.0 MiB used of 1.0 GiB"), "{out}");
-        assert!(out.contains("512 B used of 8.0 GiB"), "{out}");
-
-        let (out, _) = storage(
-            &["bezel", "storage", "info", "--json"],
-            &connector,
-            &mut media,
-        );
-        let json: serde_json::Value = serde_json::from_str(&out.unwrap()).unwrap();
-        assert_eq!(json["internal"]["usedBytes"], 3 << 20);
-        assert_eq!(json["card"]["totalBytes"], 8_u64 << 30);
-
-        let (out, _) = storage(&["bezel", "storage", "ls"], &connector, &mut media);
-        let out = out.unwrap();
-        assert!(
-            out.contains("internal/video/intro.mp4     3.0 MiB"),
-            "{out}"
-        );
-        assert!(out.contains("sd/image/logo.png"), "{out}");
-        assert!(out.ends_with("2 files, 3.0 MiB\n"), "{out}");
-
-        let (out, _) = storage(
-            &["bezel", "storage", "ls", "sd/image", "--json"],
-            &connector,
-            &mut media,
-        );
-        let json: serde_json::Value = serde_json::from_str(&out.unwrap()).unwrap();
-        assert_eq!(json[0]["path"], "sd/image/logo.png");
-        assert_eq!(json[0]["medium"], "sd");
-        assert_eq!(json[0]["folder"], "image");
-        assert_eq!(json[0]["sizeBytes"], 512);
-
-        // Without a card: only the internal folders, and the card says so.
-        let bare = FakeConnector::default();
-        let (out, _) = storage(&["bezel", "storage", "ls"], &bare, &mut media);
-        assert_eq!(
-            out.unwrap(),
-            "No files in internal/image, internal/video (no memory card).\n"
-        );
-        let (out, _) = storage(&["bezel", "storage", "info"], &bare, &mut media);
-        assert!(out.unwrap().contains("sd        no memory card"));
-        let (out, _) = storage(&["bezel", "storage", "ls", "sd/video"], &bare, &mut media);
-        assert!(out.unwrap_err().to_string().contains("no memory card"));
-        assert!(Cli::try_parse_from(["bezel", "storage", "ls", "internal"]).is_err());
-    }
-
-    #[test]
-    fn put_sends_a_picture_with_progress_and_a_summary() {
-        let connector = FakeConnector::default();
-        let mut media =
-            StubMedia::ready().with("/pics/My Logo.PNG", picture(MediaFormat::Png, 200_000));
-        let (out, log) = storage(
-            &["bezel", "storage", "put", "/pics/My Logo.PNG"],
-            &connector,
-            &mut media,
-        );
-        assert_eq!(
-            out.unwrap(),
-            "Turing Smart Screen 8.8\": stored internal/image/my_logo.png (195.3 KiB)\n"
-        );
-        assert!(
-            log.starts_with("Upload /pics/My Logo.PNG (195.3 KiB, PNG 64x64)\n"),
-            "{log}"
-        );
-        assert!(log.contains("  to       internal/image/my_logo.png on Turing Smart Screen 8.8\" (internal flash)"), "{log}");
-        assert!(
-            log.contains("upload  [------------------------]   0%  0 B / 195.3 KiB"),
-            "{log}"
-        );
-        assert!(
-            log.contains("upload  [########################] 100%"),
-            "{log}"
-        );
-        assert!(
-            log.contains("verify  [########################] 100%  stored size checked"),
-            "{log}"
-        );
-        assert!(!log.contains("ffmpeg"), "pictures need no converter: {log}");
-        let stored = connector.log().storage;
-        assert_eq!(
-            stored.size(&path("internal/image/my_logo.png")),
-            Some(200_000)
-        );
-    }
-
-    #[test]
-    fn put_over_a_stored_file_needs_yes() {
-        let stored = FakeStorage::default()
-            .with_card(1 << 30)
-            .with_file(path("sd/image/logo.png"), vec![7; 100]);
-        let connector = FakeConnector::with_storage(stored);
-        let mut media = StubMedia::ready().with("logo.png", picture(MediaFormat::Png, 5000));
-        let mut args = vec!["bezel", "storage", "put", "logo.png", "sd/image/logo.png"];
-        let (out, log) = storage(&args, &connector, &mut media);
-        let err = out.unwrap_err().to_string();
-        assert!(
-            err.contains("replacing sd/image/logo.png needs --yes"),
-            "{err}"
-        );
-        assert!(
-            log.contains("  replaces sd/image/logo.png (100 B)"),
-            "{log}"
-        );
-        assert!(log.contains("Add --yes to replace"), "{log}");
-        let screen = connector.log().storage;
-        assert!(
-            !screen.calls.iter().any(StorageCall::changes_the_screen),
-            "{:?}",
-            screen.calls
-        );
-
-        args.push("--yes");
-        let (out, _) = storage(&args, &connector, &mut media);
-        assert!(out.unwrap().contains("stored sd/image/logo.png (4.9 KiB)"));
-        assert_eq!(
-            connector.log().storage.size(&path("sd/image/logo.png")),
-            Some(5000)
-        );
-    }
-
-    #[test]
-    fn put_converts_a_video_of_another_shape_by_cropping_it() {
-        let connector = FakeConnector::default();
-        let clip = video(Size::new(1920, 1080), 9_000_000, true);
-        let mut media = StubMedia::ready().with("clip.mov", clip);
-        let (out, log) = storage(
-            &[
-                "bezel",
-                "storage",
-                "put",
-                "clip.mov",
-                "internal/video",
-                "--fps",
-                "24",
-            ],
-            &connector,
-            &mut media,
-        );
-        assert!(
-            out.unwrap()
-                .contains("stored internal/video/clip.mp4 (293.0 KiB, converted)")
-        );
-        // Landscape on a reverse-portrait panel: one quarter turn, then the
-        // middle of the 1080x1920 picture with the panel's 1:4 shape.
-        let target = media.targets[0];
-        assert_eq!(target.size, Size::new(480, 1920));
-        assert_eq!(target.quarter_turns, 1);
-        assert_eq!(
-            target.crop,
-            Some(Rect {
-                x: 300,
-                y: 0,
-                width: 480,
-                height: 1920
-            })
-        );
-        assert_eq!(target.frame_rate, Some(24));
-        assert!(log.contains("  convert  to 480x1920 MP4 (H.264, no audio) with ffmpeg, turned 90°, keeping the middle 1920x480 of the clip"), "{log}");
-        assert!(
-            log.contains("convert [########################] 100%  10.0 s of 10.0 s of video"),
-            "{log}"
-        );
-        assert!(!log.contains("warning"), "{log}");
-
-        // A vertical screen: half a turn, and a clip already of the panel's
-        // size is sent as it is unless an orientation is asked for.
-        let native = video(Size::new(480, 1920), 4000, false);
-        let mut media = StubMedia::ready().with("tall.mp4", native);
-        let (out, log) = storage(
-            &["bezel", "storage", "put", "tall.mp4"],
-            &connector,
-            &mut media,
-        );
-        assert!(
-            out.unwrap()
-                .contains("stored internal/video/tall.mp4 (3.9 KiB)\n")
-        );
-        assert!(
-            log.contains("  as is    already in the screen's format"),
-            "{log}"
-        );
-        assert!(media.targets.is_empty());
-        let (out, _) = storage(
-            &[
-                "bezel",
-                "storage",
-                "put",
-                "tall.mp4",
-                "internal/video/tall_180.mp4",
-                "--orientation",
-                "vertical",
-            ],
-            &connector,
-            &mut media,
-        );
-        out.unwrap();
-        assert_eq!(media.targets[0].quarter_turns, 2);
-        assert_eq!(media.targets[0].crop, None);
-    }
-
-    #[test]
-    fn files_over_the_screens_limit_are_refused_in_mib() {
-        // D-2026-09-30-release-polish-12: 25 MiB per file on the 8.8".
-        let cap = bezel_core::domain::storage::REV_C_MAX_UPLOAD_BYTES;
-        let connector = FakeConnector::default();
-        let mut media = StubMedia::ready()
-            .with("big.mp4", video(Size::new(480, 1920), cap + 1, false))
-            .with("trip.mov", video(Size::new(1920, 1080), 9_000_000, true));
-        let (out, _) = storage(
-            &["bezel", "storage", "put", "big.mp4"],
-            &connector,
-            &mut media,
-        );
-        assert_eq!(
-            out.unwrap_err().to_string(),
-            "refused: the file is 25.1 MiB and this screen takes files up to 25 MiB each; \
-             nothing was sent. For a video: send a shorter clip, or a lower frame rate with \
-             --fps (for example --fps 24)"
-        );
-        media.output_bytes = 30 * 1024 * 1024;
-        let (out, _) = storage(
-            &["bezel", "storage", "put", "trip.mov"],
-            &connector,
-            &mut media,
-        );
-        let err = out.unwrap_err().to_string();
-        assert!(
-            err.starts_with(
-                "refused: converted, the video is 30 MiB and this screen takes files up to \
-                 25 MiB each; nothing was sent."
-            ),
-            "{err}"
-        );
-        assert!(err.contains("--fps"), "{err}");
-        assert_eq!(
-            media.targets[0].max_bytes,
-            Some(cap),
-            "the conversion is capped"
-        );
-        let log = connector.log().storage;
-        assert!(log.files.is_empty());
-        assert!(!log.calls.iter().any(StorageCall::changes_the_screen));
-    }
-
-    #[test]
-    fn without_ffmpeg_only_videos_in_the_screen_format_go() {
-        let connector = FakeConnector::default();
-        let mut media = StubMedia::missing()
-            .with("ready.mp4", video(Size::new(480, 1920), 4000, false))
-            .with("raw.mp4", video(Size::new(1920, 1080), 4000, true));
-        let (out, log) = storage(
-            &["bezel", "storage", "put", "ready.mp4"],
-            &connector,
-            &mut media,
-        );
-        out.unwrap();
-        assert!(log.contains("warning: ffmpeg was not found"), "{log}");
-        assert!(log.contains("sudo dnf install ffmpeg"), "{log}");
-
-        let (out, _) = storage(
-            &["bezel", "storage", "put", "raw.mp4"],
-            &connector,
-            &mut media,
-        );
-        let err = out.unwrap_err().to_string();
-        assert!(err.contains("must be converted"), "{err}");
-        assert!(err.contains("--ffmpeg PATH"), "{err}");
-        let stored = connector.log().storage;
-        assert_eq!(stored.files.len(), 1, "only the ready video");
-    }
-
-    #[test]
-    fn a_full_screen_lists_what_could_be_deleted() {
-        let mut full = FakeStorage::default()
-            .with_file(path("internal/video/big.mp4"), vec![1; 6000])
-            .with_file(path("internal/image/small.png"), vec![1; 1000]);
-        full.internal_total = 8000;
-        let connector = FakeConnector::with_storage(full);
-        let mut media = StubMedia::ready().with("new.png", picture(MediaFormat::Png, 2000));
-        let (out, _) = storage(
-            &["bezel", "storage", "put", "new.png"],
-            &connector,
-            &mut media,
-        );
-        let err = out.unwrap_err().to_string();
-        assert!(
-            err.contains("2.0 KiB does not fit in the 1000 B free"),
-            "{err}"
-        );
-        let big = err.find("internal/video/big.mp4  5.9 KiB").unwrap();
-        let small = err.find("internal/image/small.png  1000 B").unwrap();
-        assert!(big < small, "largest first: {err}");
-        assert!(err.contains("bezel storage rm <PATH> --yes"), "{err}");
-        assert_eq!(connector.log().storage.files.len(), 2, "nothing deleted");
-
-        let mut media = StubMedia::ready().with("huge.png", picture(MediaFormat::Png, 130_000_000));
-        let (out, _) = storage(
-            &["bezel", "storage", "put", "huge.png"],
-            &connector,
-            &mut media,
-        );
-        assert!(
-            out.unwrap_err()
-                .to_string()
-                .contains("the file is 124 MiB and this screen takes files up to 25 MiB each")
-        );
-        let mut media = StubMedia::ready().with(
-            "notes.txt",
-            MediaInfo {
-                format: MediaFormat::Other,
-                bytes: 10,
-                dimensions: None,
-                video: None,
-                has_audio: false,
-            },
-        );
-        let (out, _) = storage(
-            &["bezel", "storage", "put", "notes.txt"],
-            &connector,
-            &mut media,
-        );
-        assert!(out.unwrap_err().to_string().contains("is not a picture"));
-        let (out, _) = storage(
-            &["bezel", "storage", "put", "missing.png"],
-            &connector,
-            &mut media,
-        );
-        assert!(format!("{:#}", out.unwrap_err()).contains("cannot read missing.png"));
-    }
-
-    /// Stderr that cancels the upload once a line shows the first 64 KiB
-    /// arrived (what Ctrl+C does from the handler's thread).
-    struct CancelOnWrite {
-        token: CancelToken,
-        seen: Vec<u8>,
-    }
-
-    impl Write for CancelOnWrite {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.seen.extend_from_slice(buf);
-            if String::from_utf8_lossy(&self.seen).contains("64.0 KiB / 256.0 KiB") {
-                self.token.cancel();
-            }
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn a_cancelled_upload_says_how_to_delete_what_is_left() {
-        let connector = FakeConnector::default();
-        let mut media = StubMedia::ready().with("big.png", picture(MediaFormat::Png, 256 * 1024));
-        let cancel = CancelToken::new();
-        let mut log = CancelOnWrite {
-            token: cancel.clone(),
-            seen: Vec::new(),
-        };
-        let cli = Cli::try_parse_from(["bezel", "storage", "put", "big.png"]).unwrap();
-        let Command::Storage(args) = &cli.command else {
-            unreachable!("parsed as storage")
-        };
-        let mut kit = StorageKit {
-            media: &mut media,
-            cancel: &cancel,
-            progress: ProgressStyle::Bar,
-            log: &mut log,
-        };
-        let err = run(args, &FakeBus::turing_88(), &connector, &mut kit)
-            .unwrap_err()
-            .to_string();
-        assert_eq!(
-            err,
-            "cancelled; an incomplete file of 64.0 KiB remains at internal/image/big.png: \
-             delete it with `bezel storage rm internal/image/big.png --yes`"
-        );
-        let drawn = String::from_utf8(log.seen).unwrap();
-        assert!(
-            drawn.contains("\rupload  ["),
-            "a bar redrawn in place: {drawn:?}"
-        );
-        assert!(drawn.ends_with('\n'), "the bar line is ended: {drawn:?}");
-        assert_eq!(
-            cancelled(&path("internal/image/x.png"), None).to_string(),
-            "cancelled; nothing was stored"
-        );
-    }
-
-    #[test]
-    fn play_stop_and_boot() {
-        let connector = with_files(&[
-            ("internal/video/intro.mp4", 3000),
-            ("internal/image/logo.png", 30),
-        ]);
-        let mut media = StubMedia::ready();
-        let (out, _) = storage(
-            &["bezel", "storage", "play", "internal/video/intro.mp4"],
-            &connector,
-            &mut media,
-        );
-        assert!(out.unwrap().contains("looping internal/video/intro.mp4"));
-        let (out, _) = storage(
-            &[
-                "bezel",
-                "storage",
-                "play",
-                "internal/image/logo.png",
-                "--once",
-            ],
-            &connector,
-            &mut media,
-        );
-        assert!(out.unwrap().contains("showing internal/image/logo.png"));
-        let (out, _) = storage(
-            &[
-                "bezel",
-                "storage",
-                "play",
-                "internal/video/none.mp4",
-                "--once",
-            ],
-            &connector,
-            &mut media,
-        );
-        assert!(out.unwrap_err().to_string().contains("not stored"));
-        let (out, _) = storage(&["bezel", "storage", "stop"], &connector, &mut media);
-        assert_eq!(out.unwrap(), "Turing Smart Screen 8.8\": stopped\n");
-        assert_eq!(connector.log().storage.playback, Playback::Idle);
-
-        let calls_before = connector.log().storage.calls.len();
-        let (out, log) = storage(
-            &["bezel", "storage", "boot", "internal/video/intro.mp4"],
-            &connector,
-            &mut media,
-        );
-        assert!(out.unwrap_err().to_string().contains("needs --yes"));
-        assert!(
-            log.contains("Boot media: internal/video/intro.mp4 (video, looping)"),
-            "{log}"
-        );
-        assert!(log.contains("the vendor default, about 67%"), "{log}");
-        assert!(
-            log.contains("with its sleep timer off: it does not go to sleep on its own"),
-            "{log}"
-        );
-        assert_eq!(
-            connector.log().storage.calls.len(),
-            calls_before,
-            "the screen was not opened"
-        );
-
-        let (out, log) = storage(
-            &[
-                "bezel",
-                "storage",
-                "boot",
-                "internal/video/intro.mp4",
-                "--brightness",
-                "40",
-                "--yes",
-            ],
-            &connector,
-            &mut media,
-        );
-        assert_eq!(
-            out.unwrap(),
-            "Turing Smart Screen 8.8\": boots with internal/video/intro.mp4\n"
-        );
-        assert!(log.contains("boots with: 40% (--brightness)"), "{log}");
-        let screen = connector.log();
-        assert_eq!(screen.brightness, [Brightness::new(40).unwrap()]);
-        assert_eq!(screen.storage.start_mode, Some(StartMode::Video));
-        assert_eq!(
-            screen.storage.playback,
-            Playback::Video(path("internal/video/intro.mp4"), Repeat::Loop)
-        );
-
-        let (out, log) = storage(
-            &["bezel", "storage", "boot", "default", "--yes"],
-            &connector,
-            &mut media,
-        );
-        assert!(
-            out.unwrap()
-                .ends_with("boots with its built-in start screen\n")
-        );
-        assert!(
-            log.starts_with("Boot media: the screen's built-in start screen"),
-            "{log}"
-        );
-        assert_eq!(connector.log().storage.start_mode, Some(StartMode::Default));
-    }
-
-    #[test]
-    fn what_a_screen_cannot_do_is_said_plainly() {
-        let connector = FakeConnector::default();
-        let mut link = open_screen(&weact_bus(), &connector, None).unwrap();
-        let err = info(link.as_mut(), false).unwrap_err().to_string();
-        assert_eq!(
-            err,
-            "this screen does not support reading its storage \
-             (WeAct Studio Display FS 0.96\" has no storage)"
-        );
-        let err = play(link.as_mut(), &path("internal/video/a.mp4"), Repeat::Once)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.starts_with("this screen does not support playing a video once"),
-            "{err}"
-        );
-        let unsupported = BezelError::Unsupported("no size query for this file".into());
-        assert_eq!(
-            screen_error(DELETING)(unsupported).to_string(),
-            "this screen does not support deleting files (no size query for this file)"
-        );
-        let timeout = BezelError::Timeout("the screen; reconnect it".into());
-        assert_eq!(
-            screen_error(UPLOADING)(timeout).to_string(),
-            "timeout talking to the screen; reconnect it",
-            "other errors are printed as they are"
-        );
-    }
-
-    #[test]
-    fn destinations_and_paths_parse() {
-        assert_eq!(
-            parse_destination("sd"),
-            Ok(Destination::Medium(Medium::Card))
-        );
-        assert_eq!(
-            parse_destination("internal/video/"),
-            Ok(Destination::Folder(StorageLocation::new(
-                Medium::Internal,
-                MediaKind::Video
-            )))
-        );
-        assert_eq!(
-            parse_destination("internal/image/Logo.png"),
-            Ok(Destination::File(
-                StorageLocation::new(Medium::Internal, MediaKind::Image),
-                "Logo.png".into()
-            ))
-        );
-        assert!(parse_destination("usb").is_err());
-        assert!(parse_destination("sd/music").is_err());
-        assert!(parse_path("internal/video").is_err());
-        assert_eq!(parse_boot("default"), Ok(BootMedia::Default));
-        assert!(
-            Cli::try_parse_from(["bezel", "storage", "rm"]).is_err(),
-            "a path is required"
-        );
-        let cli = Cli::try_parse_from(["bezel", "storage", "put", "a.mp4", "--ffmpeg", "/opt/ff"])
-            .unwrap();
-        let Command::Storage(args) = &cli.command else {
-            unreachable!("parsed as storage")
-        };
-        assert_eq!(args.ffmpeg(), Some(Path::new("/opt/ff")));
-        assert!(args.cancellable());
-        let cli = Cli::try_parse_from(["bezel", "storage", "stop"]).unwrap();
-        let Command::Storage(args) = &cli.command else {
-            unreachable!("parsed as storage")
-        };
-        assert_eq!(args.ffmpeg(), None);
-        assert!(!args.cancellable());
-    }
-
-    #[test]
-    fn sizes_and_progress_read_well() {
-        assert_eq!(size_text(0), "0 B");
-        assert_eq!(size_text(1023), "1023 B");
-        assert_eq!(size_text(1536), "1.5 KiB");
-        assert_eq!(size_text(120_000_000), "114.4 MiB");
-        assert_eq!(size_text(1 << 30), "1.0 GiB");
-        assert_eq!(
-            progress_line(Progress::new(JobPhase::Convert, 2500, 0)),
-            "convert 2.5 s of video converted"
-        );
-        assert_eq!(
-            progress_line(Progress::new(JobPhase::Verify, 0, 1)),
-            "verify  [------------------------]   0%  checking the stored size"
-        );
-        let mut out = Vec::new();
-        let mut log = Messages::new(&mut out);
-        let mut view = ProgressView::new(ProgressStyle::Lines, &mut log);
-        for done in [0, 10, 50, 90, 95, 100] {
-            view.report(Progress::new(JobPhase::Upload, done, 100));
-        }
-        view.finish();
-        log.check().unwrap();
-        let lines = String::from_utf8(out).unwrap();
-        assert_eq!(
-            lines.lines().count(),
-            5,
-            "0%, 10%, 50%, 90% and 100%: {lines}"
-        );
-    }
-
-    #[test]
-    fn a_summary_that_cannot_be_written_stops_before_the_screen_changes() {
-        let clip = "internal/video/intro.mp4";
-        let connector = with_files(&[(clip, 3000)]);
-        let mut media = StubMedia::ready().with("new.png", picture(MediaFormat::Png, 100));
-        let stderr_error = "could not write to the terminal (stderr): broken pipe";
-        for args in [
-            vec!["bezel", "storage", "rm", clip],
-            vec!["bezel", "storage", "rm", clip, "--yes"],
-            vec!["bezel", "storage", "boot", clip],
-            vec!["bezel", "storage", "boot", clip, "--yes"],
-            vec!["bezel", "storage", "put", "new.png"],
-        ] {
-            let mut closed = Closing::after(0);
-            let out = storage_with(&args, &connector, &mut media, &mut closed);
-            let err = format!("{:#}", out.unwrap_err());
-            assert_eq!(err, stderr_error, "{args:?}");
-        }
-        let screen = connector.log().storage;
-        let changed: Vec<&StorageCall> = screen
-            .calls
-            .iter()
-            .filter(|c| c.changes_the_screen())
-            .collect();
-        assert!(changed.is_empty(), "{changed:?}");
-        assert!(screen.files.contains_key(&path(clip)));
-    }
-
-    #[test]
-    fn a_progress_line_that_cannot_be_written_ends_the_finished_upload_with_its_error() {
-        let connector = FakeConnector::default();
-        let mut media = StubMedia::ready().with("new.png", picture(MediaFormat::Png, 100));
-        // Room for the summary, not for the progress lines.
-        let mut closing = Closing::after(200);
-        let out = storage_with(
-            &["bezel", "storage", "put", "new.png"],
-            &connector,
-            &mut media,
-            &mut closing,
-        );
-        let err = format!("{:#}", out.unwrap_err());
-        assert_eq!(
-            err,
-            "Turing Smart Screen 8.8\" stored internal/image/new.png: \
-             could not write to the terminal (stderr): broken pipe"
-        );
-        let taken = String::from_utf8(closing.taken).unwrap();
-        assert!(taken.starts_with("Upload new.png"), "{taken}");
-        let stored = path("internal/image/new.png");
-        assert_eq!(connector.log().storage.size(&stored), Some(100));
-    }
-}
+mod tests;

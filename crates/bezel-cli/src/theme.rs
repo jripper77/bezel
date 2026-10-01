@@ -13,10 +13,10 @@ use bezel_core::app::ThemeRuntime;
 use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::sensor::Wanted;
-use bezel_core::domain::theme::{AssetRef, Theme};
+use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::{ThemeLocation, ThemeStore};
 use bezel_themes::import::import_path;
-use bezel_themes::native::{EXTENSION, is_native, native_location};
+use bezel_themes::native::{EXTENSION, is_native, load_manifest, native_location};
 
 use crate::Rendering;
 use crate::messages::Messages;
@@ -50,13 +50,86 @@ pub fn bundled_candidates(
     out
 }
 
-/// The user's data folder from the environment: `$XDG_DATA_HOME`,
-/// `$HOME/.local/share`, or `%APPDATA%` on Windows.
+/// Which rule [`data_home_on`] follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    /// Windows: the roaming application data folder.
+    Windows,
+    /// Linux and other Unix systems: the XDG data folder.
+    Unix,
+}
+
+impl Platform {
+    /// The platform this program was built for.
+    pub const fn current() -> Self {
+        if cfg!(windows) {
+            Platform::Windows
+        } else {
+            Platform::Unix
+        }
+    }
+}
+
+/// The user's data folder from the environment, as the studio resolves it
+/// (Tauri's `data_dir`), so that both find the same `bezel/themes` and
+/// `bezel/storage`: see [`data_home_on`] for this platform.
 pub fn data_home(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    data_home_on(Platform::current(), var)
+}
+
+/// The user's data folder on `platform`, read through `var`: on Windows
+/// `%APPDATA%` (else `%USERPROFILE%\AppData\Roaming`), whatever `HOME` says
+/// (Git Bash sets it); elsewhere `$XDG_DATA_HOME`, else `$HOME/.local/share`.
+pub fn data_home_on(platform: Platform, var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     let non_empty = |name: &str| var(name).filter(|v| !v.is_empty()).map(PathBuf::from);
-    non_empty("XDG_DATA_HOME")
-        .or_else(|| non_empty("HOME").map(|h| h.join(".local").join("share")))
-        .or_else(|| non_empty("APPDATA"))
+    match platform {
+        Platform::Windows => non_empty("APPDATA")
+            .or_else(|| non_empty("USERPROFILE").map(|p| p.join("AppData").join("Roaming"))),
+        Platform::Unix => non_empty("XDG_DATA_HOME")
+            .or_else(|| non_empty("HOME").map(|h| h.join(".local").join("share"))),
+    }
+}
+
+/// The studio's bundle identifier: its theme library is
+/// `<data home>/<STUDIO_ID>/themes` (Tauri's `app_data_dir`).
+pub const STUDIO_ID: &str = "io.github.slipalison.bezel";
+
+/// The folders whose themes' videos the storage manager protects
+/// (D-2026-09-30-storage-manager-9): `<data home>/bezel/themes`, the studio's
+/// theme library and the bundled themes' folder, without repeats.
+pub fn theme_folders(data_home: Option<&Path>, bundled: Option<&Path>) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mine = data_home.map(|d| d.join("bezel").join("themes"));
+    let studio = data_home.map(|d| d.join(STUDIO_ID).join("themes"));
+    for dir in [mine, studio, bundled.map(Path::to_path_buf)]
+        .into_iter()
+        .flatten()
+    {
+        if !out.contains(&dir) {
+            out.push(dir);
+        }
+    }
+    out
+}
+
+/// The background videos of the native themes in `folders`, sorted and
+/// without repeats; themes that cannot be read are skipped (only their
+/// manifests are read).
+pub fn theme_videos(folders: &[PathBuf]) -> Vec<AssetRef> {
+    let mut videos: Vec<AssetRef> = folders
+        .iter()
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flat_map(|entries| entries.filter_map(|e| e.ok().map(|e| e.path())))
+        .filter(|path| is_native(path))
+        .filter_map(|path| load_manifest(&native_location(&path)).ok())
+        .filter_map(|theme| match theme.background {
+            Background::Video { asset, .. } => Some(asset),
+            _ => None,
+        })
+        .collect();
+    videos.sort();
+    videos.dedup();
+    videos
 }
 
 /// The first existing folder of `candidates`.
@@ -337,29 +410,109 @@ mod tests {
         assert_eq!(first_dir(&[dir.join("missing")]), None);
     }
 
+    fn env(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
+        move |name: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| OsString::from(v))
+        }
+    }
+
     #[test]
-    fn data_home_follows_xdg_then_home_then_appdata() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| {
-            move |name: &str| {
-                pairs
-                    .iter()
-                    .find(|(k, _)| *k == name)
-                    .map(|(_, v)| OsString::from(v))
-            }
-        };
+    fn data_home_follows_xdg_then_home_on_unix() {
+        let unix = |pairs| data_home_on(Platform::Unix, env(pairs));
+        let home = PathBuf::from("/h").join(".local").join("share");
         assert_eq!(
-            data_home(env(&[("XDG_DATA_HOME", "/x"), ("HOME", "/h")])),
+            unix(&[("XDG_DATA_HOME", "/x"), ("HOME", "/h")]),
             Some(PathBuf::from("/x"))
         );
         assert_eq!(
-            data_home(env(&[("XDG_DATA_HOME", ""), ("HOME", "/h")])),
-            Some(PathBuf::from("/h/.local/share"))
+            unix(&[("XDG_DATA_HOME", ""), ("HOME", "/h")]),
+            Some(home.clone())
         );
         assert_eq!(
-            data_home(env(&[("APPDATA", "C:\\Users\\u\\AppData\\Roaming")])),
+            unix(&[
+                ("HOME", "/h"),
+                ("APPDATA", "C:\\Users\\u\\AppData\\Roaming")
+            ]),
+            Some(home),
+            "APPDATA is Windows' own"
+        );
+        assert_eq!(unix(&[]), None);
+    }
+
+    #[test]
+    fn data_home_is_appdata_on_windows_even_with_home_set() {
+        let windows = |pairs| data_home_on(Platform::Windows, env(pairs));
+        // Git Bash sets HOME (and maybe XDG_DATA_HOME): the studio's
+        // RoamingAppData still wins, so both share bezel/storage.
+        assert_eq!(
+            windows(&[
+                ("HOME", "/c/Users/u"),
+                ("XDG_DATA_HOME", "/c/Users/u/.local/share"),
+                ("APPDATA", "C:\\Users\\u\\AppData\\Roaming"),
+            ]),
             Some(PathBuf::from("C:\\Users\\u\\AppData\\Roaming"))
         );
-        assert_eq!(data_home(env(&[])), None);
+        assert_eq!(
+            windows(&[("APPDATA", ""), ("USERPROFILE", "C:\\Users\\u")]),
+            Some(
+                PathBuf::from("C:\\Users\\u")
+                    .join("AppData")
+                    .join("Roaming")
+            )
+        );
+        assert_eq!(windows(&[("HOME", "/c/Users/u")]), None);
+        assert_eq!(
+            data_home(env(&[])),
+            None,
+            "this platform's rule, same lookup"
+        );
+        let expected = if cfg!(windows) {
+            Platform::Windows
+        } else {
+            Platform::Unix
+        };
+        assert_eq!(Platform::current(), expected);
+    }
+
+    #[test]
+    fn theme_videos_come_from_the_theme_folders() {
+        let data = scratch("videos");
+        let mine = data.join("bezel").join("themes");
+        let folders = theme_folders(Some(&data), Some(&mine));
+        assert_eq!(
+            folders,
+            vec![mine.clone(), data.join(STUDIO_ID).join("themes")],
+            "the bundled folder is the first one here: listed once"
+        );
+        assert!(theme_videos(&folders).is_empty(), "no folders yet");
+        let mut video = small_theme();
+        video.background = Background::Video {
+            asset: AssetRef("assets/AMD.mp4".into()),
+            poster: None,
+        };
+        save(&video, &folders[0].join("amd"));
+        save(&small_theme(), &folders[0].join("still"));
+        video.background = Background::Video {
+            asset: AssetRef("assets/Rani.mp4".into()),
+            poster: None,
+        };
+        save(&video, &folders[1].join("rani"));
+        save(&video, &folders[1].join("rani-again"));
+        std::fs::write(folders[1].join("notes.txt"), "not a theme").unwrap();
+        std::fs::create_dir_all(folders[1].join("broken")).unwrap();
+        std::fs::write(folders[1].join("broken").join(MANIFEST), "{").unwrap();
+        assert_eq!(
+            theme_videos(&folders),
+            vec![
+                AssetRef("assets/AMD.mp4".into()),
+                AssetRef("assets/Rani.mp4".into())
+            ]
+        );
+        assert!(theme_folders(None, None).is_empty());
+        let _ = std::fs::remove_dir_all(data);
     }
 
     #[test]

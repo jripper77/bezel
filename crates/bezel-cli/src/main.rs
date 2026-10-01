@@ -6,34 +6,27 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use bezel_cli::theme::{bundled_candidates, data_home, first_dir, font_dirs, resolve};
+use anyhow::Context;
+use bezel_cli::storage::demo;
+use bezel_cli::theme::{
+    bundled_candidates, data_home, first_dir, font_dirs, resolve, theme_folders, theme_videos,
+};
 use bezel_cli::{
     Cli, Command, ProgressStyle, Rendering, SensorSettings, SensorsArgs, SleepPace, StorageArgs,
     StorageKit, WatchStyle, clock, hang_hint, run, run_monitor_mode, run_restart, run_sensors,
     run_storage_command, run_theme_command, udev_rules,
 };
 use bezel_core::domain::job::CancelToken;
-use bezel_core::domain::storage::RemotePath;
-use bezel_core::ports::SensorSource;
-use bezel_devices::fake::FakeStorage;
+use bezel_core::ports::{ArchiveStore, SensorSource};
 use bezel_devices::{FakeBus, FakeConnector, FakeHid, SystemBus, SystemConnector, SystemHid};
 use bezel_media::FfmpegTranscoder;
+use bezel_media::archive::{DiskArchive, MemoryArchive, storage_dir};
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SensorOptions, SystemSensors};
 use bezel_themes::FsThemeStore;
 use clap::Parser;
-
-/// Files on the simulated 8.8" of `--fake` (fresh in every process), so
-/// that `bezel --fake storage ls` has something to show.
-const DEMO_FILES: &[(&str, usize)] = &[
-    ("internal/image/bezel_demo.png", 48 * 1024),
-    ("internal/video/bezel_demo.mp4", 2_400 * 1024),
-    ("sd/video/bezel_loop.mp4", 750 * 1024),
-];
-
-/// Usable space of the simulated memory card: 8 GiB.
-const DEMO_CARD_BYTES: u64 = 8 << 30;
 
 /// The simulated bus of `--fake`: a Turing 8.8" and a Turing USB panel in
 /// desktop mode.
@@ -44,16 +37,15 @@ fn fake_bus() -> FakeBus {
 /// The model byte the simulated panel in desktop mode answers: an 8.8".
 const FAKE_DESKTOP_MODEL: u8 = 0x88;
 
-/// The simulated screen of `--fake`: a Turing 8.8" with a few demo files
-/// and a memory card.
+/// The simulated screen of `--fake`: a Turing 8.8" with a few files Bezel
+/// sent and a memory card the vendor app filled (`storage::demo`).
 fn fake_connector() -> FakeConnector {
-    let mut storage = FakeStorage::default().with_card(DEMO_CARD_BYTES);
-    for (path, bytes) in DEMO_FILES {
-        if let Ok(path) = RemotePath::parse(path) {
-            storage = storage.with_file(path, vec![0x5a; *bytes]);
-        }
-    }
-    FakeConnector::with_storage(storage)
+    FakeConnector::with_storage(demo::storage())
+}
+
+/// The user's data folder, as the studio resolves it.
+fn user_data() -> Option<PathBuf> {
+    data_home(|name| std::env::var_os(name))
 }
 
 /// The machine's sensors (the demo ones with `--fake`), with the ping host
@@ -91,7 +83,7 @@ fn bundled_dir() -> Option<PathBuf> {
     first_dir(&bundled_candidates(
         std::env::var_os("BEZEL_THEMES_DIR").map(PathBuf::from),
         exe.as_deref(),
-        data_home(|name| std::env::var_os(name)),
+        user_data(),
     ))
 }
 
@@ -153,22 +145,51 @@ fn themes(cli: &Cli) -> anyhow::Result<String> {
     result
 }
 
-/// `bezel storage`. Ctrl+C during an upload cancels it through the job's
-/// token (the upload stops at its next block and says what is left); a
-/// second Ctrl+C quits at once.
+/// Seconds since the Unix epoch: when what is sent now is recorded as sent.
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// `bezel storage`. Ctrl+C during an upload or a batch cancels it through
+/// the job's token (the upload stops at its next block and says what is
+/// left; a batch stops there and keeps that file's source); a second Ctrl+C
+/// quits at once. Bezel's catalog and local copies live in
+/// `<data>/bezel/storage` (in memory, with the demo catalog, for `--fake`).
 fn storage(args: &StorageArgs, fake: bool) -> anyhow::Result<String> {
     let mut media = FfmpegTranscoder::new(args.ffmpeg().map(Path::to_path_buf));
     let cancel = CancelToken::new();
-    if args.cancellable() {
+    if let Some(note) = args.cancel_note() {
         let token = cancel.clone();
         ctrlc::set_handler(move || {
             if token.is_cancelled() {
                 std::process::exit(130);
             }
             token.cancel();
-            eprintln!("\nbezel: cancelling the upload... (Ctrl+C again quits at once)");
+            eprintln!("\nbezel: {note} (Ctrl+C again quits at once)");
         })?;
     }
+    let data = user_data();
+    let videos = theme_videos(&theme_folders(data.as_deref(), bundled_dir().as_deref()));
+    let dir = data.as_deref().map(storage_dir);
+    let mut memory = if fake {
+        demo::archive()
+    } else {
+        MemoryArchive::new()
+    };
+    let mut disk: DiskArchive;
+    let archive: &mut dyn ArchiveStore = if fake || !args.uses_catalog() {
+        &mut memory
+    } else {
+        let dir = dir.as_deref().context(
+            "cannot find your data folder for Bezel's local copies: set HOME or \
+             XDG_DATA_HOME (APPDATA on Windows)",
+        )?;
+        disk = DiskArchive::open(dir)
+            .with_context(|| format!("cannot open Bezel's local copies in {}", dir.display()))?;
+        &mut disk
+    };
     let mut log = std::io::stderr();
     let progress = if log.is_terminal() {
         ProgressStyle::Bar
@@ -180,6 +201,10 @@ fn storage(args: &StorageArgs, fake: bool) -> anyhow::Result<String> {
         cancel: &cancel,
         progress,
         log: &mut log,
+        archive,
+        archive_dir: if fake { None } else { dir.as_deref() },
+        theme_videos: &videos,
+        now: unix_now(),
     };
     if fake {
         run_storage_command(args, &fake_bus(), &fake_connector(), &mut kit)

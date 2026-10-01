@@ -315,7 +315,9 @@ pub enum Command {
         output: PathBuf,
     },
     /// The files a screen stores (internal flash and memory card): list,
-    /// send, delete, play, and what it shows on its own after power-up.
+    /// send, delete, play, what it shows on its own after power-up, and the
+    /// storage manager: move, rename and restore from Bezel's local copies,
+    /// clean up, and the catalog and cache of those copies.
     Storage(StorageArgs),
 }
 

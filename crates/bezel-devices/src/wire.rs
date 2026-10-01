@@ -141,23 +141,48 @@ pub struct SerialWire {
     port: Box<dyn serialport::SerialPort>,
 }
 
-impl SerialWire {
-    /// Opens `path` at 115200 8N1 with DTR and RTS on (the baud rate is only a
-    /// SET_LINE_CODING value on CDC-ACM) and the given flow control.
-    pub fn open(path: &str, flow: Flow) -> io::Result<Self> {
-        let flow = match flow {
-            Flow::None => serialport::FlowControl::None,
-            Flow::Hardware => serialport::FlowControl::Hardware,
-        };
-        let port = serialport::new(path, 115_200)
+/// How every [`SerialWire`] opens `path`: 115200 8N1 (the baud rate is only
+/// a SET_LINE_CODING value on CDC-ACM), the given flow control, DTR on as
+/// the port opens, reads paced by a 10 ms timeout, and exclusively
+/// ([`exclusively`]).
+fn settings(path: &str, flow: Flow) -> serialport::SerialPortBuilder {
+    let flow = match flow {
+        Flow::None => serialport::FlowControl::None,
+        Flow::Hardware => serialport::FlowControl::Hardware,
+    };
+    exclusively(
+        serialport::new(path, 115_200)
             .data_bits(serialport::DataBits::Eight)
             .parity(serialport::Parity::None)
             .stop_bits(serialport::StopBits::One)
             .flow_control(flow)
             .dtr_on_open(true)
-            .timeout(Duration::from_millis(10))
-            .open()
-            .map_err(io::Error::other)?;
+            .timeout(Duration::from_millis(10)),
+    )
+}
+
+/// One owner per port: while a wire holds it, a second open of the same
+/// path, from this process or another, is refused as busy. That refusal is
+/// how a port this process already holds is told apart
+/// (D-2026-10-01-live-screen-controls-4). On Unix serialport sets
+/// `TIOCEXCL` and an exclusive `flock`; asked explicitly, not left to the
+/// crate's default.
+#[cfg(unix)]
+fn exclusively(port: serialport::SerialPortBuilder) -> serialport::SerialPortBuilder {
+    port.exclusive(true)
+}
+
+/// One owner per port: Windows opens a COM port exclusively anyway.
+#[cfg(not(unix))]
+fn exclusively(port: serialport::SerialPortBuilder) -> serialport::SerialPortBuilder {
+    port
+}
+
+impl SerialWire {
+    /// Opens `path` with the wire's [`settings`] (115200 8N1, the given flow
+    /// control, DTR on, exclusive), then raises RTS.
+    pub fn open(path: &str, flow: Flow) -> io::Result<Self> {
+        let port = settings(path, flow).open().map_err(io::Error::other)?;
         let mut wire = Self { port };
         wire.port
             .write_request_to_send(true)
@@ -301,6 +326,39 @@ mod tests {
     fn opening_a_missing_port_fails_cleanly() {
         assert!(SerialWire::open("/dev/bezel-no-such-port", Flow::None).is_err());
         assert!(SerialWire::open("/dev/bezel-no-such-port", Flow::Hardware).is_err());
+    }
+
+    /// serialport's kind for an open refused because the port is held:
+    /// `EBUSY` from `TIOCEXCL`, or the exclusive `flock` taken.
+    #[cfg(unix)]
+    fn busy(e: &serialport::Error) -> bool {
+        e.kind() == serialport::ErrorKind::NoDevice
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_port_the_wire_holds_refuses_a_second_open() {
+        use serialport::SerialPort;
+        // A pseudo terminal stands in for the screen's tty (no device is
+        // touched). The pair stays open throughout: closing either end
+        // would clear the tty's exclusive mark or end the terminal.
+        let (_master, slave) = serialport::TTYPort::pair().unwrap();
+        let path = slave.name().unwrap();
+        // Held through the wire's settings, the port refuses a second open
+        // through them as busy, and so does `SerialWire::open` (which would
+        // otherwise get past the open and fail raising RTS: a pty has no
+        // modem lines). D-2026-10-01-live-screen-controls-4 rests on this.
+        let held = settings(&path, Flow::None).open().unwrap();
+        let again = settings(&path, Flow::None).open().err();
+        assert!(again.as_ref().is_some_and(busy), "{again:?}");
+        let wire = SerialWire::open(&path, Flow::Hardware).err();
+        let inner = wire.as_ref().and_then(|e| e.get_ref());
+        let inner = inner.and_then(|e| e.downcast_ref::<serialport::Error>());
+        assert!(inner.is_some_and(busy), "{wire:?}");
+        // Released, it opens again: the refusal came from the hold.
+        drop(held);
+        let reopened = settings(&path, Flow::None).open();
+        assert!(reopened.is_ok(), "{:?}", reopened.err());
     }
 
     /// A clock that moves one second on every look.

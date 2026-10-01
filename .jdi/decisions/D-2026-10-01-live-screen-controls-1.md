@@ -1,0 +1,1 @@
+D-2026-10-01-live-screen-controls-1: Phase 'Brilho, cartão SD e filtro de temas com a tela ao vivo' (slug: live-screen-controls) added. Reason: relato do usuário em 2026-10-01 (studio 0.1.0-dev.287+4feaa0f, 8.8" ao vivo): brilho falha com 'Device or resource busy', o cartão SD não aparece nem pode ser alterado, e o filtro 'Para esta tela' alterna entre desabilitado e habilitado.

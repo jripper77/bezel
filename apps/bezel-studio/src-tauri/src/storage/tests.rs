@@ -521,6 +521,43 @@ fn a_cancelled_upload_reports_the_partial_file() {
     assert!(f.storage().files.is_empty());
 }
 
+/// Crosses the crates: the core's upload use case finds the file stored
+/// short and says so with its own error, and the UI gets the `sizeMismatch`
+/// code with the sizes, no text parsed.
+#[test]
+fn a_file_stored_short_fails_its_size_check_with_its_own_code() {
+    let short = FakeStorage {
+        short_by: 10,
+        ..FakeStorage::default()
+    };
+    let f = fixture_with("short", short, FakeMedia::ready());
+    let ready = f.ready(&f.local("Logo.png", 400), "internal");
+    let error = f.run(ready.ticket, Confirm::No).0.unwrap_err();
+    assert_eq!(error.code(), "sizeMismatch");
+    assert_eq!(
+        (
+            error.value("file"),
+            error.value("stored"),
+            error.value("expected")
+        ),
+        (Some("internal/image/logo.png"), Some("390"), Some("400"))
+    );
+    assert!(
+        error
+            .to_string()
+            .ends_with("the stored size differs; delete it and send it again"),
+        "{error}"
+    );
+    // The file stays for the delete the UI offers.
+    assert!(
+        f.writes()
+            .iter()
+            .all(|c| !matches!(c, StorageCall::Delete(_)))
+    );
+    let listed = f.backend.storage_overview(KEY, TIME).unwrap();
+    assert_eq!(listed.folders[0].files[0].size, Some(390));
+}
+
 #[test]
 fn a_video_to_convert_is_turned_like_the_theme_and_cropped() {
     let f = fixture("convert");
@@ -836,6 +873,14 @@ fn core_errors_keep_a_code_the_ui_translates() {
             "refused",
         ),
         (BezelError::ThemeFile(x()), "themeFile"),
+        (
+            BezelError::SizeMismatch {
+                path: remote_path("sd/video/a.mp4"),
+                sent: 2,
+                stored: 1,
+            },
+            "sizeMismatch",
+        ),
     ];
     for (e, code) in cases {
         let english = e.to_string();

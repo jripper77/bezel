@@ -1520,11 +1520,11 @@ mod tests {
             let stored = WRITER_QUEUE + png.len();
             assert_eq!(
                 upload_as_the_core_does(&mut s, &image, &png),
-                Err(BezelError::Transport(format!(
-                    "sd/image/logo.png was stored with {stored} bytes, not the file's {}: \
-                     the stored size differs; delete it and send it again",
-                    png.len()
-                ))),
+                Err(BezelError::SizeMismatch {
+                    path: image.clone(),
+                    sent: png.len() as u64,
+                    stored: stored as u64,
+                }),
                 "{idle:?}"
             );
             let fw = s.wire();

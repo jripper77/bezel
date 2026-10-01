@@ -644,11 +644,11 @@ fn verification_and_races_are_caught() {
     );
     assert_eq!(
         result,
-        Err(BezelError::Transport(
-            "internal/video/clip.mp4 was stored with 999 bytes, not the file's 1000: \
-             the stored size differs; delete it and send it again"
-                .into()
-        ))
+        Err(BezelError::SizeMismatch {
+            path: remote("internal/video/clip.mp4"),
+            sent: 1000,
+            stored: 999,
+        })
     );
     assert!(
         !writes(&connector)

@@ -210,25 +210,6 @@ impl fmt::Display for UiError {
 
 impl std::error::Error for UiError {}
 
-/// The end of the upload's size check (`app::storage::upload`), which the
-/// core reports as a transport error: "<path> was stored with <n> bytes, not
-/// the file's <m>: the stored size differs; delete it and send it again".
-const SIZE_CHECK: &str = ": the stored size differs; delete it and send it again";
-
-/// The size check as its own error, so the UI says what to do and offers
-/// the delete; `None` for any other transport error.
-fn size_mismatch(detail: &str) -> Option<UiError> {
-    let rest = detail.strip_suffix(SIZE_CHECK)?;
-    let (file, sizes) = rest.split_once(" was stored with ")?;
-    let (stored, expected) = sizes.split_once(" bytes, not the file's ")?;
-    Some(
-        UiError::new(ErrorCode::SizeMismatch)
-            .arg("file", file)
-            .arg("stored", stored)
-            .arg("expected", expected),
-    )
-}
-
 impl Serialize for UiError {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let args: BTreeMap<&str, &str> = self.args.iter().map(|(n, v)| (*n, v.as_str())).collect();
@@ -260,14 +241,17 @@ impl From<BezelError> for UiError {
                 .arg("holders", holders.join(", ")),
             BezelError::Timeout(d) => detail(ErrorCode::Timeout, d),
             BezelError::InvalidInput(d) => detail(ErrorCode::InvalidInput, d),
-            BezelError::Transport(d) => {
-                size_mismatch(&d).unwrap_or_else(|| detail(ErrorCode::Transport, d))
-            }
+            BezelError::Transport(d) => detail(ErrorCode::Transport, d),
             BezelError::Unsupported(d) => detail(ErrorCode::Unsupported, d),
             BezelError::Cancelled { .. } => Self::new(ErrorCode::Cancelled),
             BezelError::NotConfirmed(d) => detail(ErrorCode::NotConfirmed, d),
             BezelError::Refused(refusal) => detail(ErrorCode::Refused, refusal.to_string()),
             BezelError::ThemeFile(d) => detail(ErrorCode::ThemeFile, d),
+            // The UI says what to do and offers the delete.
+            BezelError::SizeMismatch { path, sent, stored } => Self::new(ErrorCode::SizeMismatch)
+                .arg("file", path)
+                .arg("stored", stored)
+                .arg("expected", sent),
         }
     }
 }
@@ -437,11 +421,12 @@ mod tests {
 
     #[test]
     fn a_failed_size_check_has_its_own_code() {
-        let core = BezelError::Transport(
-            "internal/video/clip.mp4 was stored with 1990 bytes, not the file's 2000: the stored \
-             size differs; delete it and send it again"
-                .into(),
-        );
+        let core = BezelError::SizeMismatch {
+            path: bezel_core::domain::storage::RemotePath::parse("internal/video/clip.mp4")
+                .unwrap(),
+            sent: 2000,
+            stored: 1990,
+        };
         let english = core.to_string();
         let e = UiError::from(core);
         assert_eq!(e.code(), "sizeMismatch");
@@ -449,11 +434,7 @@ mod tests {
             (e.value("file"), e.value("stored"), e.value("expected")),
             (Some("internal/video/clip.mp4"), Some("1990"), Some("2000"))
         );
-        assert_eq!(
-            format!("transport error: {e}"),
-            english,
-            "the same sentence"
-        );
+        assert_eq!(e.to_string(), english, "the core's own sentence");
         let other = UiError::from(BezelError::Transport("the cable is out".into()));
         assert_eq!(other.code(), "transport");
     }

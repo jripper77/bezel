@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use super::storage::Refusal;
+use super::storage::{Refusal, RemotePath};
 
 /// Errors of the Bezel domain. Adapters map their own errors into these
 /// variants and never leak transport-specific error types through a port.
@@ -61,6 +61,22 @@ pub enum BezelError {
     /// and the problem.
     #[error("theme file: {0}")]
     ThemeFile(String),
+    /// An upload's size check failed: the screen stores another number of
+    /// bytes than were sent (bytes an earlier cancelled upload left queued
+    /// can land in this file). The file stays; the user deletes it and sends
+    /// it again.
+    #[error(
+        "{path} was stored with {stored} bytes, not the file's {sent}: \
+         the stored size differs; delete it and send it again"
+    )]
+    SizeMismatch {
+        /// The uploaded file.
+        path: RemotePath,
+        /// Bytes sent.
+        sent: u64,
+        /// Bytes the screen reports for it (0 when it reports none).
+        stored: u64,
+    },
 }
 
 fn partial_note(partial: &Option<u64>) -> String {
@@ -89,6 +105,20 @@ mod tests {
         assert_eq!(
             BezelError::Unsupported("Turing 3.5\" has no storage".into()).to_string(),
             "not supported: Turing 3.5\" has no storage"
+        );
+    }
+
+    #[test]
+    fn a_failed_size_check_says_what_to_do() {
+        let e = BezelError::SizeMismatch {
+            path: RemotePath::parse("sd/video/clip.mp4").expect("path"),
+            sent: 2000,
+            stored: 1990,
+        };
+        assert_eq!(
+            e.to_string(),
+            "sd/video/clip.mp4 was stored with 1990 bytes, not the file's 2000: \
+             the stored size differs; delete it and send it again"
         );
     }
 

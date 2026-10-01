@@ -81,7 +81,9 @@ the Conventional Commits.
   Nothing measuring a game, or a reading older than 3 s, is unavailable with
   how to turn the source on. Not yet validated with a real game.
 - `net.ping`, the round trip to `--ping-host` (default 8.8.8.8), measured on a
-  thread of its own so a silent host never delays the other sensors; fans,
+  thread of its own so a silent host never delays the other sensors, and only
+  while a shown theme or the studio's sensor list uses it (no traffic
+  otherwise); fans,
   pump, voltages, network totals and available memory from hwmon/sysfs on
   Linux and LibreHardwareMonitor on Windows; the sensor keys of imported themes
   map to Bezel's.

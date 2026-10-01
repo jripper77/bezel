@@ -104,6 +104,8 @@ trait SerialPorts {
     /// Opens and closes `endpoint` without writing a byte: the rev C MCU
     /// wake. A port that does not open is skipped (the next attempt retries).
     fn poke(&self, endpoint: &Endpoint);
+    /// The other programs holding `endpoint` open (this one excluded).
+    fn holders(&self, endpoint: &Endpoint) -> Vec<String>;
 }
 
 /// The host's serial ports.
@@ -121,6 +123,10 @@ impl SerialPorts for SystemPorts {
         if let Ok(port) = SerialWire::open(&endpoint.address.0, Flow::None) {
             drop(port);
         }
+    }
+
+    fn holders(&self, endpoint: &Endpoint) -> Vec<String> {
+        crate::busy::holders(&endpoint.address.0)
     }
 }
 
@@ -271,8 +277,19 @@ where
     /// back about 10 s later under a new device number, also from a hung
     /// firmware: once `display` (the SoC as it was listed) left, the display
     /// back behind the MCU's hub is returned, whichever endpoint it is.
-    /// Nothing may hold the SoC's port meanwhile.
+    /// Refused with `InUse`, before anything is sent, while another program
+    /// holds the SoC's port (D-2026-09-30-device-protocols-3): restarting
+    /// would pull the screen from under it.
     fn restart_rev_c(&self, wake: &Endpoint, display: Option<&Endpoint>) -> Result<Endpoint> {
+        if let Some(display) = display {
+            let holders = self.ports.holders(display);
+            if !holders.is_empty() {
+                return Err(BezelError::InUse {
+                    address: display.address.0.clone(),
+                    holders,
+                });
+            }
+        }
         tracing::info!(mcu = %wake.address, "restarting the rev C screen through its MCU");
         let mut mcu = self.ports.open(wake, Flow::None)?;
         mcu.send(&proto::MCU_RESTART).map_err(io_err)?;
@@ -534,6 +551,8 @@ mod tests {
         opens: RefCell<VecDeque<Result<Opened>>>,
         log: RefCell<Vec<String>>,
         journal: Journal,
+        /// Other programs holding every port.
+        held_by: Vec<String>,
     }
 
     impl ScriptedPorts {
@@ -571,6 +590,10 @@ mod tests {
         fn poke(&self, endpoint: &Endpoint) {
             let address = &endpoint.address.0;
             self.log.borrow_mut().push(format!("poke {address}"));
+        }
+
+        fn holders(&self, _endpoint: &Endpoint) -> Vec<String> {
+            self.held_by.clone()
         }
     }
 
@@ -752,6 +775,28 @@ mod tests {
             [RESTART_HOLD, LEAVE_STEP, RESTART_POLL, RESTART_POLL]
         );
         assert_eq!(host.ports.log(), ["open /dev/ttyACM0"], "only the MCU");
+    }
+
+    #[test]
+    fn a_restart_is_refused_while_another_program_holds_the_soc() {
+        // Review W1: `bezel restart` must not pull the screen from under the
+        // vendor app or another service; nothing reaches the MCU.
+        let old = soc(SOC, &[1, 2]);
+        let ports = ScriptedPorts {
+            held_by: vec!["turing-smart-screen (pid 42)".into()],
+            ..ScriptedPorts::new([mute()])
+        };
+        let host = fake_host(ScriptedBus::new([Ok(vec![mcu(), old.clone()])]), ports);
+        let err = host.restart_rev_c(&mcu(), Some(&old)).unwrap_err();
+        assert_eq!(
+            err,
+            BezelError::InUse {
+                address: SOC.into(),
+                holders: vec!["turing-smart-screen (pid 42)".into()],
+            }
+        );
+        assert!(host.ports.log().is_empty(), "the MCU is not even opened");
+        assert!(host.pause.taken().is_empty());
     }
 
     #[test]

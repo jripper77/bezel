@@ -580,7 +580,9 @@ Every step after the first reopen resets or re-enumerates the screen (section 16
 Decision `D-2026-09-30-device-protocols-2` limits Bezel's automatic traffic to what the vendor apps send on every
 start and stop: HELLO, STOP_VIDEO / STOP_MEDIA, brightness, PRE/END update (0x86 / 0x87), frames, QUERY_STATUS and
 screen off. Everything below is **never sent implicitly**: it needs an explicit command, and a destructive one needs
-`Confirm::Yes`.
+`Confirm::Yes`. One exception, validated on the 8.8" (`D-2026-09-30-release-polish-13`): the MCU restart is also sent
+automatically, once per connection attempt, to a SoC that is on the bus but answers no HELLO or stopped reading; it is
+refused while another program holds the SoC's port.
 
 | Command | Effect | Kind |
 |---|---|---|

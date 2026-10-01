@@ -1208,6 +1208,23 @@ mod tests {
         ));
     }
 
+    /// A rev C connection through the host's own serial ports, from a bus
+    /// that lists `display` and `mcu` behind one hub and pauses recorded
+    /// instead of slept: what it ends with, and the pauses it took.
+    #[cfg(unix)]
+    fn through_the_host_ports(display: &str, mcu: &str) -> (Option<BezelError>, Vec<Duration>) {
+        let mcu = at(mcu, UsbId::new(0x1a86, 0xca88), Some("CT88INCH"), &[1, 1]);
+        let display = soc(display, &[1, 2]);
+        let host = RevCHost {
+            bus: ScriptedBus::new([Ok(vec![mcu.clone(), display.clone()])]),
+            ports: SystemPorts,
+            pause: Pauses::default(),
+        };
+        let screen = rev_c(Some(display), Some(mcu));
+        let ended = host.connect_rev_c(&screen, &screen.candidates).err();
+        (ended, host.pause.taken())
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_host_ports_name_this_process_for_a_port_it_holds() {
@@ -1216,12 +1233,38 @@ mod tests {
         // never opened, nobody holds it.
         let path = std::env::temp_dir().join(format!("bezel-ports-held-{}", std::process::id()));
         let file = std::fs::File::create(&path).unwrap();
-        let held = endpoint(path.to_str().unwrap());
+        let address = path.to_str().unwrap();
+        let held = endpoint(address);
         let me = format!("(PID {})", std::process::id());
-        let holders = SystemPorts.holders(&held);
-        assert!(holders.this.is_some_and(|h| h.ends_with(&me)), "{me}");
-        assert!(holders.others.is_empty());
+        let Holders { this, others } = SystemPorts.holders(&held);
+        let this = this.expect("this process holds it");
+        assert!(this.ends_with(&me), "{this} is not {me}");
+        assert!(others.is_empty());
+        // D-2026-10-01-live-screen-controls-4 through the host's `open`, the
+        // entry of `open_serial` and `open_rev_c`: the open fails as busy (a
+        // file is no tty, so serialport's exclusive lock refuses it) and is
+        // `InUse` naming this process. The rev C connection stops there, with
+        // no pause: no wait for the display to leave and no wake of its MCU
+        // (a path that does not exist; each poke is followed by a pause).
+        let in_use = BezelError::InUse {
+            address: address.into(),
+            holders: vec![this],
+        };
+        assert_eq!(
+            SystemPorts.open(&held, Flow::None).err(),
+            Some(in_use.clone())
+        );
+        let no_mcu =
+            std::env::temp_dir().join(format!("bezel-ports-no-mcu-{}", std::process::id()));
+        let (ended, pauses) = through_the_host_ports(address, no_mcu.to_str().unwrap());
+        assert_eq!(ended, Some(in_use));
+        assert!(pauses.is_empty(), "{pauses:?}");
         drop(file);
+        // Closed, the same refusal is the system's own again.
+        assert!(matches!(
+            SystemPorts.open(&held, Flow::None).err(),
+            Some(BezelError::Transport(_))
+        ));
         assert_eq!(SystemPorts.holders(&held), Holders::default());
         std::fs::remove_file(&path).unwrap();
         let nobody = endpoint("/dev/bezel-no-such-port");

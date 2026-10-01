@@ -1,0 +1,1 @@
+D-2026-09-30-storage-manager-1 (2026-09-30): Phase 'Gerenciador de armazenamento' (slug: storage-manager) added after release-polish. Reason: user request ("monte uma forma de gerenciamento dos dados dentro da memória da tela e do cartão sd"), to start once the video and GIF work (T-7.9, T-7.11) is done.

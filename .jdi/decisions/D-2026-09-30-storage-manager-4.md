@@ -1,0 +1,1 @@
+D-2026-09-30-storage-manager-4 (2026-09-30): In the studio the manager is the existing Storage tab grown into a full-width view (single window): internal memory and card side by side, thumbnails, multi-select, sort and filter, drag between the two sides to move. The CLI gets the same operations under `bezel storage`. User's choice (asked 2026-09-30) over a separate window.

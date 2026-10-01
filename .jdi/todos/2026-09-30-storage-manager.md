@@ -1,0 +1,3 @@
+- [backlog 1.x] Sync/profile: make a screen hold exactly a chosen set (diff preview, then one confirmation), on top of restore and the cleanup assistant (D-2026-09-30-storage-manager-14)
+- [backlog] Preview a file on the screen without writing flash through the RAM root /tmp/video (rev C; lost at reboot) (D-2026-09-30-storage-manager-14)
+- [backlog] Copy cataloged files between different screens (profile check and conversion per model) (D-2026-09-30-storage-manager-14)

@@ -181,9 +181,10 @@ export const PROGRESS_EVENT = 'storage-progress';
  *   `{"rotation": 270, "fit": "contain", "zoom": 1.25, "position": {"x": 0.5, "y": 0.4}, "padColor": "#000000ff"}`.
  * @typedef {{rotation: 0|90|180|270, size: {width: number, height: number}|null}} VideoAutoDto
  *   What Auto resolves to for the theme's video background (`video_auto`):
- *   - `size`: the video's own size, from its MP4 header (read in Rust, no
- *     ffmpeg); `null` when it cannot be read (another container, a GIF, a
- *     missing or broken file);
+ *   - `size`: the video's own size as the backend probes it without ffmpeg
+ *     (`bezel-media`'s probe: the MP4/MOV boxes, a GIF's header; the
+ *     `MediaInfo.dimensions`); `null` when the probe gives none (a missing
+ *     or broken file, another container);
  *   - `rotation`: the clockwise turn Auto gives the video. When `size` is
  *     exactly the panel's native size (480x1920 on the 8.8") and the theme
  *     is an odd number of quarter turns from the panel, the video is taken

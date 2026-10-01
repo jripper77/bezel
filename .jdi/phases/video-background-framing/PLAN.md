@@ -83,7 +83,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
 - **Acceptance:** `### Framing the video` / `### Enquadrar o vídeo` sob o vídeo de fundo: Auto, controles e teclas, cópia `_f…` (nada apagado), prévia e movimento reduzido, sem ffmpeg, CLI só respeita; `check-docs.sh` exige os títulos; CHANGELOG `[Unreleased]` cita framing.
 - **Dependencies:** T-1, T-2
 - **Test:** DoD 7
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4
 

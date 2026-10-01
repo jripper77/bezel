@@ -21,7 +21,7 @@ pub struct LocalTime {
 }
 
 /// Language of day and month names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Language {
     /// English.
     #[default]

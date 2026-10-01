@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use bezel_core::BezelError;
+use bezel_core::domain::error::ServiceFailure;
 use bezel_themes::import::ImportWarning;
 use serde::ser::SerializeStruct as _;
 use serde::{Serialize, Serializer};
@@ -87,6 +88,15 @@ error_codes! {
     InvalidHost = "invalidHost" => "\"{host}\" is not a host name or an IP address",
     InvalidFolder = "invalidFolder" => "\"{folder}\" is not a folder",
     System = "system" => "system error: {detail}",
+    // ------------------------------------- GIFs and stickers (KLIPY) --
+    KlipyNoKey = "klipyNoKey" => "no KLIPY API key is saved",
+    KlipyKeyRejected = "klipyKeyRejected" => "KLIPY refused the API key",
+    KlipyRateLimited = "klipyRateLimited"
+        => "the KLIPY API key reached its request limit (test keys allow 100 requests per \
+            hour)",
+    KlipyUnavailable = "klipyUnavailable" => "KLIPY is unavailable: {detail}",
+    GifNotInResults = "gifNotInResults" => "{item} is not among the last search's results",
+    NotInCollection = "notInCollection" => "{item} is not in the collection",
 }
 
 impl ErrorCode {
@@ -256,6 +266,16 @@ impl From<BezelError> for UiError {
                 .arg("file", path)
                 .arg("stored", stored)
                 .arg("expected", sent),
+            // KLIPY is the only online service (D-2026-10-01-gif-sticker-search-2).
+            BezelError::Service(ServiceFailure::RateLimited) => {
+                Self::new(ErrorCode::KlipyRateLimited)
+            }
+            BezelError::Service(ServiceFailure::KeyRejected) => {
+                Self::new(ErrorCode::KlipyKeyRejected)
+            }
+            BezelError::Service(ServiceFailure::Unavailable(d)) => {
+                detail(ErrorCode::KlipyUnavailable, d)
+            }
         }
     }
 }
@@ -503,6 +523,35 @@ mod tests {
         assert_eq!(e.to_string(), english, "the core's own sentence");
         let other = UiError::from(BezelError::Transport("the cable is out".into()));
         assert_eq!(other.code(), "transport");
+    }
+
+    #[test]
+    fn service_failures_are_klipy_codes() {
+        let cases = [
+            (ServiceFailure::RateLimited, "klipyRateLimited"),
+            (ServiceFailure::KeyRejected, "klipyKeyRejected"),
+            (
+                ServiceFailure::Unavailable("timed out".into()),
+                "klipyUnavailable",
+            ),
+        ];
+        for (failure, code) in cases {
+            assert_eq!(UiError::from(BezelError::Service(failure)).code(), code);
+        }
+        let down = UiError::from(BezelError::Service(ServiceFailure::Unavailable(
+            "timed out".into(),
+        )));
+        assert_eq!(down.value("detail"), Some("timed out"));
+        assert_eq!(down.to_string(), "KLIPY is unavailable: timed out");
+        assert!(
+            UiError::new(ErrorCode::KlipyRateLimited)
+                .to_string()
+                .contains("100 requests per hour")
+        );
+        let missing = UiError::new(ErrorCode::NotInCollection).arg("item", "abc");
+        assert_eq!(missing.to_string(), "abc is not in the collection");
+        assert_eq!(ErrorCode::GifNotInResults.params(), ["item"]);
+        assert!(ErrorCode::KlipyNoKey.params().is_empty());
     }
 
     #[test]

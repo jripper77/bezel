@@ -64,7 +64,7 @@ export default {
   'error.refused': 'A tela recusou o arquivo: {detail}',
   'error.screenNotFound': 'Tela não encontrada: {screen}. Confira o cabo USB.',
   'error.sizeMismatch': '“{file}” foi gravado com {stored} bytes em vez de {expected}. Apague e envie de novo.',
-  'error.stale': 'Esse envio expirou. Escolha o arquivo de novo.',
+  'error.stale': 'Isso ficou desatualizado: a tela ou os arquivos mudaram desde que foi preparado. Escolha de novo.',
   'error.system': 'O sistema recusou: {detail}',
   'error.themeFile': 'O arquivo de tema não pôde ser usado: {detail}',
   'error.themeMisfit': 'Este tema tem {theme}, mas a tela tem {screen} nesta orientação. Gire o tema ou abra um feito para esta tela.',

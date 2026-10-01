@@ -64,7 +64,7 @@ export default {
   'error.refused': 'The screen refused the file: {detail}',
   'error.screenNotFound': 'Screen not found: {screen}. Check the USB cable.',
   'error.sizeMismatch': '“{file}” was stored with {stored} bytes instead of {expected}. Delete it and send it again.',
-  'error.stale': 'This upload expired. Choose the file again.',
+  'error.stale': 'This is out of date: the screen or the files changed since it was prepared. Choose again.',
   'error.system': 'The system refused: {detail}',
   'error.themeFile': 'The theme file could not be used: {detail}',
   'error.themeMisfit': 'This theme is {theme}, but the screen is {screen} in this orientation. Turn the theme or open one made for this screen.',

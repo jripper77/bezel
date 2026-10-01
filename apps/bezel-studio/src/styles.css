@@ -161,7 +161,8 @@ button, input, select { font: inherit; color: inherit; }
 .media-item { display: grid; grid-template-columns: 48px 1fr; gap: 8px; align-items: center; padding: 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
 .media-item .thumb { width: 48px; height: 48px; border-radius: 6px; background: #000 center / contain no-repeat; }
 .media-item .actions { grid-column: 1 / -1; display: flex; gap: 6px; }
-.media-item .thumb, .bg-video .thumb { display: grid; place-items: center; color: var(--muted); }
+.media-item .thumb, .bg-video .thumb { display: grid; place-items: center; color: #94a3b8; }
+.media-item .thumb svg, .bg-video .thumb svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .media-item .thumb[style*="background-image"], .bg-video .thumb[style*="background-image"] { background-size: cover; }
 .media-name { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .media-name small { color: var(--muted); font-size: 0.8rem; }

@@ -6,13 +6,19 @@
 //! video is used, Auto is decided from the video's probed size
 //! ([`VideoFraming::resolve`]), and the [`ResolvedFraming`] gives one pure
 //! [`geometry`] to every user: the conversion for a screen, the poster and
-//! the pictures decoded on the host. Turning and scaling pixels is the
-//! adapters' job.
+//! the pictures decoded on the host. The converter turns and scales the
+//! pixels of a conversion or a poster; the pictures decoded on the host are
+//! framed here ([`frame_picture`]), so a framing edit never restarts the
+//! decoder.
 
 use super::catalog::MODELS;
 use super::device::DeviceModel;
 use super::frame::{Rect, Rgba};
 use super::geometry::{Orientation, Size};
+
+mod picture;
+
+pub use picture::frame_picture;
 
 /// How the picture fills its target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

@@ -21,11 +21,20 @@
 //! and the command says how to send it (`bezel storage put`); a screen that
 //! cannot play videos gets them decoded on this computer (ffmpeg), at up to
 //! [`HOST_VIDEO_FPS`] pictures per second.
+//!
+//! The theme's framing of its video is honoured, never edited
+//! (D-2026-10-01-video-background-framing-6): the video is probed first
+//! (an MP4's header is read without ffmpeg) so that Auto recognises a video
+//! already turned for the panel, the screen looks for the copy framed that
+//! way, and pictures decoded here are framed by the core. `bezel storage
+//! put` can make the default framing's copy (as it is, or turned with
+//! `--orientation`); any other framing is sent from the studio ("Send to
+//! screen").
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -37,6 +46,7 @@ use bezel_core::app::{
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::frame::Frame;
+use bezel_core::domain::media::MediaInfo;
 use bezel_core::domain::reconnect::{Reconnect, worth_reconnecting};
 use bezel_core::domain::theme::{AssetRef, Background, Theme, refresh_interval};
 use bezel_core::ports::{DeviceBus, MediaLocation, MediaTranscoder, ScreenConnector, ScreenLink};
@@ -166,15 +176,15 @@ where
 /// core's pace for screens that cannot play videos themselves).
 pub use bezel_core::app::HOST_VIDEO_FPS;
 
-/// The theme's video file on this computer, for host decoding: the file in
-/// a theme folder, or a temporary copy of the asset (zipped and converted
-/// themes), deleted when dropped.
-struct HostSource {
+/// The theme's video file on this computer, to probe it and to decode it
+/// here: the file in a theme folder, or a temporary copy of the asset
+/// (zipped and converted themes), deleted when dropped.
+struct VideoFile {
     location: MediaLocation,
     temporary: Option<PathBuf>,
 }
 
-impl Drop for HostSource {
+impl Drop for VideoFile {
     fn drop(&mut self) {
         // Best effort: a copy left in the temporary folder harms nothing,
         // and the run already ended.
@@ -200,49 +210,99 @@ fn asset_file(theme: &Path, asset: &AssetRef) -> Option<PathBuf> {
     file.is_file().then_some(file)
 }
 
-/// The video to decode on this computer, only for a screen that cannot play
-/// it itself and a theme with a video background.
-fn host_source(theme: &Path, loaded: &Loaded, model: &DeviceModel) -> Option<HostSource> {
+/// The video file of a theme with a video background, on this computer.
+/// Temporary copies get names of their own: runs (and tests) may overlap.
+fn video_file(theme: &Path, loaded: &Loaded) -> Option<VideoFile> {
+    static COPIES: AtomicUsize = AtomicUsize::new(0);
     let Background::Video { asset, .. } = &loaded.theme.background else {
         return None;
     };
-    if model.capabilities.video_playback {
-        return None;
-    }
     if let Some(file) = asset_file(theme, asset) {
         let location = MediaLocation(file.to_string_lossy().into_owned());
-        return Some(HostSource {
+        return Some(VideoFile {
             location,
             temporary: None,
         });
     }
     let bytes = loaded.assets.get(asset)?;
     let name = Path::new(&asset.0).file_name()?.to_string_lossy();
-    let file = std::env::temp_dir().join(format!("bezel-video-{}-{name}", std::process::id()));
+    let n = COPIES.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    let file = std::env::temp_dir().join(format!("bezel-video-{pid}-{n}-{name}"));
     std::fs::write(&file, bytes).ok()?;
-    Some(HostSource {
+    Some(VideoFile {
         location: MediaLocation(file.to_string_lossy().into_owned()),
         temporary: Some(file),
     })
 }
 
-/// The command that puts a missing theme video on the screen.
-fn put_hint(theme: &Path, runtime: &ThemeRuntime, missing: &MissingVideo) -> String {
-    let orientation = OrientationArg::from(runtime.theme().orientation).cli_name();
-    let put = |file: &str| {
-        format!(
-            "  bezel storage put {file} {} --orientation {orientation}",
-            missing.path
-        )
+/// The theme's video as probed here (an MP4's header is read without
+/// ffmpeg), for the core to frame it; `None`, said in `log`, when it cannot
+/// be read: Auto then turns nothing.
+fn probe_video(
+    media: &mut dyn MediaTranscoder,
+    file: &VideoFile,
+    log: &mut Messages<'_>,
+) -> Option<MediaInfo> {
+    match media.probe(&file.location) {
+        Ok(info) => Some(info),
+        Err(e) => {
+            writeln!(
+                log,
+                "warning: cannot read the theme's video here ({e}); its framing cannot tell \
+                 whether it is already turned for the screen"
+            );
+            None
+        }
+    }
+}
+
+/// The video to decode on this computer: only for a screen that cannot play
+/// it itself.
+fn host_source(file: Option<VideoFile>, model: &DeviceModel) -> Option<VideoFile> {
+    file.filter(|_| !model.capabilities.video_playback)
+}
+
+/// How `bezel storage put` makes the copy of the theme's video a screen
+/// looks for, when it can.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Put {
+    /// The asset as it is (already the panel's picture): no options.
+    AsIs,
+    /// Turned and cropped for the theme's orientation (the default framing,
+    /// nothing turned on the canvas): `--orientation`.
+    Turned,
+}
+
+/// What `bezel storage put` can do for `missing`: nothing for a framing
+/// other than the default (only the studio frames a video).
+fn put_for(runtime: &ThemeRuntime, missing: &MissingVideo) -> Option<Put> {
+    if missing.options.is_identity() && runtime.video_info().is_some() {
+        return Some(Put::AsIs);
+    }
+    let framing = runtime.video_framing()?;
+    (framing.turns == 0 && framing.is_plain()).then_some(Put::Turned)
+}
+
+/// The command that puts a missing theme video on the screen, when the
+/// command line can make it.
+fn put_hint(theme: &Path, runtime: &ThemeRuntime, missing: &MissingVideo) -> Option<String> {
+    let flags = match put_for(runtime, missing)? {
+        Put::AsIs => String::new(),
+        Put::Turned => {
+            let orientation = OrientationArg::from(runtime.theme().orientation).cli_name();
+            format!(" --orientation {orientation}")
+        }
     };
-    match asset_file(theme, &missing.asset) {
+    let put = |file: &str| format!("  bezel storage put {file} {}{flags}", missing.path);
+    Some(match asset_file(theme, &missing.asset) {
         Some(file) => put(&quoted(&file.to_string_lossy())),
         None => format!(
             "  bezel import {} -o <FOLDER>   # the theme as a folder, to reach its video\n{}",
             quoted(&theme.to_string_lossy()),
             put(&format!("<FOLDER>/{}", missing.asset.0))
         ),
-    }
+    })
 }
 
 /// A path as the platform's shell reads it back: POSIX sh, or PowerShell on
@@ -266,11 +326,18 @@ fn video_line(state: &VideoState, theme: &Path, runtime: &ThemeRuntime) -> Optio
     let line = match state {
         VideoState::NoVideo | VideoState::NotStarted => return None,
         VideoState::OnDevice(path) => format!("the screen plays {path} under the theme"),
-        VideoState::VideoMissing(missing) => format!(
-            "warning: the screen does not store this theme's video yet, so its poster shows. \
-             Send it, then run the theme again:\n{}",
-            put_hint(theme, runtime, missing)
-        ),
+        VideoState::VideoMissing(missing) => match put_hint(theme, runtime, missing) {
+            Some(put) => format!(
+                "warning: the screen does not store this theme's video yet, so its poster \
+                 shows. Send it, then run the theme again:\n{put}"
+            ),
+            None => format!(
+                "warning: the screen does not store this theme's video framed as the theme \
+                 says ({}), so its poster shows. The command line cannot frame a video: open \
+                 the theme in Bezel Studio and use \"Send to screen\", then run the theme again",
+                missing.path
+            ),
+        },
         VideoState::Host => format!(
             "the video is decoded on this computer, up to {HOST_VIDEO_FPS} pictures per second"
         ),
@@ -294,7 +361,7 @@ fn start_video(
     runtime: &mut ThemeRuntime,
     link: &mut dyn ScreenLink,
     media: &mut dyn MediaTranscoder,
-    source: Option<&HostSource>,
+    source: Option<&VideoFile>,
     theme: &Path,
     log: &mut Messages<'_>,
 ) {
@@ -339,7 +406,7 @@ struct Show<'a, B: ?Sized, C: ?Sized> {
     /// `None` once it failed and did not come back.
     link: Option<Box<dyn ScreenLink>>,
     media: &'a mut dyn MediaTranscoder,
-    source: Option<HostSource>,
+    source: Option<VideoFile>,
     theme: &'a Path,
 }
 
@@ -560,9 +627,12 @@ where
         "{name}: showing {line}, every {:.2} s; Ctrl+C to stop",
         every.as_secs_f64()
     );
-    let source = host_source(request.theme, &loaded, link.identity().model);
+    let file = video_file(request.theme, &loaded);
+    let info = file.as_ref().and_then(|f| probe_video(media, f, &mut log));
+    let source = host_source(file, link.identity().model);
     let mut runtime = ThemeRuntime::new(loaded.theme, loaded.assets, kit.language);
     runtime.limit_refresh(MAX_REFRESH);
+    runtime.set_video_info(info);
     let mut show = Show {
         runtime,
         bus,
@@ -616,11 +686,12 @@ mod tests {
     use bezel_core::domain::theme::{
         BoxF, Element, ElementId, ElementKind, TextContent, TextStyle,
     };
-    use bezel_devices::fake::{FakeStorage, Playback};
+    use bezel_devices::fake::{FakeStorage, Playback, StorageCall};
 
-    use crate::storage::doubles::{STREAMED, StubMedia, weact_bus};
+    use crate::storage::doubles::{STREAMED, StubMedia, video, weact_bus};
     use bezel_core::domain::device::{Transport, UsbId};
     use bezel_core::domain::discovery::{DeviceAddress, Endpoint, UsbLocation};
+    use bezel_core::domain::framing::{VideoFraming, Zoom};
     use bezel_core::domain::theme::Fit;
     use bezel_core::ports::{SensorSource, ThemeLocation, ThemeStore};
     use bezel_core::{BezelError, Result};
@@ -1125,6 +1196,138 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(folder);
         let _ = std::fs::remove_file(zipped);
+    }
+
+    /// Saves a theme folder over `assets/clip.mp4` for a panel of `size`
+    /// standing horizontal, its video framed as `framing` says (`None`:
+    /// Auto).
+    fn framed_theme(name: &str, size: Size, framing: Option<VideoFraming>) -> PathBuf {
+        let path = video_theme(name, size, Orientation::Landscape, false);
+        let location = ThemeLocation(path.display().to_string());
+        let (mut theme, assets) = FsThemeStore.load(&location).unwrap();
+        if let Background::Video { framing: kept, .. } = &mut theme.background {
+            *kept = framing;
+        }
+        FsThemeStore.save(&location, &theme, &assets).unwrap();
+        path
+    }
+
+    /// A media stub that probes the video of the theme `folder` as an MP4
+    /// of `size` and `bytes`.
+    fn probing(folder: &Path, size: Size, bytes: u64) -> StubMedia {
+        let file = folder.join("assets/clip.mp4");
+        StubMedia::ready().with(&file.to_string_lossy(), video(size, bytes, false))
+    }
+
+    /// The 8.8" storing `files` (path, bytes).
+    fn turing_88_storing(files: &[(&str, usize)]) -> (FakeBus, FakeConnector) {
+        let storage = files
+            .iter()
+            .fold(FakeStorage::default(), |s, (path, bytes)| {
+                s.with_file(RemotePath::parse(path).unwrap(), vec![9; *bytes])
+            });
+        (FakeBus::turing_88(), FakeConnector::with_storage(storage))
+    }
+
+    /// D-2026-10-01-video-background-framing-4, -6: `bezel run` probes the
+    /// theme's video and honours its framing. A video already turned for
+    /// the panel, in a horizontal theme like the vendor's "Dragon Ball", is
+    /// the screen's copy of the asset's size; another framing has a copy of
+    /// its own that only the studio makes; a screen without playback gets
+    /// the whole picture decoded and framed.
+    #[test]
+    fn run_honours_the_video_framing() {
+        let native = Size::new(480, 1920);
+        let folder = framed_theme("framed", native, None);
+        let file = quoted(&folder.join("assets/clip.mp4").to_string_lossy());
+        let run = |screen: &(FakeBus, FakeConnector), theme: &Path, media: &mut StubMedia| {
+            let mut pace = scripted(9);
+            let (out, log) = run_on(
+                screen,
+                theme,
+                &mut FakeSensors::demo(),
+                &mut pace,
+                Some(1),
+                media,
+            );
+            out.unwrap();
+            log
+        };
+
+        let screen = turing_88_storing(&[("internal/video/clip.mp4", 64)]);
+        let log = run(&screen, &folder, &mut probing(&folder, native, 64));
+        assert!(
+            log.contains("the screen plays internal/video/clip.mp4 under the theme"),
+            "{log}"
+        );
+        let clip = RemotePath::parse("internal/video/clip.mp4").unwrap();
+        let seen = screen.1.log().storage;
+        assert_eq!(seen.playback, Playback::Video(clip, Repeat::Loop));
+        assert!(
+            !seen
+                .calls
+                .iter()
+                .any(|c| matches!(c, StorageCall::Upload(..)))
+        );
+
+        // A copy of another size is not the asset: it is sent as it is.
+        let screen = turing_88_storing(&[("internal/video/clip.mp4", 10)]);
+        let log = run(&screen, &folder, &mut probing(&folder, native, 64));
+        let put = format!("  bezel storage put {file} internal/video/clip.mp4\n");
+        assert!(log.contains(&put), "{log}");
+        assert!(
+            screen
+                .1
+                .log()
+                .storage
+                .calls
+                .iter()
+                .all(|c| !c.changes_the_screen())
+        );
+
+        // Zoomed: a copy of its own, made by the studio's "Send to screen".
+        let zoom = VideoFraming {
+            zoom: Zoom::from_percent(125),
+            ..VideoFraming::default()
+        };
+        let zoomed = framed_theme("zoomed", native, Some(zoom));
+        let screen = turing_88_storing(&[("internal/video/clip.mp4", 64)]);
+        let log = run(&screen, &zoomed, &mut probing(&zoomed, native, 64));
+        assert!(
+            log.contains("framed as the theme says (internal/video/clip_f8ca275f8.mp4)"),
+            "{log}"
+        );
+        assert!(
+            log.contains("Bezel Studio and use \"Send to screen\""),
+            "{log}"
+        );
+        assert!(!log.contains("bezel storage put"), "{log}");
+
+        // Unreadable here, it is not taken as turned: the copy turned for
+        // the screen is looked for, made with `--orientation`.
+        let screen = turing_88_storing(&[]);
+        let log = run(&screen, &folder, &mut StubMedia::ready());
+        assert!(
+            log.contains("warning: cannot read the theme's video here"),
+            "{log}"
+        );
+        let put = format!("put {file} internal/video/clip_90.mp4 --orientation horizontal");
+        assert!(log.contains(&put), "{log}");
+
+        // The WeAct 0.96" decodes the whole picture (80x160, its panel's
+        // native size) and the core turns it onto the 160x80 canvas.
+        let small = Size::new(80, 160);
+        let host = framed_theme("framed-host", small, None);
+        let mut media = probing(&host, small, 1000);
+        let screen = (weact_bus(), FakeConnector::default());
+        run(&screen, &host, &mut media);
+        assert_eq!(media.streamed[0].1.size, small, "raw, never turned");
+        let frames = screen.1.log().frames;
+        assert_eq!(frames[0].size(), Size::new(160, 80));
+        assert_eq!(frames[0].pixel(150, 10), Some(STREAMED));
+        for dir in [folder, zoomed, host] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[test]

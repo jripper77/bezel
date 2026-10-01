@@ -52,7 +52,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - Tema antigo e importação TURZX = `framing: None` (Auto).
 - **Dependencies:** T-1
 - **Test:** `native::tests::video_framing_round_trips_and_older_themes_load_as_auto`, `import::turzx::tests::vendor_video_backgrounds_import_with_auto_framing`
-- **Status:** pending
+- **Status:** completed (4e82fab)
 
 #### T-5: Runtime e `bezel run` respeitam o enquadramento
 - **Specialist:** jdi-doer-bezel

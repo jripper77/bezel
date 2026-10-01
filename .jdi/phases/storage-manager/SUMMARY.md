@@ -36,11 +36,11 @@
   `crates/bezel-cli/tests/storage.rs`
 - `apps/bezel-studio/src/{app,bridge,demo-backend,demo-data,demo-manager,storage-manager}.js`, `src/ui/{storage,
   manager}.js`, `src/i18n/*`, `src/styles.css`, `apps/bezel-studio/src-tauri/src/{manager,manager/**,storage,
-  library,lib,messages,dto,commands,backend,studio}.rs`, `build.rs`, `capabilities/default.json`, `tests/**`
+  library,lib,messages,dto,commands,backend,clock,video}.rs`, `build.rs`, `capabilities/default.json`, `tests/**`
 - `docs/user/{,pt-BR/}{storage-and-video,README}.md`, `scripts/ci/check-docs.sh`, `README.md`, `CHANGELOG.md`,
-  `Cargo.toml`/`Cargo.lock` (`sha2`)
-- Fora do PLAN, sinalizados: `domain/media.rs`/`app/runtime.rs` (T-1), `demo-manager.js` (T-4), `ThemeLibrary::videos`
-  e `MediaSetup::spare` (T-6)
+  `crates/bezel-media/Cargo.toml`, `Cargo.lock` (`sha2`)
+- Fora do PLAN, sinalizados: `domain/media.rs`/`app/runtime.rs` (T-1), `demo-manager.js` (T-4), `ThemeLibrary::videos`,
+  `MediaSetup::spare`, `clock.rs` (novo), `video.rs` e `src-tauri/tests/hardware.rs` (T-6)
 
 ## Tests
 - `cargo test --workspace --locked`: 819 passando, 0 falhando, 9 ignorados (hardware e ffmpeg real)
@@ -48,7 +48,8 @@
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc`), `check-docs.sh`, `check-packaging.sh`
 - Coverage (`cargo llvm-cov`): 94,38% de linhas; `domain/archive.rs` 99,82%, `domain/cleanup.rs` 99,76%,
   `app/manager.rs` 98,86%, `archive/disk.rs` 90,91%, studio `manager.rs` 94,03%
-- CI: v0.9.0 (núcleo) verde no Linux e no Windows (gravação atômica do catálogo testada no runner Windows)
+- CI: verde no Linux e no Windows (gravação atômica do catálogo testada no runner Windows); releases v0.9.0 (núcleo),
+  v0.10.0 (CLI) e v0.11.0 (studio)
 
 ## Hardware validation
 Turing 8.8" (ROM 1.90), CLI `0.1.0-dev.238`; serviço do usuário parado e religado; só `bezel_test_*`; listagem antes e

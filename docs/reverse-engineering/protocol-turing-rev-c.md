@@ -490,6 +490,12 @@ GET_FILE_SIZE <path> must equal the file size
 
 - Mixed endianness: BE32 path length in bytes 3..6, **LE32** file size after the path. The device drops the block
   padding using that size.
+- **Size limit (hardware, 8.8" ROM 1.90):** the firmware keeps the whole upload in memory before storing it. It
+  stopped reading at exactly 29,577,216 bytes of a 42 MB upload in three runs (to the card, at 7 MiB/s and at
+  0.94 MiB/s alike), left that partial file and stayed hung until the MCU restarted it (section 15); 24.0 MiB passed at
+  6 MiB/s and the vendor app's largest stored files are 24.6 MiB. Below the limit the data phase runs at the link's
+  speed (5.1 MiB in 0.63 s, 11.8 MiB in 1.63 s) and `file_rev_done` follows within 0.2 s. Bezel caps rev C uploads at
+  25 MiB (D-2026-09-30-release-polish-12).
 - The vendor lower-cases names and accepts only `[A-Za-z0-9_.-]`; its device page uploads jpg/jpeg/bmp/png/gif/mp4/
   h264 and transcodes an MP4 of another resolution first ([video.md](video.md) section 3).
 - The data phase has no abort: after the header the firmware takes the next *declared-size* bytes as file content,
@@ -584,7 +590,7 @@ screen off. Everything below is **never sent implicitly**: it needs an explicit 
 | firmware (`/update.app` + 0x84) | replaces the firmware | destructive |
 | 0x84 RESTART | reboots the SoC; the gadget re-enumerates | disruptive |
 | 0x82 | restarts something on the device; the vendor waits 2 s and re-inits | disruptive |
-| MCU `00 00 00 00 00 c9` | probably resets or power-cycles the SoC (**inferred** from the 8 s wait) | disruptive |
+| MCU `00 00 00 00 00 c9` | restarts the SoC: it leaves the bus at once and returns about 10 s later (**hardware**, 8.8"), also when hung | disruptive |
 | USB device reset (section 15) | re-enumerates the screen | disruptive |
 | 0x7D OPTIONS | boot mode, flip, sleep timer and stored brightness | persistent |
 | 0x81 ROTATION | rotation setting | persistent (**inferred**) |
@@ -721,8 +727,10 @@ host, measured by the project.
 | Storage info | 0x64 on the 8.8": flash 65.9 MiB after the 512 KiB reserve; a 29.7 GiB FAT32 card reported in the TF fields |
 | Uploads | PNG and MP4 to `/mnt/UDISK/{img,video}` and `/mnt/SDCARD/{img,video}` accepted and verified with GET_FILE_SIZE; `create_success` and `file_rev_done` as in section 13.4 |
 | Playback | PLAY_VIDEO (loop) and PLAY_IMAGE answered; after playback a full frame (PRE_UPDATE_BITMAP + frame) is accepted (`full_png_sucess`); that the overlay's alpha shows the video through is still to be confirmed by eye |
-| Cancelled upload | the data phase has no abort. With HELLO sent right after a cancel: in one run no HELLO was answered on that link and the next connection woke the screen (~10 s); the first upload afterwards received about 191 KB of stray bytes (caught by the size check). In a later run (a 41,573,338-byte upload to `/mnt/SDCARD/video` cancelled after 13,641,216 bytes, ROM 1.90) the first HELLO went unanswered and the one after the resync block was answered, yet GET_FILE_SIZE reported 12.6 MiB (less than the bytes accepted) and the next upload, a 7,444-byte PNG to `/mnt/SDCARD/img`, was stored as 390,157 bytes: about 382 KB of the cancelled data, still queued for the firmware's writer, went into that file. The card also counted the partial's size as used, even after it was deleted, until the screen rebooted. Completing the declared length hung the firmware: a 41.6 MB upload to the card cancelled after 16.6 MB, then right away the remaining 25 MB as filler blocks (`2c` x 249 + `00`); the firmware stopped reading after about 30.8 MB in all (data and filler), answered nothing and did not recover in 20 minutes; only a USB replug brought it back. A cancel without filler leaves a screen that reconnects on the next command and stray bytes that reach only the next upload, where the size check catches them, so Bezel sends no filler (section 13.4, D-2026-09-30-release-polish-10). Whether large fast uploads to the card can hang the firmware on their own (write pacing) is not known yet |
+| Cancelled upload | the data phase has no abort. With HELLO sent right after a cancel: in one run no HELLO was answered on that link and the next connection woke the screen (~10 s); the first upload afterwards received about 191 KB of stray bytes (caught by the size check). In a later run (a 41,573,338-byte upload to `/mnt/SDCARD/video` cancelled after 13,641,216 bytes, ROM 1.90) the first HELLO went unanswered and the one after the resync block was answered, yet GET_FILE_SIZE reported 12.6 MiB (less than the bytes accepted) and the next upload, a 7,444-byte PNG to `/mnt/SDCARD/img`, was stored as 390,157 bytes: about 382 KB of the cancelled data, still queued for the firmware's writer, went into that file. The card also counted the partial's size as used, even after it was deleted, until the screen rebooted. Completing the declared length hung the firmware: a 41.6 MB upload to the card cancelled after 16.6 MB, then right away the remaining 25 MB as filler blocks (`2c` x 249 + `00`); the firmware stopped reading after about 30.8 MB in all (data and filler), answered nothing and did not recover in 20 minutes; only a USB replug brought it back. A cancel without filler leaves a screen that reconnects on the next command and stray bytes that reach only the next upload, where the size check catches them, so Bezel sends no filler (section 13.4, D-2026-09-30-release-polish-10). |
 | Host drain | writes of 64 KB to a card file can take longer than a 10 ms serial timeout to drain; a signal during the drain must not fail the write |
+| Upload size | the firmware stops reading at exactly 29,577,216 bytes of an upload, at any rate, and hangs (section 13.4) |
+| MCU restart | `00 00 00 00 00 c9` on the MCU port, held 8 s: the SoC left the bus within 0.2–1.4 s and returned under a new device number about 10 s later, answering HELLO; the same from the hung state above (three times), so no USB replug is needed |
 
 Consequences: full frames have a text reply of their own; the partial round trip is far below the vendor's 1 Hz tick;
 a host must expect the gadget to come back under a new device number and re-open it by identity
@@ -734,8 +742,8 @@ lightly: the firmware has no abort for the data phase.
 1. HELLO's trailing `c5 d3`; the full HELLO answer beyond the id (Python reads 23 bytes, the vendor up to 1024).
 2. Whether bytes 7..9 of the 0xC8 header must be zero (Python sends `0e 10` in bytes 6..7), and whether the firmware
    needs the vendor's full-frame ritual (brightness, frame sent twice) or Python's 0x86 / `2c` / 0xC8 suffices.
-3. Semantics of 0x82, 0x87 and the MCU command 0xC9 (the vendor's unused MCU command list: 10, 11, 13, 14, 15, 40,
-   101, 201, 253).
+3. Semantics of 0x82 and 0x87, and of the vendor's unused MCU command values (10, 11, 13, 14, 15, 40, 101, 201,
+   253); 0xC9 restarts the SoC (section 19).
 4. Whether 0x81 and imgFlip affect streamed frames or only stored media; whether 0x81 persists; which file start modes
    1/2 show; whether the 0x78 loop flag persists.
 5. How the screen wakes after TURNOFF (no host sends TURNON).

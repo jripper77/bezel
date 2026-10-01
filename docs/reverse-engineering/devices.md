@@ -229,8 +229,8 @@ re-runs detection.
   successful HELLO. Never in normal operation.
 - MCU command: in its reconnect ladder ([protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 15), at attempt
   6 and every tenth attempt (10, 20, ...), outside test mode, it writes the six bytes `00 00 00 00 00 c9` to the
-  sibling port, waits 8000 ms and closes it. The shape is a rev A 6-byte command with opcode 0xC9; the 8 s wait
-  suggests it resets or power-cycles the SoC (**inferred**; disruptive). The vendor's code carries an unused list of
+  sibling port, waits 8000 ms and closes it. The shape is a rev A 6-byte command with opcode 0xC9. It restarts the
+  SoC (**hardware**, 8.8": off the bus at once, back about 10 s later, also from a hung firmware; disruptive). The vendor's code carries an unused list of
   MCU command values: 10, 11, 13, 14, 15, 40, 101, 201, 253.
 - The same ladder restarts the SoC's USB device node at attempts 2 and 4.
 - Its logs show the panel dropping off the bus about 12 s after streaming starts and returning about 9 s later in
@@ -253,5 +253,6 @@ older 8.8" MCU enumerates as 1a86:ca21 `CT21INCH`, not 1a86:ca88.
   stopped, the SoC gadget re-enumerated with a new USB device number within about 2 s.
 - Bezel must survive re-enumeration: it keeps its state and re-opens the SoC by identity (VID:PID; the 8.8" SoC has
   no iSerial).
-- Bezel never writes to the MCU implicitly: the 0xC9 command and the other disruptive steps are explicit actions
-  (decision `D-2026-09-30-device-protocols-2`, [protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 16).
+- Bezel writes to the MCU only to wake the screen and to restart it with 0xC9: on request, or automatically once
+  when the SoC stopped reading or answers no HELLO (decision `D-2026-09-30-release-polish-13`, which supersedes
+  `D-2026-09-30-device-protocols-2` for this command; [protocol-turing-rev-c.md](protocol-turing-rev-c.md) section 16).

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_AWAY_SAMPLES, DEMO_IMPORT_WARNINGS, DEMO_SENSORS, createDemoBackend, demoFits, demoFormat, demoNextChange, demoOrientation, demoThumbnail, demoValue } from '../../src/demo-backend.js';
-import { DEMO_GIF_THEME, DEMO_LIBRARY } from '../../src/demo-data.js';
+import { DEMO_DRAGON_THEME, DEMO_GIF_THEME, DEMO_LIBRARY } from '../../src/demo-data.js';
 
 const fixed = { now: () => 1000 };
 
@@ -235,6 +235,36 @@ test('a flaky demo screen is away for a while once live, then back', async () =>
   assert.equal(back.reconnecting, null);
   assert.equal(back.live, '/dev/ttyACM1');
   assert.equal(back.liveError, null);
+});
+
+test('the mcuLive demo names the live 8.8" by its MCU port, like 0.1.0-dev.287', async () => {
+  const demo = createDemoBackend('mcuLive', { now: () => 1000, delay: () => Promise.resolve() });
+  const [screen] = (await demo.listDevices()).screens;
+  assert.deepEqual([screen.key, screen.wake.address], ['/dev/ttyACM1', '/dev/ttyACM0']);
+  // A theme no panel fits: Auto knows the panel only from the live screen.
+  const odd = { ...DEMO_DRAGON_THEME, canvas: { width: 1000, height: 300 } };
+  assert.equal((await demo.videoAuto(odd)).rotation, 0, 'no screen live');
+  assert.deepEqual(await demo.setLive(true, screen.key), { live: '/dev/ttyACM0' });
+  assert.equal((await demo.sample()).live, '/dev/ttyACM0', 'the samples report the MCU port');
+  // Everything else knows the live screen by either port, like the backend.
+  assert.equal((await demo.videoAuto(odd)).rotation, 270, 'the live 8.8"\'s panel');
+  await assert.rejects(demo.playStored(screen.key, 'internal/image/logo.png'), (e) => e.code === 'live');
+  await assert.rejects(demo.stopPlayback(screen.key), (e) => e.code === 'live');
+  await demo.pushTheme({ ...DEMO_DRAGON_THEME, orientation: 'reverse-landscape' });
+  assert.equal((await demo.newTheme(screen.key, 'A')).orientation, 'reverse-landscape', 'remembered under its listed key');
+  await demo.setBrightness(screen.key, 40);
+  // Restarted, it is live again under the key it is listed by.
+  assert.deepEqual(await demo.restartScreen(screen.key), { key: '/dev/ttyACM1', live: true });
+  assert.equal((await demo.sample()).live, '/dev/ttyACM1');
+  await demo.setLive(false, screen.key);
+  assert.equal((await demo.sample()).live, null);
+  await demo.playStored(screen.key, 'internal/image/logo.png');
+  // A key no screen is listed by stays as it is.
+  await demo.setLive(true, 'k');
+  assert.equal((await demo.sample()).live, 'k');
+  // Other scenarios record the key they are given.
+  const plain = createDemoBackend('turing88', fixed);
+  assert.deepEqual(await plain.setLive(true, screen.key), { live: '/dev/ttyACM1' });
 });
 
 // ------------------------------------------------------ storage manager --

@@ -42,7 +42,7 @@ Gerenciar os arquivos da memória interna e do cartão SD da tela no studio e na
   - `Confirm::No` = zero escritas na porta; testes com `FakeStorage` + `MemoryArchive`.
 - **Dependencies:** T-1
 - **Test:** `--test storage_manager`: `move_deletes_the_source_only_after_the_copy_is_verified`, `a_failed_or_cancelled_move_keeps_the_source_and_stops_the_batch`, `restore_checks_space_and_the_cap_before_sending_anything`, `uploads_are_recorded_pending_then_stored`
-- **Status:** pending
+- **Status:** completed
 
 #### T-4: Studio UI: aba Armazenamento em largura total (demo)
 - **Specialist:** jdi-doer-bezel

@@ -1,0 +1,7 @@
+- [backlog] CLI parity for GIF/sticker search and the collection (`bezel gifs search|add|ls|rm`); the CLI stays without network in this phase (D-2026-10-01-gif-sticker-search-2)
+- [backlog] Add the user's own local GIFs and images to the collection (today only KLIPY items enter it) (D-2026-10-01-gif-sticker-search-5)
+- [backlog] WebP/MP4 renditions (smoother alpha, smaller files): needs the `image` crate's WebP decoder in the renderer (D-2026-10-01-gif-sticker-search-5)
+- [backlog] KLIPY Share Trigger and Report endpoints (report an item from the results) (D-2026-10-01-gif-sticker-search-2)
+- [backlog] Undo or a trash for items deleted from the collection; this phase confirms first (D-2026-10-01-gif-sticker-search-5)
+- [backlog] Keep the KLIPY key in the OS keyring (Secret Service / Windows Credential Manager) instead of the 0600 file (D-2026-10-01-gif-sticker-search-3)
+- [backlog] KLIPY categories, emoji search and "open on klipy.com" per item (D-2026-10-01-gif-sticker-search-4)

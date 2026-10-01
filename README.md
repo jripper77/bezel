@@ -16,7 +16,7 @@ Download from the [releases page](https://github.com/slipalison/bezel/releases)
 and follow the **[user guide](docs/user/README.md)** (em português:
 **[guia do usuário](docs/user/pt-BR/README.md)**): installing on each system,
 screen permissions and Windows drivers, the first theme, sensors, game FPS,
-storage and video, running at login and troubleshooting.
+storage and video, GIFs and stickers, running at login and troubleshooting.
 
 The installers are not signed: Windows SmartScreen may ask you to confirm
 (*More info → Run anyway*); see [Install Bezel](docs/user/install.md).
@@ -43,6 +43,10 @@ window to design themes and drive the screen.
   dragging on the canvas. A video already turned for the panel, like the vendor
   app's Dragon Ball theme, stands upright on its own
   ([Framing the video](docs/user/storage-and-video.md#framing-the-video)).
+- **GIFs and stickers**: search KLIPY with your own free key and keep what you
+  like in a local collection, ready to add as an image, use as the background
+  or drag onto the canvas; a sticker's transparency shows the theme under it
+  ([GIFs and stickers](docs/user/gifs-and-stickers.md)).
 - **Screen panel**: brightness, and the *Storage* tab for the screen's internal
   flash and memory card (send pictures and videos, play them, choose what the
   screen shows at power-up), which opens full width as the storage manager:

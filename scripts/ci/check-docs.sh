@@ -8,14 +8,18 @@
 #     `cache clear`, the Windows drivers, the unsigned installers, the
 #     "not validated on hardware" label of desktop mode and game FPS) and has
 #     the headings expected of it (the video framing section of each language);
+#     the GIFs and stickers page names KLIPY's Partner Panel and API hosts, the
+#     mandatory "Search KLIPY" placeholder and the test key's 100 requests an
+#     hour, and has a Privacy section in each language;
 #   - every relative link of the docs, README.md and CHANGELOG.md points at a
 #     file that exists, and an `#anchor` at a heading of that file;
 #   - nothing private: no home-folder paths, e-mail addresses, tokens, keys or
 #     screen serial numbers;
 #   - README.md no longer says "early development" and links to the guide;
 #     CHANGELOG.md has an `## [Unreleased]` section with the changes of each
-#     phase (the video framing's included, and the live screen controls fix
-#     by the "Device or resource busy" it ends; a phrase may wrap).
+#     phase (the video framing's included, the live screen controls fix
+#     by the "Device or resource busy" it ends, and the GIF and sticker search
+#     by "KLIPY"; a phrase may wrap).
 #
 #   bash scripts/ci/check-docs.sh
 set -euo pipefail
@@ -34,7 +38,7 @@ PAGES = [
     "README.md", "install.md", "permissions.md", "first-theme.md",
     "vertical-or-horizontal.md", "sensors.md", "fps.md", "storage-and-video.md",
     "ffmpeg.md", "sd-card.md", "run-at-login.md", "migrating.md",
-    "troubleshooting.md", "devices.md",
+    "troubleshooting.md", "devices.md", "gifs-and-stickers.md",
 ]
 # Phrases a page must contain, in both languages unless a language is named.
 COMMON = {
@@ -62,6 +66,7 @@ COMMON = {
     "troubleshooting.md": ["bezel devices", "bezel udev-rules", "is in use by",
                            "the stored size differs; delete it and send it again"],
     "devices.md": ["bezel devices", "bezel monitor-mode --yes", "1A86:AD10"],
+    "gifs-and-stickers.md": ["partner.klipy.com", "api.klipy.com", "Search KLIPY", "100"],
 }
 BY_LANGUAGE = {
     EN: {
@@ -78,10 +83,13 @@ BY_LANGUAGE = {
     },
 }
 # Headings a page must have, each a whole line outside code blocks
-# (phase video-background-framing: the guide to framing a video background).
+# (phase video-background-framing: the guide to framing a video background;
+# phase gif-sticker-search: what the GIF search sends, where and when).
 HEADINGS = {
-    EN: {"storage-and-video.md": ["### Framing the video"]},
-    PT: {"storage-and-video.md": ["### Enquadrar o vídeo"]},
+    EN: {"storage-and-video.md": ["### Framing the video"],
+         "gifs-and-stickers.md": ["### Privacy"]},
+    PT: {"storage-and-video.md": ["### Enquadrar o vídeo"],
+         "gifs-and-stickers.md": ["### Privacidade"]},
 }
 PRIVATE = [
     (re.compile(r"/home/(?!<)[A-Za-z0-9._-]+"), "a home-folder path (use ~ or <you>)"),
@@ -225,7 +233,7 @@ else:
     unreleased = re.sub(r"\s+", " ", m.group(1))  # a phrase may wrap
     for phrase in ("bezel udev-rules", "bezel monitor-mode", "gpu.fps", "net.ping",
                    "bezel-run@", "/usr/bin/bezel", "docs/user", "bezel storage mv",
-                   "framing", "Device or resource busy"):
+                   "framing", "Device or resource busy", "KLIPY"):
         if phrase not in unreleased:
             fail("CHANGELOG.md", f"## [Unreleased] does not mention {phrase!r}")
 

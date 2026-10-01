@@ -171,6 +171,20 @@ the Conventional Commits.
   re-framed video goes to the screen as a copy of its own, named with `_f` and
   8 hex digits, and Bezel deletes no earlier copy. See
   [Framing the video](docs/user/storage-and-video.md#framing-the-video).
+- GIF and sticker search in Bezel Studio, from KLIPY with your own free key:
+  the Media tab's **Collection** (next to **This theme**) opens **Search GIFs
+  and stickers** — GIFs or stickers, by text or **Trending**, 24 at a time with
+  **Load more**, explicit results only while **Show explicit results** is on
+  (off at every start). The key stays on this computer (`klipy.json` in the
+  app's config folder, readable only by you) and shows only its last 4
+  characters; without a key, or before you search, nothing reaches KLIPY. A
+  test key allows 100 requests an hour, and the help says how to ask for
+  production in KLIPY's Partner Panel. **Add to collection** keeps the largest
+  GIF of at most 25 MiB, once per content, in your local collection, where each
+  item can be added as an image, used as the background, dragged onto the
+  canvas, renamed or deleted (the confirmation names the themes that use it;
+  they keep their own copy). A sticker's transparency shows the theme under
+  it. See [GIFs and stickers](docs/user/gifs-and-stickers.md).
 
 ### Changed
 - Turing rev C screens take at most 25 MiB per file: their firmware keeps a

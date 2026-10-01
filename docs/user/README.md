@@ -28,6 +28,8 @@ parts:
   [managing them](storage-and-video.md#managing-the-files): moving between the
   internal memory and the card, renaming, restoring a card, the cleanup
   assistant and Bezel's local copies.
+- [GIFs and stickers](gifs-and-stickers.md): search KLIPY with your own free
+  key, keep GIFs and stickers in your collection and use them in themes.
 - [Installing ffmpeg](ffmpeg.md), needed to convert videos.
 - [Preparing an SD card](sd-card.md) for screens with a card slot.
 - [Running at login](run-at-login.md): from the tray, or as a systemd service.

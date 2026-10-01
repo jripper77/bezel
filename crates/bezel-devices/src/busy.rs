@@ -88,18 +88,6 @@ fn describe(process: &Path) -> String {
         .map_or_else(|_| "unknown".into(), |c| c.trim().to_string())
 }
 
-/// The other holders of `device` on this machine, this process left out
-/// (empty where `/proc` does not exist).
-pub fn holders(device: &str) -> Vec<String> {
-    on_this_machine(device).others
-}
-
-/// This process as a holder of `device`, `"<command> (PID <pid>)"` like the
-/// others, when it has it open itself (`None` where `/proc` does not exist).
-pub fn held_here(device: &str) -> Option<String> {
-    on_this_machine(device).this
-}
-
 /// Every holder of `device` on this machine in one scan of `/proc`, this
 /// process told apart from the others (nobody where `/proc` does not exist).
 pub fn on_this_machine(device: &str) -> Holders {
@@ -206,10 +194,11 @@ mod tests {
         let file = fs::File::create(&path).unwrap();
         let address = path.to_str().unwrap();
         let me = format!("(PID {})", std::process::id());
-        assert!(held_here(address).is_some_and(|h| h.ends_with(&me)), "{me}");
-        assert!(holders(address).is_empty());
+        let held = on_this_machine(address);
+        assert!(held.this.is_some_and(|h| h.ends_with(&me)), "{me}");
+        assert!(held.others.is_empty());
         drop(file);
-        assert_eq!(held_here(address), None);
+        assert_eq!(on_this_machine(address).this, None);
         fs::remove_file(&path).unwrap();
     }
 
@@ -218,8 +207,9 @@ mod tests {
         assert!(holders_in(Path::new("/no/such/proc"), Path::new("/dev/null"), 1).is_empty());
         let root = fake_proc("empty");
         assert!(holders_in(&root, &root.join("absent"), 1).is_empty());
-        assert!(holders("/dev/bezel-no-such-port").is_empty());
-        assert_eq!(held_here("/dev/bezel-no-such-port"), None);
+        let nobody = on_this_machine("/dev/bezel-no-such-port");
+        assert!(nobody.others.is_empty());
+        assert_eq!(nobody.this, None);
         fs::remove_dir_all(&root).unwrap();
     }
 }

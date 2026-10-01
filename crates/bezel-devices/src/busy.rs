@@ -100,7 +100,9 @@ pub fn held_here(device: &str) -> Option<String> {
     on_this_machine(device).this
 }
 
-fn on_this_machine(device: &str) -> Holders {
+/// Every holder of `device` on this machine in one scan of `/proc`, this
+/// process told apart from the others (nobody where `/proc` does not exist).
+pub fn on_this_machine(device: &str) -> Holders {
     holders_by_pid(Path::new("/proc"), Path::new(device), std::process::id())
 }
 

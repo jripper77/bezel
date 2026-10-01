@@ -5,7 +5,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
 
 ## Locked decisions
 - D-1: fase do relato de 2026-10-01 (Dragon Ball parado e 4x maior que a tela).
-- D-2: `framing` opcional no fundo de vídeo (schema 1): `rotation` 0/90/180/270 ou ausente = Auto, `fit` cover|contain, `zoom` 1–4, `position` {x,y} 0–1 (como `object-position`), `padColor`; omitido no padrão. Auto: tamanho nativo do painel em tema a ¼ de volta = já girado (Dragon Ball: 270°); senão 0. Importar e adicionar não gravam `framing`.
+- D-2: `framing` opcional no fundo de vídeo (schema 1): `rotation` 0/90/180/270 ou ausente = Auto, `fit` cover|contain, `zoom` 1–4, `position` {x,y} 0–1, `padColor`; omitido no padrão. Auto: tamanho nativo do painel em tema a ¼ de volta = já girado (Dragon Ball 270°). Importar/adicionar não gravam `framing`.
 - D-3: geometria pura no core; conversão e pôster por cadeia ffmpeg pura (padrão = a de hoje); prévia/PC: ffmpeg decodifica a fonte crua e o Rust enquadra. Identidade = envia como está. Pôster refeito ao salvar.
 - D-4: `device_video_name` com enquadramento: padrão = `dragon.mp4`/`amd_90.mp4`, outro soma `_f`+8 hex. Reuso só com mesmo nome e tamanho; teto de 25 MiB igual; nada apagado sozinho.
 - D-5: prévia ≤ 15 fps via `nextMs`, 1 ffmpeg, fecha após 2 s sem pedido; oculta/movimento reduzido não decodifica. Sem ffmpeg: pôster + dica; Auto e envio da identidade funcionam.
@@ -35,7 +35,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
       **Verify:** `cargo test -p bezel-themes --locked --lib -- --exact native::tests::video_framing_round_trips_and_older_themes_load_as_auto import::turzx::tests::vendor_video_backgrounds_import_with_auto_framing 2>&1 | grep -q 'ok. 2 passed' && echo OK`
       **Source:** CONTEXT
 - [ ] Studio: prévia ≤ 15 fps, para sem pedidos, pôster sem ffmpeg e ao salvar; nativo vai como está
-      **Verify:** `cargo test -p bezel-studio --locked --lib -- --exact studio::tests::the_preview_plays_the_framed_video_at_most_15_fps studio::tests::the_preview_decoder_stops_when_no_frame_is_asked studio::tests::without_ffmpeg_the_preview_shows_the_poster studio::tests::saving_retakes_the_poster_with_the_framing storage::tests::a_panel_native_theme_video_is_sent_as_it_is 2>&1 | grep -q 'ok. 5 passed' && echo OK`
+      **Verify:** `cargo test -p bezel-studio --locked --lib -- --exact studio::tests::the_preview_plays_the_framed_video_at_most_15_fps studio::tests::the_preview_decoder_stops_when_no_frame_is_asked studio::tests::without_ffmpeg_the_preview_shows_the_poster studio::tests::saving_retakes_the_poster_with_the_framing storage::tests::a_panel_native_theme_video_is_sent_as_it_is backend::tests::the_session_goes_on_while_the_poster_is_taken backend::tests::the_session_goes_on_while_the_video_is_probed 2>&1 | grep -q 'ok. 7 passed' && echo OK`
       **Source:** CONTEXT
 - [ ] UI: i18n, lógica do enquadramento e Playwright nos 4 projetos com axe
       **Verify:** `set -o pipefail; cd apps/bezel-studio && grep -qE 'await expectAccessible\(' tests/e2e/video-framing.spec.mjs && node --test tests/ui/i18n.test.mjs tests/ui/video-framing.test.mjs >/dev/null && npx playwright test -g "video framing|video background plays" --reporter=line 2>&1 | awk '{for(i=1;i<NF;i++) if($(i+1)=="passed") n=$i} END{exit !(n>=16)}' && echo OK`
@@ -56,4 +56,4 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
 - Vídeo com Caber + zoom enviado à 8.8" bate com a prévia.
 
 ## Notes
-- Ordem: core → bezel-media → themes → runtime/CLI → studio → docs; `install-local` a cada tarefa.
+- Ordem: core → media → themes → runtime/CLI → studio → docs; install-local ao fim.

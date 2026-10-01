@@ -35,7 +35,7 @@
 ## Files modified
 - `crates/bezel-core/src/{domain/{framing,media,poster,theme,cleanup,mod},app/runtime,ports/mod}.rs`,
   `crates/bezel-core/tests/runtime_video.rs`
-- `crates/bezel-media/src/{lib,framing,transcode,poster,stream,probe}.rs`, `crates/bezel-themes/src/{dto,native}.rs`,
+- `crates/bezel-media/src/{lib,framing,transcode,poster,stream}.rs`, `crates/bezel-themes/src/{dto,native}.rs`,
   `crates/bezel-themes/src/import/{turzx.rs,turzx/tests.rs}`, `crates/bezel-render/**`, `crates/bezel-cli/src/live.rs`
 - `apps/bezel-studio/src/**` (inspector, canvas, `editor/video-framing.js`, bridge, demo, i18n), `tests/**`,
   `apps/bezel-studio/src-tauri/{src/**,Cargo.toml,build.rs,capabilities/default.json}`
@@ -47,7 +47,7 @@
 - UI: 180 unitários; Playwright 176 (claro/escuro × pt-BR/en, axe); DoD 6 = 16 runs
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc`), `check-docs.sh`, `check-packaging.sh`
 - Coverage (`cargo llvm-cov`): 94,34% de linhas; `framing.rs` 100%, `studio.rs` 97,08%, `backend.rs` 98,58%
-- CI: run 36861544813 verde no `cd13083` (Windows 797/0/11); run do HEAD após a rodada de correção: ver REVIEW
+- CI: verde nos runs 36861544813 (`cd13083`, Windows 797/0/11) e 36874651056 (`007f006`, após a rodada de correção)
 - Fuzz do revisor: 200 mil casos de geometria sem problema de borda, limites ou aspecto
 
 ## Hardware validation

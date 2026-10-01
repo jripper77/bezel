@@ -121,5 +121,5 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
 - `scripts/install-local.sh` a cada task
 
 ## Notes
-- Donos únicos: W1 T-1 = todo `.rs` (`domain/mod.rs`, `ports/mod.rs`), T-2 = JS (`bridge.js`, `demo-backend.js`, i18n); W2 T-3 `bezel-media`, T-4 `bezel-themes`, T-5 core `app`/`domain/framing` + CLI; W3 T-6 studio Rust, i18n (só códigos), `lib.rs`/`build.rs`/`capabilities`; T-7 `docs/user/**`, `CHANGELOG.md`. Nenhuma crate nova (`Cargo.lock` intacto); cada task compila o workspace sozinha.
+- Donos únicos: W1 T-1 = todo `.rs` (`domain/mod.rs`, `ports/mod.rs`), T-2 = JS (`bridge.js`, `demo-backend.js`, i18n); W2 T-3 `bezel-media`, T-4 `bezel-themes`, T-5 core `app`/`domain/framing` + CLI; W3 T-6 studio Rust, i18n (só códigos), `lib.rs`/`build.rs`/`capabilities`; T-7 `docs/user/**`, `CHANGELOG.md`. Só a crate da D-7 é nova; cada task compila o workspace sozinha.
 - Tipos do core fixos após a T-1; nenhuma variante nova em `BezelError`/`Refusal`/`VideoState`/`Backdrop`. Nomes de teste do DoD exatos (`--exact`), sem módulo a mais no caminho.

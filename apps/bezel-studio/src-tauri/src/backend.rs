@@ -7,8 +7,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use bezel_core::app::{
-    choose_screen, discover_devices, discover_screens, leave_desktop_mode, reopen_screen,
-    restart_screen,
+    choose_screen, connect_screen, discover_devices, discover_screens, leave_desktop_mode,
+    reopen_screen, restart_screen,
 };
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::clock::{Language, LocalTime};
@@ -407,27 +407,24 @@ impl Backend {
     }
 
     /// Restarts the hung screen `key` without a USB replug
-    /// (D-2026-09-30-release-polish-13): live mode on it stops first (its
-    /// port closes), its MCU restarts it and Bezel waits until it is back
-    /// (about 10 s); a screen that was live shows the theme live again, under
-    /// its new key. Storage operations, live mode and brightness answer
-    /// `busy` meanwhile.
+    /// (D-2026-09-30-release-polish-13): live mode on it (by either of its
+    /// ports) stops first (its port closes), its MCU restarts it and Bezel
+    /// waits until it is back (about 10 s); a screen that was live shows the
+    /// theme live again, under its new key. Storage operations, live mode
+    /// and brightness answer `busy` meanwhile.
     pub fn restart_screen(&self, key: &str, time: LocalTime) -> UiResult<RestartedDto> {
         let restarted = {
             let _claim = self.storage.claim()?;
             let was_live = {
                 let mut studio = self.idle_studio();
-                let live = studio.live_key() == Some(key);
+                let live = studio.is_live(key);
                 if live {
                     drop(studio.stop_live());
                 }
                 live
             };
             let screen = restart_screen(self.bus.as_ref(), self.connector.as_ref(), Some(key))?;
-            let back = screen
-                .address()
-                .map_or_else(|| key.to_string(), |a| a.0.clone());
-            (back, was_live)
+            (key_of(&screen, key), was_live)
         };
         let (key, was_live) = restarted;
         let live = was_live
@@ -438,7 +435,11 @@ impl Backend {
         Ok(RestartedDto { key, live })
     }
 
-    /// Starts (`screen` given) or stops showing the edited theme live.
+    /// Starts (`screen` given, by either of its ports) or stops showing the
+    /// edited theme live. The screen goes live under its one key, the
+    /// address it is listed by once connected (its display's;
+    /// D-2026-10-01-live-screen-controls-2), which is remembered with the
+    /// orientation; `screen` only when it cannot be listed again.
     pub fn set_live(&self, on: bool, screen: Option<&str>, time: LocalTime) -> UiResult<()> {
         // Stop first: a screen can only be opened once.
         let previous = self.idle_studio().stop_live();
@@ -447,20 +448,21 @@ impl Backend {
             self.settings.update(|s| s.live_screen = None);
             return Ok(());
         }
-        let key = screen.ok_or_else(|| UiError::new(ErrorCode::NoScreenChosen))?;
+        let asked = screen.ok_or_else(|| UiError::new(ErrorCode::NoScreenChosen))?;
         self.storage.ensure_idle()?;
         // Opening wakes the screen (seconds); the session stays usable meanwhile.
-        let found = self.find_screen(key)?;
-        let link = self.connector.connect(&found)?;
+        let (found, link) =
+            connect_screen(self.bus.as_ref(), self.connector.as_ref(), Some(asked))?;
+        let key = key_of(&found, asked);
         let orientation = {
             let mut studio = self.studio();
-            studio.go_live_on(key.to_string(), found, link);
+            studio.go_live_on(key.clone(), found, link);
             studio.theme().orientation
         };
         self.show_now(time)?;
         self.settings.update(|s| {
-            s.live_screen = Some(key.to_string());
-            s.remember_orientation(key, orientation);
+            s.live_screen = Some(key.clone());
+            s.remember_orientation(&key, orientation);
         });
         Ok(())
     }
@@ -491,7 +493,8 @@ impl Backend {
         }
     }
 
-    /// Sets a screen's brightness (through the live link when it is live).
+    /// Sets a screen's brightness (through the live link when it is live,
+    /// named by either of its ports).
     pub fn set_brightness(&self, screen: &str, percent: u8) -> UiResult<()> {
         let brightness =
             Brightness::new(percent).ok_or_else(|| UiError::new(ErrorCode::BrightnessRange))?;
@@ -502,12 +505,13 @@ impl Backend {
         Ok(self.connect(screen)?.set_brightness(brightness)?)
     }
 
-    /// Hands a screen back to its own mode (stopping live mode on it).
+    /// Hands a screen back to its own mode; a live one (named by either of
+    /// its ports) stops live mode and is released through its live link.
     pub fn release(&self, screen: &str) -> UiResult<()> {
         self.storage.ensure_idle()?;
         let live = {
             let mut studio = self.idle_studio();
-            if studio.live_key() == Some(screen) {
+            if studio.is_live(screen) {
                 studio.stop_live()
             } else {
                 None
@@ -901,7 +905,9 @@ impl Backend {
     }
 
     /// Shows the theme live again on the screen that was live when the app
-    /// last ran, when it is connected. A failure leaves live mode off.
+    /// last ran, when it is connected. A failure leaves live mode off. A key
+    /// saved by an older version as the MCU's port is replaced by the
+    /// display's ([`Self::set_live`]; D-2026-10-01-live-screen-controls-2).
     pub fn restore_live(&self, time: LocalTime) {
         if let Some(key) = self.settings.load().live_screen
             && let Err(e) = self.set_live(true, Some(&key), time)
@@ -953,6 +959,14 @@ impl Backend {
             self.settings.update(|s| s.live_screen = Some(key));
         }
     }
+}
+
+/// The key `screen` goes by: the address it is listed by (its display's
+/// when awake), else `asked`, the key it was asked for.
+fn key_of(screen: &Screen, asked: &str) -> String {
+    screen
+        .address()
+        .map_or_else(|| asked.to_string(), |a| a.0.clone())
 }
 
 /// Model a new theme is sized for when no screen is connected.
@@ -1772,6 +1786,190 @@ mod tests {
         f.backend.release(KEY).unwrap();
         let log = f.connector.log();
         assert_eq!((log.brightness.len(), log.releases), (1, 1));
+    }
+
+    /// The fake 8.8"'s MCU (its wake chip): the screen's other port.
+    const MCU: &str = "/dev/ttyACM0";
+
+    /// What reopening a port this app already holds answers on Linux.
+    fn busy() -> bezel_core::BezelError {
+        bezel_core::BezelError::Transport(format!("{KEY}: Device or resource busy"))
+    }
+
+    /// The fake 8.8" asleep: its MCU listed, its display not.
+    fn asleep() -> Vec<bezel_core::domain::discovery::Endpoint> {
+        let all = FakeBus::turing_88().endpoints().unwrap();
+        all.into_iter().filter(|e| e.address.0 == MCU).collect()
+    }
+
+    /// The fake 8.8" asleep until the connector's first connection wakes
+    /// its display.
+    struct Waking(FakeConnector);
+
+    impl DeviceBus for Waking {
+        fn endpoints(&self) -> bezel_core::Result<Vec<bezel_core::domain::discovery::Endpoint>> {
+            if self.0.log().connects == 0 {
+                return Ok(asleep());
+            }
+            FakeBus::turing_88().endpoints()
+        }
+    }
+
+    /// D-2026-10-01-live-screen-controls-2: put live by its MCU's port (the
+    /// tray finds a sleeping 8.8" by it), the screen goes live under its
+    /// display's key, remembered with its orientation; the MCU's port only
+    /// while the display cannot be listed.
+    #[test]
+    fn a_screen_put_live_by_its_mcu_port_is_keyed_by_its_display() {
+        let f = fixture("live-by-mcu");
+        f.backend.set_live(true, Some(MCU), TIME).unwrap();
+        assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
+        let settings = f.backend.settings.load();
+        assert_eq!(settings.live_screen.as_deref(), Some(KEY));
+        let turned = Some(Orientation::ReversePortrait);
+        assert_eq!(settings.orientation_for(KEY), turned);
+        assert_eq!(settings.orientation_for(MCU), None);
+        assert_eq!(f.connector.log().connects, 1);
+
+        // The tray on a sleeping 8.8": the connection wakes its display.
+        let mut tray = fixture("live-by-mcu-tray");
+        tray.backend.bus = Arc::new(Waking(tray.connector.clone()));
+        assert!(tray.backend.toggle_live(TIME).unwrap());
+        assert_eq!(tray.backend.sample().live.as_deref(), Some(KEY));
+        let saved = tray.backend.settings.load().live_screen;
+        assert_eq!(saved.as_deref(), Some(KEY));
+
+        // Still asleep once connected: its MCU's port is all there is.
+        let mut sleepy = fixture("live-by-mcu-asleep");
+        sleepy.backend.bus = Arc::new(FakeBus::new(asleep()));
+        sleepy.backend.set_live(true, Some(MCU), TIME).unwrap();
+        assert_eq!(sleepy.backend.sample().live.as_deref(), Some(MCU));
+        let saved = sleepy.backend.settings.load().live_screen;
+        assert_eq!(saved.as_deref(), Some(MCU));
+    }
+
+    /// Writes down, in order, what a screen's ports see: the links `inner`
+    /// opens and that close, and the restarts.
+    #[derive(Clone, Default)]
+    struct Tracked {
+        inner: FakeConnector,
+        seen: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl Tracked {
+        fn note(&self, what: &'static str) {
+            self.seen.lock().unwrap().push(what);
+        }
+    }
+
+    /// A link of [`Tracked`], noting when it closes.
+    struct TrackedLink(Box<dyn ScreenLink>, Tracked);
+
+    impl Drop for TrackedLink {
+        fn drop(&mut self) {
+            self.1.note("close");
+        }
+    }
+
+    impl ScreenLink for TrackedLink {
+        fn identity(&self) -> &bezel_core::domain::screen::ScreenIdentity {
+            self.0.identity()
+        }
+        fn set_brightness(&mut self, brightness: Brightness) -> bezel_core::Result<()> {
+            self.0.set_brightness(brightness)
+        }
+        fn set_orientation(&mut self, orientation: Orientation) -> bezel_core::Result<()> {
+            self.0.set_orientation(orientation)
+        }
+        fn present(&mut self, frame: &bezel_core::domain::frame::Frame) -> bezel_core::Result<()> {
+            self.0.present(frame)
+        }
+        fn screen_off(&mut self) -> bezel_core::Result<()> {
+            self.0.screen_off()
+        }
+        fn release(&mut self) -> bezel_core::Result<()> {
+            self.0.release()
+        }
+    }
+
+    impl ScreenConnector for Tracked {
+        fn connect(&self, screen: &Screen) -> bezel_core::Result<Box<dyn ScreenLink>> {
+            let link = self.inner.connect(screen)?;
+            self.note("open");
+            Ok(Box::new(TrackedLink(link, self.clone())))
+        }
+        fn restart(&self, screen: &Screen) -> bezel_core::Result<()> {
+            self.inner.restart(screen)?;
+            self.note("restart");
+            Ok(())
+        }
+    }
+
+    /// D-2026-10-01-live-screen-controls-3: live on the 8.8" (the UI names
+    /// it by its display), either of its ports reaches the open live link:
+    /// brightness, the storage tab and release go through it and never open
+    /// the screen again (which would answer busy); a restart by the MCU's
+    /// port stops live mode before the screen restarts and resumes it under
+    /// the display's key.
+    #[test]
+    fn either_port_of_the_live_screen_reaches_its_live_link() {
+        let f = fixture("either-port");
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        let _held = f.connector.clone().refusing_after(1, vec![busy()]);
+        for port in [MCU, KEY] {
+            f.backend.set_brightness(port, 40).unwrap();
+            let overview = f.backend.storage_overview(port, TIME).unwrap();
+            assert!(overview.internal.total > 0, "{port}");
+        }
+        f.backend.release(MCU).unwrap();
+        let log = f.connector.log();
+        assert_eq!(
+            (log.connects, log.brightness.len(), log.releases),
+            (1, 2, 1)
+        );
+        assert_eq!(f.backend.sample().live, None);
+        assert_eq!(f.backend.settings.load().live_screen, None);
+
+        let mut f = fixture("either-port-restart");
+        let tracked = Tracked {
+            inner: f.connector.clone(),
+            ..Tracked::default()
+        };
+        f.backend.connector = Arc::new(tracked.clone());
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        let done = f.backend.restart_screen(MCU, TIME).unwrap();
+        assert_eq!(
+            done,
+            RestartedDto {
+                key: KEY.into(),
+                live: true
+            }
+        );
+        let seen = tracked.seen.lock().unwrap().clone();
+        assert_eq!(seen, ["open", "close", "restart", "open"]);
+        assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
+        assert_eq!(f.backend.settings.load().live_screen.as_deref(), Some(KEY));
+    }
+
+    /// D-2026-10-01-live-screen-controls-2: a settings file that kept the
+    /// live screen by its MCU's port (0.1.0-dev.287) brings it back live
+    /// under its display's key and is rewritten with it: the UI's
+    /// brightness, by the display, then goes through the live link.
+    #[test]
+    fn a_saved_mcu_key_is_restored_under_the_display_key() {
+        let f = fixture("restore-mcu");
+        f.backend
+            .settings
+            .update(|s| s.live_screen = Some(MCU.into()));
+        f.backend.restore_live(TIME);
+        assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
+        let settings = f.backend.settings.load();
+        assert_eq!(settings.live_screen.as_deref(), Some(KEY));
+        assert_eq!(settings.orientation_for(MCU), None);
+        let _held = f.connector.clone().refusing_after(1, vec![busy()]);
+        f.backend.set_brightness(KEY, 60).unwrap();
+        let log = f.connector.log();
+        assert_eq!((log.connects, log.brightness.len()), (1, 1));
     }
 
     #[test]

@@ -1061,6 +1061,35 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
     );
 }
 
+/// D-2026-10-01-live-screen-controls-3: live on the 8.8", playing or
+/// stopping a stored file is refused by either of its ports (the theme would
+/// hide it) before the screen is reached; once live mode is off, the MCU's
+/// port plays it.
+#[test]
+fn playing_a_file_is_refused_on_either_port_of_the_live_screen() {
+    const CLIP: &str = "internal/video/clip.mp4";
+    let stored = FakeStorage::default().with_file(remote_path(CLIP), vec![1; 64]);
+    let f = fixture_with("live-either-port", stored, FakeMedia::ready());
+    f.backend.set_live(true, Some(KEY), TIME).unwrap();
+    let writes = f.writes();
+    for port in ["/dev/ttyACM0", KEY] {
+        let err = f.backend.play_stored(port, CLIP, TIME).unwrap_err();
+        assert_eq!(err.code(), "live", "{port}");
+        let err = f.backend.stop_playback(port, TIME).unwrap_err();
+        assert_eq!(err.code(), "live", "{port}");
+    }
+    assert_eq!(f.writes(), writes, "nothing reached the screen");
+    assert_eq!(f.storage().playback, Playback::Idle);
+    assert_eq!(f.connector.log().connects, 1);
+
+    f.backend.set_live(false, None, TIME).unwrap();
+    f.backend.play_stored("/dev/ttyACM0", CLIP, TIME).unwrap();
+    assert_eq!(
+        f.storage().playback,
+        Playback::Video(remote_path(CLIP), Repeat::Loop)
+    );
+}
+
 #[test]
 fn live_mode_turned_off_during_a_job_closes_the_link_after_it() {
     let f = fixture("live-off");

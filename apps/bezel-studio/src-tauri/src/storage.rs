@@ -446,9 +446,10 @@ impl Backend {
     }
 
     /// Playing or stopping files on a live screen would be hidden by the
-    /// theme's frames, or stop its video: refused.
+    /// theme's frames, or stop its video: refused, by either port of the
+    /// live screen.
     fn refuse_while_live(&self, screen: &str) -> UiResult<()> {
-        if self.studio().live_key() == Some(screen) {
+        if self.studio().is_live(screen) {
             return Err(UiError::new(ErrorCode::Live));
         }
         Ok(())

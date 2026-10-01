@@ -463,6 +463,15 @@ struct Live {
     host: Option<HostPlayback>,
 }
 
+impl Live {
+    /// Whether `key` reaches this screen: the key it is live under, or
+    /// either port of the screen as discovered (its display or its MCU,
+    /// [`Screen::answers_to`]; D-2026-10-01-live-screen-controls-3).
+    fn answers_to(&self, key: &str) -> bool {
+        self.key == key || self.screen.as_ref().is_some_and(|s| s.answers_to(key))
+    }
+}
+
 /// A frame on its way to the live screen with the screen's link, out of the
 /// session so the screen's I/O does not hold it.
 pub struct Delivery {
@@ -1156,6 +1165,15 @@ impl Studio {
         self.live.as_ref().map(|l| l.key.as_str())
     }
 
+    /// Whether `key` is the screen showing the theme: its live key or
+    /// either port of it (a rev C screen answers to its display's and to its
+    /// MCU's). Every "is this the live screen?" asks this, so whatever
+    /// names the live screen by either port gets its open link and never
+    /// opens the port again (D-2026-10-01-live-screen-controls-3).
+    pub fn is_live(&self, key: &str) -> bool {
+        self.live.as_ref().is_some_and(|l| l.answers_to(key))
+    }
+
     /// Why the live screen stopped, until the next `go_live`.
     pub fn live_error(&self) -> Option<&UiError> {
         self.live_error.as_ref()
@@ -1181,7 +1199,9 @@ impl Studio {
 
     /// The theme video the live screen `key` could play but does not store.
     pub fn missing_video(&self, key: &str) -> Option<MissingVideo> {
-        self.live.as_ref().filter(|l| l.key == key)?;
+        if !self.is_live(key) {
+            return None;
+        }
         match self.runtime.video() {
             VideoState::VideoMissing(missing) => Some(missing.clone()),
             _ => None,
@@ -1198,7 +1218,10 @@ impl Studio {
 
     /// The live link of `key`, or why it cannot be had.
     fn link_of(&mut self, key: &str) -> Result<Option<&mut Box<dyn ScreenLink>>> {
-        let Some(live) = self.live.as_mut().filter(|l| l.key == key) else {
+        if !self.is_live(key) {
+            return Ok(None);
+        }
+        let Some(live) = self.live.as_mut() else {
             return Ok(None);
         };
         let holder = match live.slot {
@@ -1233,11 +1256,10 @@ impl Studio {
         link: Box<dyn ScreenLink>,
         resume: Resume,
     ) -> Option<Box<dyn ScreenLink>> {
-        let Some(live) = self
-            .live
-            .as_mut()
-            .filter(|l| l.key == key && matches!(l.slot, Slot::Lent))
-        else {
+        if !self.is_live(key) {
+            return Some(link);
+        }
+        let Some(live) = self.live.as_mut().filter(|l| matches!(l.slot, Slot::Lent)) else {
             return Some(link);
         };
         live.slot = Slot::Here(link);
@@ -1263,7 +1285,7 @@ impl Studio {
     }
 
     /// [`Self::go_live`] on `screen`, which is connected again when its
-    /// link fails.
+    /// link fails and is known by either of its ports ([`Self::is_live`]).
     pub fn go_live_on(&mut self, key: String, screen: Screen, link: Box<dyn ScreenLink>) {
         self.go_live(key, link);
         if let Some(live) = self.live.as_mut() {
@@ -1403,10 +1425,13 @@ impl Studio {
         let Delivery {
             key, link, turn, ..
         } = delivery;
+        if !self.is_live(&key) {
+            return Some(link);
+        }
         let Some(live) = self
             .live
             .as_mut()
-            .filter(|l| l.key == key && matches!(l.slot, Slot::Presenting))
+            .filter(|l| matches!(l.slot, Slot::Presenting))
         else {
             return Some(link);
         };
@@ -2427,6 +2452,53 @@ mod tests {
         let screen = choose_screen(found, None).unwrap();
         let link = connector.connect(&screen).unwrap();
         (screen, link)
+    }
+
+    /// D-2026-10-01-live-screen-controls-3: the live 8.8" is known by its
+    /// display's port and by its MCU's: either reaches its open link (the
+    /// brightness, a storage job's loan and its return, the video it lacks),
+    /// another port does not. Gone live without being discovered, a screen
+    /// is known by its key alone.
+    #[test]
+    fn the_live_screen_is_known_by_either_of_its_ports() {
+        const DISPLAY: &str = "/dev/ttyACM1";
+        const MCU: &str = "/dev/ttyACM0";
+        let media: SharedMedia = Arc::new(Mutex::new(Box::new(FakeMedia::ready())));
+        let dir = std::env::temp_dir().join(format!("bezel-studio-ports-{}", std::process::id()));
+        let mut s = studio().with_host_decoding(media, dir.clone());
+        let clip = AssetRef("assets/clip.mp4".into());
+        let assets = BTreeMap::from([(clip.clone(), vec![1, 2, 3])]);
+        s.start(with_video(theme_88(), &clip.0), assets, None);
+        let connector = FakeConnector::default();
+        let (screen, link) = screen_88(&connector);
+        assert!(!s.is_live(DISPLAY), "nothing is live");
+        s.go_live_on(DISPLAY.into(), screen, link);
+        present(&mut s).unwrap();
+        for port in [DISPLAY, MCU] {
+            assert!(s.is_live(port), "{port}");
+            assert!(s.live_brightness(port, Brightness::MAX).unwrap(), "{port}");
+            assert_eq!(s.missing_video(port).map(|m| m.asset), Some(clip.clone()));
+            let lent = s.lend_live_link(port).unwrap().expect("lent");
+            assert!(s.lend_live_link(port).is_err(), "lent once");
+            assert!(s.return_live_link(port, lent, Resume::Frames).is_none());
+        }
+        for other in ["/dev/ttyACM2", ""] {
+            assert!(!s.is_live(other), "{other}");
+            assert!(!s.live_brightness(other, Brightness::MAX).unwrap());
+            assert_eq!(s.missing_video(other), None);
+            assert!(s.lend_live_link(other).unwrap().is_none());
+        }
+        present(&mut s).unwrap();
+        let log = connector.log();
+        assert_eq!((log.connects, log.brightness.len()), (1, 2));
+        assert_eq!(log.frames.len(), 2, "the link came back each time");
+
+        drop(s.stop_live());
+        assert!(!s.is_live(DISPLAY) && !s.is_live(MCU));
+        let (_, link) = screen_88(&connector);
+        s.go_live(MCU.into(), link);
+        assert!(s.is_live(MCU) && !s.is_live(DISPLAY));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Live on an 8.8" whose second frame fails with `error`: away from 1 s.

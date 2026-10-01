@@ -3,11 +3,11 @@
 use std::cell::RefCell;
 
 use bezel_core::app::{
-    choose_screen, discover_screens, open_screen, reopen_screen, restart_screen,
+    choose_screen, connect_screen, discover_screens, open_screen, reopen_screen, restart_screen,
 };
 use bezel_core::domain::device::{Transport, UsbId};
 use bezel_core::domain::discovery::{
-    DeviceAddress, Endpoint, ScreenState, UsbLocation, group_screens,
+    DeviceAddress, Endpoint, Screen, ScreenState, UsbLocation, group_screens,
 };
 use bezel_core::ports::DeviceBus;
 use bezel_core::{BezelError, Result};
@@ -171,4 +171,40 @@ fn a_failed_screen_is_reopened_by_identity() {
     let (screen, link) = reopen_screen(&back, &connector, &known).expect("back");
     assert_eq!(screen.address().map(|a| a.0.as_str()), Some("/dev/ttyACM2"));
     assert_eq!(link.identity().model.id.0, "turing-8.8");
+}
+
+/// D-2026-10-01-live-screen-controls-2: one screen, one key. A screen
+/// connected by its MCU's port comes back as the bus lists it once
+/// connected, keyed by its display; one asleep when chosen was woken by the
+/// connect. Not listed again, it is the screen chosen.
+#[test]
+fn a_screen_connected_by_its_mcu_port_is_keyed_by_its_display() {
+    let key = |s: &Screen| s.address().map(|a| a.0.clone());
+    let connector = FakeConnector::default();
+    let (screen, link) =
+        connect_screen(&FakeBus::turing_88(), &connector, Some("/dev/ttyACM0")).expect("connects");
+    assert_eq!(key(&screen).as_deref(), Some("/dev/ttyACM1"));
+    assert_eq!(link.identity().model.id.0, "turing-8.8");
+
+    // Asleep when chosen (only the MCU listed): the connect woke its SoC.
+    let mcu = behind_hub("/dev/ttyACM0", 0x1a86, 0xca88, Some("CT88INCH"), 1);
+    let soc = behind_hub("/dev/ttyACM1", 0x0525, 0xa4a7, None, 2);
+    let bus = ScriptedBus(RefCell::new(vec![
+        vec![mcu.clone()],
+        vec![soc, mcu.clone()],
+    ]));
+    let (screen, _link) = connect_screen(&bus, &connector, Some("/dev/ttyACM0")).expect("woken");
+    assert_eq!(key(&screen).as_deref(), Some("/dev/ttyACM1"));
+    assert_eq!(screen.wake.as_ref(), Some(&mcu));
+
+    // Not listed again: the screen chosen, under its MCU's port.
+    let bus = ScriptedBus(RefCell::new(vec![vec![mcu.clone()], Vec::new()]));
+    let (screen, _link) = connect_screen(&bus, &connector, Some("/dev/ttyACM0")).expect("chosen");
+    assert_eq!(key(&screen).as_deref(), Some("/dev/ttyACM0"));
+    assert_eq!(connector.log().connects, 3);
+
+    // An unknown address is not found, and nothing is connected.
+    let missing = connect_screen(&FakeBus::turing_88(), &connector, Some("/dev/ttyACM9"));
+    assert!(matches!(missing, Err(BezelError::ScreenNotFound(_))));
+    assert_eq!(connector.log().connects, 3);
 }

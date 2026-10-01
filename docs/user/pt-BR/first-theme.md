@@ -13,6 +13,13 @@ Na biblioteca, à esquerda, abra a aba **Temas**:
 - **Novo vertical** / **Novo horizontal** para um tema vazio do tamanho da sua
   tela.
 
+Cada cartão mostra uma miniatura do tema, desenhada com valores de exemplo, e a
+tela para a qual ele foi feito (por exemplo `8,8″ · 1920×480`). Acima dos
+cartões, **Para esta tela** mostra só os temas que cabem na tela conectada (o
+padrão enquanto houver uma conectada), **Todos** mostra todos os temas e
+**Vertical** / **Horizontal** deixam uma orientação só. O Bezel lembra a
+escolha.
+
 ## 2. Edite
 
 - Aba **Widgets**: arraste um widget (texto, valor, relógio, imagem, forma,

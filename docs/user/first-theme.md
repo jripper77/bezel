@@ -12,6 +12,12 @@ In the library on the left, open the **Themes** tab:
 - click a built-in theme to open it (there is one for each screen size), or
 - **New vertical** / **New horizontal** for an empty theme of your screen's size.
 
+Each card shows a picture of the theme, drawn with sample values, and the
+screen it was made for (for example `8.8″ · 1920×480`). Above the cards,
+**For this screen** lists only the themes that fit the connected screen (the
+default while one is connected), **All** lists every theme, and **Vertical** /
+**Horizontal** keep one orientation. Bezel remembers the choice.
+
 ## 2. Edit it
 
 - **Widgets** tab: drag a widget (text, value, clock, image, shape, bar, ring,

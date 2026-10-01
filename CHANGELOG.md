@@ -112,6 +112,12 @@ the Conventional Commits.
 - Bezel Studio in Portuguese and English throughout, following the system
   language unless one is chosen in Preferences; errors and import warnings are
   translated; the ping target and the MangoHud log folder are Preferences.
+- Bezel Studio's Themes tab shows each theme as a thumbnail drawn by the real
+  renderer with sample values (a video background shows its poster), kept in
+  the app's cache until the theme changes, and names the screen it was made
+  for (`8.8″ · 1920×480`). **For this screen** (the default while one is
+  connected) / **All** and **Vertical** / **Horizontal** filter the list; the
+  choice is remembered.
 - Linux packages: the deb and the rpm install the `bezel` command as
   `/usr/bin/bezel`, the `bezel-run@` systemd user service in
   `/usr/lib/systemd/user` (running `/usr/bin/bezel`) and the bundled themes

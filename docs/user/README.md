@@ -24,7 +24,10 @@ parts:
 - [Sensors](sensors.md): what Bezel measures, and why a value can show `—`.
 - [Game FPS](fps.md): RivaTuner Statistics Server on Windows, MangoHud on Linux.
 - [Screen storage and video](storage-and-video.md): pictures and videos kept on
-  the screen, what it shows at power-up.
+  the screen, what it shows at power-up, and
+  [managing them](storage-and-video.md#managing-the-files): moving between the
+  internal memory and the card, renaming, restoring a card, the cleanup
+  assistant and Bezel's local copies.
 - [Installing ffmpeg](ffmpeg.md), needed to convert videos.
 - [Preparing an SD card](sd-card.md) for screens with a card slot.
 - [Running at login](run-at-login.md): from the tray, or as a systemd service.

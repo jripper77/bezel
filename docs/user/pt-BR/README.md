@@ -30,7 +30,10 @@ idioma do sistema, ou o que você escolher em **Preferências → Idioma**.
 - [FPS de jogos](fps.md): RivaTuner Statistics Server no Windows, MangoHud no
   Linux.
 - [Armazenamento e vídeo](storage-and-video.md): imagens e vídeos guardados na
-  tela, o que ela mostra ao ligar.
+  tela, o que ela mostra ao ligar, e
+  [como gerenciá-los](storage-and-video.md#gerenciar-os-arquivos): mover entre a
+  memória interna e o cartão, renomear, restaurar um cartão, o assistente de
+  limpeza e as cópias locais do Bezel.
 - [Instalar o ffmpeg](ffmpeg.md), necessário para converter vídeos.
 - [Preparar um cartão SD](sd-card.md) para telas com entrada de cartão.
 - [Iniciar com o computador](run-at-login.md): pela bandeja ou como serviço do

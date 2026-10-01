@@ -40,7 +40,9 @@ window to design themes and drive the screen.
   the vendor app's `.turtheme` and turing-smart-screen-python themes.
 - **Screen panel**: brightness, and the *Storage* tab for the screen's internal
   flash and memory card (send pictures and videos, play them, choose what the
-  screen shows at power-up).
+  screen shows at power-up), which opens full width as the storage manager:
+  both sides with thumbnails, move by dragging, rename, restore a card, the
+  cleanup assistant.
 
 `BEZEL_FAKE=1 bezel-studio` opens it with a simulated 8.8" and demo sensors.
 
@@ -152,6 +154,12 @@ bezel storage boot default --yes          # back to the built-in start screen
   brightness they boot with: `--brightness`, else the vendor default (about 67%).
   On the Turing USB generation Bezel cannot yet delete files, play a video once
   or change the boot media; `bezel` says so.
+- **Storage manager.** Bezel keeps a local copy of every file it sends
+  (`<data>/bezel/storage`): `bezel storage mv` and `rename` send it again and
+  delete the source only after the copy is verified, `restore` refills a
+  formatted or new card, `cleanup --dry-run` lists the vendor app's duplicates
+  and interrupted uploads, and `cache clear` frees the copies
+  ([Managing the files](docs/user/storage-and-video.md#managing-the-files)).
 - **Themes with a video background.** `bezel run` has the screen loop the video
   and draws the theme over it. When the screen does not store the video yet, the
   poster shows and `bezel run` prints the exact `bezel storage put` command;

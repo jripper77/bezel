@@ -123,12 +123,39 @@ the Conventional Commits.
   `/usr/lib/systemd/user` (running `/usr/bin/bezel`) and the bundled themes
   where the command finds them, next to the udev rule; installing applies the
   rule to serial, USB and HID devices at once.
+- The storage manager on the command line:
+  `bezel storage mv|rename|restore|cleanup|catalog|cache`. Bezel keeps a local
+  copy of every file it sends (the exact bytes, in `<data>/bezel/storage`:
+  `~/.local/share` on Linux, `%APPDATA%` on Windows), since the screens cannot
+  send a file back, rename or move it. `bezel storage mv PATH... --to internal|sd`
+  and `rename` send that copy again, check the stored size and only then delete
+  the source; a failure or Ctrl+C keeps the source and stops the batch.
+  `restore internal|sd` sends back the files missing from a formatted or new
+  card, after checking the free space and the 25 MiB rev C limit before the
+  first byte, and never deletes. `cleanup` lists the vendor app's duplicate
+  copies (`x.mp4.mp4`, `x.mp4<digits>.mp4`), interrupted uploads and files no
+  theme plays, never the boot media nor a theme's video; `cleanup --dry-run`
+  only lists, `--yes` deletes exactly the pre-checked files it printed.
+  `catalog associate` gives a file Bezel did not send a local copy from its
+  original; `cache clear` removes the copies of deleted files (`--all`: every
+  copy), which count toward a 2 GiB limit (`cache --limit`). Each command
+  prints the exact list first and changes nothing without `--yes`.
+- Bezel Studio: the Storage tab opens full width as the storage manager —
+  internal memory and SD card side by side with thumbnails, multiple selection
+  with the mouse or the keyboard, sort and filter, **Move to the SD card** (or
+  dragging to the other side), copy, rename, restore, the cleanup assistant
+  with its exact list to confirm, associating an original and the local copies
+  with **Clear cache…**; progress and results are announced to screen readers.
+  On Turing USB screens, what ends in a delete (move, rename, delete, cleanup)
+  is disabled with the reason, and sizes come from the catalog or show as
+  unknown.
 - User guide in English (`docs/user/`) and Portuguese (`docs/user/pt-BR/`):
   installing on each system, screen permissions and Windows drivers (WinUSB
   with Zadig, LibreHardwareMonitor), the unsigned installers and SmartScreen,
   the first theme, vertical or horizontal use, sensors, game FPS, storage and
-  video, ffmpeg, preparing an SD card, running at login, coming from
-  turing-smart-screen-python, troubleshooting and the supported screens.
+  video with the storage manager, ffmpeg, preparing an SD card, running at
+  login, coming from turing-smart-screen-python, troubleshooting and the
+  supported screens.
 
 ### Changed
 - Turing rev C screens take at most 25 MiB per file: their firmware keeps a
@@ -145,6 +172,10 @@ the Conventional Commits.
   backgrounds.
 - `scripts/install-local.sh` points the `bezel-run@` service it installs at the
   `bezel` it installed.
+- `bezel storage ls` shows, for the files Bezel sent, their state (stored, or
+  pending: an upload that did not finish) and whether Bezel keeps a local copy;
+  `put`, `rm` and `boot`, and the studio's sending, deleting and theme videos,
+  record what they do in Bezel's catalog.
 
 ### Fixed
 - A rev C screen that another app just turned off (turing-smart-screen-python

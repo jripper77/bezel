@@ -4,7 +4,8 @@
 #     page expected below, each one linking to its translation, and each index
 #     (README.md) linking to every page of its language;
 #   - every page covers its topic (the phrases each page must contain: the
-#     commands, the Windows drivers, the unsigned installers, the
+#     commands, the storage manager's `mv`, `cleanup --dry-run` and
+#     `cache clear`, the Windows drivers, the unsigned installers, the
 #     "not validated on hardware" label of desktop mode and game FPS);
 #   - every relative link of the docs, README.md and CHANGELOG.md points at a
 #     file that exists, and an `#anchor` at a heading of that file;
@@ -46,7 +47,8 @@ COMMON = {
     "fps.md": ["gpu.fps", "RivaTuner Statistics Server", "RTSS", "MangoHud",
                "autostart_log=1", "Shift_L+F2", "--mangohud-dir", "3"],
     "storage-and-video.md": ["bezel storage put", "bezel storage rm", "--yes", "120 MB",
-                             "the stored size differs; delete it and send it again"],
+                             "the stored size differs; delete it and send it again",
+                             "bezel storage mv", "cleanup --dry-run", "cache clear"],
     "ffmpeg.md": ["libx264", "sudo apt install ffmpeg", "sudo dnf install ffmpeg",
                   "winget install --id Gyan.FFmpeg -e", "--ffmpeg"],
     "sd-card.md": ["FAT32", "MBR", "mkfs.vfat -F 32", "bezel storage info"],
@@ -209,7 +211,7 @@ if not m:
 else:
     unreleased = m.group(1)
     for phrase in ("bezel udev-rules", "bezel monitor-mode", "gpu.fps", "net.ping",
-                   "bezel-run@", "/usr/bin/bezel", "docs/user"):
+                   "bezel-run@", "/usr/bin/bezel", "docs/user", "bezel storage mv"):
         if phrase not in unreleased:
             fail("CHANGELOG.md", f"## [Unreleased] does not mention {phrase!r}")
 

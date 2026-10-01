@@ -12,19 +12,31 @@ nunca o formata; veja [Preparar um cartão SD](sd-card.md).
 
 ## No aplicativo
 
-**Tela → Armazenamento** mostra quanto da memória interna e do cartão SD está em
-uso, e os arquivos de cada um.
+**Tela → Armazenamento** ocupa a janela toda: a memória interna e o cartão SD
+lado a lado, cada um com quanto está em uso e os seus arquivos. Cada arquivo
+mostra uma miniatura (ou um ícone do tipo), o tamanho e quando o Bezel o
+enviou, ou que o Bezel não o enviou. Acima das listas, **Nome contém**,
+**Tipo**, **Origem** e **Ordenar por** filtram e ordenam os dois lados.
 
-- **Enviar**: arraste um arquivo para a lista, ou **Enviar arquivo…**. O Bezel
-  mostra o que vai fazer (conversão, destino, um arquivo que será substituído) e
-  pede confirmação. A barra de progresso passa por *Convertendo*, *Enviando* e
-  *Conferindo*.
-- **Tocar** e **Parar reprodução**: a tela toca um vídeo guardado em repetição,
-  ou mostra uma imagem guardada. Com o **Ao vivo** ligado, o tema cobre o que a
-  tela toca; por isso essas ações esperam você desligar o Ao vivo.
-- **Apagar**: pede confirmação, com o nome do arquivo.
-- **Ao ligar**: **Mostrar ao ligar** escolhe o arquivo que a tela mostra quando
-  liga; **Voltar ao relógio padrão** desfaz. A tela guarda a escolha.
+- **Selecionar**: clique num arquivo; Ctrl+clique e Shift+clique somam à
+  seleção. Numa lista, as setas andam, o Espaço seleciona ou desfaz, Shift+setas
+  estendem a seleção e Ctrl+A seleciona tudo; Delete apaga e F2 renomeia.
+- **Enviar**: arraste um arquivo do computador para um dos lados, ou **Enviar
+  arquivo…**. O Bezel mostra o que vai fazer (conversão, destino, um arquivo que
+  será substituído) e pede confirmação. A barra de progresso passa por
+  *Convertendo*, *Enviando* e *Conferindo*.
+- **Tocar na tela** e **Parar reprodução**: a tela toca um vídeo guardado em
+  repetição, ou mostra uma imagem guardada. Com o **Ao vivo** ligado, o tema
+  cobre o que a tela toca; por isso essas ações esperam você desligar o Ao vivo.
+- **Apagar…**: pede confirmação, com o nome do arquivo (ou a lista dos
+  arquivos).
+- **Ao ligar**: **Mostrar ao ligar…** (ou um arquivo arrastado para **Ao
+  ligar**) escolhe o arquivo que a tela mostra quando liga; **Voltar ao relógio
+  padrão** desfaz. A tela guarda a escolha.
+- **Mover para o cartão SD**, **Copiar para o cartão SD** (ou para a memória
+  interna), **Renomear…**, **Restaurar…**, **Assistente de limpeza…**,
+  **Associar original…** e **Cópias locais…**: veja
+  [Gerenciar os arquivos](#gerenciar-os-arquivos).
 
 ## Pela linha de comando
 
@@ -43,6 +55,11 @@ bezel storage boot default --yes            # volta à tela de início original
 Tudo o que apaga, substitui ou muda o que a tela mostra ao ligar (`rm`, `put`
 sobre um arquivo que já existe, `boot`) primeiro diz o que vai fazer e precisa do
 `--yes`; sem ele nada chega à tela.
+
+O `bezel storage ls` também mostra, para cada arquivo que o Bezel enviou, o
+estado dele (*stored*, gravado, ou *pending*: um envio que não terminou) e se o
+Bezel guarda uma cópia local dele. Mover, renomear, restaurar e limpar ficam em
+[Gerenciar os arquivos](#gerenciar-os-arquivos).
 
 ## O que dá para enviar
 
@@ -102,6 +119,230 @@ tempo), ela travou: o próximo comando reinicia uma tela Turing rev C sozinho, o
 use `bezel restart` ou **Reiniciar a tela…** no aplicativo; não precisa
 desconectar o cabo. Veja
 [A tela travou](troubleshooting.md#a-tela-travou--parou-de-responder).
+
+## Gerenciar os arquivos
+
+Uma tela só lista, grava, apaga e toca os seus arquivos: ela não devolve um
+arquivo para o computador, não renomeia e não move. Por isso o Bezel guarda uma
+cópia do que envia, e mover, renomear e restaurar enviam essa cópia de novo.
+
+### As cópias locais do Bezel
+
+Todo arquivo que o Bezel envia (pelo **Enviar arquivo…**, pelo
+`bezel storage put`, o vídeo de um tema, ao mover ou ao restaurar) também fica
+guardado no computador: os bytes exatos que a tela recebeu (o resultado da
+conversão, no caso de um vídeo), com uma miniatura (a de um vídeo precisa do
+ffmpeg) e o registro de para onde foi (o *catálogo* do Bezel). Eles ficam na sua
+pasta de dados:
+
+- Linux: `~/.local/share/bezel/storage` (ou `$XDG_DATA_HOME/bezel/storage`);
+- Windows: `%APPDATA%\bezel\storage`.
+
+Os mesmos bytes na memória interna e no cartão são guardados uma vez só.
+
+**O limite.** Só contam as cópias de arquivos que você apagou pelo Bezel, até
+2 GiB por padrão (cerca de 80 arquivos de 25 MiB); acima disso, as mais antigas
+saem primeiro. As cópias de arquivos que ainda estão numa tela, ou que sumiram
+dela (um cartão formatado ou trocado), nunca saem sozinhas; assim uma
+restauração sempre as tem.
+
+**Limpar cache.** No aplicativo, **Cópias locais…** mostra quantas cópias há e
+quanto ocupam, e ajusta o limite; **Limpar cache…** remove as cópias dos
+arquivos apagados pelo Bezel (todas as cópias com **Limpar também as cópias de
+arquivos que ainda estão em uma tela**), depois de uma confirmação que diz
+quantas são e quanto ocupam. Os arquivos nas telas continuam lá, e as entradas
+do catálogo e as miniaturas também, marcadas como "sem cópia local": esses
+arquivos não podem ser movidos, renomeados nem restaurados até você
+[associar o original](#arquivos-que-o-bezel-não-enviou) de novo. Pela linha de
+comando:
+
+```bash
+bezel storage cache info                # quantas cópias, quanto ocupam e o limite
+bezel storage cache --limit 1GiB        # o limite das cópias de arquivos apagados
+bezel storage cache clear --yes         # remove as cópias dos arquivos apagados
+bezel storage cache clear --all --yes   # todas as cópias, também de arquivos que estão numa tela
+```
+
+O `bezel storage catalog` lista o que o Bezel enviou para a tela: o estado de
+cada arquivo (*stored*, gravado; *pending*, envio não concluído; *missing*,
+sumiu da tela; *deleted*, apagado pelo Bezel; ou *on another card*, em outro
+cartão), se ele tem cópia local, quando foi enviado e de onde.
+
+### Mover, renomear e copiar
+
+O Bezel move (da memória interna para o cartão, ou de volta) e renomeia um
+arquivo por vez:
+
+1. primeiro confere o destino: o nome, o tipo, os
+   [25 MiB por arquivo](#qual-o-tamanho-máximo-de-um-arquivo) das telas Turing
+   rev C e o espaço livre;
+2. envia o arquivo de novo a partir da cópia local;
+3. confere se o tamanho que a tela gravou é o tamanho da cópia;
+4. só então apaga a origem.
+
+A origem nunca é apagada antes, nem quando falta espaço. Se um arquivo falhar,
+ou se você clicar em **Cancelar** (Ctrl+C no terminal), a origem fica onde
+estava e os arquivos seguintes não começam; o relatório diz o que foi movido, o
+que falhou e por quê, e o que não começou, e um arquivo incompleto deixado pelo
+envio cancelado aparece com o comando que o apaga.
+
+O novo nome segue a regra de envio (letras minúsculas sem acento, números, `_`,
+`.` e `-`, a mesma extensão): mover `NVI.mp4` dá `nvi.mp4`. Um arquivo com esse
+nome que já esteja lá fica de fora, a menos que você escolha substituí-lo. Mover
+o arquivo que a tela mostra ao ligar, ou renomear um vídeo que um tema toca,
+acrescenta um aviso à confirmação: a tela liga com o último arquivo que tocou, e
+um tema acha o vídeo dele pelo nome.
+
+No aplicativo, selecione arquivos numa lista e clique em **Mover para o cartão
+SD** (ou **Mover para a memória interna**), ou arraste-os para a outra lista.
+**Copiar para o cartão SD** envia do mesmo jeito e mantém os originais.
+**Renomear…** (F2) pede o novo nome e mostra como a tela vai gravá-lo. Uma única
+confirmação lista cada arquivo como origem → destino com o tamanho, o que fica
+de fora e por quê (com **Substituir o “…” de lá** para um arquivo de mesmo nome)
+e o espaço livre; nada começa antes de você clicar em **Mover**. Durante a
+operação, a barra mostra *Movendo “…” (1 de 3)* e **Cancelar**.
+
+Pela linha de comando, `mv`, `rename` e `restore` primeiro imprimem a lista
+exata; sem `--yes` eles só consultam a tela e não mudam nada:
+
+```bash
+bezel storage mv internal/video/clipe.mp4 --to sd         # imprime a lista; --yes move
+bezel storage mv sd/video/a.mp4 sd/video/b.mp4 --to internal --yes
+bezel storage rename sd/video/clipe.mp4 abertura.mp4 --yes
+```
+
+```text
+$ bezel storage mv internal/video/bezel_demo.mp4 --to sd
+Move 1 file to the memory card of Turing Smart Screen 8.8", each sent from Bezel's local copy:
+  internal/video/bezel_demo.mp4 -> sd/video/bezel_demo.mp4     2.3 MiB
+1 file, 2.3 MiB to send; each source is deleted only after its copy is verified.
+Nothing on the screen was changed. Add --yes to move it.
+```
+
+O `--overwrite` substitui os arquivos de mesmo nome que já estão lá. A linha de
+comando não tem um comando de copiar:
+`bezel storage restore internal abertura.mp4 --yes` envia também para a memória
+interna um arquivo que está no cartão, e mantém o do cartão.
+
+### Restaurar
+
+Restaurar envia de volta para um meio, a partir das cópias locais, arquivos que
+o Bezel já tinha enviado: depois de você formatar o cartão no computador, ou
+para um cartão novo. Restaurar nunca apaga nada.
+
+Antes do primeiro byte, o Bezel confere se todos os arquivos cabem no espaço
+livre e se cada um pode ir para lá, inclusive os 25 MiB por arquivo das telas
+Turing rev C; se não, nada é enviado e o Bezel diz quanto falta. Um arquivo que
+já está lá com o mesmo nome e tamanho é pulado; o mesmo nome com outro tamanho
+fica de fora, a menos que você escolha substituí-lo. Os arquivos vão um por vez,
+do enviado há mais tempo ao mais recente, cada um conferido; **Cancelar** e
+falhas funcionam como ao mover.
+
+No aplicativo, **Restaurar…** (com quantos arquivos) aparece acima de uma lista
+quando arquivos que o Bezel enviou para lá sumiram ou estão em outro cartão;
+escolha os arquivos, **Continuar…** e então **Restaurar**. Pela linha de
+comando:
+
+```bash
+bezel storage restore sd                     # os arquivos que o Bezel enviou ao cartão e sumiram
+bezel storage restore sd --yes
+bezel storage restore internal abertura.mp4 --yes   # um arquivo pelo nome, também um apagado pelo Bezel
+```
+
+```text
+$ bezel storage restore sd
+Restore 1 file to the memory card of Turing Smart Screen 8.8" from Bezel's local copies:
+  sd/video/bezel_intro.mp4 -> sd/video/bezel_intro.mp4     1.2 MiB  (missing)
+1 file, 1.2 MiB to send; 7.9 GiB free there; nothing is deleted.
+Nothing on the screen was changed. Add --yes to restore it.
+```
+
+### O assistente de limpeza
+
+Para os arquivos que o Bezel não enviou (os do app do fabricante, por exemplo)
+e para os envios que não terminaram, o assistente de limpeza aponta prováveis
+sobras:
+
+- **Duplicado**: as cópias que o app do fabricante faz quando converte um
+  arquivo de novo, com nomes como `x.mp4.mp4` ou `x.mp4<dígitos>.mp4`
+  (`NVI.mp427034822.mp4`), do mesmo tamanho do arquivo que fica. Vêm marcados.
+- **Cópia do fornecedor**: os mesmos nomes com outro tamanho. Só listados.
+- **Envio interrompido**: um arquivo de exatamente 29.577.216 bytes, o que sobra
+  de um envio que travou uma tela Turing rev C. Vem marcado.
+- **Envio não concluído**: um arquivo que o Bezel começou a enviar e nunca
+  conferiu (o estado dele no catálogo é *pending*). Vem marcado.
+- **Mesmo tamanho** e **Tamanho mudou**: outros arquivos exatamente do mesmo
+  tamanho e tipo, e um arquivo cujo tamanho não é o que o Bezel enviou. Só
+  listados.
+- **Sem uso**: um arquivo que o Bezel não enviou e que nenhum tema toca. Só
+  listado.
+
+Só os sinais exatos já vêm marcados; o que é apenas provável aparece, mas não é
+escolhido. O assistente nunca sugere o arquivo que o Bezel escolheu para a tela
+mostrar ao ligar, nem um vídeo que um tema toca (o vídeo de fundo de um tema,
+por exemplo). Ele nunca roda sozinho, e nada é apagado até você confirmar a
+lista exata.
+
+No aplicativo, **Assistente de limpeza…** (acima das listas) mostra as
+sugestões por grupo; marque ou desmarque, e então **Apagar os marcados…** lista
+os arquivos exatos e o espaço liberado, e **Apagar estes arquivos** os apaga um
+por vez. **Origem → Sugestões de limpeza** também os mostra nas listas.
+
+Pela linha de comando, `bezel storage cleanup --dry-run` só lista; com `--yes`
+ele apaga exatamente os arquivos marcados que imprimiu, e nada mais (sem
+nenhum dos dois, ele lista e diz o que o `--yes` apagaria):
+
+```text
+$ bezel storage cleanup --dry-run
+Cleanup suggestions for Turing Smart Screen 8.8" (never the boot media Bezel set nor a video your themes play):
+Pre-checked, deleted by `bezel storage cleanup --yes`:
+  internal/video/bezel_cut.mp4      320.0 KiB  pending: an upload by Bezel that did not finish or failed its size check
+Only listed (`bezel storage rm PATH --yes` deletes one you no longer need):
+  sd/video/NVI.mp4                    5.4 MiB  unused: no theme plays it
+  sd/video/NVI.mp427034822.mp4        5.1 MiB  variant: a vendor copy of sd/video/NVI.mp4 with another size
+  …
+1 file pre-checked (320.0 KiB to free), 12 files only listed.
+Dry run: nothing was deleted.
+```
+
+### Arquivos que o Bezel não enviou
+
+Um arquivo que o Bezel não enviou não tem cópia local: aparece com um ícone em
+vez de miniatura (**Tocar na tela** mostra o arquivo) e não pode ser movido nem
+renomeado. Se você tem o original no computador, associe os dois: o Bezel copia
+o original para as cópias locais, o que dá ao arquivo uma miniatura e permite
+movê-lo.
+
+- No aplicativo: selecione o arquivo, **Associar original…**, e então
+  **Escolher arquivos…** ou **Escolher pasta…**. Só aparecem arquivos com
+  exatamente o mesmo tamanho em bytes e do mesmo tipo, do mais provável ao menos
+  provável (pelo nome e, num vídeo, pela duração e pela resolução); confirme o
+  par com **Associar**.
+- Pela linha de comando:
+  `bezel storage catalog associate sd/video/NVI.mp4 ~/Vídeos/NVI.mp4 --yes`
+  (ou uma pasta, para procurar nela). `bezel storage catalog forget CAMINHO --yes`
+  tira uma entrada do catálogo, e a cópia local dela, a menos que outra entrada
+  tenha os mesmos bytes; a tela não muda.
+
+### Telas Turing USB
+
+O Bezel não consegue apagar arquivos na geração Turing USB, então nada que
+termine apagando roda nela: **Mover para o cartão SD** (ou para a memória
+interna), **Renomear…**, **Apagar…** e o **Assistente de limpeza…** ficam
+desativados, com o motivo numa nota acima das listas e em cada botão; o terminal
+imprime o motivo. Copiar para o outro lado, restaurar e tocar funcionam. Essas
+telas nem sempre informam o tamanho de um arquivo: o Bezel mostra o tamanho que
+enviou, ou "tamanho desconhecido" (`?` no `bezel storage ls`).
+
+### Dois cartões do mesmo tamanho
+
+A tela não informa nada sobre o cartão além da capacidade, então o Bezel
+reconhece um cartão pela capacidade: arquivos que o Bezel enviou para um cartão
+de outra capacidade aparecem como *em outro cartão*, prontos para restaurar
+neste. Dois cartões do mesmo tamanho parecem o mesmo: o Bezel confunde um com o
+outro, e os arquivos que ele enviou ao primeiro aparecem como *sumiu da tela* no
+segundo. Telas do mesmo modelo também não se distinguem, então dividem um mesmo
+catálogo.
 
 ## O que a tela mostra ao ligar
 

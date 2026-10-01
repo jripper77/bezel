@@ -4,7 +4,7 @@
 Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo, documentação de usuário, FPS de jogos e release 1.0.
 
 ## Locked decisions (from CONTEXT.md)
-- D-2026-09-30-release-polish-1..11; herdadas: D-1 (hexagonal), device-protocols-2/-5/-6, sensors-1/-4, foundation-2
+- D-2026-09-30-release-polish-1..13; herdadas: D-1 (hexagonal), device-protocols-2/-5/-6, sensors-1/-4, foundation-2
 
 ## Tasks
 
@@ -96,6 +96,7 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Files modified:** studio, porta de pôster (core + `bezel-media`), docs
 - **Acceptance:** adicionar ou soltar vídeo/GIF = `Background::Video` com pôster e desfazer; inspetor com o fluxo de "Enviar para a tela".
 - **Dependencies:** T-7.6
+- **Test:** `tests/ui/video-background.test.mjs`, e2e de vídeo/GIF de fundo, pôster no `bezel-media`
 - **Status:** completed (`7d9dc5f`..`aa746c0`); validado na 8.8" (SUMMARY § Hardware)
 
 #### T-7.10: Limite de 25 MiB (D-12) e reinício pelo MCU (D-13)
@@ -111,6 +112,7 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Files modified:** core (runtime, animação, reconexão), CLI `live.rs`, studio, docs
 - **Acceptance:** GIF visível no próprio ritmo (≤ 30 fps, só o retângulo, sem atraso), sensores no `refreshSeconds`; ao vivo reconecta com recuo limitado.
 - **Dependencies:** T-7.10
+- **Test:** `tests/runtime_animation.rs`, `tests/animation.rs` (CLI), reconexão na CLI e no studio
 - **Status:** completed (`afa6e9c`, `79920ad`); validado na 8.8" (SUMMARY § Hardware)
 
 #### T-7.12: Aba Temas com miniaturas e filtro
@@ -118,6 +120,7 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Files modified:** studio (`thumbnails.rs`, biblioteca, ajustes, UI), docs
 - **Acceptance:** miniatura real de cada tema (renderizador, sensores de demonstração, cache em disco, refeita ao salvar); filtro "Para esta tela"/"Todos" e orientação, lembrado; cartão diz a tela do tema.
 - **Dependencies:** T-7.6
+- **Test:** `thumbnails::tests::*`, `tests/ui/theme-filter.test.mjs`, `tests/e2e/themes.spec.mjs`
 - **Status:** completed (`1b4426a`, `5a966cd`)
 
 ### Wave 4
@@ -135,19 +138,19 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Status:** pending
 
 ## Execution
-- 8 tasks em 4 waves (4 → 2 → 1 → 1)
+- 12 tasks em 5 waves (4 → 2 → 1 → 4 → 1)
 
 ## DoD → task
 | DoD (CONTEXT) | Task |
 |---|---|
 | udev = catálogo = `bezel udev-rules`; HID + Confirm | T-7.4 |
-| FPS por fixture; `net.ping` + chaves importadas | T-7.5 (chaves: T-7.2) |
-| i18n + mensagens do backend; studio 2 temas × 2 idiomas | T-7.6 |
+| FPS; `net.ping` + chaves | T-7.5, T-7.2 |
+| i18n, mensagens; studio 2 temas × 2 idiomas | T-7.6 |
 | `check-packaging.sh`, `check-docs.sh` | T-7.7 |
 | Manuais (8.8", fases 1–6, pacotes, FPS real) | T-7.8 |
 
 ## Test requirements
-- `cargo test --workspace --locked`; `cargo fmt --check`; clippy `-D warnings`; `npm test`; `scripts/ci/check-{packaging,docs}.sh`; cobertura ≥ 80% (`cargo llvm-cov`)
+- `cargo test`, fmt, clippy (Linux e Windows), `npm test`, `check-{packaging,docs}.sh`, cobertura ≥ 80%
 
 ## Notes
 - Arquivos fora de `files_modified` das T-7.1..T-7.7: SUMMARY § Files modified e as notas dos commits.

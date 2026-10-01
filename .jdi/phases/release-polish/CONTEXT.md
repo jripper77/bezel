@@ -15,9 +15,10 @@ Empacotamento deb/rpm/AppImage/msi/nsis com udev, i18n pt-BR/en completo, docume
 - D-9: dívida de revisão entra como refactor sem mudança de comportamento (lista na decisão).
 - D-10: sem enchimento após cancelar um envio rev C (o enchimento travou a 8.8").
 - D-11: `net.ping` só manda pacotes enquanto um valor visível o usa.
+- D-12/D-13: teto de 25 MiB por arquivo rev C; reinício pelo MCU (manual e automático), achados na 8.8".
 
 ## Canonical refs
-- `.jdi/decisions/D-2026-09-30-release-polish-{1..11}.md`; todos `[release-polish]` em `.jdi/todos/`
+- `.jdi/decisions/D-2026-09-30-release-polish-{1..13}.md`; todos `[release-polish]` em `.jdi/todos/`
 - `docs/reverse-engineering/sensors.md` (§ FPS, § 6.1/6.2), `protocol-turing-usb.md` § 10, `protocol-turing-rev-c.md`
 - `.github/workflows/ci.yml`, `packaging/linux/`, `scripts/install-local.sh`, `apps/bezel-studio/src-tauri/tauri.conf.json`
 - Itens Manual pendentes das fases 1-6 (REVIEW/SUMMARY de cada uma)

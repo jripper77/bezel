@@ -45,7 +45,7 @@
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc`), `check-packaging.sh`, `check-docs.sh`
 - Coverage (`cargo llvm-cov`): 94,73% de linhas; `connector.rs` 97,78%, `wire.rs` 83,21%, `runtime.rs` 100%,
   `animation.rs` 98,80%, `thumbnails.rs` 97,00%
-- CI: verde no Linux, Windows e UI; releases automáticas v0.4.0..v0.7.0 com os 5 pacotes
+- CI: verde no Linux, Windows e UI; releases automáticas v0.4.0..v0.8.0 com os 5 pacotes
 
 ## Hardware validation
 Turing 8.8" (ROM 1.90, cartão de 29,7 GiB); serviço do usuário parado e religado; só `bezel_test_*`, todos apagados.

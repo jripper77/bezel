@@ -28,7 +28,7 @@
 //! already turned for the panel, the screen looks for the copy framed that
 //! way, and pictures decoded here are framed by the core. `bezel storage
 //! put` can make the default framing's copy (as it is, or turned with
-//! `--orientation`); any other framing is sent from the studio ("Send to
+//! `--orientation`); any other framing is sent from the studio ("Send to the
 //! screen").
 
 use std::io::Write;
@@ -334,7 +334,7 @@ fn video_line(state: &VideoState, theme: &Path, runtime: &ThemeRuntime) -> Optio
             None => format!(
                 "warning: the screen does not store this theme's video framed as the theme \
                  says ({}), so its poster shows. The command line cannot frame a video: open \
-                 the theme in Bezel Studio and use \"Send to screen\", then run the theme again",
+                 the theme in Bezel Studio and use \"Send to the screen\", then run the theme again",
                 missing.path
             ),
         },
@@ -1285,7 +1285,7 @@ mod tests {
                 .all(|c| !c.changes_the_screen())
         );
 
-        // Zoomed: a copy of its own, made by the studio's "Send to screen".
+        // Zoomed: a copy of its own, made by the studio's "Send to the screen".
         let zoom = VideoFraming {
             zoom: Zoom::from_percent(125),
             ..VideoFraming::default()
@@ -1298,7 +1298,7 @@ mod tests {
             "{log}"
         );
         assert!(
-            log.contains("Bezel Studio and use \"Send to screen\""),
+            log.contains("Bezel Studio and use \"Send to the screen\""),
             "{log}"
         );
         assert!(!log.contains("bezel storage put"), "{log}");

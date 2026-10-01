@@ -35,6 +35,9 @@ piscava.
 - Iter 3 (crítico da iter 2: DoD 2 oca e objetiva → BLOCKED): o Verify da linha 2 passa a rodar também
   `the_host_ports_name_this_process_for_a_port_it_holds` (`0acd3f1`; com `this: None` a linha agora falha);
   `2a58bf1` (W3: saem `busy::holders` e `busy::held_here`, sem chamador; os testes usam `on_this_machine`).
+- Iter 4 (crítico da iter 3: nenhum teste da linha 2 rodava `SystemPorts::open`): `872283e` (o teste do `/proc` real
+  abre a porta segura por `SystemPorts::open` e pelo caminho rev C com `SystemPorts`, sem `/dev/tty*`: `InUse`, zero
+  pausas; um `open` sobrescrito ou `this: None` derrubam a linha), `05c8630` (W4: sai `busy::holders_in`).
 
 ## Blocked tasks
 - nenhuma
@@ -49,8 +52,8 @@ piscava.
 
 ## Tests
 - `cargo test --workspace --locked`: 878 passando, 0 falhando, 11 ignorados (hardware e ffmpeg real)
-- DoD 1–5: OK no branch combinado e de novo após o Step 6; DoD 6: run 36900540628 (`483c842`) verde, Windows
-  811/0/11
+- DoD 1–5: OK a cada iteração; DoD 6: runs 36900540628 (`483c842`, Windows 811/0/11), 36904730390 (`a566e80`,
+  812/0/11) e 36908306551 (`19913fa`, 812/0/11) verdes
 - UI: 186 unitários (99,93% de linhas); Playwright 184/184 (claro/escuro × pt-BR/en, axe), 8 novos
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc`), `check-docs.sh`, `check-packaging.sh`
 - Cobertura (T-3, `cargo llvm-cov -p bezel-studio`): `backend.rs` 98,14%, `studio.rs` 97,00%, `storage.rs`

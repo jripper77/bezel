@@ -3,7 +3,10 @@
 //! The argument vector keeps the vendor's chain (docs/reverse-engineering/
 //! video.md § 3 and § 4): rotation, crop, `scale=W:H,setsar=1:1`, libx264 at
 //! CRF 20, no audio, yuv420p; `-x264opts bframes=0` and the optional `eq`
-//! darkening for the TUR_USB Annex-B stream; `-r N` when asked. On top of
+//! darkening for the TUR_USB Annex-B stream; `-r N` when asked. The filter
+//! chain is the target's framing geometry ([`crate::framing::filter_chain`]):
+//! a fitted framing scales into part of the panel and pads the rest
+//! (D-2026-10-01-video-background-framing-3). On top of
 //! it: `file:` URLs (a name is never read as an option or a protocol),
 //! `-sn -dn` (only the picture reaches the screen), `-progress pipe:1` for
 //! machine-readable progress, and `-maxrate`/`-bufsize` that keep the
@@ -23,15 +26,9 @@ use bezel_core::domain::job::{Job, JobPhase, Progress};
 use bezel_core::domain::media::{BFrames, MediaFormat, Tone, TranscodeTarget};
 use bezel_core::{BezelError, Result};
 
+use crate::framing::{self, Scaling};
 use crate::process::{self, POLL, StderrTail, file_url};
 
-/// Rotation prefixes of the vendor's adjust dialog, by clockwise quarter turns.
-const ROTATIONS: [&str; 4] = [
-    "",
-    "transpose=1,",
-    "transpose=1,transpose=1,",
-    "transpose=2,",
-];
 /// The vendor's TUR_USB colour treatment.
 const DARKENING: &str = ",eq=brightness=-0.1:contrast=0.9:saturation=1";
 /// The vendor's constant quality.
@@ -119,24 +116,10 @@ fn words(list: &[&str]) -> Vec<OsString> {
     list.iter().map(OsString::from).collect()
 }
 
-/// `-vf`: rotate, crop (in rotated source pixels), scale to the exact panel
-/// size with square pixels, then the optional darkening.
+/// `-vf`: the framing ([`framing::filter_chain`]: rotate, crop in rotated
+/// source pixels, scale, pad, square pixels), then the optional darkening.
 fn filter_chain(target: &TranscodeTarget) -> Result<String> {
-    let size = target.size;
-    if size.area() == 0 {
-        return Err(BezelError::InvalidInput("the output size is empty".into()));
-    }
-    let mut chain = ROTATIONS[usize::from(target.quarter_turns % 4)].to_string();
-    if let Some(crop) = target.crop {
-        if crop.width == 0 || crop.height == 0 {
-            return Err(BezelError::InvalidInput("the crop is empty".into()));
-        }
-        chain.push_str(&format!(
-            "crop={}:{}:{}:{},",
-            crop.width, crop.height, crop.x, crop.y
-        ));
-    }
-    chain.push_str(&format!("scale={}:{},setsar=1:1", size.width, size.height));
+    let mut chain = framing::filter_chain(&target.geometry(), Scaling::Exact)?;
     if target.tone == Tone::Darkened {
         chain.push_str(DARKENING);
     }
@@ -274,9 +257,13 @@ pub(crate) fn discard(output: &Path) {
 pub(crate) mod tests {
     use bezel_core::domain::catalog::model_by_id;
     use bezel_core::domain::device::ModelId;
-    use bezel_core::domain::frame::Rect;
-    use bezel_core::domain::geometry::Size;
-    use bezel_core::domain::media::{ConvertOptions, UploadProfile};
+    use bezel_core::domain::frame::{Rect, Rgba};
+    use bezel_core::domain::framing::{PanelLayout, VideoFit, VideoFraming};
+    use bezel_core::domain::geometry::{Orientation, Size};
+    use bezel_core::domain::media::{
+        ConvertOptions, FrameRate, MediaInfo, UploadProfile, VideoCodec, VideoPixelFormat,
+        VideoTrack, framed_options,
+    };
 
     use super::*;
 
@@ -348,6 +335,74 @@ pub(crate) mod tests {
             "transpose=1,crop=480:1920:300:0,scale=480:1920,setsar=1:1"
         );
         assert_eq!(&args[12..18], ["-c:v", "libx264", "-crf", "20", "-r", "24"]);
+    }
+
+    /// The user's "Dragon Ball" video as the vendor ships it
+    /// (`video/4801920/dragon.mp4`): panel-native 480x1920 H.264 at 24 fps.
+    fn dragon_ball() -> MediaInfo {
+        MediaInfo {
+            format: MediaFormat::Mp4,
+            bytes: 2_588_343,
+            dimensions: Some(Size::new(480, 1920)),
+            video: Some(VideoTrack {
+                codec: VideoCodec::H264,
+                pixel_format: Some(VideoPixelFormat::Yuv420p),
+                b_frames: Some(true),
+                frame_rate: FrameRate::new(24, 1),
+                duration: Some(Duration::from_micros(10_166_667)),
+            }),
+            has_audio: false,
+        }
+    }
+
+    #[test]
+    fn a_framed_conversion_follows_the_framing_and_dragon_ball_needs_none() {
+        let screen = model_by_id(ModelId("turing-8.8")).unwrap();
+        let panel = Some(PanelLayout::of(screen));
+        // Dragon Ball in its landscape theme, Auto: 270 degrees on the canvas,
+        // none in total, so the conversion is the identity (sent as it is).
+        let dragon = dragon_ball();
+        let auto =
+            VideoFraming::default().resolve(dragon.dimensions, Orientation::Landscape, panel);
+        assert_eq!(auto.turns, 3);
+        let options = framed_options(screen, Orientation::Landscape, &dragon, &auto);
+        assert!(options.is_identity(), "{options:?}");
+        let target = profile("turing-8.8").transcode_target(options);
+        assert!(target.geometry().is_identity(Size::new(480, 1920)));
+        let args = strings(
+            &arguments(Path::new("dragon.mp4"), &target, Path::new("b.mp4"), None).unwrap(),
+        );
+        assert_eq!(args[11], "scale=480:1920,setsar=1:1");
+        // A 16:9 clip fitted on the landscape canvas: turned to the panel,
+        // scaled into the middle and padded with the opaque pad color.
+        let clip = MediaInfo {
+            dimensions: Some(Size::new(1920, 1080)),
+            ..dragon
+        };
+        let fitted = VideoFraming {
+            fit: VideoFit::Contain,
+            pad: Rgba::opaque(0, 0x40, 0x80),
+            ..VideoFraming::default()
+        }
+        .resolve(clip.dimensions, Orientation::Landscape, panel);
+        let options = framed_options(screen, Orientation::Landscape, &clip, &fitted);
+        let target = profile("turing-8.8").transcode_target(options);
+        let args =
+            strings(&arguments(Path::new("a.mp4"), &target, Path::new("b.mp4"), None).unwrap());
+        assert_eq!(
+            args[11],
+            "transpose=1,scale=480:852,pad=480:1920:0:534:color=0x004080,setsar=1:1"
+        );
+        // TUR_USB's darkening comes last, over the pad too.
+        let usb = profile("turing-usb-8.8").transcode_target(ConvertOptions {
+            tone: Tone::Darkened,
+            ..options
+        });
+        let args = strings(&arguments(Path::new("a"), &usb, Path::new("b"), None).unwrap());
+        assert_eq!(
+            args[11],
+            "transpose=1,scale=480:852,pad=480:1920:0:534:color=0x004080,setsar=1:1,eq=brightness=-0.1:contrast=0.9:saturation=1"
+        );
     }
 
     #[test]

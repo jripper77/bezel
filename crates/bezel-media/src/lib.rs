@@ -17,10 +17,17 @@
 //!   kills ffmpeg and deletes the partial output;
 //! - conversion outputs live in a private temporary folder, removed with the
 //!   transcoder; only the latest output is kept;
+//! - a theme video's framing becomes one ffmpeg filter chain, built purely
+//!   from the core's geometry in the vendor's order (turns, crop, scale,
+//!   pad, square pixels), for the conversion and for the poster; the plain
+//!   framing gives today's chains (D-2026-10-01-video-background-framing-3);
 //! - a theme's poster is one picture of a video or an animated GIF, framed
 //!   by the core's `PosterSpec`; animated GIFs are read natively as moving
 //!   pictures, so a GIF can be a video background and is converted for a
-//!   screen like a video.
+//!   screen like a video;
+//! - decoding on the host hands over the raw source picture (never turned or
+//!   cropped, the caller frames it) at most 15 times a second, on two
+//!   decoder threads (D-2026-10-01-video-background-framing-5).
 //!
 //! The adapter decides nothing: whether a file is in a screen's profile is
 //! the core's `UploadProfile::mismatches`.
@@ -33,6 +40,7 @@
 #![warn(missing_docs)]
 
 pub mod archive;
+mod framing;
 mod gif;
 mod mp4;
 mod poster;
@@ -235,9 +243,9 @@ impl MediaTranscoder for FfmpegTranscoder {
 
     fn stream(&mut self, source: &MediaLocation, spec: StreamSpec) -> Result<Box<dyn VideoFrames>> {
         let tools = self.require("Playing a video on the computer")?;
-        stream::check(spec)?;
+        let spec = stream::playable(spec)?;
         let source = existing_file(source)?;
-        let decoder = FfmpegDecoder::new(tools.ffmpeg, stream::arguments(source, spec), spec);
+        let decoder = FfmpegDecoder::new(tools.ffmpeg, stream::arguments(source, spec)?, spec);
         Ok(Box::new(Looping::new(decoder, spec)))
     }
 
@@ -470,9 +478,13 @@ mod tests {
         use std::process::Command;
 
         use bezel_core::domain::catalog::model_by_id;
-        use bezel_core::domain::device::ModelId;
+        use bezel_core::domain::device::{DeviceModel, ModelId};
+        use bezel_core::domain::frame::Rgba;
+        use bezel_core::domain::framing::{PanelLayout, VideoFit, VideoFraming};
+        use bezel_core::domain::geometry::Orientation;
         use bezel_core::domain::media::{
-            ConvertOptions, MediaKind, Tone, UploadProfile, VideoCodec, VideoPixelFormat,
+            ConvertOptions, MediaKind, PREVIEW_FPS, Tone, UploadProfile, VideoCodec,
+            VideoPixelFormat, framed_options,
         };
 
         use super::*;
@@ -654,13 +666,10 @@ mod tests {
             assert!(status.success());
             let gif = MediaLocation(path.to_str().unwrap().to_string());
             assert_eq!(media.probe(&gif).unwrap().format, MediaFormat::Gif);
-            let spec = StreamSpec {
-                size: Size::new(40, 40),
-                fps: 10,
-            };
+            let spec = StreamSpec::raw(Size::new(64, 48), Size::new(40, 40), 10);
             let mut frames = media.stream(&gif, spec).unwrap();
             let first = frames.frame_at(Duration::ZERO).unwrap().clone();
-            assert_eq!(first.size(), Size::new(40, 40));
+            assert_eq!(first.size(), Size::new(64, 48), "the raw picture");
             let later = frames.frame_at(Duration::from_millis(500)).unwrap().clone();
             assert_ne!(first, later);
             // 1 s at 10 fps: 1.2 s is frame 2 of the second pass.
@@ -765,6 +774,202 @@ mod tests {
             assert_eq!(rate.fps().round(), 15.0, "constant 15 fps: {rate:?}");
             let seconds = track.duration.unwrap().as_secs_f64();
             assert!((0.3..1.0).contains(&seconds), "one pass: {seconds} s");
+        }
+
+        /// The pad color of the fitted tests, and lavfi's `red`, `green`
+        /// and `blue`.
+        const RED: [u8; 3] = [200, 30, 40];
+        const RED_PURE: [u8; 3] = [255, 0, 0];
+        const GREEN: [u8; 3] = [0, 128, 0];
+        const BLUE: [u8; 3] = [0, 0, 255];
+
+        /// A video of ffmpeg's filter `graph` (lavfi), in yuv420p.
+        fn painted(dir: &Path, name: &str, graph: &str) -> MediaLocation {
+            let path = dir.join(name);
+            let status = Command::new("ffmpeg")
+                .args(["-v", "error", "-y", "-f", "lavfi", "-i", graph])
+                .args(["-pix_fmt", "yuv420p"])
+                .arg(&path)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            MediaLocation(path.to_str().unwrap().to_string())
+        }
+
+        /// The color of `frame` at (`x`, `y`).
+        fn pixel(frame: &Frame, x: u32, y: u32) -> [u8; 3] {
+            let at = usize::try_from(y * frame.size().width + x).unwrap() * 4;
+            let rgba = &frame.as_rgba()[at..at + 3];
+            [rgba[0], rgba[1], rgba[2]]
+        }
+
+        /// Whether `frame` shows about `color` at (`x`, `y`): yuv420p and
+        /// H.264 move flat colors by a few steps.
+        fn shows(frame: &Frame, x: u32, y: u32, color: [u8; 3]) -> bool {
+            let seen = pixel(frame, x, y);
+            seen.iter().zip(color).all(|(a, b)| a.abs_diff(b) <= 12)
+        }
+
+        fn eight_eight() -> (&'static DeviceModel, Option<PanelLayout>) {
+            let model = model_by_id(ModelId("turing-8.8")).unwrap();
+            (model, Some(PanelLayout::of(model)))
+        }
+
+        #[test]
+        #[ignore = "needs ffmpeg with libx264 on PATH"]
+        fn real_ffmpeg_fits_a_framed_video_on_the_poster_and_the_panel() {
+            let mut media = FfmpegTranscoder::new(None);
+            let dir = tempfile::tempdir().unwrap();
+            let source = painted(
+                dir.path(),
+                "green.mp4",
+                "color=c=green:s=1920x1080:r=30:d=2",
+            );
+            let info = media.probe(&source).unwrap();
+            let (model, panel) = eight_eight();
+            let fitted = VideoFraming {
+                fit: VideoFit::Contain,
+                pad: Rgba::opaque(RED[0], RED[1], RED[2]),
+                ..VideoFraming::default()
+            }
+            .resolve(info.dimensions, Orientation::Landscape, panel);
+            // The poster: 852x480 of picture in the middle of the 1920x480
+            // canvas, the pad color on both sides.
+            let canvas = Size::new(1920, 480);
+            let spec = PosterSpec::framed(canvas, &info, &fitted);
+            let poster = media.poster(&source, spec).unwrap();
+            assert_eq!(poster.size(), canvas);
+            for x in [0, 500, 1420, 1919] {
+                assert!(
+                    shows(&poster, x, 240, RED),
+                    "x={x}: {:?}",
+                    pixel(&poster, x, 240)
+                );
+            }
+            for x in [540, 960, 1380] {
+                assert!(
+                    shows(&poster, x, 240, GREEN),
+                    "x={x}: {:?}",
+                    pixel(&poster, x, 240)
+                );
+            }
+            // The conversion for the 8.8": turned to the 480x1920 panel, the
+            // picture in rows 534..1386, the pad above and below.
+            let options = framed_options(model, Orientation::Landscape, &info, &fitted);
+            let profile = profile("turing-8.8");
+            let token = CancelToken::new();
+            let mut sink = |_: Progress| {};
+            let mut job = quiet_job(&token, &mut sink);
+            let output = media
+                .transcode(&source, &profile.transcode_target(options), &mut job)
+                .unwrap();
+            let converted = media.probe(&output).unwrap();
+            assert_eq!(profile.mismatches(MediaKind::Video, &converted), vec![]);
+            let panel_size = Size::new(480, 1920);
+            let spec = StreamSpec::raw(panel_size, panel_size, 15);
+            let mut frames = media.stream(&output, spec).unwrap();
+            let first = frames.frame_at(Duration::ZERO).unwrap();
+            assert_eq!(first.size(), panel_size);
+            for y in [8, 520, 1400, 1912] {
+                assert!(
+                    shows(first, 240, y, RED),
+                    "y={y}: {:?}",
+                    pixel(first, 240, y)
+                );
+            }
+            for y in [548, 960, 1372] {
+                assert!(
+                    shows(first, 240, y, GREEN),
+                    "y={y}: {:?}",
+                    pixel(first, 240, y)
+                );
+            }
+        }
+
+        #[test]
+        #[ignore = "needs ffmpeg with libx264 on PATH"]
+        fn real_ffmpeg_stands_a_panel_native_video_up_and_decodes_it_raw() {
+            let mut media = FfmpegTranscoder::new(None);
+            let dir = tempfile::tempdir().unwrap();
+            // Like Dragon Ball: a 480x1920 video already turned for the
+            // 8.8", its top red and its bottom blue.
+            let source = painted(
+                dir.path(),
+                "halves.mp4",
+                "color=c=red:s=480x960:r=30:d=1[top];color=c=blue:s=480x960:r=30:d=1[bottom];[top][bottom]vstack",
+            );
+            check_panel_native(&mut media, &source, true);
+            // ffmpeg decodes at most 15 pictures a second: a 1 s pattern at
+            // 30 fps asked for at 30 is a pass of 15 pictures.
+            let moving = generated(dir.path(), "moving.mp4", "480x1920", 1, &[]);
+            let spec = StreamSpec::raw(Size::new(480, 1920), Size::new(1920, 480), 30);
+            let mut frames = media.stream(&moving, spec).unwrap();
+            let first = frames.frame_at(Duration::ZERO).unwrap().clone();
+            let next = frames.frame_at(Duration::from_millis(67)).unwrap().clone();
+            assert_ne!(first, next, "1/15 s later is the next picture");
+            let looped = frames
+                .frame_at(Duration::from_millis(1000))
+                .unwrap()
+                .clone();
+            assert_eq!(looped, first, "15 pictures in the 1 s pass");
+            // The vendor's real file, when its path is given
+            // (`BEZEL_DRAGON_BALL_MP4=.../video/4801920/dragon.mp4`).
+            match std::env::var_os("BEZEL_DRAGON_BALL_MP4") {
+                Some(path) => {
+                    let dragon = MediaLocation(path.to_string_lossy().into_owned());
+                    check_panel_native(&mut media, &dragon, false);
+                }
+                None => eprintln!("BEZEL_DRAGON_BALL_MP4 unset: the vendor's file is not checked"),
+            }
+        }
+
+        /// A panel-native 480x1920 video in a landscape theme on the 8.8":
+        /// Auto turns it 270 degrees on the canvas and not at all on the
+        /// panel (sent as it is), the poster stands it up, and host decoding
+        /// hands over the stored picture as it is.
+        fn check_panel_native(media: &mut FfmpegTranscoder, source: &MediaLocation, halves: bool) {
+            let info = media.probe(source).unwrap();
+            let native = Size::new(480, 1920);
+            assert_eq!(info.dimensions, Some(native));
+            let (model, panel) = eight_eight();
+            let auto =
+                VideoFraming::default().resolve(info.dimensions, Orientation::Landscape, panel);
+            assert_eq!(auto.turns, 3);
+            let options = framed_options(model, Orientation::Landscape, &info, &auto);
+            assert!(options.is_identity(), "{options:?}");
+            let canvas = Size::new(1920, 480);
+            let poster = media
+                .poster(source, PosterSpec::framed(canvas, &info, &auto))
+                .unwrap();
+            assert_eq!(poster.size(), canvas);
+            let spec = StreamSpec::raw(native, canvas, PREVIEW_FPS);
+            assert_eq!(spec.size, native);
+            let mut frames = media.stream(source, spec).unwrap();
+            let first = frames.frame_at(Duration::ZERO).unwrap().clone();
+            assert_eq!(first.size(), native);
+            if halves {
+                // The stored top is the canvas's left.
+                assert!(
+                    shows(&poster, 100, 240, RED_PURE),
+                    "{:?}",
+                    pixel(&poster, 100, 240)
+                );
+                assert!(
+                    shows(&poster, 1800, 240, BLUE),
+                    "{:?}",
+                    pixel(&poster, 1800, 240)
+                );
+                assert!(
+                    shows(&first, 240, 100, RED_PURE),
+                    "{:?}",
+                    pixel(&first, 240, 100)
+                );
+                assert!(
+                    shows(&first, 240, 1800, BLUE),
+                    "{:?}",
+                    pixel(&first, 240, 1800)
+                );
+            }
         }
     }
 }

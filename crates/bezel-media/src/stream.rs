@@ -3,11 +3,16 @@
 //! storage-video-4).
 //!
 //! ffmpeg writes raw RGBA frames of the requested size to a pipe at exactly
-//! `fps` frames per media second (`fps` filter), the picture covering the
-//! frame and cropped to fit. A helper thread reads whole frames into a small
-//! bounded queue, so ffmpeg never runs far ahead of the caller. The caller
-//! owns the clock: frame `n` is shown from `n / fps` seconds on; at the end
-//! of the video ffmpeg is started again and the count wraps.
+//! `fps` frames per media second (`fps` filter), at most [`MAX_FPS`]. Each
+//! frame is the whole source picture scaled to the size, never turned or
+//! cropped: the caller frames it with the core's geometry, so a framing edit
+//! never restarts ffmpeg (D-2026-10-01-video-background-framing-3). The
+//! decoder runs on [`THREADS`] threads, so a preview never takes the whole
+//! machine (D-2026-10-01-video-background-framing-5). A helper thread reads
+//! whole frames into a small bounded queue, so ffmpeg never runs far ahead of
+//! the caller. The caller owns the clock: frame `n` is shown from `n / fps`
+//! seconds on; at the end of the video ffmpeg is started again and the count
+//! wraps.
 
 use std::ffi::OsString;
 use std::io::Read;
@@ -18,46 +23,65 @@ use std::thread;
 use std::time::Duration;
 
 use bezel_core::domain::frame::{Frame, RGBA_BYTES};
-use bezel_core::domain::media::StreamSpec;
+use bezel_core::domain::framing::FramingGeometry;
+use bezel_core::domain::media::{PREVIEW_FPS, StreamSpec};
 use bezel_core::ports::VideoFrames;
 use bezel_core::{BezelError, Result};
 
+use crate::framing::{self, Scaling};
 use crate::process::{self, StderrTail, file_url};
 
 /// Frames decoded ahead of the caller.
 const QUEUE: usize = 2;
 /// Longest wait for ffmpeg's next frame.
 const FRAME_TIMEOUT: Duration = Duration::from_secs(10);
+/// Highest rate frames are decoded at on the host: previews and screens fed
+/// by the host never show more (D-2026-10-01-video-background-framing-5).
+const MAX_FPS: u32 = PREVIEW_FPS;
+/// Threads of ffmpeg's decoder (`-threads`, an input option).
+const THREADS: u32 = 2;
 
-/// ffmpeg's arguments decoding `source` into raw RGBA frames of `spec`.
-pub(crate) fn arguments(source: &Path, spec: StreamSpec) -> Vec<OsString> {
-    let (w, h) = (spec.size.width, spec.size.height);
-    let filters = format!(
-        "fps={},scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1",
-        spec.fps
-    );
-    let mut args: Vec<OsString> = ["-hide_banner", "-nostdin", "-nostats", "-v", "error", "-i"]
-        .iter()
-        .map(OsString::from)
-        .collect();
+/// ffmpeg's arguments decoding `source` into raw RGBA frames of `spec`
+/// ([`playable`]): the raw picture scaled to the size, no turn, no crop.
+pub(crate) fn arguments(source: &Path, spec: StreamSpec) -> Result<Vec<OsString>> {
+    let raw = framing::filter_chain(&FramingGeometry::turning(0, spec.size), Scaling::Exact)?;
+    let filters = format!("fps={},{raw}", spec.fps);
+    let threads = THREADS.to_string();
+    let mut args: Vec<OsString> = [
+        "-hide_banner",
+        "-nostdin",
+        "-nostats",
+        "-v",
+        "error",
+        "-threads",
+        &threads,
+        "-i",
+    ]
+    .iter()
+    .map(OsString::from)
+    .collect();
     args.push(file_url(source));
     for word in [
         "-an", "-sn", "-dn", "-vf", &filters, "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1",
     ] {
         args.push(word.into());
     }
-    args
+    Ok(args)
 }
 
-/// A spec frames can be produced for.
-pub(crate) fn check(spec: StreamSpec) -> Result<()> {
+/// The spec frames are produced for: `spec` at most [`MAX_FPS`]. An empty
+/// size or no rate is refused.
+pub(crate) fn playable(spec: StreamSpec) -> Result<StreamSpec> {
     if spec.fps == 0 || spec.size.area() == 0 {
         return Err(BezelError::InvalidInput(format!(
             "cannot decode into {}x{} at {} fps",
             spec.size.width, spec.size.height, spec.fps
         )));
     }
-    Ok(())
+    Ok(StreamSpec {
+        fps: spec.fps.min(MAX_FPS),
+        ..spec
+    })
 }
 
 /// One pass over a video, frame by frame.
@@ -364,30 +388,38 @@ mod tests {
     }
 
     #[test]
-    fn arguments_cover_crop_to_the_spec() {
-        let spec = StreamSpec {
-            size: Size::new(1920, 480),
-            fps: 24,
+    fn preview_decoding_is_raw_at_most_15_fps() {
+        // Dragon Ball's pre-turned 480x1920 video under a 1920x480 canvas:
+        // decoded as it is stored, never turned or cropped, 15 fps at most,
+        // on two decoder threads.
+        let canvas = Size::new(1920, 480);
+        let asked = StreamSpec::raw(Size::new(480, 1920), canvas, 30);
+        let spec = playable(asked).unwrap();
+        assert_eq!((spec.size, spec.fps), (Size::new(480, 1920), 15));
+        let words = |source: &Path, spec| -> Vec<String> {
+            arguments(source, spec)
+                .unwrap()
+                .iter()
+                .map(|a| a.to_str().unwrap().to_string())
+                .collect()
         };
-        let args: Vec<String> = arguments(Path::new("/v/clip.gif"), spec)
-            .iter()
-            .map(|a| a.to_str().unwrap().to_string())
-            .collect();
         assert_eq!(
-            args,
+            words(Path::new("/v/dragon.mp4"), spec),
             [
                 "-hide_banner",
                 "-nostdin",
                 "-nostats",
                 "-v",
                 "error",
+                "-threads",
+                "2",
                 "-i",
-                "file:/v/clip.gif",
+                "file:/v/dragon.mp4",
                 "-an",
                 "-sn",
                 "-dn",
                 "-vf",
-                "fps=24,scale=1920:480:force_original_aspect_ratio=increase,crop=1920:480,setsar=1",
+                "fps=15,scale=480:1920,setsar=1:1",
                 "-pix_fmt",
                 "rgba",
                 "-f",
@@ -395,13 +427,36 @@ mod tests {
                 "pipe:1",
             ]
         );
-        assert!(check(spec).is_ok());
-        assert!(check(StreamSpec { fps: 0, ..spec }).is_err());
+        // The preview's own rate and a host's slower one are kept; a large
+        // source is only scaled down, in its own shape.
+        let preview = StreamSpec::raw(Size::new(480, 1920), canvas, PREVIEW_FPS);
+        assert_eq!(playable(preview).unwrap(), preview);
+        let host = StreamSpec::raw(Size::new(7680, 4320), canvas, 10);
+        let args = words(Path::new("a.mkv"), playable(host).unwrap());
+        assert_eq!(args[13], "fps=10,scale=3840:2160,setsar=1:1");
+        // A Windows path is one argument, behind `file:` (never an option
+        // or a protocol, spaces and drive letter kept).
+        let windows = Path::new(r"C:\Users\Ana\Videos\Dragon Ball.mp4");
+        let args = words(windows, spec);
+        assert_eq!(args[8], r"file:C:\Users\Ana\Videos\Dragon Ball.mp4");
+        assert_eq!(args.len(), 19);
+        // Nothing to decode into, or no rate: refused.
+        assert!(playable(StreamSpec { fps: 0, ..spec }).is_err());
         assert!(
-            check(StreamSpec {
+            playable(StreamSpec {
                 size: Size::new(0, 4),
                 fps: 1
             })
+            .is_err()
+        );
+        assert!(
+            arguments(
+                Path::new("a"),
+                StreamSpec {
+                    size: Size::new(4, 0),
+                    fps: 1
+                }
+            )
             .is_err()
         );
     }

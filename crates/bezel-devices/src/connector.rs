@@ -1241,17 +1241,25 @@ mod tests {
         assert!(this.ends_with(&me), "{this} is not {me}");
         assert!(others.is_empty());
         // D-2026-10-01-live-screen-controls-4 through the host's `open`, the
-        // entry of `open_serial` and `open_rev_c`: the open fails as busy (a
-        // file is no tty, so serialport's exclusive lock refuses it) and is
-        // `InUse` naming this process. The rev C connection stops there, with
-        // no pause: no wait for the display to leave and no wake of its MCU
-        // (a path that does not exist; each poke is followed by a pause).
+        // entry of `open_serial` (every serial family without an MCU) and
+        // `open_rev_c`: the open fails (a plain file is no tty, so
+        // serialport's `TIOCEXCL` fails with ENOTTY, "Not a typewriter"; a
+        // real tty this process holds refuses with EBUSY, see
+        // `wire::tests::a_port_the_wire_holds_refuses_a_second_open`), and a
+        // `Transport` refusal of a port this process holds is `InUse` naming
+        // it. The rev C connection stops there, with no pause: no wait for
+        // the display to leave and no wake of its MCU (a path that does not
+        // exist; each poke is followed by a pause).
         let in_use = BezelError::InUse {
             address: address.into(),
             holders: vec![this],
         };
         assert_eq!(
             SystemPorts.open(&held, Flow::None).err(),
+            Some(in_use.clone())
+        );
+        assert_eq!(
+            open_serial(&held, Flow::Hardware).err(),
             Some(in_use.clone())
         );
         let no_mcu =

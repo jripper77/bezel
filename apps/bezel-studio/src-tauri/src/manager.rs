@@ -13,9 +13,9 @@
 //! read or made from the copies alone with a converter of their own, so they
 //! never wait for a running job.
 //!
-//! A plan waits here under a ticket for the user's one confirmation; running
-//! it is the confirmation (`run_plan` takes no other answer). Any other job
-//! that may change the screen meanwhile makes the ticket stale.
+//! A plan waits here under a ticket for the user's one confirmation, which
+//! `run_plan` passes on to the core as its `Confirm`. Any other job that may
+//! change the screen meanwhile makes the ticket stale.
 
 mod dto;
 mod originals;

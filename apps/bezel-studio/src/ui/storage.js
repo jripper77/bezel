@@ -340,7 +340,8 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     const first = plan.steps[0];
     startJob({ kind: 'plan', transfer: plan.transfer, name: baseName(first.source), step: { index: 0, count: plan.steps.length, source: first.source, target: first.target } });
     try {
-      view.notice = { kind: 'report', report: await bridge.runPlan(plan.ticket) };
+      // Only the confirmation's OK leads here.
+      view.notice = { kind: 'report', report: await bridge.runPlan(plan.ticket, true) };
     } catch (e) {
       view.notice = errorNotice(e);
     }

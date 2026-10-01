@@ -658,16 +658,19 @@ pub async fn plan_restore(
     plan(state, screen, Ask::Restore { ids, to }, overwrite).await
 }
 
-/// Runs the plan the user confirmed; progress goes out as
-/// [`PROGRESS_EVENT`], Cancel is `cancel_job`.
+/// Runs the plan the user confirmed; `confirmed` comes from the dialog that
+/// listed every file. Progress goes out as [`PROGRESS_EVENT`], Cancel is
+/// `cancel_job`.
 #[tauri::command]
 pub async fn run_plan<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, Shared>,
     ticket: u64,
+    confirmed: bool,
 ) -> UiResult<TransferReportDto> {
     blocking(&state, move |b| {
-        b.run_plan(ticket, now(), &mut |p| emit_progress(&app, p))
+        let confirm = confirm_of(confirmed);
+        b.run_plan(ticket, confirm, now(), &mut |p| emit_progress(&app, p))
     })
     .await
 }

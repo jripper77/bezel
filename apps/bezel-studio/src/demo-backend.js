@@ -707,12 +707,21 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       const room = { free: capacity(to).free, cap: capOf(key) };
       return Promise.resolve(keepPlan(key, demoPlanRestore(planView(key), chosenEntries, to, room, overwrite)));
     },
-    /** Runs a confirmed plan one file at a time; the report says what was done, failed and never started. */
-    runPlan: (ticket) => {
+    /**
+     * Runs a plan one file at a time once its dialog was confirmed (`confirmed`; without it nothing
+     * runs); the report says what was done, failed and never started.
+     */
+    runPlan: (ticket, confirmed) => {
       const held = plans.get(ticket);
       if (!held) return refuse('stale', 'this operation is no longer prepared');
       plans.delete(ticket);
       if (job) return refuse('busy', 'a storage operation is using the screen');
+      if (!confirmed) {
+        const verb = { move: 'moving', copy: 'copying', rename: 'renaming', restore: 'restoring' }[held.plan.transfer];
+        const count = held.plan.steps.length;
+        const detail = `${verb} ${count} file${count === 1 ? '' : 's'}`;
+        return refuse('notConfirmed', `${detail} needs confirmation`, { detail });
+      }
       return asJob(() => runPlanSteps(held.key, held.plan));
     },
     /** Deletes the confirmed files one by one (the cleanup's list, or a selection). */

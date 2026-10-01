@@ -222,8 +222,11 @@ function tauriBridge(invoke, tauri = {}) {
     planRename: (screen, path, newName, overwrite = []) => invoke('plan_rename', { screen, path, newName, overwrite }),
     /** `ids`: `RestorableDto.id`s. @returns {Promise<PlanReadyDto|PlanRefusedDto>} */
     planRestore: (screen, ids, to, overwrite = []) => invoke('plan_restore', { screen, ids, to, overwrite }),
-    /** Runs a confirmed plan; progress comes as `storage-progress`, Cancel is `cancelJob`. @returns {Promise<TransferReportDto>} */
-    runPlan: (ticket) => invoke('run_plan', { ticket }),
+    /**
+     * Runs a plan; `confirmed` is the answer to the dialog that listed every file (without it nothing runs).
+     * Progress comes as `storage-progress`, Cancel is `cancelJob`. @returns {Promise<TransferReportDto>}
+     */
+    runPlan: (ticket, confirmed) => invoke('run_plan', { ticket, confirmed }),
     /** Deletes the confirmed files one by one (a cleanup or a selection). @returns {Promise<DeleteReportDto>} */
     deleteFiles: (screen, paths, confirmed) => invoke('delete_files', { screen, paths, confirmed }),
     /** Originals chosen on the PC: files, or one folder (`folder`); `[]` when cancelled. @returns {Promise<string[]>} */

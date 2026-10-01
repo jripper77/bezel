@@ -282,7 +282,7 @@ test('a move sends the copy, checks it, and only then deletes the source', async
   assert.deepEqual(plan.warnings, [{ code: 'bootMedia', path: 'internal/video/earth.mp4' }]);
   assert.equal('content' in plan.steps[0], false, 'no content ids reach the UI');
   assert.equal(plan.bytes, 2_516_582 + 3_040_870);
-  const report = await demo.runPlan(plan.ticket);
+  const report = await demo.runPlan(plan.ticket, true);
   assert.deepEqual([report.done.length, report.failed, report.cancelled, report.notStarted], [2, null, null, []]);
   // The source is there through the upload and the check; it goes in the last phase.
   for (const [phase, , source, target, total] of seen) {
@@ -296,13 +296,25 @@ test('a move sends the copy, checks it, and only then deletes the source', async
   const moved = state.catalog.find((e) => e.path === 'sd/video/earth.mp4');
   assert.deepEqual([moved.state, moved.card, moved.source], ['stored', 31_890_132_172, '/home/demo/Vídeos/earth.mp4']);
   assert.equal(state.catalog.some((e) => e.path === 'internal/video/earth.mp4'), false);
-  await assert.rejects(demo.runPlan(plan.ticket), (e) => e.code === 'stale');
+  await assert.rejects(demo.runPlan(plan.ticket, true), (e) => e.code === 'stale');
+});
+
+test('a plan runs only with the dialog\'s confirmation, like the app', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  const before = new Map(demo.storageState().files);
+  let progress = 0;
+  demo.onJobProgress(() => { progress += 1; });
+  const plan = await demo.planMove(KEY, ['internal/video/earth.mp4', 'internal/video/aniya.mp4'], 'sd');
+  await assert.rejects(demo.runPlan(plan.ticket, false), (e) => e.code === 'notConfirmed' && e.args.detail === 'moving 2 files');
+  assert.deepEqual(demo.storageState().files, before, 'nothing sent, nothing deleted');
+  assert.equal(progress, 0);
+  await assert.rejects(demo.runPlan(plan.ticket, true), (e) => e.code === 'stale', 'the plan is used up, as in the app');
 });
 
 test('a cancelled or failed move keeps its source and stops the batch', async () => {
   const demo = createDemoBackend('vendorCard', instant, { hold: true });
   const plan = await demo.planMove(KEY, ['internal/video/earth.mp4', 'internal/video/aniya.mp4'], 'sd');
-  const running = demo.runPlan(plan.ticket);
+  const running = demo.runPlan(plan.ticket, true);
   await settle();
   // Held in the middle of the first upload: both there, then cancelled.
   assert.ok(demo.storageState().files.has('internal/video/earth.mp4'));
@@ -325,7 +337,7 @@ test('a cancelled or failed move keeps its source and stops the batch', async ()
   // A screen that hangs: the first file fails with the reason, the rest never starts.
   const hung = createDemoBackend('hung', instant);
   const failing = await hung.planMove(KEY, ['internal/image/logo.png', 'internal/video/amd_90.mp4'], 'sd');
-  const failed = await hung.runPlan(failing.ticket);
+  const failed = await hung.runPlan(failing.ticket, true);
   assert.equal(failed.failed.error.code, 'hung');
   assert.equal(failed.failed.refusal, null);
   assert.equal(failed.notStarted.length, 1);
@@ -335,21 +347,21 @@ test('a cancelled or failed move keeps its source and stops the batch', async ()
 test('a copy keeps the source, a rename takes the new name, a restore sends from the copies', async () => {
   const demo = createDemoBackend('vendorCard', instant);
   const copy = await demo.planCopy(KEY, ['internal/video/dragon.mp4'], 'sd');
-  assert.equal((await demo.runPlan(copy.ticket)).done.length, 1);
+  assert.equal((await demo.runPlan(copy.ticket, true)).done.length, 1);
   assert.ok(demo.storageState().files.has('internal/video/dragon.mp4'));
   assert.ok(demo.storageState().files.has('sd/video/dragon.mp4'));
 
   const refused = await demo.planRename(KEY, 'internal/video/jyanme.mp4', 'jyanme.mov');
   assert.deepEqual([refused.status, refused.code, refused.args], ['refused', 'extensionChanged', { expected: 'mp4' }]);
   const rename = await demo.planRename(KEY, 'internal/video/jyanme.mp4', 'Jyanme_2.mp4');
-  assert.equal((await demo.runPlan(rename.ticket)).transfer, 'rename');
+  assert.equal((await demo.runPlan(rename.ticket, true)).transfer, 'rename');
   assert.ok(demo.storageState().files.has('internal/video/jyanme_2.mp4'));
   assert.ok(!demo.storageState().files.has('internal/video/jyanme.mp4'));
 
   const { restorable } = await demo.managerOverview(KEY);
   const restore = await demo.planRestore(KEY, restorable.map((r) => r.id), 'sd');
   assert.deepEqual(restore.steps.map((s) => s.target), ['sd/image/foto.png', 'sd/video/relogio.mp4'], 'oldest first');
-  assert.equal((await demo.runPlan(restore.ticket)).done.length, 2);
+  assert.equal((await demo.runPlan(restore.ticket, true)).done.length, 2);
   const after = await demo.managerOverview(KEY);
   assert.deepEqual(after.restorable.map((r) => r.name), ['foto.png'], 'the other card\'s entry stays for it');
   assert.equal(after.files.find((f) => f.name === 'relogio.mp4').entry.state, 'stored');

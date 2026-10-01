@@ -82,7 +82,9 @@ fn plan_of(f: &Fixture, ask: &Ask) -> UiResult<PlanDto> {
 
 fn run(f: &Fixture, ticket: u64) -> (UiResult<TransferReportDto>, Vec<ProgressDto>) {
     let mut seen = Vec::new();
-    let report = f.backend.run_plan(ticket, TIME, &mut |p| seen.push(p));
+    let report = f
+        .backend
+        .run_plan(ticket, Confirm::Yes, TIME, &mut |p| seen.push(p));
     (report, seen)
 }
 
@@ -237,12 +239,14 @@ fn a_move_reports_by_code() {
     let before = f.writes().len();
     let mut busy = None;
     let mut seen = Vec::new();
-    let report = f.backend.run_plan(ready.ticket, TIME, &mut |p| {
-        if busy.is_none() {
-            busy = Some(f.backend.cache_info().unwrap_err().code());
-        }
-        seen.push(p);
-    });
+    let report = f
+        .backend
+        .run_plan(ready.ticket, Confirm::Yes, TIME, &mut |p| {
+            if busy.is_none() {
+                busy = Some(f.backend.cache_info().unwrap_err().code());
+            }
+            seen.push(p);
+        });
     let report = report.unwrap();
     assert_eq!(busy, Some("busy"), "one storage operation at a time");
     assert_eq!(report.done.len(), 2);
@@ -291,12 +295,14 @@ fn a_move_reports_by_code() {
     let back = ready_back(&f);
     let (report, _) = {
         let mut seen = Vec::new();
-        let report = f.backend.run_plan(back.ticket, TIME, &mut |p| {
-            if p.phase == "upload" && p.done > 0 {
-                assert!(f.backend.cancel_job());
-            }
-            seen.push(p);
-        });
+        let report = f
+            .backend
+            .run_plan(back.ticket, Confirm::Yes, TIME, &mut |p| {
+                if p.phase == "upload" && p.done > 0 {
+                    assert!(f.backend.cancel_job());
+                }
+                seen.push(p);
+            });
         (report.unwrap(), seen)
     };
     let cancelled = report.cancelled.clone().unwrap();
@@ -346,6 +352,34 @@ fn a_move_reports_by_code() {
 fn ready_back(f: &Fixture) -> PlanReadyDto {
     let paths = ["sd/video/native-a.mp4", "sd/video/native-b.mp4"];
     ready_plan(plan_of(f, &ask_move(&paths, "internal")))
+}
+
+#[test]
+fn a_plan_runs_only_with_the_dialogs_confirmation() {
+    let f = card("unconfirmed");
+    let a = send(&f, "native-a.mp4", 700, "internal");
+    let ready = ready_plan(plan_of(&f, &ask_move(&[&a], "sd")));
+    let calls = f.storage().calls.len();
+    let files = f.storage().files.clone();
+
+    let err = f
+        .backend
+        .run_plan(ready.ticket, Confirm::No, TIME, &mut |_| {
+            panic!("no progress")
+        })
+        .unwrap_err();
+    assert_eq!(err.code(), "notConfirmed");
+    assert_eq!(
+        f.storage().calls.len(),
+        calls,
+        "the screen was not even asked"
+    );
+    assert_eq!(f.storage().files, files, "nothing sent, nothing deleted");
+    assert_eq!(
+        record(&f).entries[0].path.to_string(),
+        a,
+        "the catalog is as it was"
+    );
 }
 
 #[test]
@@ -761,7 +795,7 @@ fn turing_usb_screens_never_delete_move_or_clean_up() {
     );
     let err = f
         .backend
-        .run_plan(moved.ticket, TIME, &mut |_| {})
+        .run_plan(moved.ticket, Confirm::Yes, TIME, &mut |_| {})
         .unwrap_err();
     assert_eq!(err.code(), "unsupported");
     let err = f
@@ -788,7 +822,10 @@ fn turing_usb_screens_never_delete_move_or_clean_up() {
         to: "sd".into(),
     };
     let copy = ready_plan(f.backend.plan_transfer(USB, &copy, &[], TIME));
-    let report = f.backend.run_plan(copy.ticket, TIME, &mut |_| {}).unwrap();
+    let report = f
+        .backend
+        .run_plan(copy.ticket, Confirm::Yes, TIME, &mut |_| {})
+        .unwrap();
     assert_eq!(report.done[0].target, "sd/image/logo.png");
     assert!(f.storage().files.contains_key(&remote_path(&sent)));
 }

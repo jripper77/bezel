@@ -218,12 +218,15 @@ impl Backend {
     /// Runs the plan `ticket` the user confirmed, one file at a time
     /// (preflight, upload of the copy, size check, then the source's delete
     /// for a move or rename), reporting each file's progress; Cancel is
-    /// [`Self::cancel_job`]. The report says what was done, what stopped the
+    /// [`Self::cancel_job`]. `confirm` is the answer to the dialog that
+    /// listed every file: with `Confirm::No` the core refuses before it
+    /// calls the screen. The report says what was done, what stopped the
     /// run and why, and what never started. `stale` when the plan was run,
     /// replaced, or another job changed the screen since.
     pub fn run_plan(
         &self,
         ticket: u64,
+        confirm: Confirm,
         time: LocalTime,
         progress: &mut dyn FnMut(ProgressDto),
     ) -> UiResult<TransferReportDto> {
@@ -244,7 +247,7 @@ impl Backend {
                 let mut sink = |step: StepProgress| relay.report(step);
                 let mut batch = Batch::new(&token, &mut sink);
                 desk.manager()
-                    .run(&pending.plan, Confirm::Yes, sent_at, &mut batch)
+                    .run(&pending.plan, confirm, sent_at, &mut batch)
             };
             if let Ok(report) = &report {
                 relay.finish(report);

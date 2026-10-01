@@ -84,7 +84,7 @@ Gerenciar os arquivos da memória interna e do cartão SD da tela no studio e na
 - **Acceptance:** en e pt-BR: cópias locais e onde ficam, limite e "Limpar cache", mover/renomear/restaurar (só apaga após conferir), limpeza (nada sem confirmar), TUR_USB; `check-docs.sh` exige `bezel storage mv`, `cleanup --dry-run`, `cache clear`; CHANGELOG `[Unreleased]`.
 - **Dependencies:** T-5, T-6
 - **Test:** `bash scripts/ci/check-docs.sh`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5
 

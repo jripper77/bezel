@@ -10,7 +10,7 @@ import {
   CACHE_LIMITS, FINDING_CODES, KIND_FILTERS, ORIGIN_FILTERS, PLAN_REFUSALS, SKIP_CODES, SORTS, TRANSFERS, WARNING_CODES, actionsFor,
   cleanupGroups, compareFiles, emptySelection, findingText, formatExactBytes, formatLimit, formatSent, hasCopy, isBezel, keyAction,
   matchesFilter, otherMedium, placeText, planRefusalText, planTotals, precheckedPaths, reduceSelection, renamePreview, reportLines,
-  restorableFor, restoreTotals, selectionInfo, skipText, stepText, visibleFiles, warningText,
+  restorableFor, restoreDefaults, restoreTotals, selectionInfo, skipText, stepText, visibleFiles, warningText,
 } from '../../src/storage-manager.js';
 import {
   DEMO_HANG_PARTIAL, demoArtifactBase, demoExtension, demoFindings, demoForUpload, demoPlanAcross, demoPlanRename, demoPlanRestore, demoRank,
@@ -37,7 +37,8 @@ test('every code of the core has a sentence in each language, with the same para
     ...KIND_FILTERS.map((v) => `storage.filter.kind.${v}`),
     ...ORIGIN_FILTERS.map((v) => `storage.filter.origin.${v}`),
     ...SORTS.map((v) => `storage.filter.sort.${v}`),
-    ...['pending', 'stored', 'missing'].map((s) => `storage.state.${s}`),
+    ...['pending', 'stored', 'missing', 'deleted'].map((s) => `storage.state.${s}`),
+    'storage.restore.deletedTitle', 'storage.restore.deletedHelp',
   ];
   for (const key of keys) {
     for (const [locale, table] of Object.entries(LOCALES)) assert.ok(key in table, `${locale}: ${key}`);
@@ -257,6 +258,18 @@ test('a restore offers what is missing or on another card, and checks the free s
   assert.deepEqual(restoreTotals(restorable, ['a', 'b'], 10_000_000), { count: 2, bytes: 6_803_456, fits: true });
   assert.equal(restoreTotals(restorable, ['a', 'b'], 6_803_456).fits, false, 'each upload needs less than the free space');
   assert.deepEqual(restoreTotals(restorable, [], 0), { count: 0, bytes: 0, fits: true });
+});
+
+test('a restore offers files deleted through Bezel too, unchecked', () => {
+  const entries = [
+    { id: 'missing', medium: 'sd', size: 1, localCopy: true, state: 'missing', otherCard: false },
+    { id: 'other', medium: 'sd', size: 1, localCopy: true, state: 'stored', otherCard: true },
+    { id: 'cleared', medium: 'sd', size: 1, localCopy: false, state: 'missing', otherCard: false },
+    { id: 'deleted', medium: 'sd', size: 1, localCopy: true, state: 'deleted', otherCard: false },
+  ];
+  assert.deepEqual(restorableFor(entries, 'sd').map((e) => e.id), ['missing', 'other', 'cleared', 'deleted'], 'offered');
+  assert.deepEqual(restoreDefaults(entries), ['missing', 'other'], 'checked at first: never a deleted one, nor one without a copy');
+  for (const t of [pt, en]) assert.notEqual(t('storage.state.deleted'), 'storage.state.deleted');
 });
 
 // ------------------------------------------------ the demo's core rules --

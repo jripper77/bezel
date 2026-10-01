@@ -441,6 +441,72 @@ fn a_plan_runs_only_with_the_dialogs_confirmation() {
 }
 
 #[test]
+fn files_deleted_through_bezel_are_restorable_on_request() {
+    let f = card("restore-deleted");
+    let a = send(&f, "native-a.mp4", 700, "internal");
+    let b = send(&f, "native-b.mp4", 600, "sd");
+    send(&f, "native-c.mp4", 500, "internal");
+    f.backend
+        .delete_stored(KEY, &a, Confirm::Yes, TIME)
+        .unwrap();
+    f.backend
+        .delete_files(
+            KEY,
+            &[confirmed(&b, Some(600))],
+            Confirm::Yes,
+            TIME,
+            &mut |_| {},
+        )
+        .unwrap();
+
+    // Offered after what is missing, as deleted, with their copies.
+    let offered = f.backend.manager_overview(KEY, TIME).unwrap().restorable;
+    let rows: Vec<(&str, &str, bool, bool)> = offered
+        .iter()
+        .map(|r| (r.file.path.as_str(), r.state, r.local_copy, r.other_card))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (a.as_str(), "deleted", true, false),
+            (b.as_str(), "deleted", true, false)
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(&offered[0]).unwrap()["state"],
+        "deleted"
+    );
+
+    // Chosen, it is sent again from its copy; nothing is deleted.
+    let restore = Ask::Restore {
+        ids: vec![offered[0].id.clone()],
+        to: "internal".into(),
+    };
+    let ready = ready_plan(plan_of(&f, &restore));
+    assert_eq!(ready.steps.len(), 1);
+    let before = f.writes().len();
+    let report = run(&f, ready.ticket).0.unwrap();
+    assert_eq!(report.done[0].target, a);
+    assert_eq!(f.storage().files[&remote_path(&a)], local_bytes(700));
+    assert!(
+        f.writes()[before..]
+            .iter()
+            .all(|c| !matches!(c, StorageCall::Delete(_)))
+    );
+    let entry = record(&f)
+        .entries
+        .into_iter()
+        .find(|e| e.path.to_string() == a)
+        .unwrap();
+    assert_eq!(entry.state, EntryState::Stored);
+
+    // Without its copy (the cache cleared) a deleted file is not offered.
+    f.backend.clear_cache("deleted", Confirm::Yes).unwrap();
+    let offered = f.backend.manager_overview(KEY, TIME).unwrap().restorable;
+    assert!(offered.is_empty(), "{offered:?}");
+}
+
+#[test]
 fn a_plan_runs_once_and_goes_stale_when_the_screen_changes() {
     let f = card("stale");
     let a = send(&f, "native-a.mp4", 700, "internal");

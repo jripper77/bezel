@@ -239,8 +239,10 @@ do enviado há mais tempo ao mais recente, cada um conferido; **Cancelar** e
 falhas funcionam como ao mover.
 
 No aplicativo, **Restaurar…** (com quantos arquivos) aparece acima de uma lista
-quando arquivos que o Bezel enviou para lá sumiram ou estão em outro cartão;
-escolha os arquivos, **Continuar…** e então **Restaurar**. Pela linha de
+quando arquivos que o Bezel enviou para lá sumiram, estão em outro cartão ou
+foram apagados pelo Bezel e as cópias locais continuam guardadas. Os que sumiram
+já vêm marcados; os apagados aparecem em *Apagados pelo Bezel*, desmarcados.
+Escolha os arquivos, **Continuar…** e então **Restaurar**. Pela linha de
 comando:
 
 ```bash

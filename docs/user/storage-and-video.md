@@ -226,8 +226,10 @@ time, the oldest sent first, each one checked; **Cancel** and failures behave as
 in a move.
 
 In the app, **Restore…** (with how many files) appears above a list when files
-Bezel sent there are missing or are on another card; choose the files,
-**Continue…**, then **Restore**. On the command line:
+Bezel sent there are missing or are on another card, or were deleted through
+Bezel and their local copies are kept. The missing ones come checked; the
+deleted ones are listed under *Deleted through Bezel*, unchecked. Choose the
+files, **Continue…**, then **Restore**. On the command line:
 
 ```bash
 bezel storage restore sd                     # the files Bezel sent to the card that are missing

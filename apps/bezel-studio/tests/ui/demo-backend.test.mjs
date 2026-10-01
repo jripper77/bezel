@@ -373,6 +373,41 @@ test('a copy keeps the source, a rename takes the new name, a restore sends from
   await assert.rejects(demo.planRestore(KEY, [], 'usb'), (e) => e.code === 'unknownMedium' && e.args.medium === 'usb');
 });
 
+test('a file deleted through Bezel is restorable from its copy, on request', async () => {
+  const demo = createDemoBackend('vendorCard', instant);
+  await demo.deleteFiles(KEY, listed(demo, ['internal/video/aniya.mp4']), true);
+  const { restorable } = await demo.managerOverview(KEY);
+  const aniya = restorable.find((r) => r.path === 'internal/video/aniya.mp4');
+  assert.deepEqual([aniya.state, aniya.localCopy, aniya.otherCard, aniya.id], ['deleted', true, false, 'internal/video/aniya.mp4@']);
+  assert.equal(restorable.at(-1), aniya, 'after what is missing');
+  const plan = await demo.planRestore(KEY, [aniya.id], 'internal');
+  assert.deepEqual(plan.steps.map((s) => s.target), ['internal/video/aniya.mp4']);
+  const report = await demo.runPlan(plan.ticket, true);
+  assert.deepEqual([report.status, report.done.length], ['ran', 1]);
+  assert.equal(demo.storageState().files.get('internal/video/aniya.mp4'), 3_040_870);
+  assert.equal(demo.storageState().catalog.find((e) => e.path === 'internal/video/aniya.mp4').state, 'stored');
+  assert.equal((await demo.managerOverview(KEY)).restorable.some((r) => r.path === 'internal/video/aniya.mp4'), false);
+  // Without its copy it is not offered.
+  await demo.deleteFiles(KEY, listed(demo, ['internal/video/aniya.mp4']), true);
+  await demo.clearCache('deleted', true);
+  assert.equal((await demo.managerOverview(KEY)).restorable.some((r) => r.path === 'internal/video/aniya.mp4'), false);
+});
+
+test('a restore that no longer fits when it runs is refused by code, nothing sent', async () => {
+  // 32 MB of internal memory: one copy of the 18.9 MB video fits, two do not.
+  const demo = createDemoBackend('noffmpeg', instant);
+  await demo.deleteFiles(KEY, listed(demo, ['internal/video/amd_90.mp4']), true);
+  const [amd] = (await demo.managerOverview(KEY)).restorable;
+  const first = await demo.planRestore(KEY, [amd.id], 'internal');
+  const second = await demo.planRestore(KEY, [amd.id], 'internal');
+  assert.equal((await demo.runPlan(first.ticket, true)).done.length, 1);
+  const before = new Map(demo.storageState().files);
+  const refused = await demo.runPlan(second.ticket, true);
+  assert.deepEqual([refused.status, refused.code, refused.args.needed], ['refused', 'noSpace', 18_874_368]);
+  assert.ok(refused.args.free < refused.args.needed);
+  assert.deepEqual(demo.storageState().files, before);
+});
+
 test('batch deletes go one by one, are reported and count against the cache limit', async () => {
   const demo = createDemoBackend('vendorCard', instant);
   await assert.rejects(demo.deleteFiles(KEY, listed(demo, ['sd/video/bezel_test_cancel.mp4']), false), (e) => e.code === 'notConfirmed');

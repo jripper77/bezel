@@ -258,6 +258,30 @@ test('storage manager renames and restores from the local copies', async ({ page
   await expect(option(card, 'relogio.mp4')).toHaveCount(1);
   await expect(option(card, 'foto.png')).toHaveCount(1);
   await expect(card.getByRole('button', { name: t('storage.restore.open', { count: 2 }) })).toHaveCount(0);
+
+  // A file deleted through Bezel: the restore of its side offers it from
+  // the local copy, labelled and unchecked until the user checks it.
+  await option(internal, 'aniya.mp4').click();
+  await internal.getByRole('button', { name: t('storage.action.delete') }).click();
+  const confirmDelete = page.getByRole('dialog', { name: t('storage.confirmDeleteTitle', { name: 'aniya.mp4' }) });
+  await confirmDelete.getByRole('button', { name: t('storage.deleteAction'), exact: true }).click();
+  await expect(option(internal, 'aniya.mp4')).toHaveCount(0);
+  await internal.getByRole('button', { name: t('storage.restore.open', { count: 1 }) }).click();
+  const back = page.getByRole('dialog', { name: t('storage.restore.title', { to: t('storage.to.internal') }) });
+  const deleted = back.getByRole('region', { name: t('storage.restore.deletedTitle') });
+  await expect(deleted).toContainText(t('storage.state.deleted'));
+  await expect(deleted.getByRole('checkbox')).not.toBeChecked();
+  const next = back.getByRole('button', { name: t('storage.restore.next') });
+  await expect(next).toBeDisabled();
+  await deleted.getByRole('checkbox').check();
+  await expectAccessible(page);
+  await next.click();
+  const confirmBack = page.getByRole('dialog', { name: t('storage.plan.title.restore', { to: t('storage.to.internal') }) });
+  await expect(confirmBack.getByRole('list', { name: t('storage.plan.stepsLabel') }).getByRole('listitem')).toHaveCount(1);
+  await confirmBack.getByRole('button', { name: t('storage.plan.action.restore'), exact: true }).click();
+  await letGo(page);
+  await expect(page.getByRole('region', { name: t('storage.report.finished') })).toContainText(t('storage.report.done.restore', { count: 1 }));
+  await expect(option(internal, 'aniya.mp4')).toHaveCount(1);
   expect(errors).toEqual([]);
 });
 

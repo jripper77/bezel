@@ -32,13 +32,15 @@ use std::collections::BTreeMap;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use bezel_core::app::manager::{self, Cleared, Inventory, Manager};
-use bezel_core::domain::archive::{ArchiveEntry, Catalog, Clear, ContentId, Deletes, TransferPlan};
+use bezel_core::domain::archive::{
+    ArchiveEntry, Catalog, Clear, ContentId, Deletes, EntryState, TransferPlan,
+};
 use bezel_core::domain::cleanup::{Finding, Protected};
 use bezel_core::domain::clock::LocalTime;
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::media::UploadProfile;
 use bezel_core::domain::screen::Confirm;
-use bezel_core::domain::storage::RemotePath;
+use bezel_core::domain::storage::{Medium, RemotePath};
 use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::{ArchiveStore, MediaTranscoder, ScreenLink};
 use bezel_media::archive::{DiskArchive, MemoryArchive};
@@ -241,12 +243,14 @@ fn overview_dto(
     });
     let missing = restorable(catalog, &inventory.overview.missing, false);
     let elsewhere = restorable(catalog, &inventory.overview.other_card, true);
+    let deleted = deleted_with_copies(inventory)
+        .map(|e| RestorableDto::of(e, catalog, on_another_card(e, inventory)));
     ManagerOverviewDto {
         internal: inventory.info.internal.into(),
         card: inventory.info.card.map(Into::into),
         files: files.collect(),
         folder_errors: Vec::new(),
-        restorable: missing.chain(elsewhere).collect(),
+        restorable: missing.chain(elsewhere).chain(deleted).collect(),
         deletes: inventory.deletes == Deletes::Supported,
         cap,
         cache: catalog.cache().into(),
@@ -261,6 +265,20 @@ fn restorable<'a>(
     entries
         .iter()
         .map(move |e| RestorableDto::of(e, catalog, other_card))
+}
+
+/// The files deleted through Bezel whose local copies are held: a restore
+/// offers them too, never chosen by default (D-2026-09-30-storage-manager-6,
+/// -8; the CLI's `restore internal|sd NAME`).
+fn deleted_with_copies(inventory: &Inventory) -> impl Iterator<Item = &ArchiveEntry> {
+    let entries = inventory.record().map_or(&[][..], |r| r.entries.as_slice());
+    let deleted = entries.iter().filter(|e| e.state == EntryState::Deleted);
+    deleted.filter(|e| inventory.has_copy(e))
+}
+
+/// Whether `entry` was on a card that is not the inserted one.
+fn on_another_card(entry: &ArchiveEntry, inventory: &Inventory) -> bool {
+    entry.path.location.medium == Medium::Card && entry.card != inventory.listing.card
 }
 
 impl StorageState {

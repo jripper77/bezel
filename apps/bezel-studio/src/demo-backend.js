@@ -422,10 +422,14 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       protected: (isBoot(path) && 'boot') || (isThemeVideo(path) && 'themeVideo') || null,
     }));
   }
-  /** Cataloged files that can be sent again: missing here, or on another card. */
+  /**
+   * Cataloged files that can be sent again: missing here, or on another
+   * card; then the ones deleted through Bezel whose copies it holds.
+   */
   function restorable() {
     const away = (e) => e.state !== 'deleted' && ((shown(e) && e.state === 'missing') || (e.path.startsWith('sd/') && !shown(e)));
-    return catalog.entries.filter(away).map((e) => ({
+    const deleted = (e) => e.state === 'deleted' && e.localCopy;
+    return [...catalog.entries.filter(away), ...catalog.entries.filter(deleted)].map((e) => ({
       ...entry(e.path, e.size), id: `${e.path}@${e.card ?? ''}`, sentAt: e.sentAt, localCopy: e.localCopy, otherCard: e.path.startsWith('sd/') && e.card !== cardNow(), state: e.state, content: e.content,
     }));
   }

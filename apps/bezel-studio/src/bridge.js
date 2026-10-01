@@ -77,10 +77,11 @@ export const PROGRESS_EVENT = 'storage-progress';
  *   boot media Bezel set or a video a theme plays.
  * @typedef {StoredFileDto & {
  *   id: string, size: number, sentAt: number, localCopy: boolean, otherCard: boolean,
- *   state: 'pending'|'stored'|'missing',
+ *   state: 'pending'|'stored'|'missing'|'deleted',
  * }} RestorableDto A cataloged file the screen does not store now: missing
- *   from its medium, or on another card (`otherCard`). `id` names it to
- *   `planRestore`.
+ *   from its medium, on another card (`otherCard`), or deleted through Bezel
+ *   with its local copy held (`deleted`: offered, never chosen by default).
+ *   `id` names it to `planRestore`.
  * @typedef {{copies: number, bytes: number, deletedCopies: number, deletedBytes: number, limit: number}} CacheDto
  *   The local copies; those of files deleted through Bezel count against `limit`.
  * @typedef {{

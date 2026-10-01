@@ -5,7 +5,7 @@
 
 use bezel_core::app::manager::{Batch, ManagerError, StepProgress, TransferReport};
 use bezel_core::app::storage;
-use bezel_core::domain::archive::{ArchiveEntry, EntryState, ScreenKey, TransferPlan};
+use bezel_core::domain::archive::{ArchiveEntry, ScreenKey, TransferPlan};
 use bezel_core::domain::clock::LocalTime;
 use bezel_core::domain::job::{CancelToken, JobPhase, Progress};
 use bezel_core::domain::screen::Confirm;
@@ -76,19 +76,19 @@ fn confirmed_files(files: &[ConfirmedFileDto]) -> UiResult<Vec<FileEntry>> {
     files.iter().map(file).collect()
 }
 
-/// The cataloged entries of the screen behind `desk` that `ids` name (not
-/// deleted; unknown ids are left out).
+/// The cataloged entries of the screen behind `desk` that `ids` name,
+/// files deleted through Bezel too (the user chose them, as the CLI's
+/// `restore NAME`); unknown ids are left out.
 fn chosen_entries(desk: &mut Desk<'_>, ids: &[String]) -> UiResult<Vec<ArchiveEntry>> {
     let key = ScreenKey::new(desk.model().id);
     let catalog = desk.store.load()?;
     let Some(record) = catalog.screen(&key) else {
         return Ok(Vec::new());
     };
-    let live = record
+    let named = record
         .entries
         .iter()
-        .filter(|e| e.state != EntryState::Deleted);
-    let named = live.filter(|e| ids.contains(&restore_id(e)));
+        .filter(|e| ids.contains(&restore_id(e)));
     Ok(named.cloned().collect())
 }
 

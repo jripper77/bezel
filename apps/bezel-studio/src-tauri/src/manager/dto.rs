@@ -136,7 +136,8 @@ impl ManagedFileDto {
     }
 }
 
-/// A cataloged file the screen does not store now.
+/// A cataloged file the screen does not store now: missing, on another
+/// card, or deleted through Bezel with its local copy held.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestorableDto {
@@ -151,7 +152,8 @@ pub struct RestorableDto {
     pub local_copy: bool,
     /// It was on a card that is not the inserted one.
     pub other_card: bool,
-    /// `pending`, `stored` or `missing`.
+    /// `pending`, `stored` or `missing`; `deleted` for a file deleted
+    /// through Bezel, which a restore offers unchosen.
     pub state: &'static str,
 }
 
@@ -241,7 +243,9 @@ pub struct ManagerOverviewDto {
     /// inventory, so a folder that fails fails the whole overview (the
     /// command answers its error): this stays empty.
     pub folder_errors: Vec<FolderErrorDto>,
-    /// Cataloged files the screen does not store now.
+    /// Cataloged files the screen does not store now: the missing ones,
+    /// another card's, then those deleted through Bezel whose copies are
+    /// held.
     pub restorable: Vec<RestorableDto>,
     /// Whether the screen deletes through Bezel (TUR_USB does not).
     pub deletes: bool,

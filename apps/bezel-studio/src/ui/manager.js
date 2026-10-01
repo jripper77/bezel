@@ -11,7 +11,7 @@ import { errorText } from '../messages.js';
 import {
   CACHE_LIMITS, KIND_FILTERS, ORIGIN_FILTERS, SORTS, actionsFor, baseName, cleanupGroups, emptySelection, findingText, formatBytes,
   formatExactBytes, formatLimit, formatSent, hasCopy, isBezel, keyAction, otherMedium, placeText, planRefusalText, precheckedPaths,
-  reduceSelection, renamePreview, restorableFor, restoreTotals, selectionInfo, skipText, stepText, visibleFiles, warningText,
+  reduceSelection, renamePreview, restorableFor, restoreDefaults, restoreTotals, selectionInfo, skipText, stepText, visibleFiles, warningText,
 } from '../storage-manager.js';
 
 /** How far a press travels before it is a drag, px. */
@@ -568,11 +568,16 @@ export function createManagerView({ t, locale, bridge, host }) {
     await planThen(() => bridge.planRename(host.key(), file.path, name, []), (overwrite) => bridge.planRename(host.key(), file.path, name, overwrite));
   }
 
+  /**
+   * Restore (D-2026-09-30-storage-manager-8): the missing files and another
+   * card's, checked; below them, unchecked, the files deleted through Bezel
+   * whose copies it holds.
+   */
   async function restore(medium) {
     const data = host.data();
     const entries = restorableFor(data.restorable, medium);
     const free = (medium === 'internal' ? data.internal : data.card)?.free ?? 0;
-    const chosen = new Set(entries.filter((e) => e.localCopy).map((e) => e.id));
+    const chosen = new Set(restoreDefaults(entries));
     const m = modal(t('storage.restore.title', { to: t(`storage.to.${medium}`) }), { wide: true });
     const total = el('p', { class: 'plan-total', 'aria-live': 'polite' });
     m.button('cancel', t('dialog.cancel'));
@@ -584,8 +589,10 @@ export function createManagerView({ t, locale, bridge, host }) {
       ok.disabled = !sum.count || !sum.fits;
     };
     const row = (e) => {
-      const state = e.otherCard ? t('storage.restore.otherCard') : t(`storage.state.${e.state}`);
+      const deleted = e.state === 'deleted';
+      const state = e.otherCard && !deleted ? t('storage.restore.otherCard') : t(`storage.state.${e.state}`);
       const details = [bytes(e.size), state, t('storage.origin.sent', { date: formatSent(e.sentAt, locale()) })];
+      if (deleted && e.otherCard) details.push(t('storage.restore.otherCard'));
       if (!e.localCopy) details.push(t('storage.noCopy'));
       const box = el('input', {
         type: 'checkbox', checked: chosen.has(e.id), disabled: !e.localCopy,
@@ -597,11 +604,19 @@ export function createManagerView({ t, locale, bridge, host }) {
       });
       return el('li', {}, [el('label', { class: 'check' }, [box, el('span', {}, [el('strong', { text: e.name }), el('small', { text: details.join(' · ') })])])]);
     };
-    m.body.append(
-      el('p', { text: t('storage.restore.intro') }),
-      el('ul', { class: 'check-list', 'aria-label': t('storage.restore.listLabel') }, entries.map(row)),
-      total,
-    );
+    const away = entries.filter((e) => e.state !== 'deleted');
+    const deleted = entries.filter((e) => e.state === 'deleted');
+    m.body.append(el('p', { text: t('storage.restore.intro') }));
+    if (away.length) m.body.append(el('ul', { class: 'check-list', 'aria-label': t('storage.restore.listLabel') }, away.map(row)));
+    if (deleted.length) {
+      const id = `${m.dialog.getAttribute('aria-labelledby')}-deleted`;
+      m.body.append(el('section', { 'aria-labelledby': id }, [
+        el('h3', { id, class: 'dialog-subtitle', text: t('storage.restore.deletedTitle') }),
+        el('p', { class: 'hint', text: t('storage.restore.deletedHelp') }),
+        el('ul', { class: 'check-list', 'aria-label': t('storage.restore.deletedTitle') }, deleted.map(row)),
+      ]));
+    }
+    m.body.append(total);
     update();
     (ok.disabled ? m.dialog.querySelector('.dialog-actions button') : ok).focus();
     if ((await m.result) !== 'ok') return;

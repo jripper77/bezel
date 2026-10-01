@@ -485,9 +485,22 @@ export function findingText(t, locale, file) {
 
 // --------------------------------------------------------------- restore --
 
-/** The cataloged files a restore of `medium` offers: its missing ones and, for the card, another card's. */
+/**
+ * The cataloged files a restore of `medium` offers: its missing ones, for
+ * the card another card's, and those deleted through Bezel whose copies
+ * Bezel holds.
+ */
 export function restorableFor(restorable, medium) {
   return (restorable ?? []).filter((r) => r.medium === medium);
+}
+
+/**
+ * What a restore checks at first (D-2026-09-30-storage-manager-8): the
+ * missing files and another card's that have a local copy; a file deleted
+ * through Bezel waits until the user checks it.
+ */
+export function restoreDefaults(entries) {
+  return entries.filter((e) => e.localCopy && e.state !== 'deleted').map((e) => e.id);
 }
 
 /** The chosen entries' count and bytes, and whether they fit `free` (each upload needs less than the free space). */

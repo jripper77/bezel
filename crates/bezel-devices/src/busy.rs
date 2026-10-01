@@ -47,12 +47,6 @@ pub fn holders_by_pid(proc_root: &Path, device: &Path, own_pid: u32) -> Holders 
     holders
 }
 
-/// Processes (other than `own_pid`) that have `device` open, as
-/// `"<command> (PID <pid>)"` ([`holders_by_pid`]'s others).
-pub fn holders_in(proc_root: &Path, device: &Path, own_pid: u32) -> Vec<String> {
-    holders_by_pid(proc_root, device, own_pid).others
-}
-
 fn holds(process: &Path, target: &Path) -> bool {
     let Ok(fds) = fs::read_dir(process.join("fd")) else {
         return false;
@@ -137,7 +131,7 @@ mod tests {
         process(&root, 7, &["/usr/bin/bash"], "bash", &[&other]);
         process(&root, 42, &["/usr/bin/bezel"], "bezel", &[&device]);
         fs::create_dir_all(root.join("self")).unwrap();
-        let found = holders_in(&root, &device, 42);
+        let found = holders_by_pid(&root, &device, 42).others;
         assert_eq!(
             found,
             vec![
@@ -178,7 +172,10 @@ mod tests {
                 others: vec!["TURZX (PID 99)".into()],
             }
         );
-        assert_eq!(holders_in(&root, &device, 42), ["TURZX (PID 99)"]);
+        assert_eq!(
+            holders_by_pid(&root, &device, 42).others,
+            ["TURZX (PID 99)"]
+        );
         let elsewhere = holders_by_pid(&root, &other, 42);
         assert_eq!(elsewhere.this, None, "this process does not hold it");
         assert_eq!(elsewhere.others, ["python main.py (PID 2472)"]);
@@ -204,9 +201,17 @@ mod tests {
 
     #[test]
     fn missing_proc_or_device_yields_nothing() {
-        assert!(holders_in(Path::new("/no/such/proc"), Path::new("/dev/null"), 1).is_empty());
+        assert!(
+            holders_by_pid(Path::new("/no/such/proc"), Path::new("/dev/null"), 1)
+                .others
+                .is_empty()
+        );
         let root = fake_proc("empty");
-        assert!(holders_in(&root, &root.join("absent"), 1).is_empty());
+        assert!(
+            holders_by_pid(&root, &root.join("absent"), 1)
+                .others
+                .is_empty()
+        );
         let nobody = on_this_machine("/dev/bezel-no-such-port");
         assert!(nobody.others.is_empty());
         assert_eq!(nobody.this, None);

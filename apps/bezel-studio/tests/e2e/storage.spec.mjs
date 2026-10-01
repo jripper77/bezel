@@ -6,6 +6,7 @@
 // console errors, no serious or critical accessibility violations.
 import { test, expect, watchErrors, expectAccessible, prefixOf, suffixOf } from './helpers.mjs';
 import { formatBytes } from '../../src/ui/storage.js';
+import { DEMO_LET_GO_EVENT } from '../../src/bridge.js';
 
 async function openStorage(page, t) {
   await page.getByRole('tab', { name: t('library.screen') }).click();
@@ -39,9 +40,20 @@ const placeIn = (t, medium, kind) => `${t(`storage.in.${medium}`)} (${t(`storage
 const toast = (page) => page.locator('#toast');
 const UPLOAD = { timeout: 15_000 };
 
+/**
+ * Lets `count` held upload phases go on (a page opened with `&hold` holds
+ * each phase after its first step): one now, the others when they come.
+ */
+async function letGo(page, count = 1) {
+  await page.evaluate(({ name, times }) => {
+    for (let i = 0; i < times; i += 1) window.dispatchEvent(new Event(name));
+  }, { name: DEMO_LET_GO_EVENT, times: count });
+}
+
 test('storage tab upload progress and confirmed delete', async ({ page, t, lang }) => {
   const errors = watchErrors(page);
-  await page.goto('/index.html?demo=turing88');
+  // Each phase of an upload waits in the middle until the test lets it go.
+  await page.goto('/index.html?demo=turing88&hold');
   await openStorage(page, t);
   const internal = page.getByRole('region', { name: t('storage.medium.internal') });
   const card = page.getByRole('region', { name: t('storage.medium.sd') });
@@ -61,6 +73,7 @@ test('storage tab upload progress and confirmed delete', async ({ page, t, lang 
   const bar = page.getByRole('progressbar', { name: t('storage.progressLabel') });
   await expect(bar).toBeVisible();
   await expect(page.getByText(t('storage.phase.convert'), { exact: true })).toBeVisible();
+  await letGo(page);
   await expect(page.getByText(t('storage.phase.upload'), { exact: true })).toBeVisible();
   await expect.poll(() => bar.evaluate((b) => b.value)).toBeGreaterThan(0);
   await expect(internal.getByRole('button', { name: t('storage.choose') })).toBeDisabled();
@@ -95,6 +108,7 @@ test('storage tab upload progress and confirmed delete', async ({ page, t, lang 
   // A complete upload lists the stored file.
   await internal.getByRole('button', { name: t('storage.choose') }).click();
   await page.getByRole('dialog').getByRole('button', { name: t('storage.confirmUploadAction'), exact: true }).click();
+  await letGo(page, 2);
   await expect(toast(page)).toHaveText(t('storage.uploaded', { name: 'ferias.mp4' }), UPLOAD);
   await expect(internal.getByRole('listitem').filter({ hasText: 'ferias.mp4' })).toContainText('MB');
 

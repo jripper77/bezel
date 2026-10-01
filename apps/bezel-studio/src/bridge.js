@@ -37,6 +37,12 @@ export const QUIT_EVENT = 'quit-requested';
 export const DEMO_QUIT_EVENT = 'bezel-demo-quit';
 
 /**
+ * Demo mode with `?hold` (tests only): every phase of an upload waits in
+ * the middle until the page sends this window event, once per phase.
+ */
+export const DEMO_LET_GO_EVENT = 'bezel-demo-let-go';
+
+/**
  * Subscribes to files dropped on the window from the system: Tauri owns the
  * drag and reports the paths and the pointer (physical pixels).
  */
@@ -116,15 +122,18 @@ export function createBridge(win) {
     const fail = () => Promise.reject(new Error('no backend'));
     return new Proxy({ mode: 'unavailable' }, { get: (t, k) => (k in t ? t[k] : fail) });
   }
-  const scenario = new URLSearchParams(win.location.search).get('demo') ?? 'turing88';
+  const params = new URLSearchParams(win.location.search);
+  const scenario = params.get('demo') ?? 'turing88';
   // What the window does is shown on the page (`data-demo-window`), and the
   // close button is a window event: Playwright drives and checks both.
   const root = win.document?.documentElement;
   const demo = createDemoBackend(scenario, {}, {
     onWindow: (state) => root?.setAttribute('data-demo-window', state),
     languages: win.navigator?.languages ?? [],
+    hold: params.has('hold'),
   });
   win.addEventListener?.(DEMO_CLOSE_EVENT, () => demo.requestClose());
   win.addEventListener?.(DEMO_QUIT_EVENT, () => demo.requestQuit());
+  win.addEventListener?.(DEMO_LET_GO_EVENT, () => demo.letGo());
   return { mode: 'demo', ...demo };
 }

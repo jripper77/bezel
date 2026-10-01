@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { translator } from '../../src/i18n/index.js';
 import { baseName, bootKeepsText, formatBytes, progressParts, refusalText, storageFeatures, usedFraction } from '../../src/ui/storage.js';
-import { createDemoBackend, demoKindOf, demoSuggestName, demoTurns, demoVideoName } from '../../src/demo-backend.js';
+import { createDemoBackend, createDemoGate, demoKindOf, demoSuggestName, demoTurns, demoVideoName } from '../../src/demo-backend.js';
 import { DEMO_PICKED, DEMO_STORAGE, DEMO_VIDEO_THEME, SCENARIOS } from '../../src/demo-data.js';
 
 const pt = translator('pt-BR');
@@ -182,6 +182,41 @@ test('a live theme video missing from the screen is sent on request', async () =
   assert.equal((await demo.runUpload(ready.ticket, false)).status, 'done');
   assert.deepEqual((await demo.sample()).video, { state: 'onDevice', path: 'sd/video/nebula_90.mp4' });
   await assert.rejects(demo.prepareThemeVideo(KEY), (e) => e.code === 'noVideo');
+});
+
+/** Lets every pending promise callback run. */
+const settle = async () => {
+  for (let i = 0; i < 50; i += 1) await new Promise((resolve) => { setImmediate(resolve); });
+};
+
+test('a held demo upload waits in each phase until let go, or until cancelled', async () => {
+  const demo = createDemoBackend('turing88', instant, { hold: true });
+  const seen = [];
+  demo.onJobProgress((p) => seen.push(p));
+  const source = await demo.pickMedia();
+  const first = await demo.prepareUpload(KEY, source, 'internal');
+  const cancelled = demo.runUpload(first.ticket, false);
+  await settle();
+  assert.deepEqual(seen.at(-1), { phase: 'convert', done: 2500, total: 20_000 }, 'held after the first step');
+  demo.letGo();
+  await settle();
+  const held = seen.at(-1);
+  assert.equal(held.phase, 'upload');
+  assert.equal(held.done, Math.round(held.total / 16), 'the upload holds after its first block');
+  assert.equal(await demo.cancelJob(), true);
+  const result = await cancelled;
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.partial, held.done);
+
+  // Lets go given before the phases come are kept for them.
+  const second = await demo.prepareUpload(KEY, source, 'internal');
+  demo.letGo();
+  demo.letGo();
+  assert.equal((await demo.runUpload(second.ticket, true)).status, 'done');
+
+  const free = createDemoGate(false);
+  await free.hold();
+  assert.equal(free.cancel(), false, 'nothing waits');
 });
 
 test('a file stored with the wrong size fails its check and stays for a delete', async () => {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_CLOSE_EVENT, DEMO_QUIT_EVENT, createBridge, parseFrame } from '../../src/bridge.js';
+import { DEMO_CLOSE_EVENT, DEMO_LET_GO_EVENT, DEMO_QUIT_EVENT, createBridge, parseFrame } from '../../src/bridge.js';
 
 const page = (search = '', hostname = 'localhost') => ({ location: { hostname, search } });
 
@@ -165,6 +165,19 @@ test('demo mode shows what the window does and takes the close button as an even
   assert.equal(quitting, 1, 'the tray Quit asks too');
   await bridge.quitApp();
   assert.equal(attributes['data-demo-window'], 'quit');
+});
+
+test('demo mode with hold lets each upload phase go on a window event', async () => {
+  const listeners = {};
+  const bridge = createBridge({ ...page('?demo=turing88&hold'), addEventListener: (name, cb) => { listeners[name] = cb; } });
+  const phases = [];
+  bridge.onJobProgress((p) => phases.push(p.phase));
+  const ready = await bridge.prepareUpload('/dev/ttyACM1', await bridge.pickMedia(), 'internal');
+  listeners[DEMO_LET_GO_EVENT]();
+  listeners[DEMO_LET_GO_EVENT]();
+  const done = await bridge.runUpload(ready.ticket, false);
+  assert.equal(done.status, 'done');
+  assert.deepEqual([...new Set(phases)], ['convert', 'upload', 'verify']);
 });
 
 test('demo mode serves scenarios as copies', async () => {

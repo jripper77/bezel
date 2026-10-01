@@ -143,11 +143,46 @@ export function demoVideoName(theme) {
 }
 
 /**
+ * Holds a job phase in the middle until it is let go: a test sees the job
+ * in progress however slow its machine is. Each `letGo` lets one held phase
+ * go on, now or when it comes; a cancel lets the waiting one go at once.
+ * @param {boolean} holding false: nothing is ever held
+ */
+export function createDemoGate(holding) {
+  let permits = 0;
+  let waiting = null;
+  const wake = () => {
+    const go = waiting;
+    waiting = null;
+    go?.();
+    return Boolean(go);
+  };
+  return {
+    /** Waits here while holding, until let go. */
+    async hold() {
+      if (!holding) return;
+      if (permits > 0) {
+        permits -= 1;
+        return;
+      }
+      await new Promise((resolve) => { waiting = resolve; });
+    },
+    /** Lets the held phase go on, or the next one to come. */
+    letGo() {
+      if (!wake()) permits += 1;
+    },
+    /** A cancel: the held phase goes on to see it. */
+    cancel: wake,
+  };
+}
+
+/**
  * A simulated screen storage: capacity, files, uploads with progress over
  * time and cancel, deletes, playback and the boot media, with the same
- * confirmations and refusals as the app.
+ * confirmations and refusals as the app. With `hold`, every phase of a job
+ * waits after its first step until `letGo` (tests only).
  */
-function createDemoStorage(chosen, { delay, live, theme, screens }) {
+function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }) {
   const card = chosen.card !== false;
   const files = new Map(DEMO_STORAGE.files.filter(([p]) => card || !p.startsWith('sd/')));
   const locals = new Map(Object.entries(DEMO_LOCAL_FILES).map(([name, f]) => [`demo://${name}`, { name, ...f }]));
@@ -156,6 +191,7 @@ function createDemoStorage(chosen, { delay, live, theme, screens }) {
   const tools = { ready: chosen.ffmpeg !== false, configured: null };
   let tickets = 0;
   let job = null;
+  const gate = createDemoGate(hold);
   const state = { playback: null, boot: null, bootBrightness: null };
 
   // Errors like the app's: a code, its arguments and the English text.
@@ -229,6 +265,7 @@ function createDemoStorage(chosen, { delay, live, theme, screens }) {
       each((total * i) / count);
       emit(phase, (total * i) / count, total);
       if (i === count) return false;
+      if (i === 1) await gate.hold();
       await delay(DEMO_STEP_MS);
       if (job.cancelled) return true;
     }
@@ -321,9 +358,14 @@ function createDemoStorage(chosen, { delay, live, theme, screens }) {
       }
     },
     cancelJob: () => {
-      if (job) job.cancelled = true;
+      if (job) {
+        job.cancelled = true;
+        gate.cancel();
+      }
       return Promise.resolve(Boolean(job));
     },
+    /** Lets a held job phase go on (`hooks.hold`). */
+    letGo: () => gate.letGo(),
     deleteStored: (key, path, confirmed) => {
       if (limited(key)) return refuse('unsupported', 'not supported: deleting files', { detail: 'deleting files' });
       if (!confirmed) return refuse('notConfirmed', `deleting ${path} needs confirmation`);
@@ -363,8 +405,9 @@ function createDemoStorage(chosen, { delay, live, theme, screens }) {
 /**
  * @param {string} scenario key of SCENARIOS
  * @param {{now?: () => number, delay?: (ms: number) => Promise<void>}} [clock]
- * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, languages?: readonly string[]}} [hooks]
- *   what the window does, and the system's languages
+ * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, languages?: readonly string[], hold?: boolean}} [hooks]
+ *   what the window does, the system's languages, and whether job phases
+ *   wait in the middle until `letGo` (tests)
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const now = clock.now ?? (() => Date.now() / 1000);
@@ -381,7 +424,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   /** Screen key → last orientation shown on it or chosen for it. */
   const remembered = new Map();
   const modelOf = (key) => devices.screens.find((s) => s.key === key)?.models[0];
-  const storage = createDemoStorage(chosen, { delay, live: () => live, theme: () => theme, screens: () => devices.screens });
+  const storage = createDemoStorage(chosen, { delay, live: () => live, theme: () => theme, screens: () => devices.screens, hold: Boolean(hooks.hold) });
   const { videoOfTheme, ...storageApi } = storage;
   // The window, like the app: the close button hides it while a screen is
   // live, asks the UI when edits are unsaved, and closes it otherwise.

@@ -19,7 +19,7 @@ Gerenciar os arquivos da memória interna e do cartão SD da tela no studio e na
   - Porta `ArchiveStore` (`load`, `save` atômico, `keep(bytes) -> ContentId` com bytes iguais guardados uma vez, `read`, `discard`), só tipos do core; `bezel_media::archive::{content_id, MemoryArchive}` = fake do adapter para os testes de core, CLI e studio. Nenhuma impl de porta em `crates/bezel-core/src`.
 - **Dependencies:** none
 - **Test:** `domain::archive::tests::{entries_match_listings_per_screen_and_card,eviction_drops_only_copies_of_deleted_files}`, `domain::cleanup::tests::{finds_the_users_vendor_duplicates_and_the_hang_partial,never_suggests_the_boot_media_or_a_theme_video}`, `archive::memory::tests::same_bytes_are_kept_once`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2 (paralela)
 

@@ -14,9 +14,8 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Specialist:** jdi-doer-bezel
 - **Files modified:** `crates/bezel-core/src/{domain,app}/**`, `crates/bezel-cli/src/**`, `apps/bezel-studio/src-tauri/src/**`, `crates/bezel-themes/src/**`
 - **Acceptance:**
-  - Um só `language_of` (core `domain::clock`), um só mínimo de 0,25 s, uma função do core "o tema cabe neste painel", um só "é tema nativo" (`bezel-themes`), e `fitting_options`/`convert_options` viram uma função do core ao lado de `cover_crop`.
-  - Variante de `BezelError` para arquivo de tema (sai `Transport`/`ScreenNotFound`); `Theme::sensor_keys`/`element_mut`/`next_id` e `BoxF::translated` removidos ou usados fora de teste.
-  - TUR_USB: `Unsupported` de `size` = presente com `FileEntry.size = None` em list, play e no vídeo do runtime; sobrescrever segue exigindo `Confirm::Yes`. Testes existentes passam sem mudar asserções.
+  - Duplicações da D-9 numa função só (idioma, mínimo de 0,25 s, "cabe no painel", "é tema nativo", opções de vídeo no core); `BezelError::ThemeFile`; código morto fora.
+  - TUR_USB: tamanho desconhecido = presente (`size = None`); sobrescrever exige `Confirm::Yes`.
 - **Dependencies:** none
 - **Test:** `app::storage::tests::unknown_size_counts_as_present`, `domain::media::tests::fitting_options_turn_and_cover_crop`
 - **Status:** completed (`41f647d`..`99e7c92`, 8 commits)
@@ -75,7 +74,7 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Acceptance:**
   - Erros de dispositivo/armazenamento e avisos do importador como `{code, args}` (`ImportWarning` com `Display` em inglês para a CLI); `backend-codes.json` conferido por teste Rust; `backend-messages.test.mjs` exige en/pt-BR com os mesmos `{params}`.
   - Nenhum literal visível em `src/ui/**` e `app.js` (teste em `i18n.test.mjs`); idioma do sistema com override salvo em `Settings`.
-  - Porta negada (Linux) mostra o comando de `bezel_devices::udev`, copiável, sem elevar; "desktop mode" rotulado "não validado no hardware", volta atrás de diálogo `Confirm`; host do ping e pasta do MangoHud nas configurações.
+  - Porta negada mostra o comando udev copiável; modo desktop "não validado" com `Confirm`; ping e MangoHud nas configurações.
   - Modo demo emula tudo; Playwright claro/escuro × pt-BR/en, axe sem violações sérias/críticas.
 - **Dependencies:** T-7.1, T-7.2, T-7.4
 - **Test:** `node --test tests/ui/i18n.test.mjs tests/ui/backend-messages.test.mjs`; `npm test`
@@ -88,13 +87,28 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Specialist:** jdi-doer-bezel
 - **Files modified:** `apps/bezel-studio/src-tauri/tauri.conf.json`, `packaging/linux/bezel-run@.service`, `scripts/install-local.sh`, `scripts/ci/{check-packaging,check-docs}.sh`, `docs/user/**`, `README.md`, `CHANGELOG.md`
 - **Acceptance:**
-  - deb/rpm levam `/usr/bin/bezel` (`target/release/bezel`, compilado pelo `binarios_extra` antes do bundle), `/usr/lib/systemd/user/bezel-run@.service` com ExecStart `/usr/bin/bezel`, regra udev e postinstall; `install-local.sh` troca o ExecStart para `~/.local/bin`.
-  - `check-packaging.sh` confere `tauri.conf.json`, unit, regra e temas e, com deb/rpm construídos (ou passados), exige `usr/bin/bezel`, regra e unit (`dpkg-deb -c`, `rpm -qlp`).
-  - `docs/user/` e `docs/user/pt-BR/`: tópicos da D-7, Windows (usbser, WinUSB/Zadig, LHM elevado), sem assinatura/SmartScreen, `bezel udev-rules`, FPS, HID "não validado"; `check-docs.sh`: mesmos arquivos nos dois idiomas, links relativos válidos, sem segredos/caminhos privados, README sem "early development"; CHANGELOG `## [Unreleased]` da fase.
+  - deb/rpm levam `/usr/bin/bezel`, `bezel-run@.service`, regra udev e postinstall; `install-local.sh` troca o ExecStart para `~/.local/bin`; `check-packaging.sh` confere o repositório e, com deb/rpm, o conteúdo.
+  - `docs/user/` em en e pt-BR com os tópicos da D-7; `check-docs.sh`: mesmos arquivos, links válidos, sem segredos; CHANGELOG da fase.
 - **Dependencies:** T-7.1..T-7.6
 - **Test:** `bash scripts/ci/check-packaging.sh && bash scripts/ci/check-docs.sh`
 - **Status:** completed (`0fd7f0f` empacotamento, `4762377` docs; `b063681` docs do studio após a T-7.6)
 - **Nota:** fora de `files_modified`, permitido: `packaging/linux/postinstall.sh` (gatilho `hidraw`). Os deb/rpm também levam `/usr/share/bezel/themes`; provado com deb e rpm construídos localmente.
+
+### Wave 3b (achados da T-7.8 e pedido do usuário)
+
+#### T-7.9: Vídeo de fundo no studio
+- **Specialist:** jdi-doer-bezel
+- **Files modified:** `apps/bezel-studio/**`, porta de pôster no core + `bezel-media`, `docs/user/**`, `CHANGELOG.md`
+- **Acceptance:** "Adicionar vídeo…" e soltar um vídeo na tela copiam o vídeo para o tema com pôster (ffmpeg); "Usar como fundo" = `Background::Video` com desfazer; inspetor com vídeo, pôster e o fluxo existente de "Enviar para a tela"; demo e e2e nos 4 projetos.
+- **Dependencies:** T-7.6
+- **Status:** in progress
+
+#### T-7.10: Limite de 25 MiB (D-12) e reinício pelo MCU (D-13)
+- **Specialist:** jdi-doer-bezel
+- **Files modified:** core (perfil, pré-voo, porta de conexão), `bezel-media`, `connector.rs`, CLI (`bezel restart`), studio (aba Tela), docs, `CHANGELOG.md`
+- **Acceptance:** envio rev C > 25 MiB recusado antes de enviar e conversão com bitrate limitado; `00 00 00 00 00 c9` no MCU por 8 s e espera o SoC voltar; automático uma vez quando o SoC não responde; `bezel restart` e ação no studio.
+- **Dependencies:** T-7.3
+- **Status:** in progress
 
 ### Wave 4
 

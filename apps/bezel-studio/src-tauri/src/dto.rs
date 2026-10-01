@@ -7,7 +7,7 @@ use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::{
     DesktopModePanel, Discovery, Endpoint, MonitorModeSwitch, Screen, ScreenState,
 };
-use bezel_core::domain::geometry::Orientation;
+use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::job::Progress;
 use bezel_core::domain::media::{MediaInfo, MediaTools, Mismatch};
 use bezel_core::domain::sensor::{
@@ -522,6 +522,33 @@ impl LiveVideoDto {
             VideoState::NoPlayback => ("noPlayback", None),
         };
         Some(Self { state, path })
+    }
+}
+
+/// What Auto turns a theme's video background and the video's own size
+/// (`video_auto`, D-2026-10-01-video-background-framing-2).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoAutoDto {
+    /// Clockwise degrees: 0, 90, 180 or 270.
+    pub rotation: u16,
+    /// The video's size as probed without ffmpeg; `None` when unknown.
+    pub size: Option<SizeDto>,
+}
+
+impl VideoAutoDto {
+    /// The DTO of the session's answer ([`crate::studio::Studio::video_auto`]):
+    /// clockwise quarter turns and the size; `None` (no video background)
+    /// turns nothing and knows no size.
+    pub fn of(auto: Option<(u8, Option<Size>)>) -> Self {
+        let (turns, size) = auto.unwrap_or((0, None));
+        Self {
+            rotation: u16::from(turns % 4) * 90,
+            size: size.map(|s| SizeDto {
+                width: s.width,
+                height: s.height,
+            }),
+        }
     }
 }
 

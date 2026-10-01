@@ -22,14 +22,14 @@ use bezel_core::ports::{
     DesktopModeHid, DeviceBus, ScreenConnector, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
 };
 use bezel_sensors::SensorOptions;
-use bezel_themes::dto::ThemeDto;
+use bezel_themes::dto::{BackgroundDto, ThemeDto};
 use bezel_themes::import::import_path;
 use bezel_themes::native::{is_native, native_location};
 
 use crate::dto::{
     AddedDto, AssetDto, DevicesDto, ImportedDto, LiveVideoDto, MonitorModeDto, PreferencesDto,
     ReconnectingDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
-    ThemeFilterDto,
+    ThemeFilterDto, VideoAutoDto,
 };
 use crate::library::ThemeLibrary;
 use crate::media::{extension_of, is_animated_gif, kind_of, thumbnail_data_url};
@@ -38,7 +38,7 @@ use crate::messages::{ErrorCode, UiError};
 use crate::settings::{SettingsFile, THEME_AXES, THEME_SCOPES};
 use crate::storage::StorageState;
 pub use crate::studio::MAX_REFRESH;
-use crate::studio::{Delivery, Studio};
+use crate::studio::{Delivery, Motion, Studio};
 use crate::texts::{Texts, language_slug, parse_language, texts};
 use crate::thumbnails::Thumbnails;
 use crate::udev_help::UdevHelp;
@@ -126,12 +126,14 @@ pub fn sleep_until(due: Instant, now: Instant) -> Duration {
     due.saturating_duration_since(now).min(LOOK_AGAIN)
 }
 
-/// Says that a preview does not change by itself (no animated GIF shows).
+/// Says that a preview does not change by itself (no animated GIF shows,
+/// no video plays).
 pub const STILL: u32 = u32::MAX;
 
 /// A preview frame for the UI: a 12-byte header (width, height, and the
-/// milliseconds until its animated GIFs change, [`STILL`] when none shows;
-/// u32 little-endian), then the RGBA pixels.
+/// milliseconds until its next picture is due: its animated GIFs change or
+/// its video background shows its next picture, [`STILL`] when nothing
+/// moves; u32 little-endian), then the RGBA pixels.
 pub fn frame_bytes(frame: &bezel_core::domain::frame::Frame, change: Option<Duration>) -> Vec<u8> {
     let size = frame.size();
     let next = change.map_or(STILL, |d| u32::try_from(d.as_millis()).unwrap_or(STILL - 1));
@@ -144,7 +146,56 @@ pub fn frame_bytes(frame: &bezel_core::domain::frame::Frame, change: Option<Dura
 }
 
 fn theme_of(dto: &ThemeDto) -> UiResult<Theme> {
+    check_rotation(&dto.background)?;
     Theme::try_from(dto).map_err(|e| UiError::new(ErrorCode::InvalidTheme).arg("detail", e.0))
+}
+
+/// A video background's framing turns its video by 0, 90, 180 or 270
+/// degrees, or leaves it to Auto (no `rotation`): another rotation is
+/// `invalidInput` (D-2026-10-01-video-background-framing-2). Its other
+/// numbers are clamped when the theme is read.
+fn check_rotation(background: &BackgroundDto) -> UiResult<()> {
+    let BackgroundDto::Video {
+        framing: Some(framing),
+        ..
+    } = background
+    else {
+        return Ok(());
+    };
+    let Some(rotation) = framing.rotation.as_ref() else {
+        return Ok(());
+    };
+    let degrees = rotation.as_f64();
+    if [0.0, 90.0, 180.0, 270.0]
+        .into_iter()
+        .any(|d| degrees == Some(d))
+    {
+        return Ok(());
+    }
+    Err(UiError::new(ErrorCode::InvalidInput).arg(
+        "detail",
+        format!("video framing rotation {rotation} is not 0, 90, 180 or 270"),
+    ))
+}
+
+/// Pages of the user guide the UI opens in the system's browser.
+pub const GUIDE_PAGES: &[&str] = &["ffmpeg"];
+
+/// Where the guide's `page` is in `language` (`en` or `pt-BR`): a fixed
+/// address on the project's site, so the UI can open no other.
+pub fn guide_url(page: &str, language: &str) -> UiResult<String> {
+    let folder = match language {
+        "en" => Some(""),
+        "pt-BR" => Some("pt-BR/"),
+        _ => None,
+    };
+    match folder {
+        Some(folder) if GUIDE_PAGES.contains(&page) => Ok(format!(
+            "https://github.com/slipalison/bezel/blob/main/docs/user/{folder}{page}.md"
+        )),
+        _ => Err(UiError::new(ErrorCode::InvalidInput)
+            .arg("detail", format!("guide page \"{page}\" in \"{language}\""))),
+    }
 }
 
 /// Orientation of a new theme for `model` when none was used with its screen
@@ -519,13 +570,44 @@ impl Backend {
     }
 
     /// Takes the UI's theme and renders it at `now` ([`frame_bytes`]: its
-    /// size, when its GIFs change, then RGBA).
-    pub fn render(&self, theme: &ThemeDto, time: LocalTime, now: Instant) -> UiResult<Vec<u8>> {
+    /// size, when its next picture is due, then RGBA). A video background
+    /// plays with `motion` ([`Studio::preview`]), else shows its poster.
+    pub fn render(
+        &self,
+        theme: &ThemeDto,
+        time: LocalTime,
+        now: Instant,
+        motion: Motion,
+    ) -> UiResult<Vec<u8>> {
         let theme = theme_of(theme)?;
         let mut studio = self.studio();
         studio.set_theme(theme);
-        let (frame, change) = studio.preview(time, now)?;
+        let (frame, change) = studio.preview(time, now, motion)?;
         Ok(frame_bytes(&frame, change))
+    }
+
+    /// Takes the UI's theme and says what Auto turns its video background
+    /// and the video's own size (D-2026-10-01-video-background-framing-2):
+    /// probed once (an MP4's header needs no ffmpeg), outside the session's
+    /// lock, waiting for a storage job that holds the converter.
+    pub fn video_auto(&self, theme: &ThemeDto) -> UiResult<VideoAutoDto> {
+        let theme = theme_of(theme)?;
+        let unprobed = {
+            let mut studio = self.studio();
+            studio.set_theme(theme);
+            studio.video_to_probe()
+        };
+        if let Some((asset, location, media)) = unprobed {
+            let probed = media
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .probe(&location);
+            let info = probed
+                .inspect_err(|e| tracing::warn!(video = asset.0, "not probed: {e}"))
+                .ok();
+            self.studio().probed(&asset, info);
+        }
+        Ok(VideoAutoDto::of(self.studio().video_auto()))
     }
 
     /// Takes the UI's theme and shows it on the live screen now, in the
@@ -1138,11 +1220,43 @@ mod tests {
         assert_eq!(gone.unwrap_err().code(), "screenNotFound");
     }
 
+    /// The guide's pages open at their fixed addresses, pages of this
+    /// repository; nothing else does.
+    #[test]
+    fn the_guide_opens_only_at_its_fixed_addresses() {
+        let site = "https://github.com/slipalison/bezel/blob/main/";
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for (language, page) in [
+            ("en", "docs/user/ffmpeg.md"),
+            ("pt-BR", "docs/user/pt-BR/ffmpeg.md"),
+        ] {
+            assert_eq!(
+                guide_url("ffmpeg", language).unwrap(),
+                format!("{site}{page}")
+            );
+            assert!(repo.join(page).is_file(), "{page}");
+        }
+        for (page, language) in [
+            ("ffmpeg", "fr"),
+            ("ffmpeg", "pt-br"),
+            ("../../etc/passwd", "en"),
+            ("https://example.com", "en"),
+            ("", "pt-BR"),
+        ] {
+            let error = guide_url(page, language).unwrap_err();
+            assert_eq!(error.code(), "invalidInput", "{page} {language}");
+            assert!(error.to_string().contains(page), "{error}");
+        }
+    }
+
     #[test]
     fn render_preview_returns_the_canvas_size() {
         let f = fixture("render");
         let theme = f.backend.session().theme;
-        let bytes = f.backend.render(&theme, TIME, Instant::now()).unwrap();
+        let bytes = f
+            .backend
+            .render(&theme, TIME, Instant::now(), Motion::Allowed)
+            .unwrap();
         assert_eq!(&bytes[..8], &[224, 1, 0, 0, 128, 7, 0, 0]);
         assert_eq!(&bytes[8..12], &STILL.to_le_bytes(), "nothing animates");
         let json = serde_json::to_value(f.backend.session()).unwrap();
@@ -1150,7 +1264,11 @@ mod tests {
         assert_eq!(bytes.len(), 12 + 480 * 1920 * 4);
         let mut bad = theme.clone();
         bad.orientation = "sideways".into();
-        assert!(f.backend.render(&bad, TIME, Instant::now()).is_err());
+        assert!(
+            f.backend
+                .render(&bad, TIME, Instant::now(), Motion::Allowed)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1289,11 +1407,17 @@ mod tests {
         theme
             .elements
             .push(serde_json::from_value(element).unwrap());
-        let bytes = f.backend.render(&theme, TIME, Instant::now()).unwrap();
+        let bytes = f
+            .backend
+            .render(&theme, TIME, Instant::now(), Motion::Allowed)
+            .unwrap();
         let next = next_change(&bytes).expect("animates");
         assert!((1..=100).contains(&next), "{next} ms");
         theme.elements[0].visible = false;
-        let bytes = f.backend.render(&theme, TIME, Instant::now()).unwrap();
+        let bytes = f
+            .backend
+            .render(&theme, TIME, Instant::now(), Motion::Allowed)
+            .unwrap();
         assert_eq!(next_change(&bytes), None);
     }
 
@@ -1424,7 +1548,11 @@ mod tests {
             let ticking = scope.spawn(|| backend.tick(TIME, Instant::now()));
             frame_arrived.recv().unwrap();
             // The screen is busy with a frame: the session is not.
-            assert!(backend.render(&theme, TIME, Instant::now()).is_ok());
+            assert!(
+                backend
+                    .render(&theme, TIME, Instant::now(), Motion::Allowed)
+                    .is_ok()
+            );
             assert_eq!(backend.sample().live.as_deref(), Some(KEY));
             // Whoever needs the link waits for it.
             let dimming = scope.spawn(|| backend.set_brightness(KEY, 30));

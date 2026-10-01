@@ -15,13 +15,14 @@ use tauri::ipc::Response;
 use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, State, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
+use tauri_plugin_opener::OpenerExt as _;
 
-use crate::backend::Backend;
+use crate::backend::{Backend, guide_url};
 use crate::clock::now;
 use crate::dto::{
     AddedDto, AddedMediaDto, AssetDto, DevicesDto, ImportedDto, JobDto, MediaToolsDto,
     MonitorModeDto, PreferencesDto, PrepareDto, ProgressDto, RestartedDto, SampleDto, SavedDto,
-    SensorDto, SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
+    SensorDto, SessionDto, StorageDto, ThemeEntryDto, VideoAutoDto, parse_orientation,
 };
 use crate::manager::{
     Ask, CacheDto, CandidatesDto, ClearedDto, ConfirmedFileDto, DeleteReportDto, ManagedFileDto,
@@ -30,6 +31,7 @@ use crate::manager::{
 use crate::media::{BACKGROUND_EXTENSIONS, IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
 use crate::storage::ProgressThrottle;
+use crate::studio::Motion;
 use crate::tray::{LiveItem, TrayMenu};
 
 /// State managed by Tauri.
@@ -127,14 +129,46 @@ pub async fn editor_session(state: State<'_, Shared>) -> UiResult<SessionDto> {
     blocking(&state, |b| Ok(b.session())).await
 }
 
-/// Renders the UI's theme; the body is an 8-byte size header and RGBA.
+/// Renders the UI's theme; the body is a 12-byte header (size, and when
+/// the next picture is due) and RGBA. With `motion` (the default) a video
+/// background plays; without it the poster shows and no decoder starts.
 #[tauri::command]
-pub async fn render_preview(state: State<'_, Shared>, theme: ThemeDto) -> UiResult<Response> {
+pub async fn render_preview(
+    state: State<'_, Shared>,
+    theme: ThemeDto,
+    motion: Option<bool>,
+) -> UiResult<Response> {
+    let motion = match motion {
+        Some(false) => Motion::Reduced,
+        Some(true) | None => Motion::Allowed,
+    };
     blocking(&state, move |b| {
-        b.render(&theme, now(), std::time::Instant::now())
+        b.render(&theme, now(), std::time::Instant::now(), motion)
             .map(Response::new)
     })
     .await
+}
+
+/// What Auto turns the UI's theme's video background, and the video's size.
+#[tauri::command]
+pub async fn video_auto(state: State<'_, Shared>, theme: ThemeDto) -> UiResult<VideoAutoDto> {
+    blocking(&state, move |b| b.video_auto(&theme)).await
+}
+
+/// Opens a page of the user guide (`page` in `language`) in the system's
+/// browser, off the main thread: only the fixed addresses [`guide_url`]
+/// knows, so the webview never navigates.
+#[tauri::command]
+pub async fn open_guide<R: Runtime>(
+    app: AppHandle<R>,
+    page: String,
+    language: String,
+) -> UiResult<()> {
+    let url = guide_url(&page, &language)?;
+    tauri::async_runtime::spawn_blocking(move || app.opener().open_url(url, None::<&str>))
+        .await
+        .map_err(UiError::system)?
+        .map_err(UiError::system)
 }
 
 /// Shows the UI's theme on the live screen now.

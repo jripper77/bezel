@@ -2,8 +2,10 @@
 //! on the canvas or the panel. A video, or a GIF of several pictures, is
 //! copied into the theme's assets (safe name, [`Studio::add_video`]) with its
 //! poster: a PNG of the theme's canvas taken through the core's media port
-//! (`MediaTranscoder::poster`, framed by `PosterSpec`). Without ffmpeg there
-//! is no poster and the video is still added: previews then draw the
+//! (`MediaTranscoder::poster`, framed by `PosterSpec` as a video added
+//! without a framing is: Auto, so a panel-native video in a turned theme
+//! stands upright, D-2026-10-01-video-background-framing-2). Without ffmpeg
+//! there is no poster and the video is still added: previews then draw the
 //! renderer's poster-less background, and the UI says what ffmpeg is for.
 //! A picture, a GIF of one picture included, is added as an image.
 //!
@@ -12,6 +14,8 @@
 use std::path::Path;
 
 use bezel_core::BezelError;
+use bezel_core::domain::framing::{PanelLayout, VideoFraming};
+use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::media::{MediaFormat, MediaInfo};
 use bezel_core::domain::poster::PosterSpec;
 use bezel_core::ports::{MediaLocation, MediaTranscoder};
@@ -43,12 +47,22 @@ struct Inspected {
     poster: Result<bezel_core::domain::frame::Frame, BezelError>,
 }
 
-/// Probes the video at `location` and takes its poster for a canvas of
-/// `canvas`. `None` when the file is not a moving picture.
+/// The canvas a poster is taken for: the theme's size and orientation, and
+/// the panel Auto frames the video for.
+#[derive(Debug, Clone, Copy)]
+struct Canvas {
+    size: Size,
+    orientation: Orientation,
+    panel: Option<PanelLayout>,
+}
+
+/// Probes the video at `location` and takes its poster for `canvas`, framed
+/// as a video added without a framing is (Auto). `None` when the file is not
+/// a moving picture.
 fn inspect(
     media: &mut dyn MediaTranscoder,
     location: &MediaLocation,
-    canvas: bezel_core::domain::geometry::Size,
+    canvas: Canvas,
 ) -> Option<Inspected> {
     let info = match media.probe(location) {
         Ok(info) if info.video.is_some() || info.format == MediaFormat::Gif => Ok(info),
@@ -57,7 +71,11 @@ fn inspect(
         Err(_) => return None,
     };
     let poster = match &info {
-        Ok(info) => media.poster(location, PosterSpec::for_canvas(canvas, info)),
+        Ok(info) => {
+            let auto =
+                VideoFraming::default().resolve(info.dimensions, canvas.orientation, canvas.panel);
+            media.poster(location, PosterSpec::framed(canvas.size, info, &auto))
+        }
         Err(e) => Err(e.clone()),
     };
     Some(Inspected { info, poster })
@@ -88,7 +106,14 @@ impl Backend {
     /// Adds the video (or animated GIF) at `path`, whose content is `bytes`,
     /// with its poster when ffmpeg can take one.
     pub(crate) fn add_moving(&self, path: &Path, bytes: Vec<u8>) -> UiResult<AddedMediaDto> {
-        let canvas = self.studio().theme().canvas;
+        let canvas = {
+            let studio = self.studio();
+            Canvas {
+                size: studio.theme().canvas,
+                orientation: studio.theme().orientation,
+                panel: studio.video_panel(),
+            }
+        };
         let location = MediaLocation(path.display().to_string());
         let inspected = {
             let mut media = self.storage.media();
@@ -156,7 +181,7 @@ mod tests {
     use crate::settings::SettingsFile;
     use crate::storage::StorageState;
     use crate::storage::tests::{FakeMedia, POSTER};
-    use crate::studio::Studio;
+    use crate::studio::{Motion, Studio};
 
     const TIME: LocalTime = LocalTime {
         year: 2026,
@@ -196,12 +221,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let posters = Arc::clone(&media.posters);
         let theme = Theme::blank("Wide", Size::new(480, 1920), Orientation::Landscape);
+        let storage = StorageState::new(
+            Box::new(media),
+            crate::manager::Copies::in_memory(bezel_media::archive::MemoryArchive::new()),
+            root.join("scratch"),
+        );
         let studio = Studio::new(
             Box::new(FakeSensors::demo()),
             Box::new(SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip)),
             Language::English,
             theme,
-        );
+        )
+        .with_host_decoding(storage.shared_media(), root.join("playing"));
         let backend = Backend {
             bus: Arc::new(FakeBus::turing_88()),
             connector: Arc::new(FakeConnector::default()),
@@ -214,11 +245,7 @@ mod tests {
             udev: None,
             fonts: Vec::new(),
             studio: Session::new(studio),
-            storage: StorageState::new(
-                Box::new(media),
-                crate::manager::Copies::in_memory(bezel_media::archive::MemoryArchive::new()),
-                root.join("scratch"),
-            ),
+            storage,
             thumbnails: crate::thumbnails::tests::thumbnails(root.join("thumbnails")),
         };
         Fixture {
@@ -365,7 +392,7 @@ mod tests {
         };
         let frame = f
             .backend
-            .render(&theme, TIME, std::time::Instant::now())
+            .render(&theme, TIME, std::time::Instant::now(), Motion::Reduced)
             .unwrap();
         assert_eq!(
             &frame[12..16],
@@ -393,5 +420,106 @@ mod tests {
             .iter()
             .find(|a| Some(&a.reference) == added.poster.as_ref());
         assert!(poster.unwrap().data_url.is_some(), "the poster's thumbnail");
+    }
+
+    /// The theme's background as the UI sends it: `video` framed by
+    /// `framing` (the `.bezeltheme` JSON).
+    fn with_video(
+        f: &Fixture,
+        video: &str,
+        framing: serde_json::Value,
+    ) -> bezel_themes::dto::ThemeDto {
+        let mut theme = serde_json::to_value(f.backend.session().theme).unwrap();
+        theme["background"] =
+            serde_json::json!({"type": "video", "asset": video, "framing": framing});
+        serde_json::from_value(theme).unwrap()
+    }
+
+    /// D-2026-10-01-video-background-framing-2: the vendor's pre-turned
+    /// 480x1920 video in the horizontal 8.8" theme stands upright: Auto
+    /// turns it 270 degrees, for its poster too, and says so to the UI.
+    #[test]
+    fn a_panel_native_video_is_added_upright_and_auto_says_why() {
+        let f = fixture("dragon", FakeMedia::ready());
+        let added = f
+            .backend
+            .add_media(&f.local("dragon.mp4", &[5; 4096]))
+            .unwrap();
+        let (_, spec) = f.posters.lock().unwrap()[0].clone();
+        assert_eq!((spec.size, spec.quarter_turns), (Size::new(1920, 480), 3));
+        assert_eq!((spec.crop, spec.pad), (None, None), "it fits as it is");
+
+        let theme = with_video(&f, &added.reference, serde_json::Value::Null);
+        let auto = f.backend.video_auto(&theme).unwrap();
+        let json = serde_json::to_value(auto).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"rotation": 270, "size": {"width": 480, "height": 1920}})
+        );
+        // Auto of a theme without a video, and of a video of another shape.
+        let plain = f.backend.session().theme;
+        let mut none = plain.clone();
+        none.background = bezel_themes::dto::BackgroundDto::Color {
+            color: "#000000ff".into(),
+        };
+        let auto = f.backend.video_auto(&none).unwrap();
+        assert_eq!((auto.rotation, auto.size), (0, None));
+        let clip = f.backend.add_media(&f.local("clip.mov", &[3; 64])).unwrap();
+        let auto = f
+            .backend
+            .video_auto(&with_video(&f, &clip.reference, serde_json::Value::Null))
+            .unwrap();
+        assert_eq!(auto.rotation, 0);
+        assert_eq!(auto.size.map(|s| (s.width, s.height)), Some((1920, 1080)));
+    }
+
+    /// D-2026-10-01-video-background-framing-2: the UI's framing comes and
+    /// goes with the theme: a missing key takes its default, numbers out of
+    /// range are clamped, another rotation is refused.
+    #[test]
+    fn the_framing_travels_with_the_theme_and_is_checked() {
+        let f = fixture("framing", FakeMedia::ready());
+        let added = f
+            .backend
+            .add_media(&f.local("dragon.mp4", &[5; 4096]))
+            .unwrap();
+        let theme = with_video(
+            &f,
+            &added.reference,
+            serde_json::json!({"fit": "contain", "zoom": 9, "position": {"x": -1}}),
+        );
+        f.backend
+            .render(&theme, TIME, std::time::Instant::now(), Motion::Reduced)
+            .unwrap();
+        let session = serde_json::to_value(f.backend.session().theme).unwrap();
+        assert_eq!(
+            session["background"]["framing"],
+            serde_json::json!({"fit": "contain", "zoom": 4.0, "position": {"x": 0.0, "y": 0.5}, "padColor": "#000000ff"})
+        );
+        for rotation in [45, 360, -90] {
+            let bad = with_video(
+                &f,
+                &added.reference,
+                serde_json::json!({ "rotation": rotation }),
+            );
+            let now = std::time::Instant::now();
+            let error = f
+                .backend
+                .render(&bad, TIME, now, Motion::Allowed)
+                .unwrap_err();
+            assert_eq!(error.code(), "invalidInput", "{rotation}");
+            assert!(error.to_string().contains("rotation"), "{error}");
+            assert_eq!(
+                f.backend.video_auto(&bad).unwrap_err().code(),
+                "invalidInput"
+            );
+        }
+        let turned = with_video(&f, &added.reference, serde_json::json!({"rotation": 90}));
+        f.backend
+            .render(&turned, TIME, std::time::Instant::now(), Motion::Reduced)
+            .unwrap();
+        let session = serde_json::to_value(f.backend.session().theme).unwrap();
+        assert_eq!(session["background"]["framing"]["rotation"], 90);
+        assert_eq!(session["background"]["framing"]["fit"], "cover");
     }
 }

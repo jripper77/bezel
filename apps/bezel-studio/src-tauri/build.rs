@@ -12,6 +12,8 @@ const COMMANDS: &[&str] = &[
     "sample_sensors",
     "editor_session",
     "render_preview",
+    "video_auto",
+    "open_guide",
     "push_theme",
     "set_live",
     "set_brightness",

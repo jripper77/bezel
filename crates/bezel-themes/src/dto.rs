@@ -139,6 +139,15 @@ pub struct FramingDto {
     pub pad_color: String,
 }
 
+impl FramingDto {
+    /// Clockwise quarter turns of its `rotation` (`None`: Auto). Only 0,
+    /// 90, 180 and 270 degrees are rotations; another number is refused,
+    /// for every reader of a theme (its file, the studio's commands).
+    pub fn quarter_turns(&self) -> Result<Option<u8>, DtoError> {
+        self.rotation.as_ref().map(quarter_turns).transpose()
+    }
+}
+
 /// Video fit names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -533,7 +542,7 @@ fn framing(d: Option<&FramingDto>) -> R<Option<VideoFraming>> {
         return Ok(None);
     };
     let framing = VideoFraming {
-        rotation: d.rotation.as_ref().map(quarter_turns).transpose()?,
+        rotation: d.quarter_turns()?,
         fit: match d.fit {
             VideoFitDto::Cover => VideoFit::Cover,
             VideoFitDto::Contain => VideoFit::Contain,

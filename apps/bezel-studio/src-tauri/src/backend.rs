@@ -152,30 +152,21 @@ fn theme_of(dto: &ThemeDto) -> UiResult<Theme> {
 
 /// A video background's framing turns its video by 0, 90, 180 or 270
 /// degrees, or leaves it to Auto (no `rotation`): another rotation is
-/// `invalidInput` (D-2026-10-01-video-background-framing-2). Its other
+/// `invalidInput`, not `invalidTheme`
+/// (D-2026-10-01-video-background-framing-2); the rotations are the theme
+/// format's ([`bezel_themes::dto::FramingDto::quarter_turns`]). Its other
 /// numbers are clamped when the theme is read.
 fn check_rotation(background: &BackgroundDto) -> UiResult<()> {
-    let BackgroundDto::Video {
-        framing: Some(framing),
-        ..
-    } = background
-    else {
-        return Ok(());
-    };
-    let Some(rotation) = framing.rotation.as_ref() else {
-        return Ok(());
-    };
-    let degrees = rotation.as_f64();
-    if [0.0, 90.0, 180.0, 270.0]
-        .into_iter()
-        .any(|d| degrees == Some(d))
-    {
-        return Ok(());
+    match background {
+        BackgroundDto::Video {
+            framing: Some(framing),
+            ..
+        } => framing
+            .quarter_turns()
+            .map(drop)
+            .map_err(|e| UiError::new(ErrorCode::InvalidInput).arg("detail", e.0)),
+        _ => Ok(()),
     }
-    Err(UiError::new(ErrorCode::InvalidInput).arg(
-        "detail",
-        format!("video framing rotation {rotation} is not 0, 90, 180 or 270"),
-    ))
 }
 
 /// Pages of the user guide the UI opens in the system's browser.

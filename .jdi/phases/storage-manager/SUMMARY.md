@@ -34,7 +34,7 @@
 - nenhuma
 
 ## Files modified
-- `crates/bezel-core/src/domain/{archive,cleanup,media,mod}.rs`, `crates/bezel-core/src/app/{manager,manager/**,
+- `crates/bezel-core/Cargo.toml` (dev-dep `bezel-media`), `crates/bezel-core/src/domain/{archive,cleanup,media,mod}.rs`, `crates/bezel-core/src/app/{manager,manager/**,
   storage,runtime,mod}.rs`, `crates/bezel-core/src/ports/mod.rs`, `crates/bezel-core/tests/storage_manager.rs`
 - `crates/bezel-media/src/{lib.rs,archive/**}`, `crates/bezel-cli/src/{storage.rs,storage/**,theme.rs,main.rs,lib.rs}`,
   `crates/bezel-cli/tests/storage.rs`
@@ -50,8 +50,8 @@
 - `cargo test --workspace --locked`: 825 passando, 0 falhando, 9 ignorados (hardware e ffmpeg real)
 - UI: 159 unitários; Playwright 160 (claro/escuro × pt-BR/en, axe); DoD `-g "storage manager"` 16 passando
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc`), `check-docs.sh`, `check-packaging.sh`
-- Coverage (`cargo llvm-cov`): 94,38% de linhas; `domain/archive.rs` 99,82%, `domain/cleanup.rs` 99,76%,
-  `app/manager.rs` 98,86%, `archive/disk.rs` 90,91%, studio `manager.rs` 94,03%
+- Coverage (`cargo llvm-cov`): 94,42% de linhas; `domain/archive.rs` 99,82%, `domain/cleanup.rs` 99,79%,
+  `app/manager.rs` 98,86%, `archive/disk.rs` 90,91%, studio `manager.rs` 94,42%
 - CI: verde no Linux e no Windows (gravação atômica do catálogo testada no runner Windows); releases v0.9.0 (núcleo),
   v0.10.0 (CLI) e v0.11.0 (studio)
 
@@ -68,6 +68,5 @@ depois idêntica (17 arquivos do usuário, mesmos tamanhos); cache local vazio n
   confirmação, miniaturas).
 
 ## Observações
-- A seção `manager` do `backend-codes.json` ainda não é lida por teste JS.
 - O vídeo de tema enviado pelo studio fica catalogado com `source` = cópia temporária em `cache/sending/`.
 - Nome dado à tela (D-5) existe só no domínio, sem UI nem comando.

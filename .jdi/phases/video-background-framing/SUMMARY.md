@@ -28,6 +28,8 @@
   pôster fora do lock da sessão, com testes que falham se voltarem para dentro), `c0d0a04` (W3: README), `370ae78`
   (nova tentativa limitada do decodificador da prévia), `668a25e` (uma lista de rotações), `16baa2e` (envio sem
   ffmpeg pelo caminho do tema), `4feaa0f` (rótulo "Send to the screen" na CLI).
+- No PR #1: `df3155a` resolve o Quality Gate do SonarCloud (2 bugs S9383 + 9 code smells no JS novo → 0) e o
+  achado do Semgrep (RegExp montada com o nome do asset → comparação de strings).
 
 ## Blocked tasks
 - nenhuma

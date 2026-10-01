@@ -19,7 +19,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - `device_video_name` recebe o resolvido: padrão = nomes do fornecedor pelas voltas totais (`dragon.mp4`, `amd_90.mp4`); outro = `_f` + 8 hex FNV-1a do canônico (fit, zoom×100, posição×1000, pad se aparece). `Protected::theme_video` cobre também `<nome>_f<8 hex>`.
 - **Dependencies:** none
 - **Test:** `domain::framing::tests::{a_panel_native_video_in_a_turned_theme_counts_as_turned,geometry_covers_contains_zooms_and_positions_on_even_edges}`, `domain::media::tests::device_video_names_carry_the_framing`, `app::runtime::tests::device_video_names_follow_the_vendor` (esperado de hoje)
-- **Status:** completed (41215c3)
+- **Status:** completed
 
 #### T-2: Studio UI (demo): Enquadramento no inspetor e no canvas, vídeo que toca
 - **Specialist:** jdi-doer-bezel
@@ -42,7 +42,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - `stream`: fonte crua `scale=W:H` sem recorte nem voltas, `fps` ≤ 15, `-threads 2`, rawvideo RGBA; testes de argumentos e `Path` (Windows ok).
 - **Dependencies:** T-1
 - **Test:** `framing::tests::filter_chains_follow_the_geometry`, `stream::tests::preview_decoding_is_raw_at_most_15_fps`, `transcode::tests::builds_the_vendor_argument_vector_for_rev_c`
-- **Status:** completed (46d32a7)
+- **Status:** completed
 
 #### T-4: `.bezeltheme` com `framing`; TURZX em Auto
 - **Specialist:** jdi-doer-bezel
@@ -52,7 +52,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - Tema antigo e importação TURZX = `framing: None` (Auto).
 - **Dependencies:** T-1
 - **Test:** `native::tests::video_framing_round_trips_and_older_themes_load_as_auto`, `import::turzx::tests::vendor_video_backgrounds_import_with_auto_framing`
-- **Status:** completed (4e82fab)
+- **Status:** completed
 
 #### T-5: Runtime e `bezel run` respeitam o enquadramento
 - **Specialist:** jdi-doer-bezel
@@ -63,7 +63,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - `bezel run` sonda o vídeo (cabeçalho MP4, sem ffmpeg) e o passa à runtime; a dica do `put` nomeia o arquivo procurado (identidade sem `--orientation`; outro enquadramento: "Enviar para a tela" do studio).
 - **Dependencies:** T-1
 - **Test:** `--test runtime_video`: `the_stored_dragon_ball_video_loops_without_an_upload`, `a_stored_file_of_another_size_is_not_reused`, `a_reframed_video_is_looked_for_under_its_own_name`, `the_host_decodes_the_video_with_its_framing`; CLI `live::tests::run_honours_the_video_framing`
-- **Status:** completed (8f6ef44)
+- **Status:** completed
 
 ### Wave 3 (paralela)
 

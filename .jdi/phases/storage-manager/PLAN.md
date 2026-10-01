@@ -64,7 +64,7 @@ Gerenciar os arquivos da memória interna e do cartão SD da tela no studio e na
   - Imprime a lista exata (origem -> destino, tamanhos, o que é apagado); sem `--yes` só consulta a tela; `--dry-run` nunca apaga; Ctrl+C cancela como `put`; textos em inglês. `DiskArchive` em `data_home()/bezel/storage`; `--fake` com `MemoryArchive`; protegidos = boot + vídeos dos temas em `bezel/themes`; testes com `XDG_DATA_HOME` temporário.
 - **Dependencies:** T-2, T-3
 - **Test:** `storage::tests::mv_rename_restore_and_cleanup_without_yes_change_nothing`, `storage::tests::cleanup_dry_run_lists_without_deleting`; `tests/storage.rs` com `--fake`
-- **Status:** pending
+- **Status:** completed
 
 #### T-6: Studio backend (Tauri) do gerenciador
 - **Specialist:** jdi-doer-bezel

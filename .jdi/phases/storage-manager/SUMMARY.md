@@ -25,6 +25,10 @@
 - T-7 `5e98c63`: guia do usuário (en e pt-BR) "Gerenciar os arquivos", README, CHANGELOG; `check-docs.sh` exige
   `bezel storage mv`, `cleanup --dry-run` e `cache clear`.
 - Orquestrador: `9a7dd17` (mensagem "desatualizado" serve para planos e envios).
+- Correções do verify BLOCKED (fix mode): B1 `bcd2216` (`run_plan` só com a confirmação do diálogo); W1 `6bb8152`
+  (apaga só no tamanho confirmado); W2 `f57d8cb` (studio restaura apagados pelo Bezel); W3 `4fd71d3` (códigos de
+  parada/estágio/recusa em vez de texto); W4 `ebb1eca` (teste JS lê a seção `manager`); `dae15c5` (o arquivo que um
+  grupo mantém nunca é pré-marcado); `83d9c7f` (catálogo atrasado: a CLI diz que a origem já foi apagada); W5 docs.
 
 ## Blocked tasks
 - nenhuma
@@ -43,8 +47,8 @@
   `MediaSetup::spare`, `clock.rs` (novo), `video.rs` e `src-tauri/tests/hardware.rs` (T-6)
 
 ## Tests
-- `cargo test --workspace --locked`: 819 passando, 0 falhando, 9 ignorados (hardware e ffmpeg real)
-- UI: 152 unitários; Playwright 160 (claro/escuro × pt-BR/en, axe); DoD `-g "storage manager"` 16 passando
+- `cargo test --workspace --locked`: 825 passando, 0 falhando, 9 ignorados (hardware e ffmpeg real)
+- UI: 159 unitários; Playwright 160 (claro/escuro × pt-BR/en, axe); DoD `-g "storage manager"` 16 passando
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc`), `check-docs.sh`, `check-packaging.sh`
 - Coverage (`cargo llvm-cov`): 94,38% de linhas; `domain/archive.rs` 99,82%, `domain/cleanup.rs` 99,76%,
   `app/manager.rs` 98,86%, `archive/disk.rs` 90,91%, studio `manager.rs` 94,03%

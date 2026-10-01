@@ -1,0 +1,3 @@
+- [backlog] Windows: tell a COM port this app already holds apart from one held by another program (opening it again reads "Access is denied" and maps to AccessDenied with the udev hint); D-2026-10-01-live-screen-controls-4
+- [backlog] Hardware check on the 8.8": whether poking the MCU (rev C wake) after a failed open is harmless while the SoC is awake and held; if not, skip the wake when the display is listed and held (D-2026-10-01-live-screen-controls-4)
+- [backlog] Queue a brightness change made while a storage job borrows the live link instead of answering `busy` (D-2026-10-01-live-screen-controls-3)

@@ -12,7 +12,7 @@ use std::time::Duration;
 use super::device::{DeviceModel, Family};
 use super::frame::Rect;
 use super::geometry::{Orientation, Size};
-use super::storage::FileName;
+use super::storage::{FileName, MAX_UPLOAD_BYTES, REV_C_MAX_UPLOAD_BYTES};
 
 /// Still picture or moving picture. Also names the two folders every storage
 /// medium of a screen has.
@@ -352,6 +352,11 @@ pub struct TranscodeTarget {
     pub frame_rate: Option<u32>,
     /// Colour treatment.
     pub tone: Tone,
+    /// Largest output the screen takes, in bytes: the converter caps the
+    /// bitrate from the source's duration so that the output fits (CRF 20
+    /// stays the quality ceiling). `None`, or a source of unknown duration:
+    /// no cap.
+    pub max_bytes: Option<u64>,
 }
 
 /// Host-side decoding of a video or animated GIF into frames (the fallback
@@ -442,6 +447,11 @@ pub struct UploadProfile {
     pub b_frames: BFrames,
     /// Still-image formats the screen shows (the vendor device page's list).
     pub image_formats: &'static [MediaFormat],
+    /// Largest file the screen takes, in bytes: rev C
+    /// [`REV_C_MAX_UPLOAD_BYTES`] (D-2026-09-30-release-polish-12), TUR_USB
+    /// the vendor's [`MAX_UPLOAD_BYTES`]. Always below
+    /// [`super::storage::DEVICE_SIZE_LIMIT`].
+    pub max_upload_bytes: u64,
 }
 
 impl UploadProfile {
@@ -454,9 +464,9 @@ impl UploadProfile {
             .panel
             .portrait()
             .in_orientation(model.native_orientation);
-        let (video_format, b_frames) = match model.family {
-            Family::TuringRevC => (MediaFormat::Mp4, BFrames::Allowed),
-            Family::TuringUsb => (MediaFormat::H264, BFrames::Forbidden),
+        let (video_format, b_frames, max_upload_bytes) = match model.family {
+            Family::TuringRevC => (MediaFormat::Mp4, BFrames::Allowed, REV_C_MAX_UPLOAD_BYTES),
+            Family::TuringUsb => (MediaFormat::H264, BFrames::Forbidden, MAX_UPLOAD_BYTES),
             _ => return None,
         };
         Some(Self {
@@ -464,6 +474,7 @@ impl UploadProfile {
             video_size,
             b_frames,
             image_formats: STILLS,
+            max_upload_bytes,
         })
     }
 
@@ -522,7 +533,8 @@ impl UploadProfile {
         }
     }
 
-    /// The conversion of a video into this profile with the user's `options`.
+    /// The conversion of a video into this profile with the user's
+    /// `options`, its output capped at the screen's per-file limit.
     pub fn transcode_target(&self, options: ConvertOptions) -> TranscodeTarget {
         TranscodeTarget {
             format: self.video_format,
@@ -532,6 +544,7 @@ impl UploadProfile {
             crop: options.crop,
             frame_rate: options.frame_rate,
             tone: options.tone,
+            max_bytes: Some(self.max_upload_bytes),
         }
     }
 
@@ -686,6 +699,13 @@ pub(crate) mod tests {
         assert_eq!(usb.video_format, MediaFormat::H264);
         assert_eq!(usb.b_frames, BFrames::Forbidden);
         assert_eq!(usb.accepted(MediaKind::Video), &[MediaFormat::H264]);
+        // Per-file caps (D-2026-09-30-release-polish-12), below the 2 GiB
+        // the screens parse as signed numbers.
+        assert_eq!(rev_c.max_upload_bytes, 26_214_400);
+        assert_eq!(usb.max_upload_bytes, 120_000_000);
+        for cap in [rev_c.max_upload_bytes, usb.max_upload_bytes] {
+            assert!(cap < crate::domain::storage::DEVICE_SIZE_LIMIT);
+        }
         assert!(profile("turing-3.5").is_none(), "rev A has no storage");
         assert!(profile("wch-4.3").is_none(), "WCH plays PC-decoded frames");
     }
@@ -802,6 +822,12 @@ pub(crate) mod tests {
         assert_eq!(t.frame_rate, Some(24));
         assert_eq!(t.tone, Tone::Darkened);
         assert_eq!(t.b_frames, BFrames::Allowed);
+        assert_eq!(t.max_bytes, Some(REV_C_MAX_UPLOAD_BYTES));
+        let usb = profile("turing-usb-8.8").unwrap();
+        assert_eq!(
+            usb.transcode_target(ConvertOptions::default()).max_bytes,
+            Some(MAX_UPLOAD_BYTES)
+        );
     }
 
     #[test]

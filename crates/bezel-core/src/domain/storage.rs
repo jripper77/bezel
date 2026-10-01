@@ -386,8 +386,19 @@ impl Confirmed {
     }
 }
 
-/// The vendor's upload limit ("120 MB", read as the smaller decimal value).
+/// Bytes in a mebibyte, the unit size limits are shown in.
+pub const MIB: u64 = 1 << 20;
+
+/// The vendor's upload limit ("120 MB", read as the smaller decimal value):
+/// the per-file cap of Turing USB screens.
 pub const MAX_UPLOAD_BYTES: u64 = 120_000_000;
+
+/// The per-file cap of rev C screens, 25 MiB
+/// (D-2026-09-30-release-polish-12): the 8.8" (ROM 1.90) keeps a whole
+/// upload in memory and stops reading at exactly 29,577,216 bytes, then
+/// hangs until it is restarted; 24 MiB passed and the vendor app's largest
+/// stored files are 24.6 MiB.
+pub const REV_C_MAX_UPLOAD_BYTES: u64 = 25 * MIB;
 
 /// Sizes the screens parse as signed 32-bit numbers: files this large or
 /// larger read back as absent.
@@ -419,9 +430,18 @@ pub enum Refusal {
     NeedsConverter(Vec<Mismatch>),
     /// The file is empty.
     EmptyFile,
-    /// The file is over the upload limit.
+    /// The file is over the screen's per-file limit.
     TooLarge {
         /// File size.
+        bytes: u64,
+        /// The limit.
+        limit: u64,
+    },
+    /// The converted video is still over the screen's per-file limit (its
+    /// bitrate could not be capped enough, or the source's duration is
+    /// unknown): a shorter clip or a lower frame rate makes it fit.
+    ConvertedTooLarge {
+        /// Size of the conversion's output.
         bytes: u64,
         /// The limit.
         limit: u64,
@@ -482,9 +502,19 @@ impl fmt::Display for Refusal {
                 joined(m)
             ),
             Refusal::EmptyFile => f.write_str("the file is empty"),
-            Refusal::TooLarge { bytes, limit } => {
-                write!(f, "{bytes} bytes is over the {limit}-byte upload limit")
-            }
+            Refusal::TooLarge { bytes, limit } => write!(
+                f,
+                "the file is {} MiB, over the screen's {} MiB limit per file",
+                mib_text(*bytes, Rounding::Up),
+                mib_text(*limit, Rounding::Down)
+            ),
+            Refusal::ConvertedTooLarge { bytes, limit } => write!(
+                f,
+                "the converted video is {} MiB, over the screen's {} MiB limit per file; \
+                 use a shorter clip or a lower frame rate",
+                mib_text(*bytes, Rounding::Up),
+                mib_text(*limit, Rounding::Down)
+            ),
             Refusal::NoCard => f.write_str("the screen has no memory card"),
             Refusal::NoSpace { needed, free, .. } => write!(
                 f,
@@ -532,14 +562,34 @@ pub struct UploadPlan {
     pub replaces: Option<FileEntry>,
 }
 
-/// Refuses an empty file or one over the upload limit (120 MB, and always
-/// below the devices' 2 GiB ceiling).
-pub fn check_size(bytes: u64) -> Result<(), Refusal> {
-    let limit = if MAX_UPLOAD_BYTES < DEVICE_SIZE_LIMIT {
-        MAX_UPLOAD_BYTES
-    } else {
-        DEVICE_SIZE_LIMIT - 1
+/// Which way [`mib_text`] rounds a size that is not a whole tenth of a MiB.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rounding {
+    /// Down: a limit never reads larger than it is.
+    Down,
+    /// Up: a file over a limit never reads as equal to it.
+    Up,
+}
+
+/// `bytes` in MiB as people read it: whole when exact (`25`), else with one
+/// decimal (`30.2`).
+pub fn mib_text(bytes: u64, rounding: Rounding) -> String {
+    let (scaled, mib) = (u128::from(bytes) * 10, u128::from(MIB));
+    let tenths = match rounding {
+        Rounding::Down => scaled / mib,
+        Rounding::Up => scaled.div_ceil(mib),
     };
+    match tenths % 10 {
+        0 => format!("{}", tenths / 10),
+        tenth => format!("{}.{tenth}", tenths / 10),
+    }
+}
+
+/// Refuses an empty file or one over `cap`, the screen's per-file limit
+/// ([`UploadProfile::max_upload_bytes`]), always kept below the devices'
+/// 2 GiB ceiling.
+pub fn check_size(bytes: u64, cap: u64) -> Result<(), Refusal> {
+    let limit = cap.min(DEVICE_SIZE_LIMIT - 1);
     if bytes == 0 {
         return Err(Refusal::EmptyFile);
     }
@@ -582,7 +632,7 @@ pub fn preflight(
     }
     let path = RemotePath::new(check.location, name);
     if let UploadAction::AsIs { bytes } = action {
-        check_size(bytes)?;
+        check_size(bytes, profile.max_upload_bytes)?;
         if bytes >= free {
             let on_medium = stored.iter().filter(|e| e.path.location.medium == medium);
             return Err(Refusal::no_space(bytes, free, on_medium.cloned().collect()));
@@ -757,21 +807,22 @@ mod tests {
             })
         ));
 
-        // Sizes: empty, over 120 MB, over the devices' 2 GiB ceiling.
+        // Sizes: empty, over the 8.8"'s 25 MiB, over the devices' 2 GiB
+        // ceiling.
         for (bytes, refusal) in [
             (0, Refusal::EmptyFile),
             (
-                120_000_001,
+                REV_C_MAX_UPLOAD_BYTES + 1,
                 Refusal::TooLarge {
-                    bytes: 120_000_001,
-                    limit: MAX_UPLOAD_BYTES,
+                    bytes: REV_C_MAX_UPLOAD_BYTES + 1,
+                    limit: REV_C_MAX_UPLOAD_BYTES,
                 },
             ),
             (
                 DEVICE_SIZE_LIMIT,
                 Refusal::TooLarge {
                     bytes: DEVICE_SIZE_LIMIT,
-                    limit: MAX_UPLOAD_BYTES,
+                    limit: REV_C_MAX_UPLOAD_BYTES,
                 },
             ),
         ] {
@@ -781,14 +832,8 @@ mod tests {
                 Err(refusal)
             );
         }
-        assert!(
-            run(
-                &check("clip.mp4", INTERNAL_VIDEO, &mp4(NATIVE, MAX_UPLOAD_BYTES)),
-                &roomy,
-                &[]
-            )
-            .is_ok()
-        );
+        let at_the_cap = mp4(NATIVE, REV_C_MAX_UPLOAD_BYTES);
+        assert!(run(&check("clip.mp4", INTERNAL_VIDEO, &at_the_cap), &roomy, &[]).is_ok());
 
         // Wrong profile: the resolution of a landscape export.
         let landscape = mp4(Size::new(1920, 480), 1000);
@@ -855,6 +900,91 @@ mod tests {
             plan.replaces,
             Some(entry("internal/video/old.mp4", Some(900)))
         );
+    }
+
+    #[test]
+    fn each_file_is_capped_at_the_profiles_limit() {
+        // D-2026-09-30-release-polish-12: 25 MiB on rev C, the vendor's
+        // 120 MB on TUR_USB, both refused before anything is sent.
+        let roomy = info(500_000_000, None);
+        let over_rev_c = REV_C_MAX_UPLOAD_BYTES + 1;
+        let rev_c = run(
+            &check("clip.mp4", INTERNAL_VIDEO, &mp4(NATIVE, over_rev_c)),
+            &roomy,
+            &[],
+        );
+        assert_eq!(
+            rev_c,
+            Err(Refusal::TooLarge {
+                bytes: over_rev_c,
+                limit: 26_214_400
+            })
+        );
+        let usb = profile("turing-usb-8.8").unwrap();
+        let stream = |bytes| {
+            let mut media = mp4(NATIVE, bytes);
+            media.format = MediaFormat::H264;
+            media.video = media.video.map(|v| crate::domain::media::VideoTrack {
+                b_frames: Some(false),
+                ..v
+            });
+            media
+        };
+        let fits = stream(over_rev_c);
+        let plan = preflight(
+            &check("clip.h264", INTERNAL_VIDEO, &fits),
+            &usb,
+            &roomy,
+            &[],
+        );
+        assert_eq!(
+            plan.unwrap().action,
+            UploadAction::AsIs { bytes: over_rev_c }
+        );
+        let over_usb = stream(MAX_UPLOAD_BYTES + 1);
+        let refused = preflight(
+            &check("clip.h264", INTERNAL_VIDEO, &over_usb),
+            &usb,
+            &roomy,
+            &[],
+        );
+        assert_eq!(
+            refused,
+            Err(Refusal::TooLarge {
+                bytes: MAX_UPLOAD_BYTES + 1,
+                limit: MAX_UPLOAD_BYTES
+            })
+        );
+        // A conversion is planned with its output capped at the limit; the
+        // use case checks the output's real size again.
+        let wide = mp4(Size::new(1920, 1080), 1);
+        let mut convert = check("clip.mp4", INTERNAL_VIDEO, &wide);
+        convert.converter = Converter::Available;
+        let plan = run(&convert, &roomy, &[]).unwrap();
+        let UploadAction::Convert(target) = plan.action else {
+            unreachable!("expected a conversion");
+        };
+        assert_eq!(target.max_bytes, Some(REV_C_MAX_UPLOAD_BYTES));
+        // A cap above the 2 GiB the screens can parse is held below it.
+        assert_eq!(
+            check_size(DEVICE_SIZE_LIMIT, u64::MAX),
+            Err(Refusal::TooLarge {
+                bytes: DEVICE_SIZE_LIMIT,
+                limit: DEVICE_SIZE_LIMIT - 1
+            })
+        );
+    }
+
+    #[test]
+    fn sizes_read_in_mib() {
+        assert_eq!(mib_text(REV_C_MAX_UPLOAD_BYTES, Rounding::Down), "25");
+        assert_eq!(mib_text(REV_C_MAX_UPLOAD_BYTES + 1, Rounding::Up), "25.1");
+        assert_eq!(mib_text(REV_C_MAX_UPLOAD_BYTES + 1, Rounding::Down), "25");
+        assert_eq!(mib_text(MAX_UPLOAD_BYTES, Rounding::Down), "114.4");
+        assert_eq!(mib_text(29_577_216, Rounding::Up), "28.3");
+        assert_eq!(mib_text(0, Rounding::Up), "0");
+        assert_eq!(mib_text(u64::MAX, Rounding::Down), "17592186044415.9");
+        assert_eq!(mib_text(u64::MAX, Rounding::Up), "17592186044416");
     }
 
     #[test]
@@ -1011,8 +1141,19 @@ mod tests {
             (Refusal::NeedsConverter(Vec::new()), "requested adjustments"),
             (Refusal::EmptyFile, "empty"),
             (
-                Refusal::TooLarge { bytes: 2, limit: 1 },
-                "over the 1-byte upload limit",
+                Refusal::TooLarge {
+                    bytes: 30 * MIB + MIB / 5,
+                    limit: REV_C_MAX_UPLOAD_BYTES,
+                },
+                "the file is 30.2 MiB, over the screen's 25 MiB limit per file",
+            ),
+            (
+                Refusal::ConvertedTooLarge {
+                    bytes: REV_C_MAX_UPLOAD_BYTES + 1,
+                    limit: REV_C_MAX_UPLOAD_BYTES,
+                },
+                "the converted video is 25.1 MiB, over the screen's 25 MiB limit per file; \
+                 use a shorter clip or a lower frame rate",
             ),
             (Refusal::NoCard, "no memory card"),
             (

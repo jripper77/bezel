@@ -52,6 +52,14 @@ command. If the next upload ends with *"the stored size differs; delete it and
 send it again"*, delete that file and send it once more. See
 [Cancelling an upload](storage-and-video.md#cancelling-an-upload).
 
+## "refused: the file is … MiB and this screen takes files up to 25 MiB each"
+
+Turing rev C screens take at most 25 MiB per file: their firmware keeps the
+whole upload in memory and freezes on a larger one. Bezel refuses the file
+before sending anything. Send a shorter clip, or let Bezel convert the video at
+a lower frame rate (`--fps 24`): a conversion caps the bitrate so the result
+fits. See [How large a file can be](storage-and-video.md#how-large-a-file-can-be).
+
 ## A video will not send
 
 "needs ffmpeg" or "ffmpeg not found": install ffmpeg with `libx264`

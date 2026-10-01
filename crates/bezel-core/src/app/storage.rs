@@ -267,7 +267,9 @@ fn with_sizes(storage: &mut dyn ScreenStorage, entries: Vec<FileEntry>) -> Resul
         .collect()
 }
 
-/// The conversion output must now fit the profile, the limits and the space.
+/// The conversion output must now fit the profile, the limits and the space:
+/// an output over the per-file limit is refused as
+/// [`Refusal::ConvertedTooLarge`] before a byte is sent.
 fn recheck(
     storage: &mut dyn ScreenStorage,
     media: &mut dyn MediaTranscoder,
@@ -286,6 +288,9 @@ fn recheck(
     let plan = checked(storage, profile, &check).map_err(|e| match e {
         BezelError::Refused(Refusal::NeedsConverter(m)) => {
             BezelError::Refused(Refusal::WrongProfile(m))
+        }
+        BezelError::Refused(Refusal::TooLarge { bytes, limit }) => {
+            BezelError::Refused(Refusal::ConvertedTooLarge { bytes, limit })
         }
         other => other,
     })?;

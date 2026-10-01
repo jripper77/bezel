@@ -31,6 +31,7 @@ mod transcode;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use bezel_core::domain::job::Job;
 use bezel_core::domain::media::{MediaFormat, MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
@@ -151,13 +152,13 @@ impl FfmpegTranscoder {
         Ok(path)
     }
 
-    /// The source's duration in ms (0 when unknown), for progress.
-    fn duration_ms(source: &Path, tools: &Tools) -> u64 {
+    /// The source's duration, when it can be probed: for progress and for
+    /// the bitrate that keeps the output under the screen's limit.
+    fn duration(source: &Path, tools: &Tools) -> Option<Duration> {
         probe::probe_file(source, || Some(tools.ffprobe.clone()))
             .ok()
             .and_then(|info| info.video)
             .and_then(|track| track.duration)
-            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
     }
 }
 
@@ -202,12 +203,13 @@ impl MediaTranscoder for FfmpegTranscoder {
         job.checkpoint()?;
         let tools = self.require("Converting a video")?;
         let source = existing_file(source)?;
-        let total_ms = Self::duration_ms(source, &tools);
+        let duration = Self::duration(source, &tools);
+        let total_ms = duration.map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
         let output = self.next_output(target.format, source)?;
         let location = output.to_str().map(str::to_string).ok_or_else(|| {
             BezelError::Transport(format!("{} is not a UTF-8 path", output.display()))
         })?;
-        let args = transcode::arguments(source, target, &output)?;
+        let args = transcode::arguments(source, target, &output, duration)?;
         transcode::run(&tools.ffmpeg, &args, &output, total_ms, job)?;
         Ok(MediaLocation(location))
     }

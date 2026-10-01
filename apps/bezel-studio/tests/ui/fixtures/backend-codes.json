@@ -251,6 +251,7 @@
     "resolution"
   ],
   "refusals": [
+    "convertedTooLarge",
     "emptyFile",
     "invalidName",
     "needsConverter",

@@ -54,9 +54,34 @@ sobre um arquivo que já existe, `boot`) primeiro diz o que vai fazer e precisa 
   formato certo vai como está. O ffmpeg não vem junto:
   [Instalar o ffmpeg](ffmpeg.md).
 - Nomes de arquivo: letras minúsculas sem acento `a-z`, números, `_`, `.` e `-`.
-  Até 120 MB por arquivo.
+- Tamanho: até **25 MiB por arquivo nas telas Turing rev C** (a geração serial:
+  8,8", 5", 2,1" redonda e outras), até 120 MB na geração
+  Turing USB. Veja [Qual o tamanho máximo de um arquivo](#qual-o-tamanho-máximo-de-um-arquivo).
 - Quando um arquivo não cabe, o Bezel diz quanto há livre e lista os arquivos
   guardados, dos maiores para os menores. Ele nunca apaga nada por você.
+
+## Qual o tamanho máximo de um arquivo
+
+Uma tela Turing rev C guarda o envio inteiro na memória antes de gravá-lo. Na
+8,8" o firmware para de ler em cerca de 28 MiB e trava até ser reiniciado,
+qualquer que seja a velocidade; por isso o Bezel aceita no máximo **25 MiB por
+arquivo** nessas telas e recusa um arquivo maior antes de enviar qualquer coisa.
+Os maiores arquivos do app do fabricante também ficam em cerca de 24,6 MiB.
+
+- Um vídeo que o Bezel converte é ajustado para caber: pela duração do vídeo
+  ele limita a taxa de bits, e um trecho longo perde um pouco de qualidade em
+  vez de passar do limite.
+- Se o vídeo convertido ainda ficar grande demais (ou o ffmpeg não souber a
+  duração), nada é enviado e o Bezel avisa: envie um trecho mais curto, ou
+  reduza os quadros por segundo com `--fps` (por exemplo
+  `bezel storage put clipe.mp4 --fps 24`).
+- Um vídeo que já está no formato da tela vai como está, então ele mesmo
+  precisa caber no limite; o `--fps` faz o Bezel convertê-lo, e a conversão o
+  ajusta.
+
+O limite aparece em MiB (1 MiB = 1.048.576 bytes): a mensagem do aplicativo,
+por exemplo, diz *"O arquivo tem 30 MiB; esta tela aceita arquivos de até
+25 MiB."*
 
 ## Cancelar um envio
 

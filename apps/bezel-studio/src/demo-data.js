@@ -87,7 +87,7 @@ export const DEMO_STORAGE = Object.freeze({
   files: Object.freeze([
     ['internal/image/logo.png', 184_320],
     ['internal/video/amd_90.mp4', 18_874_368],
-    ['sd/video/chuva.mp4', 67_108_864],
+    ['sd/video/chuva.mp4', 23_068_672],
   ]),
 });
 
@@ -101,6 +101,10 @@ export const DEMO_LOCAL_FILES = Object.freeze({
   'foto.png': { size: 512_000, format: 'PNG', width: 1080, height: 1080 },
   // Stored with the wrong size, like a file bytes of a cancelled upload landed in.
   'torto.png': { size: 256_000, format: 'PNG', width: 480, height: 480, storedShort: true },
+  // Over the 8.8"'s 25 MiB per file (D-2026-09-30-release-polish-12): as it
+  // is, and once converted.
+  'longo.mp4': { size: 31_457_280, format: 'MP4', width: 480, height: 1920, native: true },
+  'show.mov': { size: 52_428_800, format: 'MOV', width: 1920, height: 1080, native: false, convertedSize: 27_262_976 },
 });
 
 /** The file the demo's picker returns. */
@@ -135,14 +139,15 @@ export const DEMO_VIDEO_THEME = Object.freeze({
 export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules && sudo udevadm control --reload && sudo udevadm trigger';
 
 /**
- * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, theme?: object, denied?: boolean}>}
+ * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean}>}
  */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
   two: { screens: [turing88, asleep21] },
   empty: { screens: [] },
   error: { error: 'serial port enumeration: permission denied' },
-  noffmpeg: { screens: [turing88], ffmpeg: false, card: false },
+  // Refusals: no ffmpeg, no card and an internal flash of 32 MB.
+  noffmpeg: { screens: [turing88], ffmpeg: false, card: false, internalTotal: 32_000_000 },
   video: { screens: [turing88], theme: DEMO_VIDEO_THEME },
   turzx: { screens: [turzx] },
   // Linux without Bezel's udev rule: the screen is listed, opening it is denied.

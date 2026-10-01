@@ -103,6 +103,12 @@ the Conventional Commits.
   turing-smart-screen-python, troubleshooting and the supported screens.
 
 ### Changed
+- Turing rev C screens take at most 25 MiB per file: their firmware keeps a
+  whole upload in memory and froze past about 28 MiB. A larger file is refused
+  before anything is sent, with the limit in MiB; a conversion caps the
+  video's bitrate from its length so it fits, and a converted video still over
+  the limit is refused with how to make it fit (a shorter clip, `--fps`).
+  Turing USB screens keep the vendor's 120 MB.
 - A theme file that cannot be read or does not fit its screen fails with
   `theme file: …` instead of a transport error; the studio opens a
   `theme.json` like the command line does.

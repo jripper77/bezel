@@ -57,6 +57,9 @@ pub(crate) struct FakeMedia {
     pub(crate) converted: Arc<Mutex<Vec<TranscodeTarget>>>,
     /// The videos decoded on the host, and how.
     pub(crate) streamed: Arc<Mutex<Vec<(MediaLocation, StreamSpec)>>>,
+    /// Bytes of every conversion's output (a sparse file past
+    /// [`CONVERTED_BYTES`]).
+    output_bytes: u64,
 }
 
 /// The color of every picture of a video [`FakeMedia`] decodes.
@@ -79,6 +82,7 @@ impl FakeMedia {
             tool: Some(PathBuf::from("/usr/bin/ffmpeg")),
             converted: Arc::default(),
             streamed: Arc::default(),
+            output_bytes: CONVERTED_BYTES as u64,
         }
     }
 
@@ -89,6 +93,7 @@ impl FakeMedia {
             tool: None,
             converted: Arc::default(),
             streamed: Arc::default(),
+            output_bytes: CONVERTED_BYTES as u64,
         }
     }
 }
@@ -157,6 +162,11 @@ impl MediaTranscoder for FakeMedia {
         let dir = Path::new(&source.0).parent().unwrap();
         let output = dir.join(format!("native-converted-{}.mp4", converted.len()));
         std::fs::write(&output, vec![7; CONVERTED_BYTES]).unwrap();
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&output)
+            .unwrap();
+        file.set_len(self.output_bytes).unwrap();
         Ok(MediaLocation(output.display().to_string()))
     }
 
@@ -455,6 +465,28 @@ fn an_upload_is_prepared_confirmed_sent_and_verified() {
         .prepare_upload(KEY, &f.local("x.png", 1), "cloud", TIME)
         .unwrap_err();
     assert_eq!(err.code(), "unknownMedium");
+}
+
+#[test]
+fn a_converted_video_over_the_limit_is_refused_before_sending() {
+    // D-2026-09-30-release-polish-12: the conversion is capped at the
+    // 8.8"'s 25 MiB; an output still over it comes back as a refusal.
+    let cap = bezel_core::domain::storage::REV_C_MAX_UPLOAD_BYTES;
+    let mut media = FakeMedia::ready();
+    media.output_bytes = cap + 1;
+    let f = fixture_with("converted-too-large", FakeStorage::default(), media);
+    let ready = f.ready(&f.local("trip.mov", 3000), "internal");
+    assert!(ready.convert.is_some());
+    let (result, _) = f.run(ready.ticket, Confirm::No);
+    let Ok(JobDto::Refused(refusal)) = result else {
+        panic!("not refused: {result:?}");
+    };
+    assert_eq!(refusal.code, "convertedTooLarge");
+    assert_eq!((refusal.bytes, refusal.limit), (Some(cap + 1), Some(cap)));
+    assert!(refusal.message.contains("25 MiB"), "{}", refusal.message);
+    assert_eq!(f.converted.lock().unwrap()[0].max_bytes, Some(cap));
+    assert!(f.writes().is_empty(), "nothing was sent");
+    assert!(!f.backend.storage.is_busy());
 }
 
 #[test]

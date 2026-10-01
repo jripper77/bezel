@@ -5,7 +5,7 @@
 // stored with the wrong size, and what a TUR_USB screen does not offer. No
 // console errors, no serious or critical accessibility violations.
 import { test, expect, watchErrors, expectAccessible, prefixOf, suffixOf } from './helpers.mjs';
-import { formatBytes } from '../../src/ui/storage.js';
+import { formatBytes, formatMiB } from '../../src/ui/storage.js';
 import { DEMO_LET_GO_EVENT } from '../../src/bridge.js';
 
 async function openStorage(page, t) {
@@ -250,5 +250,30 @@ test('a file stored with the wrong size is explained and deleted on request', as
     .getByRole('button', { name: t('storage.deleteAction'), exact: true }).click();
   await expect(toast(page)).toHaveText(t('storage.deleted', { name: 'torto.png' }));
   await expect(internal.getByRole('listitem').filter({ hasText: 'torto.png' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('files over the screen\'s limit are refused in MiB, before and after converting', async ({ page, t, lang }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await openStorage(page, t);
+  const internal = page.getByRole('region', { name: t('storage.medium.internal') });
+  const limit = formatMiB(26_214_400, lang);
+
+  // As it is: refused before the summary, nothing sent.
+  await dropFile(page, internal, 'longo.mp4', 'video/mp4');
+  const refused = page.getByRole('region', { name: t('storage.refusedTitle', { name: 'longo.mp4' }) });
+  await expect(refused).toContainText(t('storage.refused.tooLarge', { size: formatMiB(31_457_280, lang, 'up'), limit }));
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expectAccessible(page);
+
+  // Converted and still too large: refused before a byte is sent.
+  await dropFile(page, internal, 'show.mov', 'video/quicktime');
+  const summary = page.getByRole('dialog', { name: t('storage.confirmUploadTitle', { name: 'show.mp4' }) });
+  await summary.getByRole('button', { name: t('storage.confirmUploadAction'), exact: true }).click();
+  const converted = page.getByRole('region', { name: t('storage.refusedTitle', { name: 'show.mp4' }) });
+  await expect(converted).toContainText(t('storage.refused.convertedTooLarge', { size: formatMiB(27_262_976, lang, 'up'), limit }), UPLOAD);
+  await expect(internal.getByRole('listitem').filter({ hasText: 'show.mp4' })).toHaveCount(0);
+  await expectAccessible(page);
   expect(errors).toEqual([]);
 });

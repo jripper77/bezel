@@ -193,7 +193,8 @@ pub trait MediaTranscoder: Send {
     ) -> Result<MediaLocation>;
 
     /// The bytes of a local media file (a source or a conversion output),
-    /// for an upload. Uploads are at most 120 MB.
+    /// for an upload. Uploads are at most the screen's per-file limit
+    /// (`UploadProfile::max_upload_bytes`: 25 MiB on rev C, 120 MB at most).
     fn load(&mut self, source: &MediaLocation) -> Result<Vec<u8>>;
 
     /// Decodes `source` (a video or an animated GIF) on the host into RGBA

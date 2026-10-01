@@ -1,14 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { translator } from '../../src/i18n/index.js';
-import { baseName, bootKeepsText, formatBytes, progressParts, refusalText, storageFeatures, usedFraction } from '../../src/ui/storage.js';
-import { createDemoBackend, createDemoGate, demoKindOf, demoSuggestName, demoTurns, demoVideoName } from '../../src/demo-backend.js';
+import { baseName, bootKeepsText, formatBytes, formatMiB, progressParts, refusalText, storageFeatures, usedFraction } from '../../src/ui/storage.js';
+import { DEMO_REV_C_CAP, DEMO_USB_CAP, createDemoBackend, createDemoGate, demoKindOf, demoSuggestName, demoTurns, demoVideoName } from '../../src/demo-backend.js';
 import { DEMO_PICKED, DEMO_STORAGE, DEMO_VIDEO_THEME, SCENARIOS } from '../../src/demo-data.js';
 
 const pt = translator('pt-BR');
 const en = translator('en');
 const instant = { now: () => 1000, delay: () => Promise.resolve() };
 const KEY = '/dev/ttyACM1';
+
+test('per-file limits read in MiB, rounded the safe way', () => {
+  assert.equal(formatMiB(26_214_400, 'en'), '25 MiB');
+  assert.equal(formatMiB(26_214_401, 'en', 'up'), '25.1 MiB');
+  assert.equal(formatMiB(26_214_401, 'en', 'down'), '25 MiB');
+  assert.equal(formatMiB(120_000_000, 'pt-BR'), '114,4 MiB');
+  assert.equal(formatMiB(undefined, 'en'), '—');
+});
 
 test('sizes are decimal, like the screens\' limits', () => {
   assert.equal(formatBytes(512, 'en'), '512 B');
@@ -45,7 +53,9 @@ test('progress reads as a phase and an amount', () => {
 test('every refusal of the preflight has its own sentence', () => {
   const r = (code, extra = {}) => refusalText(pt, 'pt-BR', { code, message: code, ...extra });
   assert.match(r('noSpace', { bytes: 5_000_000, limit: 1_000_000 }), /5 MB e há 1 MB livres/);
-  assert.match(r('tooLarge', { bytes: 130_000_000, limit: 120_000_000 }), /130 MB; a tela aceita até 120 MB/);
+  assert.match(r('tooLarge', { bytes: 130_000_000, limit: 120_000_000 }), /124 MiB; esta tela aceita arquivos de até 114,4 MiB/);
+  assert.match(r('convertedTooLarge', { bytes: 26_214_401, limit: 26_214_400 }), /o vídeo tem 25,1 MiB; esta tela aceita arquivos de até 25 MiB\. Envie um trecho mais curto/);
+  assert.equal(refusalText(en, 'en', { code: 'tooLarge', bytes: 31_457_280, limit: 26_214_400 }), 'The file is 30 MiB; this screen takes files of up to 25 MiB.');
   assert.match(r('needsConverter', { mismatches: [{ code: 'audio' }, { code: 'resolution', found: '1920x1080', expected: '480x1920' }] }), /\(tem áudio; tem 1920x1080 em vez de 480x1920\)/);
   assert.match(r('wrongProfile', { mismatches: [{ code: 'format', found: 'WebP', expected: 'JPEG, PNG' }, { code: 'resolution', expected: '480x1920' }] }), /formato WebP.*tamanho desconhecido em vez de 480x1920/);
   assert.match(r('wrongExtension', { accepted: ['jpg', 'jpeg'] }), /\.jpg, \.jpeg/);
@@ -133,7 +143,7 @@ test('demo storage refuses like the preflight', async () => {
   assert.equal((await demo.prepareUpload(KEY, 'demo://foto.png', 'sd')).code, 'noCard');
   assert.equal((await demo.prepareUpload(KEY, demo.fileSource({ name: 'notes.txt', size: 3 }), 'internal')).code, 'wrongKind');
   assert.equal((await demo.prepareUpload(KEY, demo.fileSource({ name: 'vazio.png', size: 0 }), 'internal')).code, 'emptyFile');
-  const huge = demo.fileSource({ name: 'huge.png', size: 8_000_000_000 });
+  const huge = demo.fileSource({ name: 'huge.png', size: 20_000_000 });
   const full = await demo.prepareUpload(KEY, huge, 'internal');
   assert.equal(full.code, 'noSpace');
   assert.deepEqual(full.candidates.map((c) => c.name), ['amd_90.mp4', 'logo.png'], 'largest first');
@@ -217,6 +227,22 @@ test('a held demo upload waits in each phase until let go, or until cancelled', 
   const free = createDemoGate(false);
   await free.hold();
   assert.equal(free.cancel(), false, 'nothing waits');
+});
+
+test('demo storage caps each file at the screen\'s limit, before and after converting', async () => {
+  const demo = createDemoBackend('turing88', instant);
+  const long = await demo.prepareUpload(KEY, 'demo://longo.mp4', 'internal');
+  assert.deepEqual([long.code, long.bytes, long.limit], ['tooLarge', 31_457_280, DEMO_REV_C_CAP]);
+  const show = await demo.prepareUpload(KEY, 'demo://show.mov', 'internal');
+  assert.equal(show.status, 'ready', 'converted, it may fit');
+  const result = await demo.runUpload(show.ticket, false);
+  assert.deepEqual([result.status, result.code, result.bytes, result.limit], ['refused', 'convertedTooLarge', 27_262_976, DEMO_REV_C_CAP]);
+  assert.equal(demo.storageState().files.has('internal/video/show.mp4'), false, 'nothing was sent');
+  // A TUR_USB screen takes the vendor's 120 MB.
+  const turzx = createDemoBackend('turzx', instant);
+  const [screen] = (await turzx.listDevices()).screens;
+  assert.equal((await turzx.prepareUpload(screen.key, 'demo://longo.mp4', 'internal')).status, 'ready');
+  assert.equal(DEMO_USB_CAP, 120_000_000);
 });
 
 test('a file stored with the wrong size fails its check and stays for a delete', async () => {

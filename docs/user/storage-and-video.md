@@ -52,10 +52,31 @@ it nothing reaches the screen.
   shape, never stretched. `--fps 24` lowers the frame rate. A video already in
   the right format goes as it is. ffmpeg is not included:
   [Installing ffmpeg](ffmpeg.md).
-- File names: lower-case letters `a-z`, digits, `_`, `.` and `-`. Up to 120 MB
-  per file.
+- File names: lower-case letters `a-z`, digits, `_`, `.` and `-`.
+- Size: up to **25 MiB per file on Turing rev C screens** (the serial generation:
+  8.8", 5", 2.1" round and others), up to 120 MB on the Turing USB
+  generation. See [How large a file can be](#how-large-a-file-can-be).
 - When a file does not fit, Bezel says how much is free and lists the stored
   files, largest first. It never deletes anything for you.
+
+## How large a file can be
+
+A Turing rev C screen keeps the whole upload in its memory before it stores it.
+On the 8.8" the firmware stops reading at about 28 MiB and freezes until it is
+restarted, whatever the speed, so Bezel takes at most **25 MiB per file** on
+these screens and refuses a larger one before sending anything. The vendor app's
+largest files are about 24.6 MiB too.
+
+- A video Bezel converts is made to fit: from the video's length it caps the
+  bitrate, so a long clip loses some quality instead of going over the limit.
+- If a converted video is still too large (or ffmpeg cannot tell its length),
+  nothing is sent and Bezel says so: send a shorter clip, or lower the frame
+  rate with `--fps` (for example `bezel storage put clip.mp4 --fps 24`).
+- A video already in the screen's format is sent as it is, so it must be under
+  the limit itself; `--fps` converts it, and the conversion fits it.
+
+The limit appears in MiB (1 MiB = 1,048,576 bytes): the app's message, for
+example, reads *"The file is 30 MiB; this screen takes files of up to 25 MiB."*
 
 ## Cancelling an upload
 

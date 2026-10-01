@@ -634,7 +634,8 @@ impl From<&Mismatch> for MismatchDto {
 #[serde(rename_all = "camelCase")]
 pub struct RefusalDto {
     /// `invalidName`, `wrongExtension`, `wrongKind`, `wrongProfile`,
-    /// `needsConverter`, `emptyFile`, `tooLarge`, `noCard` or `noSpace`.
+    /// `needsConverter`, `emptyFile`, `tooLarge`, `convertedTooLarge`,
+    /// `noCard` or `noSpace`.
     pub code: &'static str,
     /// The core's explanation, in English.
     pub message: String,
@@ -689,6 +690,10 @@ impl From<&Refusal> for RefusalDto {
                 (dto.bytes, dto.limit) = (Some(*bytes), Some(*limit));
                 "tooLarge"
             }
+            Refusal::ConvertedTooLarge { bytes, limit } => {
+                (dto.bytes, dto.limit) = (Some(*bytes), Some(*limit));
+                "convertedTooLarge"
+            }
             Refusal::NoCard => "noCard",
             Refusal::NoSpace {
                 needed,
@@ -734,6 +739,9 @@ pub enum JobDto {
         /// Converted first.
         converted: bool,
     },
+    /// Refused before a byte was sent: the converted video is over the
+    /// screen's per-file limit (D-2026-09-30-release-polish-12).
+    Refused(RefusalDto),
     /// Cancelled by the user.
     #[serde(rename_all = "camelCase")]
     Cancelled {

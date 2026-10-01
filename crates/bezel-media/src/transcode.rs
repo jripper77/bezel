@@ -5,8 +5,10 @@
 //! CRF 20, no audio, yuv420p; `-x264opts bframes=0` and the optional `eq`
 //! darkening for the TUR_USB Annex-B stream; `-r N` when asked. On top of
 //! it: `file:` URLs (a name is never read as an option or a protocol),
-//! `-sn -dn` (only the picture reaches the screen), and
-//! `-progress pipe:1` for machine-readable progress.
+//! `-sn -dn` (only the picture reaches the screen), `-progress pipe:1` for
+//! machine-readable progress, and `-maxrate`/`-bufsize` that keep the
+//! output under the screen's per-file limit (D-2026-09-30-release-polish-12;
+//! CRF 20 stays the quality ceiling).
 
 use std::ffi::OsString;
 use std::fs;
@@ -15,6 +17,7 @@ use std::path::Path;
 use std::process::Child;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
+use std::time::Duration;
 
 use bezel_core::domain::job::{Job, JobPhase, Progress};
 use bezel_core::domain::media::{BFrames, MediaFormat, Tone, TranscodeTarget};
@@ -33,12 +36,36 @@ const ROTATIONS: [&str; 4] = [
 const DARKENING: &str = ",eq=brightness=-0.1:contrast=0.9:saturation=1";
 /// The vendor's constant quality.
 const CRF: &str = "20";
+/// Share of the per-file limit, in percent, the video stream may fill: the
+/// rest is for the MP4 container (its index grows with the frame count)
+/// and the encoder's rate-control slack.
+const CAP_FILL_PERCENT: u128 = 92;
+/// Seconds of `-maxrate` the rate-control buffer (`-bufsize`) holds.
+const VBV_SECONDS: u64 = 2;
+/// Lowest `-maxrate`, bits per second: ffmpeg hands libx264 kbit/s, so a
+/// lower value would switch the cap off.
+const MIN_MAXRATE: u64 = 1_000;
 
-/// ffmpeg's arguments converting `source` into `target`, written to `output`.
+/// The `-maxrate`, in bits per second, that keeps the conversion of a
+/// source playing for `duration` under `max_bytes`. libx264's VBV keeps the
+/// stream within `maxrate × duration + bufsize` bits, and `bufsize` is
+/// [`VBV_SECONDS`] of `maxrate`; [`CAP_FILL_PERCENT`] leaves room for the
+/// container. `None` (no cap) when the duration is unknown or zero.
+pub(crate) fn capped_bitrate(max_bytes: u64, duration: Option<Duration>) -> Option<u64> {
+    let duration = duration.filter(|d| !d.is_zero())?;
+    let bits = u128::from(max_bytes) * 8 * CAP_FILL_PERCENT / 100;
+    let window_ms = duration.as_millis() + u128::from(VBV_SECONDS) * 1000;
+    let rate = u64::try_from(bits * 1000 / window_ms).unwrap_or(u64::MAX);
+    Some(rate.max(MIN_MAXRATE))
+}
+
+/// ffmpeg's arguments converting `source`, which plays for `duration` (as
+/// probed; `None` when unknown), into `target`, written to `output`.
 pub(crate) fn arguments(
     source: &Path,
     target: &TranscodeTarget,
     output: &Path,
+    duration: Option<Duration>,
 ) -> Result<Vec<OsString>> {
     let muxer = match target.format {
         MediaFormat::Mp4 => "mp4",
@@ -68,6 +95,15 @@ pub(crate) fn arguments(
         args.extend(words(&["-x264opts", "bframes=0"]));
     }
     args.extend(words(&["-crf", CRF]));
+    if let Some(rate) = target
+        .max_bytes
+        .and_then(|max| capped_bitrate(max, duration))
+    {
+        args.extend(words(&["-maxrate"]));
+        args.push(rate.to_string().into());
+        args.extend(words(&["-bufsize"]));
+        args.push(rate.saturating_mul(VBV_SECONDS).to_string().into());
+    }
     if let Some(rate) = target.frame_rate.filter(|r| *r > 0) {
         args.extend(words(&["-r"]));
         args.push(rate.to_string().into());
@@ -265,6 +301,7 @@ pub(crate) mod tests {
             Path::new("/videos/in.mov"),
             &rev_c_target(),
             Path::new("/tmp/out.mp4"),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -304,7 +341,8 @@ pub(crate) mod tests {
             ..ConvertOptions::default()
         };
         let target = profile("turing-8.8").transcode_target(options);
-        let args = strings(&arguments(Path::new("a.mp4"), &target, Path::new("b.mp4")).unwrap());
+        let args =
+            strings(&arguments(Path::new("a.mp4"), &target, Path::new("b.mp4"), None).unwrap());
         assert_eq!(
             args[11],
             "transpose=1,crop=480:1920:300:0,scale=480:1920,setsar=1:1"
@@ -320,7 +358,8 @@ pub(crate) mod tests {
             ..ConvertOptions::default()
         };
         let target = profile("turing-usb-8.8").transcode_target(options);
-        let args = strings(&arguments(Path::new("a.mp4"), &target, Path::new("b.h264")).unwrap());
+        let args =
+            strings(&arguments(Path::new("a.mp4"), &target, Path::new("b.h264"), None).unwrap());
         assert_eq!(
             &args[10..],
             [
@@ -345,7 +384,7 @@ pub(crate) mod tests {
         let mut half = target;
         half.quarter_turns = 2;
         half.tone = Tone::Natural;
-        let args = strings(&arguments(Path::new("a"), &half, Path::new("b")).unwrap());
+        let args = strings(&arguments(Path::new("a"), &half, Path::new("b"), None).unwrap());
         assert_eq!(
             args[11],
             "transpose=1,transpose=1,scale=480:1920,setsar=1:1"
@@ -353,20 +392,66 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_bitrate_is_capped_so_the_output_fits_the_screen() {
+        // D-2026-09-30-release-polish-12: a 30 s clip for the 8.8" (25 MiB)
+        // may use 92% of 25 MiB over 30 s plus the 2 s buffer.
+        let thirty = Some(Duration::from_secs(30));
+        let args = strings(
+            &arguments(
+                Path::new("a.mov"),
+                &rev_c_target(),
+                Path::new("b.mp4"),
+                thirty,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            &args[12..20],
+            [
+                "-c:v", "libx264", "-crf", "20", "-maxrate", "6029312", "-bufsize", "12058624"
+            ]
+        );
+        let rate = capped_bitrate(26_214_400, thirty).unwrap();
+        assert!(
+            rate * (30 + VBV_SECONDS) / 8 < 26_214_400,
+            "the VBV bound fits"
+        );
+        // TUR_USB's 120 MB allows more; a lower frame rate still follows.
+        let mut usb = profile("turing-usb-8.8").transcode_target(ConvertOptions {
+            frame_rate: Some(24),
+            ..ConvertOptions::default()
+        });
+        let args = strings(&arguments(Path::new("a"), &usb, Path::new("b"), thirty).unwrap());
+        let at = args.iter().position(|a| a == "-maxrate").unwrap();
+        assert_eq!(args[at + 1], "27600000");
+        assert_eq!(&args[at + 4..at + 6], ["-r", "24"]);
+        // No cap: unknown or zero duration, or a target without a limit.
+        for duration in [None, Some(Duration::ZERO)] {
+            assert_eq!(capped_bitrate(26_214_400, duration), None);
+        }
+        usb.max_bytes = None;
+        let args = strings(&arguments(Path::new("a"), &usb, Path::new("b"), thirty).unwrap());
+        assert!(!args.contains(&"-maxrate".to_string()));
+        // A very long source keeps a cap libx264 still applies (kbit/s).
+        let day = Some(Duration::from_secs(86_400 * 365));
+        assert_eq!(capped_bitrate(1, day), Some(MIN_MAXRATE));
+    }
+
+    #[test]
     fn impossible_targets_are_refused_before_ffmpeg_runs() {
         let mut target = rev_c_target();
         target.format = MediaFormat::Png;
-        assert!(arguments(Path::new("a"), &target, Path::new("b")).is_err());
+        assert!(arguments(Path::new("a"), &target, Path::new("b"), None).is_err());
         let mut target = rev_c_target();
         target.crop = Some(Rect::new(0, 0, 0, 10));
-        assert!(arguments(Path::new("a"), &target, Path::new("b")).is_err());
+        assert!(arguments(Path::new("a"), &target, Path::new("b"), None).is_err());
         let mut target = rev_c_target();
         target.size = Size::new(0, 1920);
-        assert!(arguments(Path::new("a"), &target, Path::new("b")).is_err());
+        assert!(arguments(Path::new("a"), &target, Path::new("b"), None).is_err());
         let mut target = rev_c_target();
         target.frame_rate = Some(0);
         assert!(
-            !strings(&arguments(Path::new("a"), &target, Path::new("b")).unwrap())
+            !strings(&arguments(Path::new("a"), &target, Path::new("b"), None).unwrap())
                 .contains(&"-r".to_string())
         );
     }
@@ -414,7 +499,7 @@ pub(crate) mod tests {
         }
 
         fn args_for(out: &Path) -> Vec<OsString> {
-            arguments(Path::new("/in.mp4"), &rev_c_target(), out).unwrap()
+            arguments(Path::new("/in.mp4"), &rev_c_target(), out, None).unwrap()
         }
 
         #[test]

@@ -56,6 +56,16 @@ Apague o arquivo incompleto antes de enviar de novo: o aplicativo oferece
 differs; delete it and send it again"*, apague esse arquivo e envie mais uma
 vez. Veja [Cancelar um envio](storage-and-video.md#cancelar-um-envio).
 
+## "refused: the file is … MiB and this screen takes files up to 25 MiB each"
+
+As telas Turing rev C aceitam no máximo 25 MiB por arquivo: o firmware guarda o
+envio inteiro na memória e trava com um arquivo maior. O Bezel recusa o arquivo
+antes de enviar qualquer coisa (no aplicativo: *"O arquivo tem … MiB; esta tela
+aceita arquivos de até 25 MiB."*). Envie um trecho mais curto, ou deixe o Bezel
+converter o vídeo com menos quadros por segundo (`--fps 24`): a conversão limita
+a taxa de bits para o resultado caber. Veja
+[Qual o tamanho máximo de um arquivo](storage-and-video.md#qual-o-tamanho-máximo-de-um-arquivo).
+
 ## Um vídeo não é enviado
 
 "needs ffmpeg" ou "ffmpeg não encontrado": instale o ffmpeg com `libx264`

@@ -24,8 +24,8 @@ use bezel_core::domain::media::{
 };
 use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::storage::{
-    BootMedia, Capacity, FileEntry, Medium, Refusal, RemotePath, Repeat, StorageInfo,
-    StorageLocation, UploadAction,
+    BootMedia, Capacity, FileEntry, Medium, Refusal, RemotePath, Repeat, Rounding, StorageInfo,
+    StorageLocation, UploadAction, mib_text,
 };
 use bezel_core::ports::{DeviceBus, MediaLocation, MediaTranscoder, ScreenConnector, ScreenLink};
 use clap::{Args, Subcommand};
@@ -735,6 +735,12 @@ fn put_summary(file: &Path, screen: &str, prepared: &PreparedUpload) -> String {
     out
 }
 
+/// How a video gets under a screen's per-file limit (rev C: 25 MiB,
+/// D-2026-09-30-release-polish-12): `--fps` converts it, with its bitrate
+/// capped to fit.
+const SMALLER_VIDEO: &str = "For a video: send a shorter clip, or a lower frame rate with --fps \
+                             (for example --fps 24)";
+
 /// A refused preflight as the user should read it.
 fn explain(error: BezelError) -> anyhow::Error {
     match error {
@@ -761,9 +767,16 @@ fn explain(error: BezelError) -> anyhow::Error {
             anyhow!(text)
         }
         BezelError::Refused(Refusal::TooLarge { bytes, limit }) => anyhow!(
-            "refused: the file is {} and a screen takes files up to {} ({limit} bytes)",
-            size_text(bytes),
-            size_text(limit)
+            "refused: the file is {} MiB and this screen takes files up to {} MiB each; \
+             nothing was sent. {SMALLER_VIDEO}",
+            mib_text(bytes, Rounding::Up),
+            mib_text(limit, Rounding::Down)
+        ),
+        BezelError::Refused(Refusal::ConvertedTooLarge { bytes, limit }) => anyhow!(
+            "refused: converted, the video is {} MiB and this screen takes files up to {} MiB \
+             each; nothing was sent. {SMALLER_VIDEO}",
+            mib_text(bytes, Rounding::Up),
+            mib_text(limit, Rounding::Down)
         ),
         BezelError::Refused(refusal @ Refusal::NeedsConverter(_)) => {
             anyhow!("refused: {refusal}; install ffmpeg (see above) or pass --ffmpeg PATH")
@@ -1071,6 +1084,8 @@ pub(crate) mod doubles {
         pub(crate) files: BTreeMap<String, MediaInfo>,
         pub(crate) targets: Vec<TranscodeTarget>,
         pub(crate) streamed: Vec<(MediaLocation, StreamSpec)>,
+        /// Bytes of every conversion's output.
+        pub(crate) output_bytes: u64,
     }
 
     impl StubMedia {
@@ -1092,6 +1107,7 @@ pub(crate) mod doubles {
                 files: BTreeMap::new(),
                 targets: Vec::new(),
                 streamed: Vec::new(),
+                output_bytes: 300_000,
             }
         }
 
@@ -1133,7 +1149,7 @@ pub(crate) mod doubles {
             job.report(Progress::new(JobPhase::Convert, 10_000, 10_000));
             let output = format!("{}.converted.mp4", source.0);
             self.files
-                .insert(output.clone(), video(target.size, 300_000, false));
+                .insert(output.clone(), video(target.size, self.output_bytes, false));
             Ok(MediaLocation(output))
         }
 
@@ -1509,6 +1525,50 @@ mod tests {
     }
 
     #[test]
+    fn files_over_the_screens_limit_are_refused_in_mib() {
+        // D-2026-09-30-release-polish-12: 25 MiB per file on the 8.8".
+        let cap = bezel_core::domain::storage::REV_C_MAX_UPLOAD_BYTES;
+        let connector = FakeConnector::default();
+        let mut media = StubMedia::ready()
+            .with("big.mp4", video(Size::new(480, 1920), cap + 1, false))
+            .with("trip.mov", video(Size::new(1920, 1080), 9_000_000, true));
+        let (out, _) = storage(
+            &["bezel", "storage", "put", "big.mp4"],
+            &connector,
+            &mut media,
+        );
+        assert_eq!(
+            out.unwrap_err().to_string(),
+            "refused: the file is 25.1 MiB and this screen takes files up to 25 MiB each; \
+             nothing was sent. For a video: send a shorter clip, or a lower frame rate with \
+             --fps (for example --fps 24)"
+        );
+        media.output_bytes = 30 * 1024 * 1024;
+        let (out, _) = storage(
+            &["bezel", "storage", "put", "trip.mov"],
+            &connector,
+            &mut media,
+        );
+        let err = out.unwrap_err().to_string();
+        assert!(
+            err.starts_with(
+                "refused: converted, the video is 30 MiB and this screen takes files up to \
+                 25 MiB each; nothing was sent."
+            ),
+            "{err}"
+        );
+        assert!(err.contains("--fps"), "{err}");
+        assert_eq!(
+            media.targets[0].max_bytes,
+            Some(cap),
+            "the conversion is capped"
+        );
+        let log = connector.log().storage;
+        assert!(log.files.is_empty());
+        assert!(!log.calls.iter().any(StorageCall::changes_the_screen));
+    }
+
+    #[test]
     fn without_ffmpeg_only_videos_in_the_screen_format_go() {
         let connector = FakeConnector::default();
         let mut media = StubMedia::missing()
@@ -1568,7 +1628,7 @@ mod tests {
         assert!(
             out.unwrap_err()
                 .to_string()
-                .contains("files up to 114.4 MiB")
+                .contains("the file is 124 MiB and this screen takes files up to 25 MiB each")
         );
         let mut media = StubMedia::ready().with(
             "notes.txt",

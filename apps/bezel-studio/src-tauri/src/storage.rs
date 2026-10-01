@@ -495,7 +495,9 @@ impl Backend {
     /// Runs the prepared upload `ticket`: converts, sends and verifies,
     /// reporting to `progress`. `overwrite` is the user's answer about the
     /// replaced file the summary named. A cancel is an answer, not an error:
-    /// it says what the interrupted upload left on the screen.
+    /// it says what the interrupted upload left on the screen; so is a
+    /// conversion whose output the screen would not take (refused before a
+    /// byte is sent).
     pub fn run_upload(
         &self,
         ticket: u64,
@@ -514,6 +516,7 @@ impl Backend {
                 converted: done.converted,
             }),
             Err(BezelError::Cancelled { partial }) => Ok(JobDto::Cancelled { path, partial }),
+            Err(BezelError::Refused(refusal)) => Ok(JobDto::Refused(RefusalDto::from(&refusal))),
             Err(e) => Err(e.into()),
         }
     }

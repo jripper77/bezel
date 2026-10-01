@@ -311,6 +311,7 @@ mod tests {
             Refusal::NeedsConverter(Vec::new()),
             Refusal::EmptyFile,
             Refusal::TooLarge { bytes: 2, limit: 1 },
+            Refusal::ConvertedTooLarge { bytes: 2, limit: 1 },
             Refusal::NoCard,
             Refusal::NoSpace {
                 needed: 2,

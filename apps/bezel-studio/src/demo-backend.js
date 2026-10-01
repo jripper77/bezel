@@ -101,6 +101,10 @@ export const DEMO_MIN_REFRESH = 0.25;
 export const DEMO_STEP_MS = 150;
 const CONVERT_STEPS = 8;
 const UPLOAD_STEPS = 16;
+/** Largest file a rev C screen takes, bytes (25 MiB, D-2026-09-30-release-polish-12). */
+export const DEMO_REV_C_CAP = 26_214_400;
+/** Largest file a TUR_USB screen takes, bytes (the vendor's 120 MB). */
+export const DEMO_USB_CAP = 120_000_000;
 /** The 8.8"'s videos: its panel in its native orientation. */
 const NATIVE = { width: 480, height: 1920 };
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'bmp', 'gif'];
@@ -196,13 +200,16 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }
 
   // Errors like the app's: a code, its arguments and the English text.
   const refuse = (code, message, args = {}) => Promise.reject(Object.assign(new Error(message), { code, args }));
+  // A refusal like the preflight's (and like an upload whose conversion is still too large).
+  const refused = (code, extra = {}) => ({ status: 'refused', code, message: code, mismatches: [], candidates: [], accepted: [], ...extra });
   const screenOf = (key) => screens().find((s) => s.key === key);
   const limited = (key) => screenOf(key)?.family === 'turing-usb';
+  const capOf = (key) => (limited(key) ? DEMO_USB_CAP : DEMO_REV_C_CAP);
   const entry = (path, size = files.get(path) ?? null) => {
     const [medium, kind, name] = path.split('/');
     return { path, medium, kind, name, size };
   };
-  const totalOf = (medium) => (medium === 'sd' ? DEMO_STORAGE.cardTotal : DEMO_STORAGE.internalTotal);
+  const totalOf = (medium) => (medium === 'sd' ? DEMO_STORAGE.cardTotal : chosen.internalTotal ?? DEMO_STORAGE.internalTotal);
   function capacity(medium) {
     const used = [...files].filter(([p]) => p.startsWith(`${medium}/`)).reduce((sum, [, size]) => sum + size, 0);
     const total = totalOf(medium);
@@ -218,10 +225,10 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }
     return { state: 'missing', path: `${card ? 'sd' : 'internal'}/video/${name}` };
   }
 
-  function readyAnswer(local, path, convert) {
+  function readyAnswer(local, path, convert, cap) {
     const ticket = (tickets += 1);
     const replaces = files.get(path) > 0 ? entry(path) : null;
-    pending.set(ticket, { path, bytes: local.size, convert, storedShort: Boolean(local.storedShort) });
+    pending.set(ticket, { path, bytes: local.size, convert, cap, convertedSize: local.convertedSize ?? null, storedShort: Boolean(local.storedShort) });
     return {
       status: 'ready',
       ticket,
@@ -235,9 +242,8 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }
     };
   }
 
-  function check(local, medium, name) {
+  function check(local, medium, cap, name) {
     const kind = demoKindOf(local.name);
-    const refused = (code, extra = {}) => ({ status: 'refused', code, message: code, mismatches: [], candidates: [], accepted: [], ...extra });
     if (!kind) return refused('wrongKind');
     if (!local.size) return refused('emptyFile');
     if (medium === 'sd' && !card) return refused('noCard');
@@ -248,13 +254,14 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }
     }
     const extension = kind === 'video' ? 'mp4' : local.name.slice(local.name.lastIndexOf('.') + 1).toLowerCase();
     const path = `${medium}/${kind}/${name ?? demoSuggestName(local.name, extension)}`;
+    if (!needsConversion && local.size > cap) return refused('tooLarge', { bytes: local.size, limit: cap });
     const free = capacity(medium).free + (files.get(path) ?? 0);
     if (!needsConversion && local.size >= free) {
       const candidates = [...files.keys()].filter((p) => p.startsWith(`${medium}/`)).map((p) => entry(p)).sort((a, b) => b.size - a.size);
       return refused('noSpace', { bytes: local.size, limit: free, candidates });
     }
     const convert = needsConversion ? { ...NATIVE, quarterTurns: demoTurns(theme().orientation), cropped: local.width * NATIVE.height !== local.height * NATIVE.width } : null;
-    return readyAnswer(local, path, convert);
+    return readyAnswer(local, path, convert, cap);
   }
 
   const emit = (phase, done, total) => listeners.forEach((cb) => cb({ phase, done: Math.round(done), total }));
@@ -276,7 +283,9 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }
     let size = p.bytes;
     if (p.convert) {
       if (await steps('convert', 20_000, CONVERT_STEPS)) return { status: 'cancelled', path: p.path, partial: null };
-      size = Math.round(p.bytes * 0.6);
+      size = p.convertedSize ?? Math.round(p.bytes * 0.6);
+      // Still over the screen's limit once converted: refused before sending.
+      if (size > p.cap) return refused('convertedTooLarge', { bytes: size, limit: p.cap });
     }
     const cancelled = await steps('upload', size, UPLOAD_STEPS, (done) => files.set(p.path, Math.round(done)));
     if (cancelled) {
@@ -335,14 +344,14 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }
       if (job) return refuse('busy', 'a storage operation is using the screen');
       const local = locals.get(source);
       if (!local || !screenOf(key)) return refuse('fileError', `${source}: no such file`, { file: source, reason: 'no such file' });
-      return Promise.resolve(check(local, medium));
+      return Promise.resolve(check(local, medium, capOf(key)));
     },
     prepareThemeVideo: (key) => {
       const video = videoOfTheme();
       if (live() !== key || video?.state !== 'missing') return refuse('noVideo', 'the live screen is not missing the theme video');
       const [medium, , name] = video.path.split('/');
       const local = { name: theme().background.asset.split('/').pop(), size: 18_874_368, format: 'MP4', width: 1920, height: 480, native: false };
-      return Promise.resolve(check(local, medium, name));
+      return Promise.resolve(check(local, medium, capOf(key), name));
     },
     runUpload: async (ticket, overwrite) => {
       const p = pending.get(ticket);

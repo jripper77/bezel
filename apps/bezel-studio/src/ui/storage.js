@@ -31,6 +31,24 @@ export function formatBytes(bytes, locale = 'en') {
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: digits }).format(value)} ${units[i]}`;
 }
 
+/** Bytes in a MiB, the unit the screens' per-file limits are shown in. */
+const MIB = 1024 * 1024;
+
+/**
+ * A size in MiB, like the core shows the per-file limits: whole when exact,
+ * else one decimal, rounded `up` (a file over a limit never reads as equal
+ * to it) or `down` (a limit never reads larger than it is).
+ * @param {number|null|undefined} bytes
+ * @param {string} locale
+ * @param {'up'|'down'} rounding
+ */
+export function formatMiB(bytes, locale = 'en', rounding = 'down') {
+  if (bytes === null || bytes === undefined) return '—';
+  const scaled = (bytes * 10) / MIB;
+  const tenths = rounding === 'up' ? Math.ceil(scaled) : Math.floor(scaled);
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(tenths / 10)} MiB`;
+}
+
 /**
  * What the storage tab offers for a screen. TUR_USB screens take uploads and
  * play files but neither delete nor set the boot media through Bezel
@@ -103,7 +121,8 @@ export function refusalText(t, locale, r) {
     case 'needsConverter':
       return t(`storage.refused.${r.code}`, { details });
     case 'tooLarge':
-      return t('storage.refused.tooLarge', { size: formatBytes(r.bytes, locale), limit: formatBytes(r.limit, locale) });
+    case 'convertedTooLarge':
+      return t(`storage.refused.${r.code}`, { size: formatMiB(r.bytes, locale, 'up'), limit: formatMiB(r.limit, locale, 'down') });
     case 'noSpace':
       return t('storage.refused.noSpace', { size: formatBytes(r.bytes, locale), free: formatBytes(r.limit, locale) });
     case 'wrongKind':
@@ -346,6 +365,8 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     view.job = null;
     if (result?.status === 'done') notify(t('storage.uploaded', { name }));
     if (result?.status === 'cancelled') view.notice = { kind: 'cancelled', name, path: result.path, partial: result.partial };
+    // A conversion the screen would not take is refused before a byte is sent.
+    if (result?.status === 'refused') view.notice = { kind: 'refused', name, refusal: result };
     await load();
   }
 

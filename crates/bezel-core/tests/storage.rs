@@ -19,7 +19,8 @@ use bezel_core::domain::media::{
 };
 use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::storage::{
-    BootMedia, FileEntry, Refusal, RemotePath, Repeat, StartMode, UploadAction,
+    BootMedia, FileEntry, REV_C_MAX_UPLOAD_BYTES, Refusal, RemotePath, Repeat, StartMode,
+    UploadAction,
 };
 use bezel_core::ports::{MediaLocation, MediaTranscoder, ScreenLink, VideoFrames};
 use bezel_core::{BezelError, Result};
@@ -55,6 +56,8 @@ struct LocalFiles {
     output_size: Option<Size>,
     output_bytes: usize,
     calls: Vec<String>,
+    /// The output cap of the last conversion asked for.
+    max_bytes: Option<Option<u64>>,
 }
 
 impl LocalFiles {
@@ -66,6 +69,7 @@ impl LocalFiles {
             output_size: None,
             output_bytes: 2000,
             calls: Vec::new(),
+            max_bytes: None,
         }
     }
 
@@ -131,6 +135,7 @@ impl MediaTranscoder for LocalFiles {
         job: &mut Job<'_>,
     ) -> Result<MediaLocation> {
         self.calls.push(format!("transcode {}", source.0));
+        self.max_bytes = Some(target.max_bytes);
         job.report(Progress::new(JobPhase::Convert, 0, 10_000));
         job.checkpoint()?;
         let output = format!("{}.converted.mp4", source.0);
@@ -539,6 +544,45 @@ fn a_video_off_profile_is_converted_then_checked_again() {
             Err(BezelError::Refused(Refusal::NeedsConverter(_)))
         ),
         "{refused:?}"
+    );
+}
+
+#[test]
+fn a_converted_video_over_the_limit_is_refused_before_a_byte_is_sent() {
+    // D-2026-09-30-release-polish-12: the conversion is asked to stay under
+    // the 8.8"'s 25 MiB, and an output still over it is never sent.
+    let connector = FakeConnector::default();
+    let mut link = open(&connector);
+    let mut files = LocalFiles::converting().with("trip.mov", mp4(Size::new(1920, 1080), 5000));
+    files.output_bytes = usize::try_from(REV_C_MAX_UPLOAD_BYTES + 1).expect("fits");
+    let req = request("trip.mov", "trip.mp4");
+    let prepared = storage::prepare_upload(link.as_mut(), &mut files, &req).expect("preflight");
+    let (refused, _) = upload(
+        link.as_mut(),
+        &mut files,
+        &prepared,
+        Confirm::No,
+        Cancel::Never,
+    );
+    assert_eq!(files.max_bytes, Some(Some(REV_C_MAX_UPLOAD_BYTES)));
+    assert_eq!(
+        refused,
+        Err(BezelError::Refused(Refusal::ConvertedTooLarge {
+            bytes: REV_C_MAX_UPLOAD_BYTES + 1,
+            limit: REV_C_MAX_UPLOAD_BYTES,
+        }))
+    );
+    let text = refused.unwrap_err().to_string();
+    assert!(text.contains("25 MiB"), "{text}");
+    assert!(
+        text.contains("shorter clip or a lower frame rate"),
+        "{text}"
+    );
+    assert!(writes(&connector).is_empty(), "nothing reached the screen");
+    assert!(
+        !files.calls.iter().any(|c| c.starts_with("load")),
+        "the output was not even read: {:?}",
+        files.calls
     );
 }
 

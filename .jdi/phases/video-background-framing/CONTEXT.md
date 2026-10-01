@@ -38,7 +38,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
       **Verify:** `cargo test -p bezel-studio --locked --lib -- --exact studio::tests::the_preview_plays_the_framed_video_at_most_15_fps studio::tests::the_preview_decoder_stops_when_no_frame_is_asked studio::tests::without_ffmpeg_the_preview_shows_the_poster studio::tests::saving_retakes_the_poster_with_the_framing storage::tests::a_panel_native_theme_video_is_sent_as_it_is 2>&1 | grep -q 'ok. 5 passed' && echo OK`
       **Source:** CONTEXT
 - [ ] UI: i18n, lógica do enquadramento e Playwright nos 4 projetos com axe
-      **Verify:** `set -o pipefail; cd apps/bezel-studio && grep -q expectAccessible tests/e2e/video-framing.spec.mjs && node --test tests/ui/i18n.test.mjs tests/ui/video-framing.test.mjs >/dev/null && npx playwright test -g "video framing|video background plays" --reporter=line 2>&1 | awk '{for(i=1;i<NF;i++) if($(i+1)=="passed") n=$i} END{exit !(n>=12)}' && echo OK`
+      **Verify:** `set -o pipefail; cd apps/bezel-studio && grep -qE 'await expectAccessible\(' tests/e2e/video-framing.spec.mjs && node --test tests/ui/i18n.test.mjs tests/ui/video-framing.test.mjs >/dev/null && npx playwright test -g "video framing|video background plays" --reporter=line 2>&1 | awk '{for(i=1;i<NF;i++) if($(i+1)=="passed") n=$i} END{exit !(n>=16)}' && echo OK`
       **Source:** CONTEXT
 - [ ] Guia en/pt-BR e CHANGELOG
       **Verify:** `grep -q '^### Framing the video' docs/user/storage-and-video.md && grep -q '^### Enquadrar o vídeo' docs/user/pt-BR/storage-and-video.md && sed -n '/^## \[Unreleased\]/,/^## \[[0-9]/p' CHANGELOG.md | grep -qi framing && bash scripts/ci/check-docs.sh >/dev/null && echo OK`

@@ -143,9 +143,11 @@ the Conventional Commits.
 - Bezel Studio: the Storage tab opens full width as the storage manager —
   internal memory and SD card side by side with thumbnails, multiple selection
   with the mouse or the keyboard, sort and filter, **Move to the SD card** (or
-  dragging to the other side), copy, rename, restore, the cleanup assistant
-  with its exact list to confirm, associating an original and the local copies
-  with **Clear cache…**; progress and results are announced to screen readers.
+  dragging to the other side), copy, rename, restore (also of files deleted
+  through Bezel, listed unchecked), the cleanup assistant with its exact list
+  to confirm (a file that changed since is not deleted), associating an
+  original and the local copies with **Clear cache…**; progress and results
+  are announced to screen readers.
   On Turing USB screens, what ends in a delete (move, rename, delete, cleanup)
   is disabled with the reason, and sizes come from the catalog or show as
   unknown.

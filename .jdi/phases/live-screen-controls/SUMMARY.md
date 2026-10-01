@@ -1,0 +1,63 @@
+# Phase 10: Brilho, cartão SD e filtro de temas com a tela ao vivo — Summary  (slug: live-screen-controls)
+
+**Status:** partial
+**Tasks:** 5/6 complete, 0 blocked (T-6: hardware fica para o PR enquanto o studio do usuário segura a tela)
+
+> `/jdi-issue` autônomo (card colado: relato do usuário de 2026-10-01, studio 0.1.0-dev.287+4feaa0f). Branch
+> `jdi/live-screen-controls` a partir de `main` com o PR #1 mergeado; um worktree por tarefa, cherry-picked.
+
+## Causa
+Uma tela, duas chaves: a UI conhece a 8.8" pelo SoC (`/dev/ttyACM1`), a sessão ao vivo ficou com a porta do MCU
+(`/dev/ttyACM0`, gravada em `liveScreen` e repetida a cada relançamento) e toda checagem "é a tela ao vivo?" comparava
+strings. Brilho e Armazenamento reabriam a porta que o próprio studio segura (busy, depois de ~5 s de espera e wake
+do MCU); a UI alternava a tela escolhida entre a chave ao vivo (fora da lista) e a listada, e "Para esta tela"
+piscava.
+
+## Executed tasks
+- T-1 `a7b70bf`: core — `Screen::answers_to` (display ou wake; `choose_screen` usa o mesmo predicado) e
+  `connect_screen` (escolhe, conecta e relista como `reopen_screen`; sem relistar, a tela escolhida).
+- T-2 `7b147f2`: devices — `busy` separa este processo dos outros detentores; `SerialPorts::open` (padrão sobre
+  `try_open`) devolve `InUse` com este app na hora quando a porta que falhou é nossa: sem esperar sumir, sem wake do
+  MCU, sem restart. Outros programas seguem device-protocols-3.
+- T-3 `354ce0f`: studio — `Studio::is_live` por identidade em `link_of`, lend/return, `live_brightness`,
+  `missing_video`, `presented`, restart, release e `refuse_while_live`; `set_live` (bandeja, retomada do restart e
+  `restore_live`) chaveia sessão, `liveScreen` e orientação pelo display relistado — a `/dev/ttyACM0` salva do
+  usuário vira `/dev/ttyACM1` no próximo início.
+- T-4 `642cb7d`: UI — `src/live-screen.js` (`liveScreenIn`, `answersTo`); `syncLive` só escolhe tela listada; demo
+  `mcuLive` reproduz o 0.1.0-dev.287 e reconhece a tela ao vivo pelas duas portas como o backend;
+  `live-screen-controls.spec.mjs` com o relógio do Playwright (6 s sem espera real).
+- T-5 `a2a449f`: CHANGELOG (`### Fixed`) e `check-docs.sh` exige "For this screen".
+
+## Blocked tasks
+- nenhuma
+
+## Files modified
+- `crates/bezel-core/src/{domain/discovery,app/screens,app/mod}.rs`, `crates/bezel-core/tests/screens.rs`
+- `crates/bezel-devices/src/{busy,connector}.rs`
+- `apps/bezel-studio/src-tauri/src/{studio,backend,storage}.rs`, `apps/bezel-studio/src-tauri/src/{storage,manager}/tests.rs`
+- `apps/bezel-studio/src/{live-screen,app,demo-backend,demo-data}.js`,
+  `apps/bezel-studio/tests/{ui/live-screen.test.mjs,ui/demo-backend.test.mjs,e2e/live-screen-controls.spec.mjs}`
+- `CHANGELOG.md`, `scripts/ci/check-docs.sh`
+
+## Tests
+- `cargo test --workspace --locked`: 876 passando, 0 falhando, 11 ignorados (hardware e ffmpeg real)
+- DoD 1–5: OK no branch combinado; DoD 6 (Windows no CI) depois do push
+- UI: 186 unitários (99,93% de linhas); Playwright 184/184 (claro/escuro × pt-BR/en, axe), 8 novos
+- fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc`), `check-docs.sh`, `check-packaging.sh`
+- Cobertura (T-3, `cargo llvm-cov -p bezel-studio`): `backend.rs` 98,14%, `studio.rs` 97,00%, `storage.rs`
+  97,06%, `manager.rs` 94,42%
+- Testes não ocos: os 6 do studio falham com o comportamento antigo de volta (só a identidade: 4; só o `set_live`:
+  2); os 2 e2e falhavam antes do `syncLive` novo; o do connector falhava (passava pela espera e pelo wake).
+
+## Hardware validation
+- T-6 (orquestrador): o studio do usuário (PID 2613288) segura `/dev/ttyACM1` ao vivo; nada foi feito na tela.
+  `settings.json` (mtime 14:02) tem `liveScreen` `/dev/ttyACM0`; o log do studio vai para `/dev/null` (relançado com
+  `setsid`) e o journal só tem a sessão das 07:34, então o caminho que gravou a chave do MCU não é visível. Os
+  candidatos (bandeja com a tela dormindo, retomada do restart, ir ao vivo com a tela listada dormindo) passam todos
+  por `set_live` e estão cobertos por `a_screen_put_live_by_its_mcu_port_is_keyed_by_its_display`.
+
+## Observações
+- Windows: uma COM que o próprio app segura ainda não é reconhecida (backlog); lá só D-2/D-3 evitam reabrir.
+- "Ocupada" = erro `Transport` com a porta nossa (o texto do serialport pode vir traduzido); `AccessDenied` e
+  `InUse` de outros programas passam intactos.
+- A orientação lembrada sob a chave do MCU não migra: se acerta na primeira vez ao vivo pela chave do display.

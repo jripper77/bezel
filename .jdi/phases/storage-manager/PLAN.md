@@ -52,7 +52,7 @@ Gerenciar os arquivos da memória interna e do cartão SD da tela no studio e na
   - Contrato: comandos novos em `bridge.js` com JSDoc dos DTOs, códigos de motivo da T-1; cenário demo `vendorCard` com a listagem do teste da T-1 ao lado de uma interna enviada pelo Bezel; o demo segura o job até o teste liberar (sem aumentar tempos); i18n com paridade, nenhum literal no JS.
 - **Dependencies:** T-1
 - **Test:** Playwright "storage manager moves files by drag and by keyboard after confirming" e "storage manager cleanup lists the vendor duplicates and deletes only what was confirmed" (4 projetos, axe); `storage.spec.mjs` verde; `node --test tests/ui/i18n.test.mjs tests/ui/storage-manager.test.mjs`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3 (paralela)
 

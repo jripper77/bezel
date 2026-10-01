@@ -1,0 +1,1 @@
+D-2026-10-01-gif-sticker-search-1: Phase 'Busca de GIFs e stickers (KLIPY) e coleção' (slug: gif-sticker-search) added. Reason: pedido do usuário em 2026-10-01 (busca de GIFs/stickers com resultados explícitos opcionais, sem custo; Tenor desligado em 2026-06-30 e produção do GIPHY paga desde 2025-03, então KLIPY com a chave do próprio usuário).

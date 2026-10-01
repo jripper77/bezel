@@ -48,7 +48,9 @@ the Conventional Commits.
   flash and the memory card, files per folder, sending by drag-and-drop with a
   progress bar and Cancel, play/stop, and delete or the boot media behind a
   confirmation dialog naming the file; a theme with a video background offers
-  "Send to screen" and then plays over the video the screen loops.
+  "Send to screen" and then plays over the video the screen loops; for screens
+  that cannot play videos, live mode decodes it on the computer, as `bezel run`
+  does.
 - `bezel storage info|ls|put|rm|play|stop|boot`: the screen's internal flash
   and memory card (sizes, `--json`), sending pictures and videos with a
   progress bar and Ctrl+C to cancel, device-side playback and the boot media.

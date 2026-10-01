@@ -508,6 +508,7 @@ impl Importer {
                 (Some(name), poster) => Background::Video {
                     asset: self.video_asset(&name, video),
                     poster,
+                    framing: None,
                 },
                 (None, Some(asset)) => {
                     self.warn(Code::VideoWithoutName);

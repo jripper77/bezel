@@ -13,6 +13,7 @@ use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::device::{Transport, UsbId};
 use bezel_core::domain::discovery::{DeviceAddress, Endpoint};
 use bezel_core::domain::frame::{Frame, Rgba};
+use bezel_core::domain::framing::{VideoFraming, Zoom};
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::job::Job;
 use bezel_core::domain::media::{MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
@@ -134,6 +135,7 @@ fn video_theme(asset: &str) -> Theme {
     theme.background = Background::Video {
         asset: AssetRef(asset.into()),
         poster: None,
+        framing: None,
     };
     theme
 }
@@ -468,6 +470,59 @@ fn a_forgotten_screen_leaves_the_poster_and_nothing_to_stop() {
     rt.replace(plain, BTreeMap::new());
     rt.forget_screen();
     assert_eq!(rt.video(), &VideoState::NoVideo);
+}
+
+#[test]
+fn the_themes_framing_names_the_video_looked_for() {
+    // An explicit 270 degrees on the landscape theme turns nothing on the
+    // 8.8": the vendor's own name, as the screen stores it.
+    let turned_back = VideoFraming {
+        rotation: Some(3),
+        ..VideoFraming::default()
+    };
+    let framed = |framing| {
+        let mut theme = video_theme("assets/dragon.mp4");
+        theme.background = Background::Video {
+            asset: AssetRef("assets/dragon.mp4".into()),
+            poster: None,
+            framing: Some(framing),
+        };
+        theme
+    };
+    let (connector, mut screen) = turing_88(stored("internal/video/dragon.mp4"));
+    let mut rt = runtime(framed(turned_back));
+    let dragon = path("internal/video/dragon.mp4");
+    let state = rt.start_video(screen.as_mut(), None).expect("start");
+    assert_eq!(state, &VideoState::OnDevice(dragon.clone()));
+    assert_eq!(
+        calls(&connector),
+        [
+            StorageCall::Info,
+            StorageCall::Size(dragon.clone()),
+            StorageCall::PlayVideo(dragon, Repeat::Loop),
+        ]
+    );
+    // Zoomed, it is another file: looked for under its own name.
+    let zoomed = VideoFraming {
+        zoom: Zoom::from_percent(125),
+        ..turned_back
+    };
+    let (connector, mut screen) = turing_88(stored("internal/video/dragon.mp4"));
+    let mut rt = runtime(framed(zoomed));
+    let state = rt
+        .start_video(screen.as_mut(), None)
+        .expect("start")
+        .clone();
+    let VideoState::VideoMissing(missing) = state else {
+        panic!("{state:?}")
+    };
+    assert_eq!(missing.path, path("internal/video/dragon_f8ca275f8.mp4"));
+    assert_eq!(missing.options.quarter_turns, 0);
+    assert!(
+        !calls(&connector)
+            .iter()
+            .any(StorageCall::changes_the_screen)
+    );
 }
 
 #[test]

@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use super::frame::Rgba;
+use super::framing::VideoFraming;
 use super::geometry::{Orientation, Size};
 use super::sensor::{DisplayFormat, SensorKey};
 
@@ -106,6 +107,10 @@ pub enum Background {
         asset: AssetRef,
         /// Frame shown in previews and when playback is unavailable.
         poster: Option<AssetRef>,
+        /// How the video is turned, fitted, zoomed and placed on the canvas;
+        /// `None` is [`VideoFraming::default`] (Auto rotation, cover,
+        /// centered; D-2026-10-01-video-background-framing-2).
+        framing: Option<VideoFraming>,
     },
 }
 
@@ -462,7 +467,7 @@ impl Theme {
         let mut out = Vec::new();
         match &self.background {
             Background::Image { asset, .. } => out.push(asset.clone()),
-            Background::Video { asset, poster } => {
+            Background::Video { asset, poster, .. } => {
                 out.push(asset.clone());
                 out.extend(poster.clone());
             }
@@ -577,6 +582,7 @@ mod tests {
         t.background = Background::Video {
             asset: AssetRef("assets/bg.mp4".into()),
             poster: Some(AssetRef("assets/bg.png".into())),
+            framing: None,
         };
         let mut style = TextStyle::default();
         style.font.asset = Some(AssetRef("assets/font.ttf".into()));

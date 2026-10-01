@@ -949,6 +949,7 @@ fn video_theme() -> (Theme, BTreeMap<AssetRef, Vec<u8>>) {
     theme.background = Background::Video {
         asset: AssetRef("assets/intro.mp4".into()),
         poster: None,
+        framing: None,
     };
     let mut assets = BTreeMap::new();
     assets.insert(AssetRef("assets/intro.mp4".into()), vec![3; 7000]);
@@ -1029,6 +1030,7 @@ fn an_animated_gif_background_is_sent_as_a_video_at_a_constant_rate() {
     theme.background = Background::Video {
         asset: asset.clone(),
         poster: None,
+        framing: None,
     };
     let assets = BTreeMap::from([(asset, vec![5; 3000])]);
     f.backend.studio().start(theme, assets, None);

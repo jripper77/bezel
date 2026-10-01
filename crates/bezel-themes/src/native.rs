@@ -282,6 +282,7 @@ mod tests {
             background: Background::Video {
                 asset: AssetRef("assets/bg.mp4".into()),
                 poster: Some(AssetRef("assets/bg.png".into())),
+                framing: None,
             },
             refresh_seconds: 0.5,
             elements: vec![

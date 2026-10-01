@@ -1396,6 +1396,7 @@ mod tests {
         theme.background = Background::Video {
             asset: AssetRef(asset.into()),
             poster: None,
+            framing: None,
         };
         theme
     }

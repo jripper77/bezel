@@ -847,7 +847,7 @@ impl From<&Theme> for ThemeDto {
                     asset: asset.0.clone(),
                     fit: fit_dto(*fit),
                 },
-                Background::Video { asset, poster } => BackgroundDto::Video {
+                Background::Video { asset, poster, .. } => BackgroundDto::Video {
                     asset: asset.0.clone(),
                     poster: poster.as_ref().map(|p| p.0.clone()),
                 },
@@ -896,6 +896,7 @@ impl TryFrom<&ThemeDto> for Theme {
             BackgroundDto::Video { asset, poster } => Background::Video {
                 asset: AssetRef(asset.clone()),
                 poster: poster.clone().map(AssetRef),
+                framing: None,
             },
         };
         let elements = d

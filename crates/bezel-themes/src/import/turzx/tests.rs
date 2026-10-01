@@ -702,7 +702,7 @@ fn video_backgrounds_use_the_poster_and_bundle_the_video_when_found() {
     );
     let (t, assets, report) = run(&root, Some(b"MP4"));
     assert_eq!(t.orientation, Orientation::Landscape);
-    let Background::Video { asset, poster } = &t.background else {
+    let Background::Video { asset, poster, .. } = &t.background else {
         panic!("{:?}", t.background)
     };
     assert_eq!(asset.0, "assets/m04.mp4");
@@ -712,7 +712,7 @@ fn video_backgrounds_use_the_poster_and_bundle_the_video_when_found() {
 
     let root = theme(1920, 480, Some("AMD.mp4"), vec![image((0, 0), 1920, 480)]);
     let (t, assets, report) = run(&root, None);
-    let Background::Video { asset, poster } = &t.background else {
+    let Background::Video { asset, poster, .. } = &t.background else {
         panic!("{:?}", t.background)
     };
     assert_eq!(asset.0, "assets/AMD.mp4");

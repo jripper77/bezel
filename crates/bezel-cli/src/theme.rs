@@ -492,12 +492,14 @@ mod tests {
         video.background = Background::Video {
             asset: AssetRef("assets/AMD.mp4".into()),
             poster: None,
+            framing: None,
         };
         save(&video, &folders[0].join("amd"));
         save(&small_theme(), &folders[0].join("still"));
         video.background = Background::Video {
             asset: AssetRef("assets/Rani.mp4".into()),
             poster: None,
+            framing: None,
         };
         save(&video, &folders[1].join("rani"));
         save(&video, &folders[1].join("rani-again"));

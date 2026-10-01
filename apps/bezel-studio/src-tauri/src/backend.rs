@@ -702,7 +702,7 @@ impl Backend {
         let listed: Vec<(AssetDto, Option<Vec<u8>>)> = {
             let studio = self.studio();
             let background = match &studio.theme().background {
-                Background::Video { asset, poster } => Some((asset.clone(), poster.clone())),
+                Background::Video { asset, poster, .. } => Some((asset.clone(), poster.clone())),
                 _ => None,
             };
             studio

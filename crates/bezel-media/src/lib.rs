@@ -534,6 +534,7 @@ mod tests {
                 crop: Some(bezel_core::domain::frame::Rect::new(300, 0, 480, 1920)),
                 frame_rate: Some(24),
                 tone: Tone::Natural,
+                ..ConvertOptions::default()
             };
             let token = CancelToken::new();
             let mut last = None;

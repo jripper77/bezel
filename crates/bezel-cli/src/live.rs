@@ -828,6 +828,7 @@ mod tests {
         theme.background = Background::Video {
             asset: clip.clone(),
             poster: None,
+            framing: None,
         };
         let assets = BTreeMap::from([(clip, vec![1, 2, 3])]);
         FsThemeStore

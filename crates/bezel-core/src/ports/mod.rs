@@ -240,14 +240,19 @@ pub trait MediaTranscoder: Send {
     fn load(&mut self, source: &MediaLocation) -> Result<Vec<u8>>;
 
     /// Decodes `source` (a video or an animated GIF) on the host into RGBA
-    /// frames of `spec.size` (the source covers it, cropped to fit) at
-    /// `spec.fps`. Without the converter: `BezelError::Unsupported`.
+    /// frames of exactly `spec.size` at `spec.fps`: the whole picture, never
+    /// turned or cropped, scaled to that size ([`StreamSpec::raw`] keeps its
+    /// shape). The caller frames each picture
+    /// (D-2026-10-01-video-background-framing-3). Without the converter:
+    /// `BezelError::Unsupported`.
     fn stream(&mut self, source: &MediaLocation, spec: StreamSpec) -> Result<Box<dyn VideoFrames>>;
 
     /// The poster of the video (or animated GIF) `source` for a theme: the
-    /// picture shown `spec.at` after the start, cropped and scaled to cover
-    /// `spec.size` ([`PosterSpec`]). Without the converter, and for adapters
-    /// that take no pictures: `BezelError::Unsupported`.
+    /// picture shown `spec.at` after the start, turned, cropped, scaled and
+    /// padded into `spec.size` as its framing says ([`PosterSpec::geometry`];
+    /// no crop and no pad: scaled to cover `spec.size`). Without the
+    /// converter, and for adapters that take no pictures:
+    /// `BezelError::Unsupported`.
     fn poster(&mut self, source: &MediaLocation, spec: PosterSpec) -> Result<Frame> {
         let _ = (source, spec);
         Err(crate::BezelError::Unsupported(

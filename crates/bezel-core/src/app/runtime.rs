@@ -39,6 +39,7 @@ use crate::app::storage::{Presence, UploadRequest, presence};
 use crate::domain::animation::{MIN_FRAME_STEP, Timeline};
 use crate::domain::clock::{Language, LocalTime};
 use crate::domain::frame::Frame;
+use crate::domain::framing::{PanelLayout, ResolvedFraming, VideoFraming};
 use crate::domain::geometry::Orientation;
 use crate::domain::history::Histories;
 use crate::domain::media::{
@@ -91,8 +92,9 @@ pub struct MissingVideo {
     /// when a card is present, else in the internal one (the vendor's
     /// choice). The runtime looks for that name in both.
     pub path: RemotePath,
-    /// The conversion that fits the video to the panel: the quarter turns
-    /// from the theme's orientation to the panel's native one.
+    /// The conversion that fits the video to the panel: the total quarter
+    /// turns of the theme's framing, turned from the theme's orientation to
+    /// the panel's native one.
     pub options: ConvertOptions,
 }
 
@@ -217,6 +219,15 @@ fn video_of(theme: &Theme) -> Option<(&AssetRef, Orientation)> {
     match &theme.background {
         Background::Video { asset, .. } => Some((asset, theme.orientation)),
         _ => None,
+    }
+}
+
+/// The framing of the theme's video background (the default when the theme
+/// sets none, or has no video).
+fn framing_of(theme: &Theme) -> VideoFraming {
+    match &theme.background {
+        Background::Video { framing, .. } => framing.unwrap_or_default(),
+        _ => VideoFraming::default(),
     }
 }
 
@@ -405,14 +416,14 @@ impl ThemeRuntime {
             }
         };
         let model = screen.identity().model;
-        let turns = self
-            .scene
-            .theme
-            .orientation
-            .quarter_turns_to(model.native_orientation);
+        let orientation = self.scene.theme.orientation;
+        // The video's size is not known here: Auto turns it 0.
+        let framing = framing_of(&self.scene.theme)
+            .resolve(None, orientation, Some(PanelLayout::of(model)))
+            .turned(orientation.quarter_turns_to(model.native_orientation));
         let profile = UploadProfile::for_model(model).filter(|_| model.capabilities.video_playback);
         let state = match (profile, screen.storage()) {
-            (Some(profile), Some(storage)) => self.on_device(storage, video, turns, &profile)?,
+            (Some(profile), Some(storage)) => self.on_device(storage, video, &framing, &profile)?,
             _ => self.on_host(host)?,
         };
         if !matches!(state, VideoState::OnDevice(_)) {
@@ -422,15 +433,16 @@ impl ThemeRuntime {
         Ok(&self.video)
     }
 
-    /// Loops the stored video, or says where it belongs.
+    /// Loops the stored video, or says where it belongs. `framing` is the
+    /// theme's, turned to the panel.
     fn on_device(
         &mut self,
         storage: &mut dyn ScreenStorage,
         asset: AssetRef,
-        quarter_turns: u8,
+        framing: &ResolvedFraming,
         profile: &UploadProfile,
     ) -> Result<VideoState> {
-        let name = device_video_name(&asset, quarter_turns, profile);
+        let name = device_video_name(&asset, framing, profile);
         match find_video(storage, name)? {
             Lookup::Stored(path) => {
                 storage.play_video(&path, Repeat::Loop)?;
@@ -441,7 +453,7 @@ impl ThemeRuntime {
                 asset,
                 path,
                 options: ConvertOptions {
-                    quarter_turns,
+                    quarter_turns: framing.turns,
                     ..ConvertOptions::default()
                 },
             })),
@@ -702,7 +714,8 @@ mod tests {
         };
         let (rev_c, usb) = (profile("turing-8.8"), profile("turing-usb-8.8"));
         let name = |asset: &str, turns, profile: &UploadProfile| {
-            device_video_name(&AssetRef(asset.into()), turns, profile).to_string()
+            let plain = ResolvedFraming::plain(turns);
+            device_video_name(&AssetRef(asset.into()), &plain, profile).to_string()
         };
         assert_eq!(name("assets/AMD.mp4", 0, &rev_c), "amd.mp4");
         assert_eq!(name("assets/AMD.mp4", 1, &rev_c), "amd_90.mp4");
@@ -743,6 +756,7 @@ mod tests {
         video.background = Background::Video {
             asset: AssetRef("assets/clip.mp4".into()),
             poster: None,
+            framing: None,
         };
         let mut runtime = ThemeRuntime::new(plain.clone(), BTreeMap::new(), Language::English);
         assert_eq!(runtime.video(), &VideoState::NoVideo);

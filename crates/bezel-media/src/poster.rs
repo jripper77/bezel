@@ -133,7 +133,9 @@ mod tests {
         PosterSpec {
             size: Size::new(1920, 480),
             at,
+            quarter_turns: 0,
             crop,
+            pad: None,
         }
     }
 
@@ -203,7 +205,9 @@ mod tests {
             PosterSpec {
                 size: Size::new(2, 1),
                 at: Duration::ZERO,
+                quarter_turns: 0,
                 crop: None,
+                pad: None,
             }
         }
 
@@ -222,7 +226,7 @@ mod tests {
             let bigger = PosterSpec {
                 size: Size::new(4, 4),
                 at: Duration::from_secs(1),
-                crop: None,
+                ..two_pixels()
             };
             let err = take(&fakes::dir().join("ready/ffmpeg"), &args, bigger).unwrap_err();
             assert!(err.to_string().contains("no picture 1.0 s in"), "{err}");

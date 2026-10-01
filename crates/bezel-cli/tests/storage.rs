@@ -276,6 +276,7 @@ fn cleanup_dry_run_lists_the_vendor_duplicates_but_never_a_theme_video() {
     theme.background = Background::Video {
         asset: AssetRef("assets/AMD.mp4".into()),
         poster: None,
+        framing: None,
     };
     let folder = data.join("bezel").join("themes").join("amd-loop");
     FsThemeStore

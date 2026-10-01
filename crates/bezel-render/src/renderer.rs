@@ -635,6 +635,7 @@ mod tests {
         let video = Background::Video {
             asset: AssetRef("assets/clip.mp4".into()),
             poster: Some(AssetRef("poster.png".into())),
+            framing: None,
         };
         let theme = testkit::theme(32, 16, video, elements.clone());
 

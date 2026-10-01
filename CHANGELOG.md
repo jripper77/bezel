@@ -158,6 +158,19 @@ the Conventional Commits.
   video with the storage manager, ffmpeg, preparing an SD card, running at
   login, coming from turing-smart-screen-python, troubleshooting and the
   supported screens.
+- Video background framing in Bezel Studio: **Properties → Framing** turns the
+  video (Auto, or 0, 90, 180 or 270°), fills or fits it (with a pad color),
+  zooms it (100 to 400%) and places it (Position X and Y, Center, Reset
+  framing); **Frame on canvas**, or a double-click on the video, does it on the
+  editing area with the mouse (drag, wheel) and the keys (arrows, + and −, 0,
+  Esc or Enter), each change or gesture one undo step. The editor's preview
+  plays the video background, framed, at up to 15 pictures a second (the
+  poster when motion is reduced or without ffmpeg). A theme keeps an optional
+  `framing` in its video background (`rotation`, `fit`, `zoom`, `position`,
+  `padColor`), left out when it is the default; `bezel run` honours it. A
+  re-framed video goes to the screen as a copy of its own, named with `_f` and
+  8 hex digits, and Bezel deletes no earlier copy. See
+  [Framing the video](docs/user/storage-and-video.md#framing-the-video).
 
 ### Changed
 - Turing rev C screens take at most 25 MiB per file: their firmware keeps a
@@ -183,3 +196,10 @@ the Conventional Commits.
 - A rev C screen that another app just turned off (turing-smart-screen-python
   and the vendor app send TURNOFF on exit) is woken instead of failing with
   "Broken pipe".
+- A theme video stored turned for the screen, as in the vendor's horizontal
+  themes (Dragon Ball: 480x1920 in a 1920x480 theme on the 8.8"), is turned
+  back by the framing's Auto instead of being zoomed past the screen, and the
+  `dragon.mp4` the screen already stores is found (Bezel looked for
+  `dragon_90.mp4`) and used without sending it again when its size matches;
+  framed by default, such a video is sent as it is, without ffmpeg. The
+  studio's preview plays a video background instead of showing its poster.

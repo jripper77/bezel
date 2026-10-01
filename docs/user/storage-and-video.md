@@ -341,8 +341,117 @@ draws the theme over it.
 
 - If the video is not on the screen yet, the screen shows the theme's still
   picture and the app offers **Send to the screen**; `bezel run` prints the exact
-  `bezel storage put` command.
+  `bezel storage put` command (for a re-framed video it points to the app, see
+  [Framing the video](#framing-the-video)).
 - Screens that cannot play videos get them decoded on the computer, which needs
   ffmpeg (`bezel run --ffmpeg PATH` if it is not on the `PATH`).
 - To give a theme a video background in the app (a video or an animated GIF),
   see [A video in the background](first-theme.md#a-video-in-the-background).
+
+### Framing the video
+
+The framing decides how the video fills the screen: turned, filled or fitted,
+zoomed and placed. With no element selected, **Properties** shows the theme;
+under **Background**, a video has its **Framing** group.
+
+**Auto.** Some videos are stored already turned for the screen: the vendor
+app's horizontal themes keep, for a 1920×480 theme on the 8.8", a 480×1920
+video, the panel's own shape. A video of exactly the panel's native size, in a
+theme turned the other way (a horizontal theme on the 8.8", whose panel is
+vertical), is turned back on its own, so it plays upright under the theme:
+**Rotation** then reads, for example, **Auto · 270°**, and a note says Auto
+turned it. Any other video gets 0°. Imported themes, the themes already in the
+library and a video you add all start in Auto, and Bezel reads an MP4's size
+itself, so Auto works without ffmpeg.
+
+The controls:
+
+- **Rotation**: **Auto** (with the angle it chose), **0°**, **90°**, **180°**
+  or **270°**, clockwise.
+- **Size**: **Fill** (the default) covers the whole screen and cuts what
+  overflows; **Fit** shows the whole video with the **Pad color** around it
+  (black by default; the color appears with Fit only).
+- **Zoom**: 100% to 400%, in steps of 5%, with the slider or the number.
+- **Position X** and **Position Y**: 0% to 100%. Where the video overflows the
+  screen they choose the part shown (with Fill the edge is never empty); where
+  it is smaller they place it. **Center** puts both back at 50%.
+- **Reset framing**: back to Auto, Fill, 100%, centered.
+
+Each change is one step of Undo (Ctrl+Z) and Redo.
+
+**On the canvas.** **Frame on canvas**, or a double-click on the video away
+from the elements, frames the video right on the editing area, which shows the
+video's edges and a grid:
+
+- drag to move it; turn the mouse wheel to zoom around the pointer
+  (Ctrl+wheel still zooms the view);
+- the arrow keys move it 1% (with Shift, 10%); + and − zoom 5%; 0 resets the
+  zoom and the position;
+- Esc, Enter or **Done** finish.
+
+A bar at the top of the editing area shows the zoom, the position, these keys
+and **Done**; screen readers announce the zoom and the position. Meanwhile the
+elements cannot be selected; Undo, Redo and Save still work. Each drag, and
+each burst of wheel turns, is one undo step.
+
+**The preview.** The editing area plays the video under the elements, framed,
+at up to 15 pictures a second; a framing change shows at once. It shows the
+poster instead:
+
+- when motion is reduced on the computer (the system's reduced-motion
+  setting); **Framing** says so;
+- without ffmpeg: **Framing** says so and offers **How to install ffmpeg**
+  ([Installing ffmpeg](ffmpeg.md)). The framing can still be edited and is
+  saved, and Auto still works.
+
+It does not play while the window is hidden. The poster is taken with the
+framing when the video is added, and again when the theme is saved with
+another framing (with ffmpeg; without it the poster stays as it was).
+
+**On the screen.** A screen that plays videos itself loops a copy of the
+video made for the framing:
+
+- With Fill, 100% and centered, whatever the rotation, the copy keeps the
+  vendor's names: the video's name, with `_90`, `_180` or `_270` when the copy
+  is turned for the panel (`amd_90.mp4`). The Dragon Ball video, stored turned
+  for the 8.8", needs no turn there: it is `dragon.mp4`, and a video like it,
+  already in the screen's format, is sent as it is, without conversion and
+  without ffmpeg. A file of that name already on the screen with exactly the
+  video's size is used and nothing is sent; one of another size is another
+  file, which **Send to the screen** replaces after a confirmation.
+- Fit, a zoom or another position make a copy of their own, converted with
+  ffmpeg: its name gains `_f` and 8 hex digits (for example
+  `dragon_f8ec2b24d.mp4`), so **Send to the screen** sends a new file each time
+  you re-frame, and going back to a framing already sent finds its copy again.
+  Without ffmpeg, **Send to the screen** refuses a re-framed video and says how
+  to install it.
+- Bezel never deletes the earlier copies, and the
+  [cleanup assistant](#the-cleanup-assistant) does not suggest them either (it
+  never suggests a video a theme plays, in any framing): delete the ones you no
+  longer need in **Screen → Storage** (**Delete…**) or with
+  `bezel storage rm PATH --yes`.
+- The [25 MiB per file](#how-large-a-file-can-be) of Turing rev C screens still
+  applies: a conversion is made to fit, and a video sent as it is must be under
+  the limit itself, or nothing is sent.
+- Screens that cannot play videos get the video decoded on the computer and
+  framed the same way.
+
+**From the command line.** The command line honours the framing a theme has
+but cannot change it. `bezel run` reads the video's size from its MP4 header
+(no ffmpeg needed) and looks for the copy under the name its framing gives.
+When the copy is missing, it prints the `bezel storage put` command for a video
+framed by default and, for a re-framed video, points to **Send to the screen**
+in the app, which makes the framed copy.
+
+In the theme file (`theme.json` in the `.bezeltheme`), the framing is an
+optional `framing` object in the video background, left out when everything is
+the default:
+
+```json
+"framing": {"rotation": 270, "fit": "contain", "zoom": 1.25, "position": {"x": 0.5, "y": 0.4}, "padColor": "#000000ff"}
+```
+
+`rotation` is 0, 90, 180 or 270 (absent: Auto) and any other value is an
+error; `fit` is `cover` (Fill) or `contain` (Fit); `zoom` goes from 1 to 4 and
+each `position` axis from 0 to 1, numbers out of range being brought into it.
+A missing key takes its default.

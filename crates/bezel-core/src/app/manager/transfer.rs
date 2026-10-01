@@ -215,7 +215,8 @@ impl Runner<'_> {
         report
     }
 
-    /// One file: preflight, upload, verify, then (move, rename) delete.
+    /// One file: preflight, upload, verify, then (move, rename) delete and
+    /// the catalog forgets the source.
     fn step(&mut self, step: &Step, job: &mut Job<'_>) -> std::result::Result<(), (Stage, Halt)> {
         let ready = self.preflight(step, job).map_err(at(Stage::Preflight))?;
         let pending = self
@@ -231,8 +232,9 @@ impl Runner<'_> {
         sent.map_err(|(stage, error)| (stage, Halt::from(error)))?;
         settled.map_err(|e| (Stage::Verify, Halt::from(e)))?;
         if self.transfer.deletes_source() {
-            self.delete_source(step, ready.card, job)
-                .map_err(at(Stage::Delete))?;
+            self.delete_source(step, job).map_err(at(Stage::Delete))?;
+            ledger::forget(self.store, self.key, &step.source, ready.card)
+                .map_err(|e| (Stage::Catalog, Halt::from(e)))?;
         }
         Ok(())
     }
@@ -328,17 +330,12 @@ impl Runner<'_> {
     }
 
     /// Deletes the source of a verified copy, unless the user cancelled
-    /// meanwhile, and forgets its entry: the file lives at the target now.
-    fn delete_source(
-        &mut self,
-        step: &Step,
-        card: Option<u64>,
-        job: &Job<'_>,
-    ) -> std::result::Result<(), Halt> {
+    /// meanwhile; the caller then forgets its entry: the file lives at the
+    /// target now.
+    fn delete_source(&mut self, step: &Step, job: &Job<'_>) -> std::result::Result<(), Halt> {
         job.checkpoint()?;
         let confirmed = Confirmed::require(self.confirm, &Operation::Delete(step.source.clone()))?;
         self.storage.delete(&step.source, confirmed)?;
-        ledger::forget(self.store, self.key, &step.source, card)?;
         Ok(())
     }
 }

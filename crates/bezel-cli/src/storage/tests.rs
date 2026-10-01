@@ -2,7 +2,7 @@ use super::doubles::{StubMedia, picture, video, weact_bus};
 use super::*;
 use crate::messages::tests::Closing;
 use crate::{Cli, Command};
-use bezel_core::domain::archive::{ArchiveEntry, Catalog, EntryState, ScreenKey};
+use bezel_core::domain::archive::{ArchiveEntry, Catalog, ContentId, EntryState, ScreenKey};
 use bezel_core::domain::device::ModelId;
 use bezel_core::domain::frame::Rect;
 use bezel_core::domain::geometry::Size;
@@ -883,6 +883,21 @@ impl Session {
         log: &mut dyn Write,
         cancel: &CancelToken,
     ) -> anyhow::Result<String> {
+        let mut archive = std::mem::take(&mut self.archive);
+        let out = self.run_on(args, log, cancel, &mut archive);
+        self.archive = archive;
+        out
+    }
+
+    /// Runs `bezel storage <args>` with `archive` as Bezel's catalog and
+    /// copies, its stderr going to `log`.
+    fn run_on(
+        &mut self,
+        args: &[&str],
+        log: &mut dyn Write,
+        cancel: &CancelToken,
+        archive: &mut dyn ArchiveStore,
+    ) -> anyhow::Result<String> {
         let cli = Cli::try_parse_from(["bezel", "storage"].iter().chain(args))?;
         let Command::Storage(storage) = &cli.command else {
             anyhow::bail!("not a storage command")
@@ -892,7 +907,7 @@ impl Session {
             cancel,
             progress: ProgressStyle::Lines,
             log,
-            archive: &mut self.archive,
+            archive,
             archive_dir: self.archive_dir.as_deref(),
             theme_videos: &self.videos,
             now: NOW,
@@ -1252,6 +1267,69 @@ fn a_cancelled_move_keeps_the_source_and_says_what_is_left() {
     );
     let files = s.files();
     assert!(files.contains_key("internal/image/bezel_demo.png"));
+    assert!(files.contains_key("sd/image/bezel_demo.png"));
+}
+
+/// The memory store, failing every save once the screen deleted a file
+/// (a full disk right after a move's delete).
+struct SaveFailsAfterDelete {
+    inner: MemoryArchive,
+    connector: FakeConnector,
+}
+
+impl ArchiveStore for SaveFailsAfterDelete {
+    fn load(&mut self) -> bezel_core::Result<Catalog> {
+        self.inner.load()
+    }
+    fn save(&mut self, catalog: &Catalog) -> bezel_core::Result<()> {
+        let calls = self.connector.log().storage.calls;
+        if calls.iter().any(|c| matches!(c, StorageCall::Delete(_))) {
+            return Err(BezelError::Transport("the disk is full".into()));
+        }
+        self.inner.save(catalog)
+    }
+    fn keep(&mut self, bytes: &[u8]) -> bezel_core::Result<ContentId> {
+        self.inner.keep(bytes)
+    }
+    fn read(&mut self, content: &ContentId) -> bezel_core::Result<Option<Vec<u8>>> {
+        self.inner.read(content)
+    }
+    fn discard(&mut self, content: &ContentId) -> bezel_core::Result<()> {
+        self.inner.discard(content)
+    }
+}
+
+#[test]
+fn a_move_whose_catalog_cannot_follow_says_the_source_is_gone() {
+    let mut s = Session::light();
+    let mut store = SaveFailsAfterDelete {
+        inner: s.archive.clone(),
+        connector: s.connector.clone(),
+    };
+    let args = ["mv", "internal/image/bezel_demo.png", "--to", "sd", "--yes"];
+    let mut log = Vec::new();
+    let err = s
+        .run_on(&args, &mut log, &CancelToken::new(), &mut store)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.starts_with(
+            "stopped at internal/image/bezel_demo.png -> sd/image/bezel_demo.png (after \
+             deleting the source, while updating Bezel's catalog): "
+        ),
+        "{err}"
+    );
+    assert!(
+        err.ends_with(
+            "\n  its copy at sd/image/bezel_demo.png is verified and \
+             internal/image/bezel_demo.png was deleted, but Bezel's catalog still names it: \
+             `bezel storage catalog forget internal/image/bezel_demo.png --yes` drops it"
+        ),
+        "{err}"
+    );
+    assert!(!err.contains("still there"), "{err}");
+    let files = s.files();
+    assert!(!files.contains_key("internal/image/bezel_demo.png"));
     assert!(files.contains_key("sd/image/bezel_demo.png"));
 }
 

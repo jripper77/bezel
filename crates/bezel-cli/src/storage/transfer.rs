@@ -6,7 +6,9 @@
 //! deleted. The batch stops at the first failure or Ctrl+C.
 
 use anyhow::anyhow;
-use bezel_core::app::manager::{Batch, Inventory, Manager, ManagerError, Stage, TransferReport};
+use bezel_core::app::manager::{
+    Batch, Inventory, Manager, ManagerError, Stage, Stopped, TransferReport,
+};
 use bezel_core::domain::archive::{
     ArchiveEntry, ScreenRecord, Skip, Step, Transfer, TransferPlan, Warning,
 };
@@ -306,6 +308,26 @@ const fn stage_text(stage: Stage) -> &'static str {
         Stage::Upload => "while sending",
         Stage::Verify => "while checking the stored size",
         Stage::Delete => "while deleting the source, its copy verified",
+        Stage::Catalog => "after deleting the source, while updating Bezel's catalog",
+    }
+}
+
+/// Where a moved or renamed file stands once its step stopped: both copies
+/// (the copy verified, the source not deleted), the target alone (the
+/// source deleted, the catalog not updated) or the source alone.
+fn whereabouts(stopped: &Stopped) -> String {
+    let step = &stopped.step;
+    let (source, target) = (&step.source, &step.target);
+    match stopped.stage {
+        Stage::Delete => format!(
+            "its copy at {target} is verified and {source} is still there too: delete it with \
+             `bezel storage rm {source} --yes`"
+        ),
+        Stage::Catalog => format!(
+            "its copy at {target} is verified and {source} was deleted, but Bezel's catalog \
+             still names it: `bezel storage catalog forget {source} --yes` drops it"
+        ),
+        Stage::Preflight | Stage::Upload | Stage::Verify => format!("{source} stays where it was"),
     }
 }
 
@@ -333,15 +355,7 @@ fn report_text(report: &TransferReport, verbs: &Verbs) -> anyhow::Result<String>
         halt_text(&stopped.halt, verbs.what)
     );
     if report.transfer.deletes_source() {
-        if stopped.copied() {
-            text.push_str(&format!(
-                "\n  its copy at {} is verified and {} is still there too: delete it with \
-                 `bezel storage rm {} --yes`",
-                step.target, step.source, step.source
-            ));
-        } else {
-            text.push_str(&format!("\n  {} stays where it was", step.source));
-        }
+        text.push_str(&format!("\n  {}", whereabouts(stopped)));
     }
     if let Some(left) = stopped.leftover() {
         text.push_str(&format!(

@@ -642,6 +642,80 @@ fn a_failed_or_cancelled_move_keeps_the_source_and_stops_the_batch() {
     assert_eq!(state_at(&catalog, "internal/video/two.mp4"), None);
 }
 
+/// The memory store, failing every save once the screen deleted a file
+/// (a full or read-only disk right after a move's delete).
+struct SaveFailsAfterDelete {
+    inner: MemoryArchive,
+    connector: FakeConnector,
+}
+
+impl ArchiveStore for SaveFailsAfterDelete {
+    fn load(&mut self) -> Result<Catalog> {
+        self.inner.load()
+    }
+    fn save(&mut self, catalog: &Catalog) -> Result<()> {
+        let deleted = calls(&self.connector)
+            .iter()
+            .any(|c| matches!(c, StorageCall::Delete(_)));
+        if deleted {
+            return Err(BezelError::Transport("the disk is full".into()));
+        }
+        self.inner.save(catalog)
+    }
+    fn keep(&mut self, bytes: &[u8]) -> Result<ContentId> {
+        self.inner.keep(bytes)
+    }
+    fn read(&mut self, content: &ContentId) -> Result<Option<Vec<u8>>> {
+        self.inner.read(content)
+    }
+    fn discard(&mut self, content: &ContentId) -> Result<()> {
+        self.inner.discard(content)
+    }
+}
+
+#[test]
+fn a_catalog_that_cannot_follow_the_delete_says_the_source_is_gone() {
+    let a = clip(1, 3000);
+    let card = FakeStorage::default()
+        .with_card(CARD)
+        .with_file(remote("sd/video/a.mp4"), a.clone());
+    let connector = FakeConnector::with_storage(card);
+    let mut inner = MemoryArchive::new();
+    seed(&mut inner, &key(), &[("sd/video/a.mp4", Some(CARD), &a)]);
+    let mut store = SaveFailsAfterDelete {
+        inner,
+        connector: connector.clone(),
+    };
+    let mut link = open(&connector);
+    let mut manager = Manager::new(link.as_mut(), &mut store);
+    let source = remote("sd/video/a.mp4");
+    let plan = manager
+        .plan_move(std::slice::from_ref(&source), Medium::Internal, &[])
+        .expect("plans");
+    let (report, _) = run(&mut manager, &plan, Confirm::Yes, Cancel::Never);
+    let stopped = report.expect("a report").stopped.expect("stopped");
+    // The copy was verified and the source deleted; only the catalog lags.
+    assert_eq!(stopped.stage, Stage::Catalog);
+    assert_eq!(
+        stopped.halt,
+        Halt::Failed(BezelError::Transport("the disk is full".into()))
+    );
+    assert!(!stopped.copied() && stopped.source_deleted());
+    let files = connector.log().storage.files;
+    assert!(!files.contains_key(&source));
+    assert_eq!(files.get(&remote("internal/video/a.mp4")), Some(&a));
+    let catalog = saved(&store.inner);
+    assert_eq!(
+        state_at(&catalog, "internal/video/a.mp4"),
+        Some(EntryState::Stored)
+    );
+    assert_eq!(
+        state_at(&catalog, "sd/video/a.mp4"),
+        Some(EntryState::Stored),
+        "the catalog still names the source"
+    );
+}
+
 #[test]
 fn restore_checks_space_and_the_cap_before_sending_anything() {
     const SMALL_CARD: u64 = 1_000_000;
@@ -1068,14 +1142,11 @@ fn a_screen_that_changed_since_the_plan_stops_the_batch() {
     for (halt, text) in halts {
         assert!(halt.to_string().contains(text), "{halt}");
     }
-    let steps = [
-        Stage::Preflight,
-        Stage::Upload,
-        Stage::Verify,
-        Stage::Delete,
-    ]
-    .map(Stage::slug);
-    assert_eq!(steps, ["preflight", "upload", "verify", "delete"]);
+    let steps = Stage::ALL.map(Stage::slug);
+    assert_eq!(
+        steps,
+        ["preflight", "upload", "verify", "delete", "catalog"]
+    );
 }
 
 #[test]

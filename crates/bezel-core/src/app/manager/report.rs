@@ -76,22 +76,37 @@ pub enum Stage {
     /// Deleting the source, once its copy was verified: the copy is there
     /// and the source too.
     Delete,
+    /// Recording the source's delete in the catalog: the copy is there and
+    /// the source is gone; only the catalog still names the source.
+    Catalog,
 }
 
 impl Stage {
-    /// Stable machine name (`preflight`, `upload`, `verify`, `delete`).
+    /// Every stage, in the order a step goes through them.
+    pub const ALL: [Stage; 5] = [
+        Stage::Preflight,
+        Stage::Upload,
+        Stage::Verify,
+        Stage::Delete,
+        Stage::Catalog,
+    ];
+
+    /// Stable machine name (`preflight`, `upload`, `verify`, `delete`,
+    /// `catalog`).
     pub const fn slug(self) -> &'static str {
         match self {
             Stage::Preflight => "preflight",
             Stage::Upload => "upload",
             Stage::Verify => "verify",
             Stage::Delete => "delete",
+            Stage::Catalog => "catalog",
         }
     }
 }
 
 /// Why a file stopped its batch. The source of a move or rename is never
-/// deleted after any of these.
+/// deleted after any of these, except at [`Stage::Catalog`]: the source was
+/// deleted and the catalog could not record it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Halt {
     /// The user cancelled. `partial`: the bytes an interrupted upload left
@@ -179,6 +194,12 @@ impl Stopped {
     /// rename stopped before deleting its source: both are there).
     pub fn copied(&self) -> bool {
         self.stage == Stage::Delete
+    }
+
+    /// Whether its source was deleted after the copy was verified, and only
+    /// the catalog could not record it: the file is at the target alone.
+    pub fn source_deleted(&self) -> bool {
+        self.stage == Stage::Catalog
     }
 
     /// What the interrupted upload left at the target, for a confirmed

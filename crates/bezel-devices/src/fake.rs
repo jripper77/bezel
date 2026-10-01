@@ -4,7 +4,7 @@
 //! files and device-side playback ([`FakeStorage`]). [`FakeHid`] stands for
 //! the HID interface of a panel in desktop mode.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bezel_core::domain::device::{Family, Transport, UsbId};
@@ -197,6 +197,8 @@ pub struct FakeLog {
     pub offs: usize,
     /// `release` calls.
     pub releases: usize,
+    /// Connections opened (`ScreenConnector::connect` that succeeded).
+    pub connects: usize,
     /// Screens restarted through the connector (`ScreenConnector::restart`),
     /// by the address they had.
     pub restarts: Vec<String>,
@@ -398,10 +400,23 @@ impl FakeStorage {
     }
 }
 
+/// Failures scripted into a [`FakeConnector`]'s screens.
+#[derive(Debug, Default)]
+struct Script {
+    /// `present` fails once with this error when the screens already showed
+    /// that many frames in all.
+    break_at: Option<(usize, BezelError)>,
+    /// Once this many connections were opened, the next ones fail with
+    /// `refusals`, one each, in order.
+    refuse_after: usize,
+    refusals: VecDeque<BezelError>,
+}
+
 /// Connects to an in-memory screen that records everything.
 #[derive(Debug, Clone, Default)]
 pub struct FakeConnector {
     log: Arc<Mutex<FakeLog>>,
+    script: Arc<Mutex<Script>>,
 }
 
 impl FakeConnector {
@@ -414,7 +429,33 @@ impl FakeConnector {
         };
         Self {
             log: Arc::new(Mutex::new(log)),
+            script: Arc::default(),
         }
+    }
+
+    /// Its screens' `present` fails once with `error` when they already
+    /// showed `frames` frames in all: a link that breaks mid-run (a hung
+    /// screen answers `BezelError::Hung`).
+    #[must_use]
+    pub fn breaking_after(self, frames: usize, error: BezelError) -> Self {
+        self.script().break_at = Some((frames, error));
+        self
+    }
+
+    /// Once `connects` connections were opened, the next ones fail with
+    /// `errors`, one each, in order: a screen that is not back yet, or one
+    /// that answers nothing even after its restart.
+    #[must_use]
+    pub fn refusing_after(self, connects: usize, errors: Vec<BezelError>) -> Self {
+        let mut script = self.script();
+        script.refuse_after = connects;
+        script.refusals = errors.into();
+        drop(script);
+        self
+    }
+
+    fn script(&self) -> std::sync::MutexGuard<'_, Script> {
+        self.script.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// A snapshot of what the screens were asked to do.
@@ -448,6 +489,16 @@ impl ScreenConnector for FakeConnector {
         let model = screen
             .model()
             .ok_or_else(|| BezelError::Transport("simulated screen needs a single model".into()))?;
+        let mut log = self.log.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut script = self.script();
+        if log.connects >= script.refuse_after
+            && let Some(refusal) = script.refusals.pop_front()
+        {
+            return Err(refusal);
+        }
+        drop(script);
+        log.connects += 1;
+        drop(log);
         Ok(Box::new(FakeScreen {
             identity: ScreenIdentity {
                 model,
@@ -456,6 +507,7 @@ impl ScreenConnector for FakeConnector {
             orientation: Orientation::Portrait,
             has_storage: matches!(model.family, Family::TuringRevC | Family::TuringUsb),
             log: Arc::clone(&self.log),
+            script: Arc::clone(&self.script),
         }))
     }
 }
@@ -467,6 +519,7 @@ pub struct FakeScreen {
     orientation: Orientation,
     has_storage: bool,
     log: Arc<Mutex<FakeLog>>,
+    script: Arc<Mutex<Script>>,
 }
 
 impl FakeScreen {
@@ -514,6 +567,19 @@ impl ScreenLink for FakeScreen {
                 "frame size does not match the panel".into(),
             ));
         }
+        let shown = self
+            .log
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .frames
+            .len();
+        let mut script = self.script.lock().unwrap_or_else(PoisonError::into_inner);
+        if script.break_at.as_ref().is_some_and(|(at, _)| shown >= *at)
+            && let Some((_, error)) = script.break_at.take()
+        {
+            return Err(error);
+        }
+        drop(script);
         self.record(|l| l.frames.push(frame.clone()));
         Ok(())
     }
@@ -669,6 +735,28 @@ mod tests {
         assert_eq!(log.frames.len(), 1);
         assert_eq!(log.orientations, vec![Orientation::Landscape]);
         assert_eq!((log.offs, log.releases, log.brightness.len()), (1, 1, 1));
+    }
+
+    #[test]
+    fn scripted_screens_break_once_and_refuse_connections() {
+        let hung = BezelError::Hung("stalled".into());
+        let away = BezelError::ScreenNotFound("away".into());
+        let connector = FakeConnector::default()
+            .breaking_after(1, hung.clone())
+            .refusing_after(1, vec![away.clone()]);
+        let bus = FakeBus::turing_88();
+        let frame = Frame::filled(
+            bezel_core::domain::geometry::Size::new(480, 1920),
+            Rgba::BLACK,
+        );
+        let mut link = open_screen(&bus, &connector, None).unwrap();
+        link.present(&frame).unwrap();
+        assert_eq!(link.present(&frame).err(), Some(hung), "the second frame");
+        link.present(&frame).unwrap();
+        assert_eq!(open_screen(&bus, &connector, None).err(), Some(away));
+        assert!(open_screen(&bus, &connector, None).is_ok());
+        let log = connector.log();
+        assert_eq!((log.connects, log.frames.len()), (2, 2));
     }
 
     #[test]

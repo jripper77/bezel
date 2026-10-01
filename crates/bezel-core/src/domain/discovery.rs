@@ -127,6 +127,60 @@ impl Screen {
     }
 }
 
+/// Whether `a` and `b` are on the bus through the same wake chip: a rev C
+/// MCU keeps its port while its SoC leaves and comes back. A display
+/// grouped with it from another hub (a lone one, while the SoC is away)
+/// is not the screen.
+fn same_wake(a: &Screen, b: &Screen) -> bool {
+    let (Some(x), Some(y)) = (&a.wake, &b.wake) else {
+        return false;
+    };
+    let hub = |e: &Endpoint| e.location.as_ref().and_then(UsbLocation::parent);
+    let behind = match (hub(x), a.display.as_ref().and_then(hub)) {
+        (Some(w), Some(d)) => w == d,
+        _ => true,
+    };
+    x.address == y.address && behind
+}
+
+/// Whether the displays of `a` and `b` sit in the same USB port.
+fn same_port(a: &Screen, b: &Screen) -> bool {
+    let port = |s: &Screen| s.display.as_ref().and_then(|d| d.location.clone());
+    port(a).is_some() && port(a) == port(b)
+}
+
+/// Whether the displays of `a` and `b` are the same USB device by serial.
+fn same_serial(a: &Screen, b: &Screen) -> bool {
+    let id = |s: &Screen| {
+        let d = s.display.as_ref()?;
+        Some((d.usb, d.serial_number.clone()?))
+    };
+    id(a).is_some() && id(a) == id(b)
+}
+
+/// Whether `a` and `b` are reached at the same address.
+fn same_address(a: &Screen, b: &Screen) -> bool {
+    a.address().is_some() && a.address() == b.address()
+}
+
+/// The screen of `screens` that is `known` again after it left the bus and
+/// came back (a rev C SoC returns under a new device name after a restart;
+/// devices.md § 5.4): the one behind the same wake chip, else in the same
+/// USB port, else with the same serial number, else at the same address.
+/// `None` while it is not back.
+pub fn find_again(screens: Vec<Screen>, known: &Screen) -> Option<Screen> {
+    let mut same_family: Vec<Screen> = screens
+        .into_iter()
+        .filter(|s| s.family == known.family)
+        .collect();
+    let rules: [fn(&Screen, &Screen) -> bool; 4] =
+        [same_wake, same_port, same_serial, same_address];
+    let found = rules
+        .iter()
+        .find_map(|rule| same_family.iter().position(|s| rule(s, known)))?;
+    Some(same_family.swap_remove(found))
+}
+
 struct Classified {
     endpoint: Endpoint,
     role: EndpointRole,
@@ -495,6 +549,50 @@ mod tests {
         assert!(switch.model().is_none());
         switch.model_byte = None;
         assert!(switch.model().is_none());
+    }
+
+    #[test]
+    fn a_screen_back_on_the_bus_is_found_again_by_identity() {
+        let mcu = || {
+            ep(
+                "/dev/ttyACM0",
+                0x1a86,
+                0xca88,
+                Some("CT88INCH"),
+                Some(("3", &[1, 1])),
+            )
+        };
+        let soc = |addr: &str, port: u8| ep(addr, 0x0525, 0xa4a7, None, Some(("3", &[1, port])));
+        let known = group_screens(vec![mcu(), soc("/dev/ttyACM1", 2)]).remove(0);
+        // The SoC restarted and came back as another tty, beside another 8.8".
+        let other = ep("/dev/ttyACM9", 0x0525, 0xa4a7, None, Some(("3", &[4, 2])));
+        let back = group_screens(vec![other.clone(), soc("/dev/ttyACM2", 2), mcu()]);
+        let found = find_again(back, &known).expect("back");
+        assert_eq!(found.address(), Some(&DeviceAddress("/dev/ttyACM2".into())));
+        // Still away: only the MCU is listed (asleep), which is the screen
+        // too; a lone display from another hub grouped with it is not.
+        let away = find_again(group_screens(vec![mcu()]), &known).expect("asleep");
+        assert_eq!(away.display, None);
+        assert!(find_again(group_screens(vec![mcu(), other.clone()]), &known).is_none());
+
+        // Without a wake chip: the same USB port, else the same serial, else
+        // the same address.
+        let no_wake = |e: Endpoint| group_screens(vec![e]).remove(0);
+        let lone = no_wake(soc("/dev/ttyACM1", 2));
+        let moved = group_screens(vec![other.clone(), soc("/dev/ttyACM5", 2)]);
+        let found = find_again(moved, &lone).expect("same port");
+        assert_eq!(found.address(), Some(&DeviceAddress("/dev/ttyACM5".into())));
+        let weact = |addr: &str| ep(addr, 0x1a86, 0xfe0c, Some("AD0001"), None);
+        let found = find_again(group_screens(vec![weact("COM7")]), &no_wake(weact("COM3")));
+        assert_eq!(
+            found.and_then(|s| s.address().cloned()),
+            Some(DeviceAddress("COM7".into()))
+        );
+        let plain = |addr: &str| ep(addr, 0x1a86, 0x5722, None, None);
+        let at = |addr| group_screens(vec![plain(addr)]);
+        assert!(find_again(at("/dev/ttyUSB0"), &no_wake(plain("/dev/ttyUSB0"))).is_some());
+        assert!(find_again(at("/dev/ttyUSB1"), &no_wake(plain("/dev/ttyUSB0"))).is_none());
+        assert!(find_again(Vec::new(), &known).is_none());
     }
 
     #[test]

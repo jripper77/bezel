@@ -597,14 +597,24 @@ mod tests {
         );
     }
 
-    /// Never waits and is never stopped (`--frames` ends the run).
-    struct NoWait;
+    /// Never waits (its clock jumps instead) and is never stopped
+    /// (`--frames` ends the run).
+    struct NoWait {
+        start: std::time::Instant,
+        waited: Duration,
+    }
 
     impl Pace for NoWait {
-        fn wait(&mut self, _: Duration) {}
+        fn wait(&mut self, duration: Duration) {
+            self.waited += duration;
+        }
 
         fn stopped(&self) -> bool {
             false
+        }
+
+        fn now(&self) -> std::time::Instant {
+            self.start + self.waited
         }
     }
 
@@ -637,7 +647,10 @@ mod tests {
             &connector,
             &mut kit,
             &mut storage::doubles::StubMedia::missing(),
-            &mut NoWait,
+            &mut NoWait {
+                start: std::time::Instant::now(),
+                waited: Duration::ZERO,
+            },
             &mut Vec::new(),
         )?;
         Ok((out, connector))

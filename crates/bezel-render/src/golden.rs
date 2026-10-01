@@ -466,9 +466,15 @@ pub(crate) fn images(r: &mut SkiaRenderer) {
             },
         )],
     );
-    for (second, expected) in [(0, RED), (1, BLUE), (2, RED), (59, BLUE)] {
+    for (ms, expected) in [
+        (0, RED),
+        (999, RED),
+        (1000, BLUE),
+        (2000, RED),
+        (59_500, BLUE),
+    ] {
         let scene = Scene {
-            time: bezel_core::domain::clock::LocalTime { second, ..TIME },
+            animation: std::time::Duration::from_millis(ms),
             ..Scene::empty().asset("a.gif", gif(4, 4, &[(RED, 1000), (BLUE, 1000)]))
         };
         let f = render(r, &t, &scene);

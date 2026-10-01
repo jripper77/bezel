@@ -40,7 +40,9 @@ use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
 use tauri::{AppHandle, Emitter as _, Manager, WindowEvent};
 
-use crate::backend::{Backend, DEFAULT_MODEL, Pacer, SensorFactory, Session, default_orientation};
+use crate::backend::{
+    Backend, DEFAULT_MODEL, SensorFactory, Session, default_orientation, sleep_until,
+};
 use crate::commands::{Shared, Unsaved};
 use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
@@ -343,8 +345,9 @@ impl MediaSetup for FfmpegTranscoder {
 }
 
 /// Shows the last live screen again, then samples and refreshes the live
-/// screen at the theme's pace (the screen's I/O does not stretch it), on its
-/// own thread for the life of the app. The tray's live item follows.
+/// screen when the session says (the theme's refresh, a visible GIF's
+/// frames, an attempt to connect a failed screen again), on its own thread
+/// for the life of the app. The tray's live item follows.
 fn start_refresh_loop(backend: Shared, live_item: tray::LiveItem) {
     let spawned = std::thread::Builder::new()
         .name("bezel-refresh".into())
@@ -353,14 +356,13 @@ fn start_refresh_loop(backend: Shared, live_item: tray::LiveItem) {
                 tracing::warn!("sensor catalog: {e}");
             }
             backend.restore_live(clock::now());
-            let mut pacer = Pacer::new(Instant::now());
             loop {
-                let period = backend.tick(clock::now());
+                let due = backend.tick(clock::now(), Instant::now());
                 // Not under the session's lock: the menu waits for the main
                 // thread.
                 let live = backend.studio().live_key().is_some();
                 live_item.sync(live);
-                std::thread::sleep(pacer.wait(period, Instant::now()));
+                std::thread::sleep(sleep_until(due, Instant::now()));
             }
         });
     if let Err(e) = spawned {

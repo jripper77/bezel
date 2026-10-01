@@ -24,6 +24,14 @@
 //! comes back once the screen showed it ([`Studio::presented`]). Previews
 //! render meanwhile; whoever needs the link waits for it
 //! ([`Studio::presenting`]).
+//!
+//! Frames come when the runtime says they are due (T-7.11): every refresh,
+//! and at a visible animated GIF's frame times; the preview reports when its
+//! GIFs change next so the UI can draw them too ([`Studio::preview`]). A
+//! live link that fails (the screen stopped reading, a cable glitch) is
+//! dropped and the screen connected again after 2, 5 and 10 s, outside the
+//! session ([`Studio::reconnect_due`], [`Studio::reconnected`]); turning
+//! live mode off meanwhile ends it at once.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -32,14 +40,16 @@ use std::time::{Duration, Instant};
 
 use bezel_core::app::{HOST_VIDEO_FPS, HostVideo, MissingVideo, ThemeRuntime, VideoState};
 use bezel_core::domain::clock::{Language, LocalTime};
+use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::{Orientation, Size};
+use bezel_core::domain::reconnect::{Reconnect, worth_reconnecting};
 use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use bezel_core::domain::theme::{AssetRef, Background, Theme, refresh_interval};
 use bezel_core::ports::{
-    Backdrop, FrameRenderer, MediaLocation, MediaTranscoder, ScreenLink, SensorSource,
-    ThemeLocation, ThemeStore,
+    FrameRenderer, MediaLocation, MediaTranscoder, ScreenLink, SensorSource, ThemeLocation,
+    ThemeStore,
 };
 use bezel_core::{BezelError, Result};
 
@@ -88,6 +98,18 @@ struct HostPlayback {
     started: Instant,
 }
 
+/// A live screen whose link failed, being connected again.
+struct Away {
+    attempts: Reconnect,
+    /// When the next attempt is due.
+    due: Instant,
+    /// What stopped the link: live mode stops with it when the screen does
+    /// not come back.
+    error: BezelError,
+    /// An attempt is under way, outside the session.
+    trying: bool,
+}
+
 /// Where the live screen's link is.
 enum Slot {
     /// In the session.
@@ -97,13 +119,15 @@ enum Slot {
     /// Lent to a storage job ([`Studio::lend_live_link`]): frames pause
     /// until it comes back.
     Lent,
+    /// Gone: it failed and the screen is being connected again.
+    Away(Away),
 }
 
 impl Slot {
     fn link(&mut self) -> Option<&mut Box<dyn ScreenLink>> {
         match self {
             Slot::Here(link) => Some(link),
-            Slot::Presenting | Slot::Lent => None,
+            Slot::Presenting | Slot::Lent | Slot::Away(_) => None,
         }
     }
 
@@ -123,7 +147,15 @@ impl Slot {
 /// The screen showing the edited theme.
 struct Live {
     key: String,
+    /// The screen as discovered, to find it again after its link failed
+    /// (`None`: it is not connected again).
+    screen: Option<Screen>,
+    /// Counts the times live mode started or stopped: an attempt to
+    /// connect again that ends after it changed is dropped.
+    generation: u64,
     slot: Slot,
+    /// When its last frame was drawn.
+    drawn: Option<Instant>,
     orientation: Option<Orientation>,
     /// Start the video (again) before the next frame: after going live, after
     /// a theme with another video, after a job that changed what plays.
@@ -152,6 +184,30 @@ impl Delivery {
     }
 }
 
+/// An attempt to connect the live screen again, made outside the session
+/// ([`Studio::reconnect_due`]); its outcome goes to [`Studio::reconnected`].
+#[derive(Debug, Clone)]
+pub struct Attempt {
+    screen: Screen,
+    generation: u64,
+}
+
+impl Attempt {
+    /// The screen to find again and connect.
+    pub fn screen(&self) -> &Screen {
+        &self.screen
+    }
+}
+
+/// Where a live screen whose link failed stands, for the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reconnecting {
+    /// The attempt under way or next (1 for the first).
+    pub attempt: usize,
+    /// Attempts in all.
+    pub attempts: usize,
+}
+
 /// What a borrowed live link resumes when it comes back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resume {
@@ -172,15 +228,17 @@ pub struct Studio {
     /// The sensors the library's list shows ([`Self::show_sensors`]).
     listed: Wanted,
     sample_millis: f64,
-    /// Refreshes since the last sample (a video decoded here refreshes more
-    /// often than the theme samples).
-    unsampled: u32,
     location: Option<ThemeLocation>,
     live: Option<Live>,
+    /// Counts the times live mode started or stopped.
+    generation: u64,
     live_error: Option<UiError>,
     host: Option<HostDecoding>,
     /// What the session learnt about the videos added to it.
     videos: BTreeMap<AssetRef, AddedVideo>,
+    /// The session's clock starts here: the runtime's cadence and the
+    /// animations run on it.
+    origin: Instant,
 }
 
 /// A video (or an animated GIF) added to the session for a background: its
@@ -202,21 +260,29 @@ impl Studio {
         language: Language,
         theme: Theme,
     ) -> Self {
+        let mut runtime = ThemeRuntime::new(theme, BTreeMap::new(), language);
+        runtime.limit_refresh(MAX_REFRESH);
         Self {
             sensors,
             renderer,
             language,
-            runtime: ThemeRuntime::new(theme, BTreeMap::new(), language),
+            runtime,
             catalog: Vec::new(),
             listed: Wanted::nothing(),
             sample_millis: 0.0,
-            unsampled: 0,
             location: None,
             live: None,
+            generation: 0,
             live_error: None,
             host: None,
             videos: BTreeMap::new(),
+            origin: Instant::now(),
         }
+    }
+
+    /// `now` on the session's clock.
+    fn clock(&self, now: Instant) -> Duration {
+        now.saturating_duration_since(self.origin)
     }
 
     /// Decodes the theme's video with `media` for screens that cannot play
@@ -239,6 +305,7 @@ impl Studio {
         let assets = self.runtime.assets().clone();
         // The old runtime, and a video it decodes here, stop first.
         self.runtime = ThemeRuntime::new(theme, assets, language);
+        self.runtime.limit_refresh(MAX_REFRESH);
         self.runtime.use_catalog(&self.catalog);
         self.runtime.want_also(self.listed.clone());
         if let Some(live) = self.live.as_mut() {
@@ -434,8 +501,16 @@ impl Studio {
     /// Renders the edited theme with the latest readings, as the preview
     /// shows it (a video background shows its poster).
     pub fn render(&mut self, time: LocalTime) -> Result<Frame> {
-        self.runtime
-            .render_with(self.renderer.as_mut(), time, Backdrop::Poster)
+        self.preview(time, Instant::now()).map(|(frame, _)| frame)
+    }
+
+    /// The preview at `now` ([`Self::render`]) with its animated GIFs as
+    /// they are then, and how long until they change (`None`: nothing
+    /// animates): when the UI draws the next frame of the preview.
+    pub fn preview(&mut self, time: LocalTime, now: Instant) -> Result<(Frame, Option<Duration>)> {
+        let clock = self.clock(now);
+        let (frame, change) = self.runtime.preview(self.renderer.as_mut(), time, clock)?;
+        Ok((frame, change.map(|at| at.saturating_sub(clock))))
     }
 
     /// Key of the screen showing the theme, if any.
@@ -446,6 +521,18 @@ impl Studio {
     /// Why the live screen stopped, until the next `go_live`.
     pub fn live_error(&self) -> Option<&UiError> {
         self.live_error.as_ref()
+    }
+
+    /// Where the live screen stands while its link failed and it is being
+    /// connected again; `None` otherwise.
+    pub fn reconnecting(&self) -> Option<Reconnecting> {
+        match &self.live.as_ref()?.slot {
+            Slot::Away(away) => Some(Reconnecting {
+                attempt: away.attempts.attempt(),
+                attempts: Reconnect::attempts(),
+            }),
+            _ => None,
+        }
     }
 
     /// How the theme's video background reaches the live screen (`None`
@@ -480,6 +567,7 @@ impl Studio {
             Slot::Here(_) => return Ok(live.slot.link()),
             Slot::Presenting => LIVE_FRAME,
             Slot::Lent => STORAGE_JOB,
+            Slot::Away(_) => RECONNECTING,
         };
         Err(BezelError::InUse {
             address: key.to_string(),
@@ -522,21 +610,35 @@ impl Studio {
     /// Shows the edited theme on `link` from the next frame on.
     pub fn go_live(&mut self, key: String, link: Box<dyn ScreenLink>) {
         self.runtime.forget_screen();
+        self.generation += 1;
         self.live = Some(Live {
             key,
+            screen: None,
+            generation: self.generation,
             slot: Slot::Here(link),
+            drawn: None,
             orientation: None,
             restart_video: true,
             host: None,
         });
         self.live_error = None;
-        self.unsampled = 0;
+    }
+
+    /// [`Self::go_live`] on `screen`, which is connected again when its
+    /// link fails.
+    pub fn go_live_on(&mut self, key: String, screen: Screen, link: Box<dyn ScreenLink>) {
+        self.go_live(key, link);
+        if let Some(live) = self.live.as_mut() {
+            live.screen = Some(screen);
+        }
     }
 
     /// Stops showing the theme and hands back the screen's link (`None`
-    /// while it is out: whoever has it closes it).
+    /// while it is out: whoever has it closes it). A screen being connected
+    /// again stops there.
     pub fn stop_live(&mut self) -> Option<Box<dyn ScreenLink>> {
         let mut live = self.live.take()?;
+        self.generation += 1;
         // The decoder stops before its copy of the video goes.
         self.runtime.forget_screen();
         live.slot.take_for(Slot::Lent)
@@ -592,14 +694,15 @@ impl Studio {
         }
     }
 
-    /// Renders the next frame of the live screen and takes its link out of
+    /// Renders the live screen's frame of `now` and takes its link out of
     /// the session to show it ([`Delivery::present`], then
     /// [`Self::presented`]). `None` while nothing is live or the link is
     /// out. A theme that does not fit the screen stops the live mode, kept
     /// for [`Self::live_error`].
-    pub fn frame_for_screen(&mut self, time: LocalTime) -> Result<Option<Delivery>> {
+    pub fn frame_for_screen(&mut self, time: LocalTime, now: Instant) -> Result<Option<Delivery>> {
         self.start_live_video();
         let orientation = self.runtime.theme().orientation;
+        let clock = self.clock(now);
         let Some(live) = self.live.as_mut() else {
             return Ok(None);
         };
@@ -610,8 +713,10 @@ impl Studio {
         let video = live
             .host
             .as_ref()
-            .map_or(Duration::ZERO, |h| h.started.elapsed());
-        let frame = match self.runtime.render(self.renderer.as_mut(), time, video) {
+            .map_or(Duration::ZERO, |h| now.saturating_duration_since(h.started));
+        live.drawn = Some(now);
+        let renderer = self.renderer.as_mut();
+        let frame = match self.runtime.render_at(renderer, time, clock, video) {
             Ok(frame) => frame,
             Err(e) => {
                 self.stop_with(UiError::from(e.clone()));
@@ -638,13 +743,16 @@ impl Studio {
     }
 
     /// Takes the link back after `delivery` showed its frame with
-    /// `outcome`. A failure stops the live mode (kept for
+    /// `outcome`. A link that failed is dropped: a screen known by identity
+    /// is connected again from 2 s after `now` ([`Self::reconnect_due`]);
+    /// any other failure stops the live mode (kept for
     /// [`Self::live_error`]). Hands the link back when it is not taken (live
     /// mode stopped meanwhile, or it failed): the caller closes it.
     pub fn presented(
         &mut self,
         delivery: Delivery,
         outcome: &Result<()>,
+        now: Instant,
     ) -> Option<Box<dyn ScreenLink>> {
         let Delivery {
             key, link, turn, ..
@@ -657,7 +765,24 @@ impl Studio {
             return Some(link);
         };
         if let Err(e) = outcome {
-            self.stop_with(UiError::from(e.clone()));
+            if worth_reconnecting(e) && live.screen.is_some() {
+                let mut attempts = Reconnect::new();
+                let wait = attempts.next_wait().unwrap_or_default();
+                tracing::warn!(
+                    screen = live.key,
+                    "live screen lost ({e}); connecting it again"
+                );
+                live.slot = Slot::Away(Away {
+                    attempts,
+                    due: now + wait,
+                    error: e.clone(),
+                    trying: false,
+                });
+                live.host = None;
+                self.runtime.forget_screen();
+            } else {
+                self.stop_with(UiError::from(e.clone()));
+            }
             return Some(link);
         }
         live.slot = Slot::Here(link);
@@ -671,7 +796,81 @@ impl Studio {
     fn stop_with(&mut self, error: UiError) {
         self.runtime.forget_screen();
         self.live = None;
+        self.generation += 1;
         self.live_error = Some(error);
+    }
+
+    /// The attempt to connect the live screen again that is due at `now`,
+    /// if any: the caller makes it outside the session (it takes seconds,
+    /// longer when a hung screen restarts) and reports with
+    /// [`Self::reconnected`]. Nothing while one is under way.
+    pub fn reconnect_due(&mut self, now: Instant) -> Option<Attempt> {
+        let live = self.live.as_mut()?;
+        let screen = live.screen.clone()?;
+        let Slot::Away(away) = &mut live.slot else {
+            return None;
+        };
+        if away.trying || now < away.due {
+            return None;
+        }
+        away.trying = true;
+        Some(Attempt {
+            screen,
+            generation: live.generation,
+        })
+    }
+
+    /// The outcome of `attempt`: back, the screen shows the theme again (a
+    /// whole frame first, its video started again) under the key it has now;
+    /// still away, the next attempt is due after its wait, and after the
+    /// last one (or a failure that would repeat) live mode stops with the
+    /// error that stopped the link. Hands the link back when live mode
+    /// stopped or started again meanwhile: the caller closes it.
+    pub fn reconnected(
+        &mut self,
+        attempt: Attempt,
+        outcome: Result<(Screen, Box<dyn ScreenLink>)>,
+        now: Instant,
+    ) -> Option<Box<dyn ScreenLink>> {
+        let Some(live) = self
+            .live
+            .as_mut()
+            .filter(|l| l.generation == attempt.generation && matches!(l.slot, Slot::Away(_)))
+        else {
+            return outcome.ok().map(|(_, link)| link);
+        };
+        let Slot::Away(away) = &mut live.slot else {
+            return None;
+        };
+        match outcome {
+            Ok((screen, link)) => {
+                tracing::info!(screen = live.key, "the live screen is back");
+                live.key = screen
+                    .address()
+                    .map_or_else(|| live.key.clone(), |a| a.0.clone());
+                live.screen = Some(screen);
+                live.slot = Slot::Here(link);
+                live.orientation = None;
+                live.restart_video = true;
+                live.drawn = None;
+                self.runtime.forget_screen();
+            }
+            Err(e) => {
+                away.trying = false;
+                let wait = worth_reconnecting(&e)
+                    .then(|| away.attempts.next_wait())
+                    .flatten();
+                tracing::warn!(screen = live.key, "the live screen is not back: {e}");
+                match wait {
+                    Some(wait) => away.due = now + wait,
+                    None => {
+                        let error = away.error.clone();
+                        self.stop_with(UiError::from(error));
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Time between two refreshes: the theme's refresh, or a picture of a
@@ -688,20 +887,54 @@ impl Studio {
         refresh_interval(self.runtime.theme().refresh_seconds, MAX_REFRESH)
     }
 
-    /// One refresh: a sample when one is due (every refresh, or every
-    /// theme refresh while a video decoded here sets the pace), then the
-    /// frame for the live screen ([`Self::frame_for_screen`]).
-    pub fn tick(&mut self, time: LocalTime) -> Result<Option<Delivery>> {
-        let (refresh, period) = (self.refresh().as_millis(), self.period().as_millis());
-        let every = ((refresh + period / 2) / period.max(1)).max(1);
-        let every = u32::try_from(every).unwrap_or(u32::MAX);
-        if self.unsampled == 0
-            && let Err(e) = self.sample()
-        {
-            tracing::warn!("sensor sample failed: {e}");
+    /// When the live screen's next frame is due: the runtime's (the
+    /// refresh, a visible GIF's frames), sooner while a video decoded here
+    /// sets the pace. `None` while no frame can be drawn for it.
+    fn frame_due(&self) -> Option<Instant> {
+        let live = self.live.as_ref()?;
+        if !matches!(live.slot, Slot::Here(_)) {
+            return None;
         }
-        self.unsampled = (self.unsampled + 1) % every;
-        self.frame_for_screen(time)
+        let due = self.origin + self.runtime.next_due();
+        let host = live
+            .host
+            .as_ref()
+            .and(live.drawn)
+            .map(|at| at + self.period());
+        Some(host.map_or(due, |host| due.min(host)))
+    }
+
+    /// When the next refresh is due: a sample, a frame of the live screen,
+    /// an attempt to connect it again.
+    pub fn next_due(&self) -> Instant {
+        let sample = self.origin + self.runtime.next_sample();
+        let away = self.live.as_ref().and_then(|l| match &l.slot {
+            Slot::Away(away) if !away.trying => Some(away.due),
+            _ => None,
+        });
+        [Some(sample), self.frame_due(), away]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(sample)
+    }
+
+    /// One refresh at `now`: a sample when one is due (once per refresh,
+    /// never per animation frame), then the live screen's frame when it is
+    /// due ([`Self::frame_for_screen`]).
+    pub fn tick(&mut self, time: LocalTime, now: Instant) -> Result<Option<Delivery>> {
+        // Before the sample moves the cadence on.
+        let due = self.frame_due();
+        let (clock, started) = (self.clock(now), Instant::now());
+        match self.runtime.sample_on_time(self.sensors.as_mut(), clock) {
+            Ok(true) => self.sample_millis = started.elapsed().as_secs_f64() * 1000.0,
+            Ok(false) => {}
+            Err(e) => tracing::warn!("sensor sample failed: {e}"),
+        }
+        if due.is_none_or(|due| now < due) {
+            return Ok(None);
+        }
+        self.frame_for_screen(time, now)
     }
 }
 
@@ -749,6 +982,8 @@ fn decode_here(
 pub const STORAGE_JOB: &str = "a storage job of Bezel";
 /// Who holds a live screen while it shows a frame.
 pub const LIVE_FRAME: &str = "Bezel's live frame";
+/// Who holds a live screen while it is being connected again.
+pub const RECONNECTING: &str = "Bezel, connecting it again";
 
 /// `"My Photo.PNG"` → (`"my-photo"`, `".png"`): safe, lowercase asset names.
 fn split_name(file_name: &str) -> (String, String) {
@@ -787,7 +1022,9 @@ mod tests {
     use super::*;
     use crate::storage::tests::{FakeMedia, STREAMED};
     use bezel_core::app::open_screen;
+    use bezel_core::app::{choose_screen, discover_screens, reopen_screen};
     use bezel_core::domain::device::{Transport, UsbId};
+    use bezel_core::domain::discovery::Screen;
     use bezel_core::domain::discovery::{DeviceAddress, Endpoint};
     use bezel_core::domain::frame::Rgba;
     use bezel_core::domain::geometry::Size;
@@ -796,7 +1033,7 @@ mod tests {
     use bezel_core::domain::theme::{
         Binding, BoxF, Element, ElementId, ElementKind, Fit, GraphStyle,
     };
-    use bezel_core::ports::RenderContext;
+    use bezel_core::ports::{Backdrop, RenderContext, ScreenConnector};
     use bezel_devices::fake::FakeStorage;
     use bezel_devices::{FakeBus, FakeConnector};
     use bezel_render::{SkiaRenderer, SystemFonts};
@@ -828,25 +1065,35 @@ mod tests {
         }
     }
 
+    /// `ms` milliseconds into the session, on its clock: no real time
+    /// passes in these tests.
+    fn at(s: &Studio, ms: u64) -> Instant {
+        s.origin + Duration::from_millis(ms)
+    }
+
     /// Shows what `delivered` carries, as the backend does outside the
-    /// session.
-    fn show(s: &mut Studio, delivered: Result<Option<Delivery>>) -> Result<()> {
+    /// session, at `now`.
+    fn show(s: &mut Studio, delivered: Result<Option<Delivery>>, now: Instant) -> Result<()> {
         let Some(mut delivery) = delivered? else {
             return Ok(());
         };
         let outcome = delivery.present();
-        drop(s.presented(delivery, &outcome));
+        drop(s.presented(delivery, &outcome, now));
         outcome
     }
 
+    /// A frame for the live screen at the session's start.
     fn present(s: &mut Studio) -> Result<()> {
-        let delivered = s.frame_for_screen(TIME);
-        show(s, delivered)
+        let now = at(s, 0);
+        let delivered = s.frame_for_screen(TIME, now);
+        show(s, delivered, now)
     }
 
-    fn tick(s: &mut Studio) -> Result<()> {
-        let delivered = s.tick(TIME);
-        show(s, delivered)
+    /// The refresh `ms` milliseconds into the session.
+    fn tick(s: &mut Studio, ms: u64) -> Result<()> {
+        let now = at(s, ms);
+        let delivered = s.tick(TIME, now);
+        show(s, delivered, now)
     }
 
     fn go_live(s: &mut Studio, link: Box<dyn ScreenLink>) -> Result<()> {
@@ -886,7 +1133,7 @@ mod tests {
         let mut s = studio();
         go_live(&mut s, link).unwrap();
         assert_eq!(s.live_key(), Some("k"));
-        tick(&mut s).unwrap();
+        tick(&mut s, 0).unwrap();
         let log = connector.log();
         assert_eq!(log.frames.len(), 2);
         assert_eq!(log.orientations, vec![Orientation::ReversePortrait]);
@@ -921,7 +1168,7 @@ mod tests {
         go_live(&mut s, link).unwrap();
         s.stop_live().unwrap().release().unwrap();
         assert_eq!(connector.log().releases, 1);
-        tick(&mut s).unwrap();
+        tick(&mut s, 0).unwrap();
         assert_eq!(connector.log().frames.len(), 1);
     }
 
@@ -1168,13 +1415,13 @@ mod tests {
             theme.clone(),
         );
         go_live(&mut s, link).unwrap();
-        tick(&mut s).unwrap();
+        tick(&mut s, 0).unwrap();
         s.render(TIME).unwrap();
         // An edit swaps the theme in place: the history goes on.
         let mut edited = theme;
         edited.name = "Edited".into();
         s.set_theme(edited);
-        tick(&mut s).unwrap();
+        tick(&mut s, 1_000).unwrap();
         assert_eq!(
             *probe.0.lock().unwrap(),
             [
@@ -1240,7 +1487,7 @@ mod tests {
             go_live(&mut s, link).unwrap();
             assert_eq!(s.live_video(), Some(&VideoState::NotStarted));
         }
-        tick(&mut s).unwrap();
+        tick(&mut s, 0).unwrap();
         assert_eq!(s.live_video(), Some(&VideoState::Host));
         let copy = dir.join("Clip.mp4");
         assert_eq!(std::fs::read(&copy).unwrap(), [1, 2, 3]);
@@ -1257,7 +1504,7 @@ mod tests {
         let mut other = s.theme().clone();
         other.background = Background::Color(Rgba::BLACK);
         s.set_theme(other);
-        tick(&mut s).unwrap();
+        tick(&mut s, 100).unwrap();
         assert_eq!(s.live_video(), Some(&VideoState::NoVideo));
         assert!(!copy.exists(), "no video, no copy");
         assert_eq!(s.period(), Duration::from_secs(1));
@@ -1372,14 +1619,14 @@ mod tests {
         s.sensors = Box::new(Counted(FakeSensors::demo(), Arc::clone(&samples)));
         let (connector, link) = weact();
         go_live(&mut s, link).unwrap();
-        for _ in 0..20 {
-            tick(&mut s).unwrap();
+        for k in 1..=20 {
+            tick(&mut s, 100 * k).unwrap();
         }
         assert_eq!(connector.log().frames.len(), 21);
         assert_eq!(*samples.lock().unwrap(), 2, "one per second of the theme");
         s.stop_live();
-        for _ in 0..3 {
-            tick(&mut s).unwrap();
+        for k in 0..3 {
+            tick(&mut s, 2_100 + 1_000 * k).unwrap();
         }
         assert_eq!(*samples.lock().unwrap(), 5, "every refresh again");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1415,10 +1662,11 @@ mod tests {
         let link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
         let mut s = studio();
         s.go_live("k".into(), link);
-        let mut delivery = s.frame_for_screen(TIME).unwrap().unwrap();
+        let now = at(&s, 0);
+        let mut delivery = s.frame_for_screen(TIME, now).unwrap().unwrap();
         assert!(s.presenting());
         assert!(
-            s.frame_for_screen(TIME).unwrap().is_none(),
+            s.frame_for_screen(TIME, now).unwrap().is_none(),
             "one frame at a time"
         );
         let busy = s.live_brightness("k", Brightness::MAX).unwrap_err();
@@ -1427,19 +1675,19 @@ mod tests {
         // Previews render meanwhile.
         s.render(TIME).unwrap();
         delivery.present().unwrap();
-        assert!(s.presented(delivery, &Ok(())).is_none(), "taken back");
+        assert!(s.presented(delivery, &Ok(()), now).is_none(), "taken back");
         assert!(!s.presenting());
         assert!(s.live_brightness("k", Brightness::MAX).unwrap());
         let log = connector.log();
         assert_eq!(log.orientations, vec![Orientation::ReversePortrait]);
-        tick(&mut s).unwrap();
+        tick(&mut s, 0).unwrap();
         assert_eq!(connector.log().orientations.len(), 1, "turned once");
 
         // Live mode stopped while the frame was out: the link comes back to
         // be closed.
-        let delivery = s.frame_for_screen(TIME).unwrap().unwrap();
+        let delivery = s.frame_for_screen(TIME, now).unwrap().unwrap();
         assert!(s.stop_live().is_none());
-        assert!(s.presented(delivery, &Ok(())).is_some());
+        assert!(s.presented(delivery, &Ok(()), now).is_some());
         assert_eq!(s.live_key(), None);
     }
 
@@ -1453,7 +1701,7 @@ mod tests {
         assert_eq!(s.live_key(), None);
         assert_eq!(s.live_error().unwrap().code(), "transport");
         assert!(s.live_error().unwrap().to_string().contains("cable"));
-        assert!(s.frame_for_screen(TIME).unwrap().is_none());
+        assert!(s.frame_for_screen(TIME, at(&s, 0)).unwrap().is_none());
     }
 
     #[test]
@@ -1468,7 +1716,10 @@ mod tests {
         assert!(s.lend_live_link("other").unwrap().is_none(), "not live");
         let lent = s.lend_live_link("k").unwrap().unwrap();
         assert!(s.lend_live_link("k").is_err(), "lent once");
-        assert!(s.frame_for_screen(TIME).unwrap().is_none(), "frames pause");
+        assert!(
+            s.frame_for_screen(TIME, at(&s, 0)).unwrap().is_none(),
+            "frames pause"
+        );
         assert!(s.return_live_link("other", lent, Resume::Video).is_some());
         let lent = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
         assert!(s.return_live_link("k", lent, Resume::Video).is_none());
@@ -1483,5 +1734,102 @@ mod tests {
         assert_eq!(plays(&connector), 1);
         present(&mut s).unwrap();
         assert_eq!(plays(&connector), 2, "started again after the job");
+    }
+
+    /// The fake 8.8" as discovered, with a link from `connector`.
+    fn screen_88(connector: &FakeConnector) -> (Screen, Box<dyn ScreenLink>) {
+        let found = discover_screens(&FakeBus::turing_88()).unwrap();
+        let screen = choose_screen(found, None).unwrap();
+        let link = connector.connect(&screen).unwrap();
+        (screen, link)
+    }
+
+    /// Live on an 8.8" whose second frame fails with `error`: away from 1 s.
+    fn failing_at_one_second(error: BezelError) -> (Studio, FakeConnector) {
+        let connector = FakeConnector::default().breaking_after(1, error);
+        let (screen, link) = screen_88(&connector);
+        let mut s = studio();
+        s.go_live_on("k".into(), screen, link);
+        present(&mut s).unwrap();
+        assert!(tick(&mut s, 1_000).is_err());
+        (s, connector)
+    }
+
+    fn hung() -> BezelError {
+        BezelError::Hung("stalled".into())
+    }
+
+    /// T-7.11: a failed link is dropped and the screen connected again 2 s
+    /// later, outside the session; frames go on at once on the new link.
+    #[test]
+    fn a_failed_link_is_connected_again_and_frames_go_on() {
+        let (mut s, connector) = failing_at_one_second(hung());
+        assert_eq!(s.live_key(), Some("k"), "still live");
+        assert_eq!(s.live_error(), None);
+        let away = Reconnecting {
+            attempt: 1,
+            attempts: 3,
+        };
+        assert_eq!(s.reconnecting(), Some(away));
+        assert_eq!(s.next_due(), at(&s, 2_000), "the next sample first");
+        let busy = s.lend_live_link("k").err().unwrap();
+        assert!(busy.to_string().contains(RECONNECTING), "{busy}");
+        assert!(s.frame_for_screen(TIME, at(&s, 1_500)).unwrap().is_none());
+
+        assert!(s.reconnect_due(at(&s, 2_999)).is_none(), "2 s after");
+        let attempt = s.reconnect_due(at(&s, 3_000)).expect("due");
+        assert!(s.reconnect_due(at(&s, 3_000)).is_none(), "one at a time");
+        let outcome = reopen_screen(&FakeBus::turing_88(), &connector, attempt.screen());
+        assert!(s.reconnected(attempt, outcome, at(&s, 3_100)).is_none());
+        assert_eq!(s.reconnecting(), None);
+        tick(&mut s, 3_100).unwrap();
+        let log = connector.log();
+        assert_eq!((log.connects, log.frames.len()), (2, 2));
+        assert_eq!(log.orientations.len(), 2, "turned again on the new link");
+    }
+
+    /// After the third attempt (2, 5 and 10 s apart) live mode stops with the
+    /// error that stopped the link; a failure that would repeat stops it at
+    /// the first.
+    #[test]
+    fn after_the_last_attempt_live_mode_stops_with_the_first_error() {
+        let (mut s, connector) = failing_at_one_second(hung());
+        let gone = FakeBus::new(Vec::new());
+        let mut now = 1_000;
+        for wait in [2_000, 5_000, 10_000] {
+            now += wait;
+            assert!(s.reconnect_due(at(&s, now - 1)).is_none());
+            let attempt = s.reconnect_due(at(&s, now)).expect("due");
+            let outcome = reopen_screen(&gone, &connector, attempt.screen());
+            assert!(s.reconnected(attempt, outcome, at(&s, now)).is_none());
+        }
+        assert_eq!((s.live_key(), s.reconnecting()), (None, None));
+        assert_eq!(s.live_error().unwrap().code(), "hung");
+
+        let (mut s, _) = failing_at_one_second(hung());
+        let attempt = s.reconnect_due(at(&s, 3_000)).expect("due");
+        let denied = BezelError::AccessDenied {
+            address: "/dev/ttyACM1".into(),
+            reason: "denied".into(),
+        };
+        assert!(s.reconnected(attempt, Err(denied), at(&s, 3_000)).is_none());
+        assert_eq!(s.live_error().unwrap().code(), "hung");
+
+        // A link that fails for good (a frame of the wrong size) stops it at once.
+        let (s, _) = failing_at_one_second(BezelError::InvalidInput("size".into()));
+        assert_eq!((s.live_key(), s.reconnecting()), (None, None));
+    }
+
+    /// Turning live mode off while the screen is away ends it at once: an
+    /// attempt under way hands its link back to be closed.
+    #[test]
+    fn stopping_live_mode_while_away_drops_the_attempt() {
+        let (mut s, connector) = failing_at_one_second(hung());
+        let attempt = s.reconnect_due(at(&s, 5_000)).expect("due");
+        assert!(s.stop_live().is_none(), "no link while away");
+        let outcome = reopen_screen(&FakeBus::turing_88(), &connector, attempt.screen());
+        assert!(s.reconnected(attempt, outcome, at(&s, 5_100)).is_some());
+        assert_eq!((s.live_key(), s.live_error()), (None, None));
+        assert!(s.reconnect_due(at(&s, 60_000)).is_none());
     }
 }

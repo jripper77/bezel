@@ -153,11 +153,30 @@ export const DEMO_VIDEO_THEME = Object.freeze({
   ],
 });
 
+/** A theme with an animated GIF element, for `?demo=gif` (T-7.11). */
+export const DEMO_GIF_THEME = Object.freeze({
+  ...DEMO_VIDEO_THEME,
+  name: 'GIF',
+  refreshSeconds: 5,
+  background: { type: 'color', color: '#0c0e16ff' },
+  elements: [
+    {
+      id: 1,
+      name: 'Spinner',
+      frame: { x: 200, y: 140, width: 200, height: 200 },
+      opacity: 1,
+      visible: true,
+      locked: false,
+      kind: { type: 'image', asset: 'assets/spinner.gif', fit: 'contain' },
+    },
+  ],
+});
+
 /** The command the app shows to install its udev rule (Linux). */
 export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules && sudo udevadm control --reload && sudo udevadm trigger';
 
 /**
- * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean}>}
+ * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean, flaky?: boolean}>}
  */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
@@ -173,5 +192,9 @@ export const SCENARIOS = Object.freeze({
   // A screen whose firmware hangs: live mode and uploads stop until it is
   // restarted (D-2026-09-30-release-polish-13).
   hung: { screens: [turing88], hung: true },
+  // A theme with an animated GIF, which moves in the preview (T-7.11).
+  gif: { screens: [turing88], theme: DEMO_GIF_THEME },
+  // A live screen that drops once and is connected again by itself (T-7.11).
+  flaky: { screens: [turing88], flaky: true },
   desktop: { screens: [turing88], desktopMode: [desktopPanel] },
 });

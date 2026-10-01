@@ -2,7 +2,9 @@
 
 use std::cell::RefCell;
 
-use bezel_core::app::{choose_screen, discover_screens, open_screen, restart_screen};
+use bezel_core::app::{
+    choose_screen, discover_screens, open_screen, reopen_screen, restart_screen,
+};
 use bezel_core::domain::device::{Transport, UsbId};
 use bezel_core::domain::discovery::{
     DeviceAddress, Endpoint, ScreenState, UsbLocation, group_screens,
@@ -129,4 +131,29 @@ fn screens_without_an_mcu_are_not_restarted() {
         "{err}"
     );
     assert!(connector.log().restarts.is_empty(), "nothing was sent");
+}
+
+/// T-7.11: a live screen whose link failed is opened again by identity: a
+/// rev C SoC that came back under another device name is found behind its
+/// MCU; one still away is not found yet.
+#[test]
+fn a_failed_screen_is_reopened_by_identity() {
+    let mcu = behind_hub("/dev/ttyACM0", 0x1a86, 0xca88, Some("CT88INCH"), 1);
+    let old = behind_hub("/dev/ttyACM1", 0x0525, 0xa4a7, None, 2);
+    let new = behind_hub("/dev/ttyACM2", 0x0525, 0xa4a7, None, 2);
+    let known = group_screens(vec![mcu.clone(), old]).remove(0);
+    let connector = FakeConnector::default();
+
+    let gone = FakeBus::new(Vec::new());
+    let err = reopen_screen(&gone, &connector, &known)
+        .err()
+        .expect("not back");
+    assert_eq!(
+        err,
+        BezelError::ScreenNotFound("/dev/ttyACM1 is not back on the bus".into())
+    );
+    let back = FakeBus::new(vec![new, mcu]);
+    let (screen, link) = reopen_screen(&back, &connector, &known).expect("back");
+    assert_eq!(screen.address().map(|a| a.0.as_str()), Some("/dev/ttyACM2"));
+    assert_eq!(link.identity().model.id.0, "turing-8.8");
 }

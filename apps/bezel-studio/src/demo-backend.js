@@ -2,7 +2,7 @@
 // themes, media and an approximate renderer. Nothing here reaches hardware.
 import { DEMO_BACK_FROM_DESKTOP, DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
 import { DEMO_THEME } from './demo-theme.js';
-import { renderApprox } from './demo-render.js';
+import { DEMO_GIF_FRAME_MS, renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
 import { IMAGE_EXTENSIONS as PICTURES, droppable, extensionOf, fileNameOf } from './editor/background.js';
 import { pickLocale } from './i18n/index.js';
@@ -100,6 +100,18 @@ export function demoHung() {
   const detail = 'it stopped reading what was sent (250 bytes still queued)';
   return Object.assign(new Error(`the screen stopped responding: ${detail}`), { code: 'hung', args: { detail } });
 }
+
+/**
+ * How long until the demo's animated GIFs change at `ms` (null: the theme
+ * shows none), like the backend's preview: every visible `*.gif` image.
+ */
+export function demoNextChange(theme, ms) {
+  const gif = (theme?.elements ?? []).some((e) => e.visible !== false && e.kind?.type === 'image' && String(e.kind.asset).toLowerCase().endsWith('.gif'));
+  return gif ? DEMO_GIF_FRAME_MS - (Math.floor(ms) % DEMO_GIF_FRAME_MS) : null;
+}
+
+/** Samples a live screen that dropped (the `flaky` scenario) reports it away. */
+export const DEMO_AWAY_SAMPLES = 2;
 
 /** The fastest refresh a theme may ask for, seconds (the core's `MIN_REFRESH_SECONDS`). */
 export const DEMO_MIN_REFRESH = 0.25;
@@ -463,8 +475,9 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   /** Screen key → last orientation shown on it or chosen for it. */
   const remembered = new Map();
   const modelOf = (key) => devices.screens.find((s) => s.key === key)?.models[0];
-  // The `hung` scenario: the screen stops reading until it is restarted.
-  const screenState = { hung: Boolean(chosen.hung) };
+  // The `hung` scenario: the screen stops reading until it is restarted. The
+  // `flaky` one: it drops once after going live and comes back by itself.
+  const screenState = { hung: Boolean(chosen.hung), away: chosen.flaky ? DEMO_AWAY_SAMPLES : 0 };
   const storage = createDemoStorage(chosen, {
     delay, live: () => live, theme: () => theme, screens: () => devices.screens, hold: Boolean(hooks.hold), hung: () => screenState.hung,
   });
@@ -553,13 +566,20 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
         liveError = { code, args, message };
         live = null;
       }
-      return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError, video: videoOfTheme() });
+      // A live screen that dropped is connected again by the backend.
+      let reconnecting = null;
+      if (live && screenState.away > 0) {
+        screenState.away -= 1;
+        reconnecting = { attempt: 1, attempts: 3 };
+      }
+      return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError, video: videoOfTheme(), reconnecting });
     },
     session: () => Promise.resolve({ theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location, minRefreshSeconds: DEMO_MIN_REFRESH }),
     render: (next) => {
       const started = performance.now();
-      const frame = renderApprox(next, now());
-      return Promise.resolve({ ...frame, millis: performance.now() - started });
+      const t = now();
+      const frame = renderApprox(next, t);
+      return Promise.resolve({ ...frame, millis: performance.now() - started, nextMs: demoNextChange(next, t * 1000) });
     },
     pushTheme: (next) => {
       theme = structuredClone(next);

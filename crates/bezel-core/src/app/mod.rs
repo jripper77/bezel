@@ -5,9 +5,10 @@ mod screens;
 pub mod storage;
 
 pub use runtime::{
-    HOST_VIDEO_FPS, HostVideo, MissingVideo, ThemeRuntime, VideoState, device_video_name,
+    DEFAULT_SLOWEST_REFRESH, HOST_VIDEO_FPS, HostVideo, MissingVideo, ThemeRuntime, VideoState,
+    device_video_name,
 };
 pub use screens::{
     choose_screen, discover_devices, discover_screens, leave_desktop_mode, open_screen,
-    restart_screen,
+    reopen_screen, restart_screen,
 };

@@ -294,6 +294,7 @@ export default {
   'restart.done': 'A tela voltou.',
   'restart.doneLive': 'A tela voltou e mostra o tema ao vivo de novo.',
   'restart.hung': 'A tela parou de responder. Reinicie-a para continuar; não precisa desconectar o cabo.',
+  'restart.reconnecting': 'Reconectando à tela (tentativa {attempt} de {attempts})…',
   'restart.running': 'Reiniciando a tela (cerca de 10 s)…',
   'screen.autostart': 'Iniciar com o computador, na bandeja, mostrando o último tema ao vivo',
   'screen.brightness': 'Brilho',

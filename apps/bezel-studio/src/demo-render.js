@@ -15,6 +15,11 @@ function paint(p) {
   return 'transparent';
 }
 
+/** How long each frame of the demo's animated GIFs (every `*.gif` image) lasts, ms. */
+export const DEMO_GIF_FRAME_MS = 100;
+/** The colors the demo's GIFs cycle through, one per frame. */
+const GIF_COLORS = ['#e4572e', '#f3a712', '#29bf12', '#4361ee'];
+
 function fraction(t, i) {
   return 0.5 + 0.4 * Math.sin(t / 3 + i);
 }
@@ -112,6 +117,10 @@ function drawElement(ctx, e, t) {
       break;
     }
     case 'image':
+      if (String(k.asset).toLowerCase().endsWith('.gif')) {
+        ctx.fillStyle = GIF_COLORS[Math.floor((t * 1000) / DEMO_GIF_FRAME_MS) % GIF_COLORS.length];
+        ctx.fillRect(f.x, f.y, f.width, f.height);
+      }
       ctx.strokeStyle = 'rgba(255,255,255,0.4)';
       ctx.setLineDash([6, 6]);
       ctx.strokeRect(f.x, f.y, f.width, f.height);

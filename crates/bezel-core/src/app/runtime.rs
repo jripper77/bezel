@@ -1,5 +1,13 @@
 //! Running a theme: sample the sensors, keep graph histories, render a frame
-//! and show it. The caller owns the cadence (`Theme::refresh_seconds`).
+//! and show it.
+//!
+//! The caller owns the clock and the waiting; the runtime says when the next
+//! frame is due ([`ThemeRuntime::next_due`]): the sensors are sampled once
+//! per `refresh_seconds`, and a visible animated image (GIF) adds frames of
+//! its own at its frame times, at most `MAX_ANIMATION_FPS` a second, each
+//! from the last sample (T-7.11). Every frame shows the images as they are
+//! when it is drawn, so a screen slower than an animation skips frames
+//! instead of falling behind; the screen's adapter sends only what changed.
 //!
 //! A video background (D-2026-09-30-storage-video-4) reaches a screen in one
 //! of three ways, chosen by [`ThemeRuntime::start_video`] once the screen is
@@ -28,6 +36,7 @@ use std::time::Duration;
 
 use crate::Result;
 use crate::app::storage::{Presence, UploadRequest, presence};
+use crate::domain::animation::{MIN_FRAME_STEP, Timeline};
 use crate::domain::clock::{Language, LocalTime};
 use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
@@ -35,7 +44,7 @@ use crate::domain::history::Histories;
 use crate::domain::media::{ConvertOptions, MediaKind, MediaTools, StreamSpec, UploadProfile};
 use crate::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use crate::domain::storage::{FileName, Medium, RemotePath, Repeat, StorageLocation};
-use crate::domain::theme::{AssetRef, Background, Theme};
+use crate::domain::theme::{AssetRef, Background, Theme, refresh_interval};
 use crate::ports::{
     Backdrop, FrameRenderer, MediaLocation, MediaTranscoder, RenderContext, ScreenLink,
     ScreenStorage, SensorSource, VideoFrames,
@@ -152,11 +161,13 @@ struct Scene {
 }
 
 impl Scene {
-    /// Renders the theme from the last sample over `backdrop`.
+    /// Renders the theme from the last sample over `backdrop`, its animated
+    /// images as they are `animation` after the theme started.
     fn draw(
         &self,
         renderer: &mut dyn FrameRenderer,
         time: LocalTime,
+        animation: Duration,
         backdrop: Backdrop<'_>,
     ) -> Result<Frame> {
         let context = RenderContext {
@@ -164,6 +175,7 @@ impl Scene {
             histories: &self.histories,
             quantities: &self.quantities,
             time,
+            animation,
             language: self.language,
             backdrop,
         };
@@ -171,9 +183,31 @@ impl Scene {
     }
 }
 
+/// Slowest refresh, seconds, until the caller sets its own
+/// ([`ThemeRuntime::limit_refresh`]).
+pub const DEFAULT_SLOWEST_REFRESH: f32 = 60.0;
+
+/// When a live loop samples and draws, on the caller's clock.
+#[derive(Debug, Clone, Copy, Default)]
+struct Cadence {
+    /// When the next sample is due (`None`: at once).
+    sample: Option<Duration>,
+    /// When the screen's last frame was drawn (`None`: none yet).
+    drawn: Option<Duration>,
+}
+
 /// A theme being shown.
 pub struct ThemeRuntime {
     scene: Scene,
+    /// The frame times of the theme's images, learned from the renderer
+    /// (`None`: a still image).
+    timelines: BTreeMap<AssetRef, Option<Timeline>>,
+    /// The caller's clock at the last frame drawn: animated images show
+    /// their frame of it.
+    clock: Duration,
+    cadence: Cadence,
+    /// Slowest refresh the caller allows, seconds.
+    slowest: f32,
     /// What the caller shows besides the theme ([`ThemeRuntime::want_also`]).
     also: Wanted,
     /// The theme's sensors and `also`, declared at every sample.
@@ -260,6 +294,10 @@ impl ThemeRuntime {
             video,
             host: None,
             playing: None,
+            timelines: BTreeMap::new(),
+            clock: Duration::ZERO,
+            cadence: Cadence::default(),
+            slowest: DEFAULT_SLOWEST_REFRESH,
         }
     }
 
@@ -276,6 +314,7 @@ impl ThemeRuntime {
     /// Adds `asset` for the theme to use (new bytes for one it has replace
     /// them); the other assets stay.
     pub fn add_asset(&mut self, asset: AssetRef, bytes: Vec<u8>) {
+        self.timelines.remove(&asset);
         self.scene.assets.insert(asset, bytes);
     }
 
@@ -326,6 +365,7 @@ impl ThemeRuntime {
     /// again with [`Self::start_video`].
     pub fn replace(&mut self, theme: Theme, assets: BTreeMap<AssetRef, Vec<u8>>) {
         self.scene.assets = assets;
+        self.timelines.clear();
         self.replace_theme(theme);
     }
 
@@ -349,6 +389,7 @@ impl ThemeRuntime {
         self.video = unstarted(&self.scene.theme);
         self.host = None;
         self.playing = None;
+        self.cadence.drawn = None;
     }
 
     /// Chooses how the theme's video reaches `screen` and starts it. Call it
@@ -465,33 +506,173 @@ impl ThemeRuntime {
         Ok(())
     }
 
-    /// Renders one frame from the last sample. `video` is how long the
-    /// host-decoded video has played ([`VideoState::Host`]; ignored
-    /// otherwise): a loop streaming it renders at the video's rate and
-    /// samples at the theme's.
+    /// Renders one frame from the last sample, animated images as they are
+    /// at the clock of the last [`Self::render_at`] or [`Self::preview`].
+    /// `video` is how long the host-decoded video has played
+    /// ([`VideoState::Host`]; ignored otherwise): a loop streaming it
+    /// renders at the video's rate and samples at the theme's.
     pub fn render(
         &mut self,
         renderer: &mut dyn FrameRenderer,
         time: LocalTime,
         video: Duration,
     ) -> Result<Frame> {
+        self.learn_animations(renderer);
         let backdrop = match (&self.video, self.host.as_mut()) {
             (VideoState::OnDevice(_), _) => Backdrop::OnDevice,
             (VideoState::Host, Some(frames)) => Backdrop::Frame(frames.frame_at(video)?),
             _ => Backdrop::Poster,
         };
-        self.scene.draw(renderer, time, backdrop)
+        self.scene.draw(renderer, time, self.clock, backdrop)
     }
 
     /// Renders one frame from the last sample over `backdrop`, whatever the
     /// screen shows: an editor's preview passes [`Backdrop::Poster`].
+    /// Animated images show their frame of the last clock given.
     pub fn render_with(
         &self,
         renderer: &mut dyn FrameRenderer,
         time: LocalTime,
         backdrop: Backdrop<'_>,
     ) -> Result<Frame> {
-        self.scene.draw(renderer, time, backdrop)
+        self.scene.draw(renderer, time, self.clock, backdrop)
+    }
+
+    // ------------------------------------------------------- live cadence --
+    //
+    // `now` is the caller's monotonic clock: the time since any origin that
+    // stays the same while the runtime lives (the loop's or the session's
+    // start). The caller sleeps until [`Self::next_due`].
+
+    /// Samples at least every `slowest_seconds` whatever the theme asks
+    /// (the driving adapter's limit; [`DEFAULT_SLOWEST_REFRESH`] until set).
+    pub fn limit_refresh(&mut self, slowest_seconds: f32) {
+        self.slowest = slowest_seconds;
+    }
+
+    /// Time between two samples: the theme's `refresh_seconds`, at least
+    /// `MIN_REFRESH_SECONDS`, at most the caller's limit.
+    pub fn refresh(&self) -> Duration {
+        refresh_interval(self.scene.theme.refresh_seconds, self.slowest)
+    }
+
+    /// Whether a sample is due at `now`.
+    pub fn sample_due(&self, now: Duration) -> bool {
+        self.cadence.sample.is_none_or(|due| now >= due)
+    }
+
+    /// When the next sample is due (at once before the first).
+    pub fn next_sample(&self) -> Duration {
+        self.cadence.sample.unwrap_or_default()
+    }
+
+    /// Samples the sensors ([`Self::sample`]) when a sample is due at `now`:
+    /// once per refresh, never per animation frame. Whether it sampled. The
+    /// next one is due a refresh after this one was due; a loop that fell
+    /// further behind starts the count again from `now`. A failed sample
+    /// waits for the next refresh too.
+    pub fn sample_on_time(
+        &mut self,
+        sensors: &mut dyn SensorSource,
+        now: Duration,
+    ) -> Result<bool> {
+        if !self.sample_due(now) {
+            return Ok(false);
+        }
+        let refresh = self.refresh();
+        let next = self.cadence.sample.unwrap_or(now) + refresh;
+        self.cadence.sample = Some(if next > now { next } else { now + refresh });
+        self.sample(sensors)?;
+        Ok(true)
+    }
+
+    /// Renders the screen's frame at `now` ([`Self::render`]: animated
+    /// images as they are at `now`) and counts it as drawn for
+    /// [`Self::next_due`].
+    pub fn render_at(
+        &mut self,
+        renderer: &mut dyn FrameRenderer,
+        time: LocalTime,
+        now: Duration,
+        video: Duration,
+    ) -> Result<Frame> {
+        self.clock = now;
+        self.cadence.drawn = Some(now);
+        self.render(renderer, time, video)
+    }
+
+    /// One frame of a live loop at `now`: a sample when one is due
+    /// ([`Self::sample_on_time`]), then the frame of `now` from the last
+    /// sample ([`Self::render_at`]). Show it, then wait until
+    /// [`Self::next_due`].
+    pub fn live_frame(
+        &mut self,
+        sensors: &mut dyn SensorSource,
+        renderer: &mut dyn FrameRenderer,
+        time: LocalTime,
+        now: Duration,
+    ) -> Result<Frame> {
+        self.sample_on_time(sensors, now)?;
+        self.render_at(renderer, time, now, Duration::ZERO)
+    }
+
+    /// When the screen's next frame is due: the next sample, or the next
+    /// frame of a visible animated image, no sooner than `MIN_FRAME_STEP`
+    /// after the last frame drawn. At once before the first frame. A time
+    /// already past means at once: the frame drawn then shows the images as
+    /// they are then, so a send slower than the animation skips frames
+    /// instead of queuing them.
+    pub fn next_due(&self) -> Duration {
+        let sample = self.next_sample();
+        let Some(drawn) = self.cadence.drawn else {
+            return Duration::ZERO;
+        };
+        match self.next_animation_change(drawn) {
+            Some(change) => sample.min(change.max(drawn + MIN_FRAME_STEP)),
+            None => sample,
+        }
+    }
+
+    /// When the visible animated images next change after `at`; `None`
+    /// while none is shown. Known for the images the last render met.
+    pub fn next_animation_change(&self, at: Duration) -> Option<Duration> {
+        self.scene
+            .theme
+            .shown_images()
+            .filter_map(|asset| self.timelines.get(asset)?.as_ref())
+            .map(|timeline| timeline.next_change(at))
+            .min()
+    }
+
+    /// An editor's preview at `now`: the frame over the poster with the
+    /// animated images as they are at `now`, and when they next change
+    /// (`None`: nothing animates). Not a frame of the screen.
+    pub fn preview(
+        &mut self,
+        renderer: &mut dyn FrameRenderer,
+        time: LocalTime,
+        now: Duration,
+    ) -> Result<(Frame, Option<Duration>)> {
+        self.learn_animations(renderer);
+        self.clock = now;
+        let frame = self.scene.draw(renderer, time, now, Backdrop::Poster)?;
+        Ok((frame, self.next_animation_change(now)))
+    }
+
+    /// Asks the renderer for the frame times of shown images it has not
+    /// told yet.
+    fn learn_animations(&mut self, renderer: &mut dyn FrameRenderer) {
+        let unknown: Vec<AssetRef> = self
+            .scene
+            .theme
+            .shown_images()
+            .filter(|asset| !self.timelines.contains_key(*asset))
+            .cloned()
+            .collect();
+        for asset in unknown {
+            let timeline = renderer.animation(&asset, &self.scene.assets);
+            self.timelines.insert(asset, timeline);
+        }
     }
 
     /// Samples the sensors, records histories and renders one frame

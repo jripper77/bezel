@@ -282,6 +282,28 @@ pub struct SampleDto {
     /// How the theme's video background reaches the live screen; `None`
     /// when nothing is live or the theme has no video.
     pub video: Option<LiveVideoDto>,
+    /// The live screen's link failed and Bezel connects it again (T-7.11);
+    /// `None` otherwise.
+    pub reconnecting: Option<ReconnectingDto>,
+}
+
+/// Where a live screen whose link failed stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconnectingDto {
+    /// The attempt under way or next (1 for the first).
+    pub attempt: usize,
+    /// Attempts in all.
+    pub attempts: usize,
+}
+
+impl From<crate::studio::Reconnecting> for ReconnectingDto {
+    fn from(r: crate::studio::Reconnecting) -> Self {
+        Self {
+            attempt: r.attempt,
+            attempts: r.attempts,
+        }
+    }
 }
 
 impl SampleDto {

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_IMPORT_WARNINGS, DEMO_SENSORS, createDemoBackend, demoFormat, demoOrientation, demoValue } from '../../src/demo-backend.js';
+import { DEMO_AWAY_SAMPLES, DEMO_IMPORT_WARNINGS, DEMO_SENSORS, createDemoBackend, demoFormat, demoNextChange, demoOrientation, demoValue } from '../../src/demo-backend.js';
+import { DEMO_GIF_THEME } from '../../src/demo-data.js';
 
 const fixed = { now: () => 1000 };
 
@@ -148,4 +149,28 @@ test('a panel in desktop mode is listed and switched back only when confirmed', 
   const after = await demo.listDevices();
   assert.deepEqual([after.screens.length, after.desktopMode.length], [2, 0], 'back as a screen');
   await assert.rejects(demo.leaveDesktopMode(panel.key, true), (e) => e.code === 'screenNotFound');
+});
+
+test('the demo GIF changes every 100 ms, like the backend says', () => {
+  assert.equal(demoNextChange(DEMO_GIF_THEME, 1234), 66);
+  assert.equal(demoNextChange(DEMO_GIF_THEME, 1300), 100);
+  const hidden = { ...DEMO_GIF_THEME, elements: DEMO_GIF_THEME.elements.map((e) => ({ ...e, visible: false })) };
+  assert.equal(demoNextChange(hidden, 1234), null);
+  assert.equal(demoNextChange({ elements: [{ kind: { type: 'image', asset: 'assets/logo.png' } }] }, 0), null);
+  assert.equal(demoNextChange(undefined, 0), null);
+});
+
+test('a flaky demo screen is away for a while once live, then back', async () => {
+  const demo = createDemoBackend('flaky', fixed);
+  assert.equal((await demo.sample()).reconnecting, null, 'not live yet');
+  await demo.setLive(true, '/dev/ttyACM1');
+  for (let i = 0; i < DEMO_AWAY_SAMPLES; i += 1) {
+    const away = await demo.sample();
+    assert.deepEqual(away.reconnecting, { attempt: 1, attempts: 3 });
+    assert.equal(away.live, '/dev/ttyACM1', 'still live');
+  }
+  const back = await demo.sample();
+  assert.equal(back.reconnecting, null);
+  assert.equal(back.live, '/dev/ttyACM1');
+  assert.equal(back.liveError, null);
 });

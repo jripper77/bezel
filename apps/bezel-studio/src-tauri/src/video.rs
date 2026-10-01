@@ -357,9 +357,12 @@ mod tests {
             asset: added.reference.clone(),
             poster: added.poster.clone(),
         };
-        let frame = f.backend.render(&theme, TIME).unwrap();
+        let frame = f
+            .backend
+            .render(&theme, TIME, std::time::Instant::now())
+            .unwrap();
         assert_eq!(
-            &frame[8..12],
+            &frame[12..16],
             &[POSTER.r, POSTER.g, POSTER.b, 255],
             "the poster"
         );

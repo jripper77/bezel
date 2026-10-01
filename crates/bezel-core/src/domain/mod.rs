@@ -1,6 +1,7 @@
 //! Domain types: device catalog, geometry, discovery, themes, sensors,
 //! stored media and long-running jobs.
 
+pub mod animation;
 pub mod catalog;
 pub mod clock;
 pub mod device;
@@ -13,6 +14,7 @@ pub mod job;
 pub mod media;
 pub mod pattern;
 pub mod poster;
+pub mod reconnect;
 pub mod screen;
 pub mod sensor;
 pub mod storage;

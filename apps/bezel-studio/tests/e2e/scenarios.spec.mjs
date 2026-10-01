@@ -6,7 +6,9 @@
 // horizontal, imports list what had no equivalent, the preferences switch
 // the language and set the sensors, the sensor list tells the app what it
 // shows, a denied port shows the udev command, a panel in desktop mode goes
-// back only after a dialog, and a hung screen is restarted after one.
+// back only after a dialog, a hung screen is restarted after one, an
+// animated GIF moves in the preview by itself and a live screen that drops
+// is connected again, saying so.
 import { test, expect, watchErrors, expectAccessible, dragTo, literally, prefixOf } from './helpers.mjs';
 import { translator } from '../../src/i18n/index.js';
 
@@ -619,5 +621,40 @@ test('screens without a wake chip offer no restart', async ({ page, t }) => {
   await page.getByRole('tab', { name: t('library.screen') }).click();
   await expect(page.getByRole('region', { name: 'Turing 2.1" Round (USB)' })).toBeVisible();
   await expect(page.getByRole('button', { name: t('screen.restart') })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('an animated GIF moves in the preview at its own pace', async ({ page }) => {
+  // T-7.11: the theme refreshes every 5 s, its GIF every 100 ms; the
+  // preview draws the GIF's frames in between, at most 15 a second.
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=gif');
+  await expect(page.locator('#theme-name')).toHaveValue('GIF');
+  const colors = await page.evaluate(async () => {
+    const ctx = document.getElementById('preview').getContext('2d');
+    const seen = new Set();
+    const end = performance.now() + 900;
+    while (performance.now() < end) {
+      seen.add(ctx.getImageData(300, 240, 1, 1).data.slice(0, 3).join(','));
+      await new Promise((resolve) => { setTimeout(resolve, 30); });
+    }
+    return [...seen];
+  });
+  expect(colors.length).toBeGreaterThanOrEqual(3);
+  expect(errors).toEqual([]);
+});
+
+test('a live screen that drops is connected again by itself', async ({ page, t }) => {
+  // T-7.11: the backend connects the screen again (2, 5, 10 s apart); the
+  // status says so meanwhile, and a toast when it is back.
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=flaky');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('switch').click({ force: true });
+  await expect(page.locator('#status-device')).toHaveText(t('restart.reconnecting', { attempt: 1, attempts: 3 }));
+  await expectAccessible(page);
+  await expect(page.locator('#toast')).toHaveText(t('restart.doneLive'), { timeout: 5_000 });
+  await expect(page.locator('#status-device')).toHaveText(t('status.live'));
+  await expect(page.getByRole('switch')).toBeChecked();
   expect(errors).toEqual([]);
 });

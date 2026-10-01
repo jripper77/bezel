@@ -1,15 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_CLOSE_EVENT, DEMO_LET_GO_EVENT, DEMO_QUIT_EVENT, createBridge, parseFrame } from '../../src/bridge.js';
+import { DEMO_CLOSE_EVENT, DEMO_LET_GO_EVENT, DEMO_QUIT_EVENT, STILL, createBridge, parseFrame } from '../../src/bridge.js';
 
 const page = (search = '', hostname = 'localhost') => ({ location: { hostname, search } });
 
-function frameBytes(width, height) {
-  const bytes = new Uint8Array(8 + width * height * 4);
+function frameBytes(width, height, next = STILL) {
+  const bytes = new Uint8Array(12 + width * height * 4);
   const view = new DataView(bytes.buffer);
   view.setUint32(0, width, true);
   view.setUint32(4, height, true);
-  bytes[8] = 0xab;
+  view.setUint32(8, next, true);
+  bytes[12] = 0xab;
   return bytes;
 }
 
@@ -19,18 +20,24 @@ test('parseFrame reads the header and keeps the pixels', () => {
   assert.equal(frame.height, 3);
   assert.equal(frame.rgba.length, 24);
   assert.equal(frame.rgba[0], 0xab);
+  assert.equal(frame.nextMs, null, 'nothing animates');
+});
+
+test('parseFrame says when an animated GIF changes next', () => {
+  assert.equal(parseFrame(frameBytes(1, 1, 66)).nextMs, 66);
+  assert.equal(parseFrame(frameBytes(1, 1, 0)).nextMs, 0);
 });
 
 test('parseFrame accepts a view at an offset', () => {
-  const outer = new Uint8Array(4 + 8 + 4);
+  const outer = new Uint8Array(4 + 12 + 4);
   outer.set(frameBytes(1, 1), 4);
   const frame = parseFrame(outer.subarray(4));
   assert.deepEqual([frame.width, frame.height, frame.rgba.length], [1, 1, 4]);
 });
 
 test('parseFrame rejects short or inconsistent frames', () => {
-  assert.throws(() => parseFrame(new Uint8Array(4)), /too short/);
-  assert.throws(() => parseFrame(frameBytes(2, 2).subarray(0, 12)), /expected 16/);
+  assert.throws(() => parseFrame(new Uint8Array(8)), /too short/);
+  assert.throws(() => parseFrame(frameBytes(2, 2).subarray(0, 16)), /expected 16/);
 });
 
 test('tauri mode maps every call to its command', async () => {

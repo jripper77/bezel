@@ -294,6 +294,7 @@ export default {
   'restart.done': 'The screen is back.',
   'restart.doneLive': 'The screen is back and shows the theme live again.',
   'restart.hung': 'The screen stopped responding. Restart it to go on; no need to unplug it.',
+  'restart.reconnecting': 'Reconnecting to the screen (attempt {attempt} of {attempts})…',
   'restart.running': 'Restarting the screen (about 10 s)…',
   'screen.autostart': 'Start with the computer, in the tray, showing the last theme live',
   'screen.brightness': 'Brightness',

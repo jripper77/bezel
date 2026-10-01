@@ -126,7 +126,11 @@ pub async fn editor_session(state: State<'_, Shared>) -> UiResult<SessionDto> {
 /// Renders the UI's theme; the body is an 8-byte size header and RGBA.
 #[tauri::command]
 pub async fn render_preview(state: State<'_, Shared>, theme: ThemeDto) -> UiResult<Response> {
-    blocking(&state, move |b| b.render(&theme, now()).map(Response::new)).await
+    blocking(&state, move |b| {
+        b.render(&theme, now(), std::time::Instant::now())
+            .map(Response::new)
+    })
+    .await
 }
 
 /// Shows the UI's theme on the live screen now.

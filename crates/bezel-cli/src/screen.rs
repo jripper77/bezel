@@ -166,6 +166,7 @@ where
         histories: &histories,
         quantities: &quantities,
         time: NO_TIME,
+        animation: Duration::ZERO,
         language: Language::English,
         backdrop: Backdrop::Poster,
     };

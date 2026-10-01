@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
+use std::time::Duration;
 
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::frame::{Frame, Rgba};
@@ -76,6 +77,8 @@ pub(crate) struct Scene {
     pub histories: Histories,
     pub assets: BTreeMap<AssetRef, Vec<u8>>,
     pub time: LocalTime,
+    /// How long the theme has been showing (animated images).
+    pub animation: Duration,
 }
 
 impl Scene {
@@ -86,6 +89,7 @@ impl Scene {
             histories: Histories::default(),
             assets: BTreeMap::new(),
             time: TIME,
+            animation: Duration::ZERO,
         }
     }
 
@@ -133,6 +137,7 @@ pub(crate) fn render_over(
         histories: &scene.histories,
         quantities: &NO_QUANTITIES,
         time: scene.time,
+        animation: scene.animation,
         language: Language::English,
         backdrop,
     };

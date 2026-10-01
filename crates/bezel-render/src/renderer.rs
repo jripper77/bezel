@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use bezel_core::domain::animation::Timeline;
 use bezel_core::domain::clock::format_clock;
 use bezel_core::domain::frame::{Frame, Rgba};
 use bezel_core::domain::geometry::Size;
@@ -121,6 +122,16 @@ impl SkiaRenderer {
 }
 
 impl FrameRenderer for SkiaRenderer {
+    /// The frame times of a GIF, from its decoded frames (cached for
+    /// drawing); delays of 10 ms or less play at 100 ms, as browsers do.
+    fn animation(
+        &mut self,
+        asset: &AssetRef,
+        assets: &BTreeMap<AssetRef, Vec<u8>>,
+    ) -> Option<Timeline> {
+        self.images.timeline(asset, assets, &mut self.diagnostics)
+    }
+
     fn render(
         &mut self,
         theme: &Theme,
@@ -324,7 +335,7 @@ impl SkiaRenderer {
         else {
             return;
         };
-        let Some(frame) = image.frame_at(&context.time) else {
+        let Some(frame) = image.frame_at(context.animation) else {
             return;
         };
         let (width, height) = (canvas.width(), canvas.height());
@@ -462,7 +473,7 @@ impl SkiaRenderer {
         else {
             return;
         };
-        if let Some(frame) = image.frame_at(&context.time) {
+        if let Some(frame) = image.frame_at(context.animation) {
             layer.blit(
                 frame.as_ref(),
                 plan.at.0.round() as i32,
@@ -506,7 +517,7 @@ impl SkiaRenderer {
             gauges::draw_line_needle(layer, area, pose, *color, *width);
             return;
         };
-        if let Some(frame) = image.frame_at(&context.time) {
+        if let Some(frame) = image.frame_at(context.animation) {
             let (px, py) = pose.pivot;
             let placement =
                 Transform::from_translate(plan.at.0, plan.at.1).post_rotate_at(pose.angle, px, py);

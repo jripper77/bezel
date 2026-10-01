@@ -4,7 +4,7 @@
 use crate::domain::device::Family;
 use crate::domain::discovery::{
     DesktopModePanel, Discovery, MonitorModeConfirmed, MonitorModeSwitch, Screen, ScreenState,
-    desktop_mode_panels, group_devices, group_screens,
+    desktop_mode_panels, find_again, group_devices, group_screens,
 };
 use crate::domain::screen::Confirm;
 use crate::ports::{DesktopModeHid, DeviceBus, ScreenConnector, ScreenLink};
@@ -58,6 +58,28 @@ where
 {
     let screen = choose_screen(discover_screens(bus)?, address)?;
     connector.connect(&screen)
+}
+
+/// Opens `known` again after its live link failed (T-7.11): finds it on
+/// the bus by identity ([`find_again`]: a rev C SoC comes back under a new
+/// device name) and connects it, which restarts a hung rev C screen through
+/// its MCU (D-2026-09-30-release-polish-13). Returns the screen as the bus
+/// lists it now, with the link. `ScreenNotFound` while it is not back.
+pub fn reopen_screen<B, C>(
+    bus: &B,
+    connector: &C,
+    known: &Screen,
+) -> Result<(Screen, Box<dyn ScreenLink>)>
+where
+    B: DeviceBus + ?Sized,
+    C: ScreenConnector + ?Sized,
+{
+    let screen = find_again(discover_screens(bus)?, known).ok_or_else(|| {
+        let address = known.address().map_or_else(|| "?".into(), |a| a.0.clone());
+        BezelError::ScreenNotFound(format!("{address} is not back on the bus"))
+    })?;
+    let link = connector.connect(&screen)?;
+    Ok((screen, link))
 }
 
 /// Restarts a hung screen without a USB replug

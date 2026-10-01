@@ -455,6 +455,7 @@ impl Scene {
             histories: &self.histories,
             quantities: &NO_QUANTITIES,
             time: TIME,
+            animation: std::time::Duration::ZERO,
             language: Language::English,
             backdrop: Backdrop::Poster,
         }

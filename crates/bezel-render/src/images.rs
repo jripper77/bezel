@@ -5,8 +5,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Duration;
 
-use bezel_core::domain::clock::LocalTime;
+use bezel_core::domain::animation::Timeline;
 use bezel_core::domain::theme::{AssetRef, BoxF, Fit};
 use image::codecs::gif::GifDecoder;
 use image::imageops::{self, FilterType};
@@ -36,31 +37,38 @@ struct Decoded {
     width: u32,
     height: u32,
     frames: Vec<DecodedFrame>,
+    /// When each frame shows (`None`: a still image).
+    timeline: Option<Timeline>,
+}
+
+impl Decoded {
+    fn new(frames: Vec<DecodedFrame>) -> Option<Self> {
+        let first = frames.first()?;
+        let delays = frames
+            .iter()
+            .map(|f| Duration::from_millis(u64::from(f.delay_ms)))
+            .collect();
+        Some(Self {
+            width: first.pixels.width(),
+            height: first.pixels.height(),
+            timeline: Timeline::new(delays),
+            frames,
+        })
+    }
 }
 
 /// An image ready to draw at its target size (every frame of an animation).
 pub(crate) struct Scaled {
-    frames: Vec<(Pixmap, u32)>,
-    total_ms: u64,
+    frames: Vec<Pixmap>,
+    timeline: Option<Timeline>,
 }
 
 impl Scaled {
-    /// The frame shown at `time` (animations loop from midnight).
-    pub fn frame_at(&self, time: &LocalTime) -> Option<&Pixmap> {
-        let first = self.frames.first().map(|(p, _)| p);
-        if self.frames.len() < 2 || self.total_ms == 0 {
-            return first;
-        }
-        let seconds =
-            u64::from(time.hour) * 3600 + u64::from(time.minute) * 60 + u64::from(time.second);
-        let mut t = seconds * 1000 % self.total_ms;
-        for (pixmap, delay) in &self.frames {
-            if t < u64::from(*delay) {
-                return Some(pixmap);
-            }
-            t -= u64::from(*delay);
-        }
-        first
+    /// The frame shown `animation` after the theme started (animations
+    /// loop; the core's [`Timeline`] picks it).
+    pub fn frame_at(&self, animation: Duration) -> Option<&Pixmap> {
+        let index = self.timeline.as_ref().map_or(0, |t| t.frame_at(animation));
+        self.frames.get(index).or(self.frames.first())
     }
 }
 
@@ -147,14 +155,11 @@ fn decode(bytes: &[u8]) -> Result<Decoded, String> {
         .map_err(|e| e.to_string())?
         .to_rgba8();
     premultiply(&mut pixels);
-    Ok(Decoded {
-        width: pixels.width(),
-        height: pixels.height(),
-        frames: vec![DecodedFrame {
-            pixels,
-            delay_ms: 0,
-        }],
-    })
+    let still = DecodedFrame {
+        pixels,
+        delay_ms: 0,
+    };
+    Decoded::new(vec![still]).ok_or_else(|| "the image has no pixels".to_string())
 }
 
 fn decode_gif(bytes: &[u8]) -> Result<Decoded, String> {
@@ -179,12 +184,7 @@ fn decode_gif(bytes: &[u8]) -> Result<Decoded, String> {
         premultiply(&mut pixels);
         frames.push(DecodedFrame { pixels, delay_ms });
     }
-    let first = frames.first().ok_or("the GIF has no frames")?;
-    Ok(Decoded {
-        width: first.pixels.width(),
-        height: first.pixels.height(),
-        frames,
-    })
+    Decoded::new(frames).ok_or_else(|| "the GIF has no frames".to_string())
 }
 
 fn scale(source: &Decoded, plan: &Plan) -> Option<Scaled> {
@@ -200,13 +200,12 @@ fn scale(source: &Decoded, plan: &Plan) -> Option<Scaled> {
         };
         let mut raw = resized.into_raw();
         clamp_premultiplied(&mut raw);
-        frames.push((
-            Pixmap::from_vec(raw, IntSize::from_wh(w, h)?)?,
-            frame.delay_ms,
-        ));
+        frames.push(Pixmap::from_vec(raw, IntSize::from_wh(w, h)?)?);
     }
-    let total_ms = frames.iter().map(|(_, d)| u64::from(*d)).sum();
-    Some(Scaled { frames, total_ms })
+    Some(Scaled {
+        frames,
+        timeline: source.timeline.clone(),
+    })
 }
 
 struct SourceEntry {
@@ -261,6 +260,16 @@ impl ImageCache {
         };
         self.sources.insert(asset.clone(), entry);
         image
+    }
+
+    /// When the frames of `asset` show, when it is an animation.
+    pub fn timeline(
+        &mut self,
+        asset: &AssetRef,
+        assets: &BTreeMap<AssetRef, Vec<u8>>,
+        diagnostics: &mut Diagnostics,
+    ) -> Option<Timeline> {
+        self.source(asset, assets, diagnostics)?.timeline.clone()
     }
 
     /// `asset` fitted into `area`, with where to draw it.
@@ -340,32 +349,50 @@ mod tests {
 
     #[test]
     fn animations_pick_the_frame_by_time() {
-        let pixmap = |_| Pixmap::new(1, 1).expect("pixmap");
+        let pixmap = || Pixmap::new(1, 1).expect("pixmap");
+        let ms = Duration::from_millis;
         let scaled = Scaled {
-            frames: vec![(pixmap(0), 1000), (pixmap(1), 2000)],
-            total_ms: 3000,
+            frames: vec![pixmap(), pixmap()],
+            timeline: Timeline::new(vec![ms(1000), ms(2000)]),
         };
-        let at = |second| LocalTime {
-            year: 2026,
-            month: 1,
-            day: 1,
-            hour: 0,
-            minute: 0,
-            second,
-            weekday: 0,
-        };
-        let ptr = |s| scaled.frame_at(&at(s)).map(|p| p as *const Pixmap);
-        let first = Some(&scaled.frames[0].0 as *const Pixmap);
-        let second = Some(&scaled.frames[1].0 as *const Pixmap);
+        let ptr = |t| scaled.frame_at(ms(t)).map(|p| p as *const Pixmap);
+        let first = Some(&scaled.frames[0] as *const Pixmap);
+        let second = Some(&scaled.frames[1] as *const Pixmap);
         assert_eq!(ptr(0), first);
-        assert_eq!(ptr(1), second);
-        assert_eq!(ptr(2), second);
-        assert_eq!(ptr(3), first);
+        assert_eq!(ptr(999), first);
+        assert_eq!(ptr(1000), second, "to the millisecond");
+        assert_eq!(ptr(2999), second);
+        assert_eq!(ptr(3000), first);
         let still = Scaled {
-            frames: vec![(pixmap(0), 0)],
-            total_ms: 0,
+            frames: vec![pixmap()],
+            timeline: None,
         };
-        assert!(still.frame_at(&at(7)).is_some());
+        assert!(still.frame_at(ms(7000)).is_some());
+    }
+
+    #[test]
+    fn a_gif_tells_its_frame_times() {
+        let mut cache = ImageCache::default();
+        let mut diagnostics = Diagnostics::default();
+        let gif = crate::testkit::gif(
+            2,
+            2,
+            &[
+                (bezel_core::domain::frame::Rgba::BLACK, 40),
+                (bezel_core::domain::frame::Rgba::WHITE, 5),
+            ],
+        );
+        let png = crate::testkit::png(2, 2, |_, _| bezel_core::domain::frame::Rgba::WHITE);
+        let (anim, still) = (AssetRef("a.gif".into()), AssetRef("b.png".into()));
+        let assets = BTreeMap::from([(anim.clone(), gif), (still.clone(), png)]);
+        let timeline = cache
+            .timeline(&anim, &assets, &mut diagnostics)
+            .expect("animated");
+        let ms = Duration::from_millis;
+        // A 5 ms frame plays at 100 ms, as browsers do.
+        assert_eq!((timeline.len(), timeline.total()), (2, ms(140)));
+        assert_eq!(cache.timeline(&still, &assets, &mut diagnostics), None);
+        assert_eq!(cache.len(), (2, 0), "decoded once, kept for drawing");
     }
 
     #[test]

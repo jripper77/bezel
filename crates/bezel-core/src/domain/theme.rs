@@ -501,6 +501,27 @@ impl Theme {
             .collect()
     }
 
+    /// The images of the image elements a frame shows: visible, not fully
+    /// transparent, with a box that reaches into the canvas. An animated
+    /// one among them sets the pace of the frames
+    /// ([`super::animation`]); hidden ones do not animate.
+    pub fn shown_images(&self) -> impl Iterator<Item = &AssetRef> {
+        let (width, height) = (self.canvas.width as f32, self.canvas.height as f32);
+        self.elements.iter().filter_map(move |e| {
+            let ElementKind::Image { asset, .. } = &e.kind else {
+                return None;
+            };
+            let b = e.frame;
+            let on_canvas = b.width > 0.0
+                && b.height > 0.0
+                && b.x < width
+                && b.y < height
+                && b.x + b.width > 0.0
+                && b.y + b.height > 0.0;
+            (e.visible && e.opacity > 0.0 && on_canvas).then_some(asset)
+        })
+    }
+
     /// The graph history length wanted for each bound sensor.
     pub fn history_lengths(&self) -> Vec<(SensorKey, usize)> {
         self.elements
@@ -636,6 +657,42 @@ mod tests {
             "the hidden bar's sensor is not wanted"
         );
         assert!(t.element(ElementId(3)).is_some());
+    }
+
+    #[test]
+    fn only_images_a_frame_shows_are_shown_images() {
+        let mut t = Theme::blank("x", Size::new(480, 1920), Orientation::Portrait);
+        let image = |id, name: &str, frame| Element {
+            frame,
+            ..element(
+                id,
+                ElementKind::Image {
+                    asset: AssetRef(name.into()),
+                    fit: Fit::Fill,
+                },
+            )
+        };
+        let mut hidden = image(2, "hidden.gif", BoxF::new(0.0, 0.0, 10.0, 10.0));
+        hidden.visible = false;
+        let mut clear = image(3, "clear.gif", BoxF::new(0.0, 0.0, 10.0, 10.0));
+        clear.opacity = 0.0;
+        t.elements = vec![
+            image(1, "shown.gif", BoxF::new(470.0, 1910.0, 64.0, 64.0)),
+            hidden,
+            clear,
+            image(4, "outside.gif", BoxF::new(480.0, 0.0, 10.0, 10.0)),
+            image(5, "above.gif", BoxF::new(0.0, -10.0, 10.0, 10.0)),
+            image(6, "empty.gif", BoxF::new(5.0, 5.0, 0.0, 10.0)),
+            element(
+                7,
+                ElementKind::Text {
+                    content: TextContent::Static("x".into()),
+                    style: TextStyle::default(),
+                },
+            ),
+        ];
+        let shown: Vec<&str> = t.shown_images().map(|a| a.0.as_str()).collect();
+        assert_eq!(shown, ["shown.gif"]);
     }
 
     #[test]

@@ -3,16 +3,24 @@
 // without hardware). Both expose the same async API.
 import { createDemoBackend } from './demo-backend.js';
 
-/** Parses the renderer's frame: u32 LE width, u32 LE height, then RGBA8. */
+/** The renderer's "nothing animates" in a frame header. */
+export const STILL = 0xffffffff;
+
+/**
+ * Parses the renderer's frame: u32 LE width, u32 LE height, u32 LE
+ * milliseconds until its animated GIFs change (`STILL`: none shows), then
+ * RGBA8. `nextMs` is `null` for a still frame.
+ */
 export function parseFrame(buffer) {
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-  if (bytes.length < 8) throw new Error('frame too short');
-  const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
+  if (bytes.length < 12) throw new Error('frame too short');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, 12);
   const width = view.getUint32(0, true);
   const height = view.getUint32(4, true);
-  const rgba = new Uint8ClampedArray(bytes.buffer, bytes.byteOffset + 8, bytes.length - 8);
+  const next = view.getUint32(8, true);
+  const rgba = new Uint8ClampedArray(bytes.buffer, bytes.byteOffset + 12, bytes.length - 12);
   if (rgba.length !== width * height * 4) throw new Error(`frame is ${rgba.length} bytes, expected ${width * height * 4}`);
-  return { width, height, rgba };
+  return { width, height, rgba, nextMs: next === STILL ? null : next };
 }
 
 /** Event of a running upload's progress (`storage-progress` in the backend). */

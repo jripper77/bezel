@@ -1,6 +1,7 @@
 //! Ports: the traits adapters implement (driven) or call (driving).
 
 use crate::Result;
+use crate::domain::animation::Timeline;
 use crate::domain::clock::{Language, LocalTime};
 use crate::domain::discovery::{DesktopModePanel, Endpoint, MonitorModeConfirmed, Screen};
 use crate::domain::frame::Frame;
@@ -280,6 +281,9 @@ pub struct RenderContext<'a> {
     pub quantities: &'a Quantities,
     /// Local wall-clock time for clock elements.
     pub time: LocalTime,
+    /// How long the theme has been showing: animated images show their
+    /// frame of that moment (they loop; [`FrameRenderer::animation`]).
+    pub animation: Duration,
     /// Language of day and month names.
     pub language: Language,
     /// What a video background shows.
@@ -295,6 +299,19 @@ pub trait FrameRenderer: Send {
         assets: &BTreeMap<AssetRef, Vec<u8>>,
         context: RenderContext<'_>,
     ) -> Result<Frame>;
+
+    /// The frame times of the image `asset` when it is an animation (an
+    /// animated GIF): what [`RenderContext::animation`] picks its frame
+    /// from. `None` for a still image, an asset that cannot be read, or a
+    /// renderer that does not animate images (the default).
+    fn animation(
+        &mut self,
+        asset: &AssetRef,
+        assets: &BTreeMap<AssetRef, Vec<u8>>,
+    ) -> Option<Timeline> {
+        let _ = (asset, assets);
+        None
+    }
 }
 
 /// Where a theme lives for a [`ThemeStore`] (a file or folder for disk stores).

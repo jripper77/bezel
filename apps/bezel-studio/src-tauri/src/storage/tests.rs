@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::frame::{Frame, Rgba};
@@ -759,8 +759,8 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
             // The session is not locked: previews render and the loop samples,
             // but no frame reaches the screen.
             let theme = f.backend.session().theme;
-            assert!(f.backend.render(&theme, TIME).is_ok());
-            f.backend.tick(TIME);
+            assert!(f.backend.render(&theme, TIME, Instant::now()).is_ok());
+            f.backend.tick(TIME, Instant::now());
             assert_eq!(f.connector.log().frames.len(), 2);
             // The screen's port has one owner meanwhile.
             assert!(
@@ -786,7 +786,9 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
     assert!(matches!(result, Ok(JobDto::Done { .. })));
     assert_eq!(frames(), 3, "the link came back with a frame");
     assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
-    f.backend.tick(TIME);
+    // The next refresh (a second later).
+    f.backend
+        .tick(TIME, Instant::now() + Duration::from_secs(2));
     assert_eq!(frames(), 4, "frames resumed");
 
     // The theme would hide what the screen plays: no play or stop while live.
@@ -888,8 +890,9 @@ fn sending_the_theme_video_lets_the_live_screen_play_it() {
     let overlay = f.connector.log().frames.last().cloned().unwrap();
     assert_eq!(alpha_at(&overlay, 0, 0), 0, "the video shows through");
     // The preview keeps the poster.
-    let preview = f.backend.render(&f.backend.session().theme, TIME).unwrap();
-    assert_eq!(preview[8 + 3], 255);
+    let theme = f.backend.session().theme;
+    let preview = f.backend.render(&theme, TIME, Instant::now()).unwrap();
+    assert_eq!(preview[12 + 3], 255);
 
     // Another background stops the video on the screen.
     let mut plain = f.backend.session().theme;

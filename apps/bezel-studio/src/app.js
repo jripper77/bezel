@@ -14,6 +14,7 @@ import { createPreferences } from './ui/preferences.js';
 import { showAccessHelp } from './ui/udev.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
+import { createPreviewAnimation } from './preview-animation.js';
 import { errorText, sensorLabel } from './messages.js';
 import { backgroundOf, droppable, fileNameOf, videoFacts } from './editor/background.js';
 
@@ -56,6 +57,9 @@ const state = {
   mediaTools: null,
   // A file being added from the Media panel or a drop.
   addingMedia: false,
+  // The live screen's link failed and the backend connects it again
+  // (`{attempt, attempts}`), else null.
+  reconnecting: null,
 };
 
 function toast(message) {
@@ -151,12 +155,23 @@ const inspector = createInspector({
 });
 
 // ----------------------------------------------------------- render ----
+// Animated GIFs move in the preview at their own pace (T-7.11), at most 15
+// frames a second; not while the window is hidden or motion is reduced.
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const animation = createPreviewAnimation({
+  request: () => renderNow(),
+  enabled: () => !document.hidden && !reducedMotion?.matches,
+});
+
 async function drawPreview() {
+  const started = performance.now();
   try {
     const frame = await bridge.render(store.getState().theme);
     canvasView.drawFrame(frame);
     $('status-render').textContent = t('status.render', { ms: Math.round(frame.millis) });
+    animation.shown({ nextMs: frame.nextMs ?? null, elapsed: performance.now() - started });
   } catch (e) {
+    animation.stop();
     $('status-render').textContent = t('status.renderError', { message: errorText(t, e) });
   }
 }
@@ -164,6 +179,9 @@ async function drawPreview() {
 // One render at a time, at most 30 a second while dragging, the last exact.
 const previews = createRenderScheduler({ render: drawPreview, gesturing: () => store.isGesturing() });
 const renderNow = () => previews.request();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) renderNow();
+});
 
 let liveTimer = null;
 function pushLive() {
@@ -270,6 +288,7 @@ function renderScreenSelect() {
   let device = t('top.noScreen');
   if (state.screenError) device = t('status.devicesError', { message: errorText(t, state.screenError) });
   else if (state.restarting) device = t('restart.running');
+  else if (state.reconnecting) device = t('restart.reconnecting', state.reconnecting);
   else if (current && state.live && state.liveVideo?.state === 'missing') device = t('status.liveVideoMissing');
   else if (current) device = state.live ? t('status.live') : t(`screen.state.${current.state}`);
   $('status-device').textContent = device;
@@ -296,11 +315,18 @@ async function refreshScreens() {
   if (bg.type === 'video' && !bg.poster) refreshTools();
 }
 
-// The backend owns live mode: it restores it at start and stops it when the
-// screen fails; the switch follows what each sample reports.
+// The backend owns live mode: it restores it at start, connects a screen
+// whose link failed again (T-7.11) and stops it when the screen does not come
+// back; the switch and the status follow what each sample reports.
 function syncLive(s) {
   const live = Boolean(s.live);
   const video = s.video ?? null;
+  const reconnecting = live ? (s.reconnecting ?? null) : null;
+  if (reconnecting?.attempt !== state.reconnecting?.attempt) {
+    if (state.reconnecting && !reconnecting && live) toast(t('restart.doneLive'));
+    state.reconnecting = reconnecting;
+    renderScreenSelect();
+  }
   if ((video?.state ?? null) !== (state.liveVideo?.state ?? null)) {
     state.liveVideo = video;
     renderScreenSelect();

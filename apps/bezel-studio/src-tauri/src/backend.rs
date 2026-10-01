@@ -7,7 +7,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use bezel_core::app::{
-    choose_screen, discover_devices, discover_screens, leave_desktop_mode, restart_screen,
+    choose_screen, discover_devices, discover_screens, leave_desktop_mode, reopen_screen,
+    restart_screen,
 };
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::clock::{Language, LocalTime};
@@ -27,7 +28,7 @@ use bezel_themes::native::{is_native, native_location};
 
 use crate::dto::{
     AddedDto, AssetDto, DevicesDto, ImportedDto, LiveVideoDto, MonitorModeDto, PreferencesDto,
-    RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
+    ReconnectingDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
 };
 use crate::library::ThemeLibrary;
 use crate::media::{extension_of, is_animated_gif, kind_of, thumbnail_data_url};
@@ -111,38 +112,29 @@ impl Session {
     }
 }
 
-/// Keeps the refresh loop on its cadence: each refresh is due one period
-/// after the previous one was due, however long the work took (the screen's
-/// I/O does not stretch the period). A loop that fell behind starts again
-/// from now instead of catching up in a burst.
-#[derive(Debug, Clone, Copy)]
-pub struct Pacer {
-    due: Instant,
+/// Longest sleep of the refresh loop between two looks at the session: an
+/// edit or a screen going live is picked up this soon.
+pub const LOOK_AGAIN: Duration = Duration::from_millis(250);
+
+/// How long the refresh loop sleeps at `now` for the refresh due at `due`:
+/// until then (nothing when it is past), at most [`LOOK_AGAIN`].
+pub fn sleep_until(due: Instant, now: Instant) -> Duration {
+    due.saturating_duration_since(now).min(LOOK_AGAIN)
 }
 
-impl Pacer {
-    /// A cadence whose first refresh was due at `now`.
-    pub fn new(now: Instant) -> Self {
-        Self { due: now }
-    }
+/// Says that a preview does not change by itself (no animated GIF shows).
+pub const STILL: u32 = u32::MAX;
 
-    /// How long to wait at `now` for the refresh due `period` after the
-    /// last one.
-    pub fn wait(&mut self, period: Duration, now: Instant) -> Duration {
-        self.due += period;
-        if self.due < now {
-            self.due = now;
-        }
-        self.due - now
-    }
-}
-
-/// Header of a frame sent to the UI: width and height, u32 little-endian.
-pub fn frame_bytes(frame: &bezel_core::domain::frame::Frame) -> Vec<u8> {
+/// A preview frame for the UI: a 12-byte header (width, height, and the
+/// milliseconds until its animated GIFs change, [`STILL`] when none shows;
+/// u32 little-endian), then the RGBA pixels.
+pub fn frame_bytes(frame: &bezel_core::domain::frame::Frame, change: Option<Duration>) -> Vec<u8> {
     let size = frame.size();
-    let mut out = Vec::with_capacity(8 + frame.as_rgba().len());
+    let next = change.map_or(STILL, |d| u32::try_from(d.as_millis()).unwrap_or(STILL - 1));
+    let mut out = Vec::with_capacity(12 + frame.as_rgba().len());
     out.extend_from_slice(&size.width.to_le_bytes());
     out.extend_from_slice(&size.height.to_le_bytes());
+    out.extend_from_slice(&next.to_le_bytes());
     out.extend_from_slice(frame.as_rgba());
     out
 }
@@ -210,7 +202,7 @@ impl Backend {
             return Ok(());
         };
         let outcome = delivery.present();
-        let unwanted = self.studio().presented(delivery, &outcome);
+        let unwanted = self.studio().presented(delivery, &outcome, Instant::now());
         self.studio.link_back.notify_all();
         drop(unwanted);
         outcome
@@ -218,7 +210,7 @@ impl Backend {
 
     /// Shows the edited theme on the live screen now.
     pub(crate) fn show_now(&self, time: LocalTime) -> bezel_core::Result<()> {
-        let delivered = self.idle_studio().frame_for_screen(time);
+        let delivered = self.idle_studio().frame_for_screen(time, Instant::now());
         self.deliver(delivered)
     }
 
@@ -375,10 +367,11 @@ impl Backend {
         let key = screen.ok_or_else(|| UiError::new(ErrorCode::NoScreenChosen))?;
         self.storage.ensure_idle()?;
         // Opening wakes the screen (seconds); the session stays usable meanwhile.
-        let link = self.connect(key)?;
+        let found = self.find_screen(key)?;
+        let link = self.connector.connect(&found)?;
         let orientation = {
             let mut studio = self.studio();
-            studio.go_live(key.to_string(), link);
+            studio.go_live_on(key.to_string(), found, link);
             studio.theme().orientation
         };
         self.show_now(time)?;
@@ -481,6 +474,7 @@ impl Backend {
             live: studio.live_key().map(str::to_string),
             live_error: studio.live_error().cloned(),
             video: studio.live_video().and_then(LiveVideoDto::of),
+            reconnecting: studio.reconnecting().map(ReconnectingDto::from),
         }
     }
 
@@ -496,12 +490,14 @@ impl Backend {
         }
     }
 
-    /// Takes the UI's theme and renders it: 8-byte size header then RGBA.
-    pub fn render(&self, theme: &ThemeDto, time: LocalTime) -> UiResult<Vec<u8>> {
+    /// Takes the UI's theme and renders it at `now` ([`frame_bytes`]: its
+    /// size, when its GIFs change, then RGBA).
+    pub fn render(&self, theme: &ThemeDto, time: LocalTime, now: Instant) -> UiResult<Vec<u8>> {
         let theme = theme_of(theme)?;
         let mut studio = self.studio();
         studio.set_theme(theme);
-        Ok(studio.render(time).map(|f| frame_bytes(&f))?)
+        let (frame, change) = studio.preview(time, now)?;
+        Ok(frame_bytes(&frame, change))
     }
 
     /// Takes the UI's theme and shows it on the live screen now, in the
@@ -757,15 +753,44 @@ impl Backend {
         }
     }
 
-    /// One refresh of the session (a sample when due, and a frame on the
-    /// live screen, shown outside the session's lock). Returns the time
-    /// until the next one.
-    pub fn tick(&self, time: LocalTime) -> Duration {
-        let delivered = self.studio().tick(time);
+    /// One refresh of the session at `now`: an attempt to connect a live
+    /// screen that failed when one is due, a sample when one is due, and the
+    /// live screen's frame when it is due (the screen's I/O outside the
+    /// session's lock). Returns when the next refresh is due.
+    pub fn tick(&self, time: LocalTime, now: Instant) -> Instant {
+        self.reconnect(now);
+        let delivered = self.studio().tick(time, now);
         if let Err(e) = self.deliver(delivered) {
-            tracing::warn!("live screen stopped: {e}");
+            tracing::warn!("live screen frame failed: {e}");
         }
-        self.studio().period()
+        self.studio().next_due()
+    }
+
+    /// Connects a live screen whose link failed again, when an attempt is
+    /// due (T-7.11): found by identity (a rev C SoC comes back under a new
+    /// device name), restarted through its MCU by the connection when it
+    /// hung, outside the session's lock. Back, it shows the theme again
+    /// under its new key, which is remembered.
+    fn reconnect(&self, now: Instant) {
+        let Some(attempt) = self.studio().reconnect_due(now) else {
+            return;
+        };
+        let outcome = reopen_screen(self.bus.as_ref(), self.connector.as_ref(), attempt.screen());
+        let unwanted = self.studio().reconnected(attempt, outcome, Instant::now());
+        drop(unwanted);
+        let back = {
+            let studio = self.studio();
+            studio
+                .reconnecting()
+                .is_none()
+                .then(|| studio.live_key().map(str::to_string))
+                .flatten()
+        };
+        if let Some(key) = back
+            && self.settings.load().live_screen.as_deref() != Some(key.as_str())
+        {
+            self.settings.update(|s| s.live_screen = Some(key));
+        }
     }
 }
 
@@ -1002,14 +1027,15 @@ mod tests {
     fn render_preview_returns_the_canvas_size() {
         let f = fixture("render");
         let theme = f.backend.session().theme;
-        let bytes = f.backend.render(&theme, TIME).unwrap();
+        let bytes = f.backend.render(&theme, TIME, Instant::now()).unwrap();
         assert_eq!(&bytes[..8], &[224, 1, 0, 0, 128, 7, 0, 0]);
+        assert_eq!(&bytes[8..12], &STILL.to_le_bytes(), "nothing animates");
         let json = serde_json::to_value(f.backend.session()).unwrap();
         assert_eq!(json["minRefreshSeconds"], MIN_REFRESH_SECONDS);
-        assert_eq!(bytes.len(), 8 + 480 * 1920 * 4);
+        assert_eq!(bytes.len(), 12 + 480 * 1920 * 4);
         let mut bad = theme.clone();
         bad.orientation = "sideways".into();
-        assert!(f.backend.render(&bad, TIME).is_err());
+        assert!(f.backend.render(&bad, TIME, Instant::now()).is_err());
     }
 
     #[test]
@@ -1020,7 +1046,9 @@ mod tests {
         assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
         let theme = f.backend.session().theme;
         f.backend.push(&theme, TIME).unwrap();
-        assert!(f.backend.tick(TIME).as_secs_f32() >= MIN_REFRESH_SECONDS);
+        let now = Instant::now();
+        let due = f.backend.tick(TIME, now);
+        assert!(due >= now + Duration::from_secs_f32(MIN_REFRESH_SECONDS));
         assert_eq!(f.connector.log().frames.len(), 3);
         f.backend.set_brightness(KEY, 40).unwrap();
         assert!(f.backend.set_brightness(KEY, 101).is_err());
@@ -1095,17 +1123,140 @@ mod tests {
     }
 
     #[test]
-    fn the_refresh_keeps_its_cadence() {
+    fn the_refresh_loop_sleeps_until_the_next_refresh_is_due() {
         let t0 = Instant::now();
         let ms = Duration::from_millis;
-        let second = Duration::from_secs(1);
-        let mut pacer = Pacer::new(t0);
-        // The frame took 260 ms: the wait is the rest of the period.
-        assert_eq!(pacer.wait(second, t0 + ms(260)), ms(740));
-        assert_eq!(pacer.wait(second, t0 + second + ms(300)), ms(700));
-        // Far behind: the next one now, then the cadence from there.
-        assert_eq!(pacer.wait(second, t0 + ms(5000)), Duration::ZERO);
-        assert_eq!(pacer.wait(second, t0 + ms(5100)), ms(900));
+        assert_eq!(sleep_until(t0 + ms(40), t0), ms(40), "a GIF's next frame");
+        assert_eq!(sleep_until(t0, t0 + ms(5)), Duration::ZERO, "already due");
+        assert_eq!(sleep_until(t0 + ms(2000), t0), LOOK_AGAIN, "edits are seen");
+    }
+
+    /// The fixture's frame header for a preview whose GIF changes in
+    /// `ms`: `None` when nothing animates.
+    fn next_change(bytes: &[u8]) -> Option<u32> {
+        let next = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        (next != STILL).then_some(next)
+    }
+
+    /// A GIF of two 100 ms frames.
+    fn blinking_gif() -> Vec<u8> {
+        use image::codecs::gif::{GifEncoder, Repeat};
+        let mut out = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut out);
+            encoder.set_repeat(Repeat::Infinite).unwrap();
+            for red in [0, 255] {
+                let pixels = image::RgbaImage::from_pixel(4, 4, image::Rgba([red, 0, 0, 255]));
+                let delay = image::Delay::from_numer_denom_ms(100, 1);
+                encoder
+                    .encode_frame(image::Frame::from_parts(pixels, 0, 0, delay))
+                    .unwrap();
+            }
+        }
+        out
+    }
+
+    /// T-7.11: the preview says when its GIF changes next, so the UI draws
+    /// it at the GIF's pace; a hidden GIF says nothing.
+    #[test]
+    fn the_preview_says_when_its_gif_changes() {
+        let f = fixture("preview-gif");
+        std::fs::create_dir_all(&f.root).unwrap();
+        let file = f.root.join("blink.gif");
+        std::fs::write(&file, blinking_gif()).unwrap();
+        let asset = f.backend.add_image(&file).unwrap().reference;
+        let mut theme = f.backend.session().theme;
+        let element = serde_json::json!({
+            "id": 1, "name": "blink", "frame": {"x": 10, "y": 10, "width": 40, "height": 40},
+            "opacity": 1, "visible": true, "locked": false,
+            "kind": {"type": "image", "asset": asset, "fit": "fill"}
+        });
+        theme
+            .elements
+            .push(serde_json::from_value(element).unwrap());
+        let bytes = f.backend.render(&theme, TIME, Instant::now()).unwrap();
+        let next = next_change(&bytes).expect("animates");
+        assert!((1..=100).contains(&next), "{next} ms");
+        theme.elements[0].visible = false;
+        let bytes = f.backend.render(&theme, TIME, Instant::now()).unwrap();
+        assert_eq!(next_change(&bytes), None);
+    }
+
+    /// T-7.11: a live screen whose link failed (it hung) is connected again
+    /// after 2 s by the refresh loop and shows the theme again, a whole frame
+    /// on the new link; the UI hears about it meanwhile.
+    #[test]
+    fn a_live_screen_that_hangs_comes_back_by_itself() {
+        let mut f = fixture("reconnect");
+        let connector = FakeConnector::default()
+            .breaking_after(1, bezel_core::BezelError::Hung("stalled".into()));
+        f.backend.connector = Arc::new(connector.clone());
+        f.connector = connector;
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        let later = |ms| Instant::now() + Duration::from_millis(ms);
+        f.backend.tick(TIME, later(1_000));
+        let sample = f.backend.sample();
+        assert_eq!(sample.live.as_deref(), Some(KEY), "still live");
+        assert_eq!(sample.live_error, None);
+        let waiting = sample.reconnecting.expect("reconnecting");
+        assert_eq!((waiting.attempt, waiting.attempts), (1, 3));
+        let json = serde_json::to_value(&sample).unwrap();
+        assert_eq!(json["reconnecting"]["attempt"], 1);
+        // The link is gone meanwhile: whoever needs it hears why.
+        let busy = f.backend.set_brightness(KEY, 30).unwrap_err();
+        assert!(
+            busy.to_string().contains(crate::studio::RECONNECTING),
+            "{busy}"
+        );
+
+        f.backend.tick(TIME, later(500));
+        assert_eq!(f.connector.log().connects, 1, "not before 2 s");
+        f.backend.tick(TIME, later(3_000));
+        let sample = f.backend.sample();
+        assert_eq!(sample.reconnecting, None);
+        assert_eq!(sample.live.as_deref(), Some(KEY));
+        let log = f.connector.log();
+        assert_eq!((log.connects, log.frames.len()), (2, 2), "a frame at once");
+        assert_eq!(log.orientations.len(), 2, "turned again");
+        assert_eq!(f.backend.settings.load().live_screen.as_deref(), Some(KEY));
+    }
+
+    /// After three attempts live mode stops with the error that stopped the
+    /// link (a hung screen's card offers the restart); turning live mode off
+    /// while the screen is away ends the attempts at once.
+    #[test]
+    fn reconnecting_gives_up_after_three_attempts_or_when_stopped() {
+        let hung = || bezel_core::BezelError::Hung("stalled".into());
+        let mut f = fixture("reconnect-gone");
+        let connector = FakeConnector::default().breaking_after(1, hung());
+        f.backend.connector = Arc::new(connector.clone());
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        let later = |ms| Instant::now() + Duration::from_millis(ms);
+        f.backend.bus = Arc::new(FakeBus::new(Vec::new()));
+        f.backend.tick(TIME, later(0));
+        for (wait, attempt) in [(3_000, 2), (6_000, 3)] {
+            f.backend.tick(TIME, later(wait));
+            let sample = f.backend.sample();
+            assert_eq!(sample.reconnecting.map(|r| r.attempt), Some(attempt));
+        }
+        f.backend.tick(TIME, later(11_000));
+        let sample = f.backend.sample();
+        assert_eq!((sample.live, sample.reconnecting), (None, None));
+        assert_eq!(sample.live_error.unwrap().code(), "hung");
+        assert_eq!(connector.log().connects, 1, "the screen never came back");
+
+        let mut f = fixture("reconnect-stop");
+        let connector = FakeConnector::default().breaking_after(1, hung());
+        f.backend.connector = Arc::new(connector.clone());
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        f.backend.tick(TIME, later(0));
+        assert!(f.backend.sample().reconnecting.is_some());
+        f.backend.set_live(false, None, TIME).unwrap();
+        f.backend.tick(TIME, later(3_000));
+        let sample = f.backend.sample();
+        assert_eq!((sample.live, sample.reconnecting), (None, None));
+        assert_eq!(sample.live_error, None);
+        assert_eq!(connector.log().connects, 1, "no attempt after the stop");
     }
 
     /// A link whose frames wait until the test lets them through, telling
@@ -1154,17 +1305,18 @@ mod tests {
         let theme = f.backend.session().theme;
         let backend = &f.backend;
         std::thread::scope(|scope| {
-            let ticking = scope.spawn(|| backend.tick(TIME));
+            let started = Instant::now();
+            let ticking = scope.spawn(|| backend.tick(TIME, Instant::now()));
             frame_arrived.recv().unwrap();
             // The screen is busy with a frame: the session is not.
-            assert!(backend.render(&theme, TIME).is_ok());
+            assert!(backend.render(&theme, TIME, Instant::now()).is_ok());
             assert_eq!(backend.sample().live.as_deref(), Some(KEY));
             // Whoever needs the link waits for it.
             let dimming = scope.spawn(|| backend.set_brightness(KEY, 30));
             std::thread::sleep(Duration::from_millis(50));
             assert!(f.connector.log().brightness.is_empty(), "after the frame");
             let_through.send(()).unwrap();
-            assert!(ticking.join().unwrap() >= Duration::from_secs_f32(MIN_REFRESH_SECONDS));
+            assert!(ticking.join().unwrap() > started);
             dimming.join().unwrap().unwrap();
         });
         let log = f.connector.log();
@@ -1201,7 +1353,7 @@ mod tests {
         let f = fixture("sensors");
         let catalog = f.backend.catalog().unwrap();
         assert!(catalog.iter().any(|s| s.key == "cpu.usage"));
-        f.backend.tick(TIME);
+        f.backend.tick(TIME, Instant::now());
         let sample = f.backend.sample();
         assert!(sample.readings.contains_key("cpu.usage"));
         assert_eq!(sample.live_error, None);

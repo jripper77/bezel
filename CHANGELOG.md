@@ -81,6 +81,15 @@ the Conventional Commits.
   `bezel restart [-s SCREEN]`, or with **Restart screen…** in the studio's
   Screen panel, which errors meaning a frozen screen also offer. It is back in
   about 10 s; what it played stops, its stored files stay.
+- Animated GIF elements move at their own pace, between the theme's
+  refreshes: up to 30 frames a second on the screen (only the GIF's rectangle
+  is sent; a slow link skips frames instead of lagging) and 15 in the studio's
+  preview, while sensors keep the theme's refresh. Full-screen GIFs belong in
+  a video background.
+- Live mode recovers from a screen that stops taking frames: `bezel run`, the
+  service and the studio connect it again after 2, 5 and 10 s (restarting a
+  frozen rev C screen on the way, found again under its new port), say so
+  meanwhile, and stop with the error after the third attempt.
 - `bezel udev-rules` prints the Linux udev rule generated from the device
   catalog and the one-line sudo command that installs it, for AppImage,
   archive and source installs; Bezel never runs it. A refused port points at

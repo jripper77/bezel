@@ -51,10 +51,16 @@ de despertar) pode travar, por exemplo com um envio acima do limite de 25 MiB.
 **Não precisa desconectar o cabo**: o Bezel a reinicia pelo chip de despertar,
 e ela volta em cerca de 10 segundos.
 
-- **Sozinho**: o próximo comando, o `bezel run` iniciado de novo (o serviço
-  `bezel-run@` faz isso), ou ligar o **Ao vivo** de novo encontra a tela
-  travada e a reinicia uma vez antes de conectar. Nada é reiniciado enquanto a
-  tela responde.
+- **Durante o ao vivo**: o `bezel run`, o serviço `bezel-run@` e o **Ao vivo**
+  do aplicativo conectam a tela de novo sozinhos, 2, 5 e 10 segundos depois de
+  ela parar; conectar reinicia antes uma tela travada, e o tema continua. A
+  barra de status do aplicativo diz *Reconectando à tela (tentativa 1 de 3)…*,
+  depois *A tela voltou e mostra o tema ao vivo de novo.*; o `bezel run`
+  escreve o mesmo no terminal. Depois da terceira tentativa o ao vivo para com
+  o erro. Desligar o **Ao vivo** (ou Ctrl+C) nesse meio-tempo para na hora.
+- **Sozinho**: o próximo comando, ou ligar o **Ao vivo** de novo, encontra a
+  tela travada e a reinicia uma vez antes de conectar. Nada é reiniciado
+  enquanto a tela responde.
 - **Linha de comando**: `bezel restart` (ou `bezel restart -s /dev/ttyACM1`
   para uma tela). Ele diz que vai reiniciar a tela, espera por ela e mostra onde
   ela voltou. O terminal também mostra essa dica depois de um erro que indica

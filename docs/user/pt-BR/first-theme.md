@@ -37,6 +37,10 @@ mesmo renderizador.
 Ligue a chave **Ao vivo** na barra de cima. A tela acompanha as suas mudanças
 enquanto você edita. Clique em **Salvar** para guardar o tema na sua biblioteca.
 
+Se a tela parar de receber quadros com o ao vivo ligado (um mau contato, uma
+tela travada), o Bezel a conecta de novo sozinho e continua; veja
+[A tela travou](troubleshooting.md#a-tela-travou--parou-de-responder).
+
 Fechar a janela deixa o tema rodando pelo ícone na bandeja. O menu da bandeja
 tem **Abrir o Bezel**, **Ao vivo na tela** e **Sair**. Para ele voltar sozinho
 quando você entrar no computador, veja
@@ -85,6 +89,18 @@ O que a tela faz com ele:
 
 Salvar o tema guarda o vídeo e a imagem de capa dentro do arquivo
 `.bezeltheme`.
+
+## GIFs animados
+
+Um GIF animado adicionado como elemento de **imagem** se mexe no ritmo dele,
+também entre as atualizações do tema: até 30 quadros por segundo na tela, até
+15 na edição. Os sensores seguem a atualização do tema. Só o retângulo do GIF
+vai para a tela, então um GIF pequeno (um logo, um ícone, uma animação de
+240x240) se mexe suave. Um GIF do tamanho da tela muda só na velocidade em que
+o USB leva quadros inteiros (cerca de 2 por segundo na 8,8"): o Bezel então
+pula quadros para não atrasar. Para uma animação de tela cheia ou de fundo, use
+o GIF como vídeo de fundo ([Um vídeo no fundo](#um-vídeo-no-fundo)): a própria
+tela o toca. Um elemento de GIF oculto não se mexe.
 
 ## Temas de outros aplicativos
 

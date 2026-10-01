@@ -34,6 +34,10 @@ renderer.
 Turn on the **Live** switch in the top bar. The screen follows your edits as you
 make them. Click **Save** to keep the theme in your library.
 
+If the screen stops taking frames while live (a cable glitch, a frozen
+screen), Bezel connects it again by itself and goes on; see
+[The screen froze](troubleshooting.md#the-screen-froze--stopped-responding).
+
 Closing the window keeps the theme running from the tray icon. The tray menu
 has **Open Bezel**, **Live on the screen** and **Quit**. To have it come back at
 login, see [Running at login](run-at-login.md).
@@ -79,6 +83,18 @@ What the screen does with it:
   **Live** is on, which also needs ffmpeg.
 
 Saving the theme keeps the video and its poster inside the `.bezeltheme` file.
+
+## Animated GIFs
+
+An animated GIF added as an **image** element moves at its own pace, also
+between the theme's refreshes: up to 30 frames a second on the screen, up to
+15 in the editor. Sensors keep the theme's refresh. Only the GIF's rectangle
+goes to the screen, so a small GIF (a logo, an icon, a 240x240 animation)
+moves smoothly. A GIF as large as the screen changes only as fast as the USB
+link carries whole frames (about 2 a second on the 8.8"): Bezel then skips
+frames to keep time. For a full-screen or background animation, use the GIF
+as a video background ([A video in the background](#a-video-in-the-background)):
+the screen plays it itself. A hidden GIF element does not animate.
 
 ## Themes from other apps
 

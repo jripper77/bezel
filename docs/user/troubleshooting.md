@@ -46,8 +46,14 @@ screen (the 8.8" and the other serial models with a wake chip) can freeze, for
 example on an upload over its 25 MiB limit. **No replug is needed**: Bezel
 restarts it through its wake chip, and it comes back in about 10 seconds.
 
-- **On its own**: the next command, `bezel run` started again (the
-  `bezel-run@` service restarts it), or turning **Live** on again finds the
+- **While live**: `bezel run`, the `bezel-run@` service and **Live** in the app
+  connect the screen again by themselves, 2, 5 and 10 seconds after it
+  stopped; connecting restarts a frozen screen first, then the theme goes on.
+  The app's status bar says *Reconnecting to the screen (attempt 1 of 3)…*,
+  then *The screen is back and shows the theme live again.*; `bezel run`
+  writes the same in the terminal. After the third attempt live mode stops
+  with the error. Turning **Live** off (or Ctrl+C) meanwhile stops at once.
+- **On its own**: the next command, or turning **Live** on again, finds the
   frozen screen and restarts it once before connecting. Nothing is restarted
   while the screen answers.
 - **Command line**: `bezel restart` (or `bezel restart -s /dev/ttyACM1` for one

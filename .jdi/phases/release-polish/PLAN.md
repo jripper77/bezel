@@ -4,7 +4,7 @@
 Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo, documentação de usuário, FPS de jogos e release 1.0.
 
 ## Locked decisions (from CONTEXT.md)
-- D-2026-09-30-release-polish-1..9; herdadas: D-1 (hexagonal), device-protocols-2/-5/-6, sensors-1/-4, foundation-2
+- D-2026-09-30-release-polish-1..11; herdadas: D-1 (hexagonal), device-protocols-2/-5/-6, sensors-1/-4, foundation-2
 
 ## Tasks
 
@@ -52,7 +52,8 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
   - Volta ao modo monitor com `Confirm`: `Confirm::No` = zero chamadas à porta; `bezel monitor-mode` sem `--yes` sai ≠ 0 sem enviar nada.
   - Regra udev com as linhas do HID; `bezel udev-rules` imprime a regra (stdout) e o comando sudo de uma linha (stderr), sem executá-lo; ambos vêm de `bezel_devices::udev` (o studio reusa); a dica de acesso negado aponta para ele.
 - **Dependencies:** none
-\1- **Status:** completed (`e941130`)
+- **Test:** `udev_rules::tests::printed_rule_matches_packaged_file_and_catalog`, `hid_desktop::` (devices), `hid_desktop_requires_confirm` (CLI)
+- **Status:** completed (`e941130`)
 
 ### Wave 2 (paralela)
 
@@ -60,9 +61,9 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Specialist:** jdi-doer-bezel
 - **Files modified:** `crates/bezel-sensors/**`, `Cargo.lock`, `crates/bezel-cli/src/{lib,main}.rs`, `crates/bezel-cli/tests/sensors.rs`
 - **Acceptance:**
-  - `gpu.fps` só leitura: parser do RTSS (`RTSSSharedMemoryV2`, assinatura `RTSS`, entrada ativa mais nova) puro, testado no Linux com fixtures; o mapeamento (`windows-sys`) só em `cfg(windows)`, com `#[allow(unsafe_code, reason = "…")]` no menor escopo e `// SAFETY:`, nenhum outro `unsafe`. Linux: CSV mais novo do MangoHud em `mangohud_dir` (padrão: `output_folder` do `MangoHud.conf`). `hardware_validated = false`.
+  - `gpu.fps` só leitura: parser puro do RTSS testado por fixture; mapeamento só em `cfg(windows)` com `unsafe` no menor escopo e `// SAFETY:`. Linux: CSV mais novo do MangoHud em `mangohud_dir`. `hardware_validated = false`.
   - Fonte ausente ou leitura com mais de 3 s = `Unavailable` dizendo como ativar; nunca 0 nem último valor; 0 fps de fonte viva é 0.
-  - `net.ping` em thread própria: ICMP datagrama sem privilégio (`ping_group_range`, `socket2`), senão TCP 53/443; timeout = `Unavailable`; `sample()` < 50 ms com alvo mudo; `imported_keys_are_published` (catálogo de fixture ⊇ `keys::IMPORTED`). CLI: `--ping-host`, `--mangohud-dir`.
+  - `net.ping` em thread própria: ICMP sem privilégio, senão TCP; timeout = `Unavailable`; `sample()` < 50 ms com alvo mudo; catálogo ⊇ `keys::IMPORTED`. CLI: `--ping-host`, `--mangohud-dir`.
 - **Dependencies:** T-7.2, T-7.4
 - **Test:** `cargo test -p bezel-sensors fps::`, `-- ping:: imported_keys_are_published`; clippy `--target x86_64-pc-windows-gnu`
 - **Status:** completed (`9071262`; FPS com jogo real fica para a T-7.8)
@@ -125,5 +126,5 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - `cargo test --workspace --locked`; `cargo fmt --check`; clippy `-D warnings`; `npm test`; `scripts/ci/check-{packaging,docs}.sh`; cobertura ≥ 80% (`cargo llvm-cov`)
 
 ## Notes
-- Worktree por task + cherry-pick, um dono por arquivo compartilhado na wave (`Cargo.lock`, `backend.rs`, i18n, `README.md`/`CHANGELOG.md`).
+- Worktree por task + cherry-pick; um dono por arquivo compartilhado na wave.
 - Ritmo e cancelamento do rev C e o HID só valem como validados na T-7.8 (D-8).

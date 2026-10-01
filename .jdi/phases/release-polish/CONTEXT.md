@@ -13,15 +13,17 @@ Empacotamento deb/rpm/AppImage/msi/nsis com udev, i18n pt-BR/en completo, docume
 - D-7: docs em `docs/user/` (en) e `docs/user/pt-BR/`, incluindo guia de cartão SD em texto; README sem "early development".
 - D-8: nada destrutivo sem validação em hardware; HID desktop mode: listar e voltar ao modo monitor sempre com Confirm e rótulo "não validado".
 - D-9: dívida de revisão entra como refactor sem mudança de comportamento (lista na decisão).
+- D-10: sem enchimento após cancelar um envio rev C (o enchimento travou a 8.8").
+- D-11: `net.ping` só manda pacotes enquanto um valor visível o usa.
 
 ## Canonical refs
-- `.jdi/decisions/D-2026-09-30-release-polish-{1..9}.md`; todos `[release-polish]` em `.jdi/todos/`
+- `.jdi/decisions/D-2026-09-30-release-polish-{1..11}.md`; todos `[release-polish]` em `.jdi/todos/`
 - `docs/reverse-engineering/sensors.md` (§ FPS, § 6.1/6.2), `protocol-turing-usb.md` § 10, `protocol-turing-rev-c.md`
 - `.github/workflows/ci.yml`, `packaging/linux/`, `scripts/install-local.sh`, `apps/bezel-studio/src-tauri/tauri.conf.json`
 - Itens Manual pendentes das fases 1-6 (REVIEW/SUMMARY de cada uma)
 
 ## Out of scope
-- Firmware, boot logo, ffmpeg embutido/baixado, vídeo no host, system.volume, assinatura de código, detecção de SD por código, baixar/renomear arquivos no device, Sonar (dispensa mantida). Ver `.jdi/todos/2026-09-30-release-polish.md`.
+- Firmware, boot logo, ffmpeg embutido/baixado, system.volume, assinatura de código, detecção de SD por código, baixar/renomear arquivos no device, Sonar (dispensa mantida). Ver `.jdi/todos/2026-09-30-release-polish.md`.
 
 ## Definition of Done
 

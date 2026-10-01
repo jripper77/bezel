@@ -49,7 +49,7 @@
   `apps/bezel-studio/{src,tests}/**`, `apps/bezel-studio/playwright.config.mjs`
 - `packaging/linux/{60-bezel.rules,bezel-run@.service,postinstall.sh}`, `scripts/install-local.sh`,
   `scripts/ci/{check-packaging,check-docs}.sh`
-- `docs/user/**`, `docs/reverse-engineering/{protocol-turing-rev-c,protocol-turing-usb,sensors}.md`,
+- `docs/user/**`, `docs/reverse-engineering/{protocol-turing-rev-c,protocol-turing-usb,sensors,devices}.md`,
   `README.md`, `CHANGELOG.md`, `Cargo.toml`, `Cargo.lock`
 
 ## Tests

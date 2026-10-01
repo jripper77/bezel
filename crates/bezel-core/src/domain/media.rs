@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use super::device::{DeviceModel, Family};
 use super::frame::Rect;
+use super::framing::{FramingGeometry, Pad, ResolvedFraming, geometry};
 use super::geometry::{Orientation, Size};
 use super::storage::{FileName, MAX_UPLOAD_BYTES, REV_C_MAX_UPLOAD_BYTES};
 use super::theme::AssetRef;
@@ -271,6 +272,10 @@ pub struct ConvertOptions {
     /// Part of the (rotated) source to keep, in source pixels; `None` keeps
     /// the whole picture. The result is then scaled to the panel.
     pub crop: Option<Rect>,
+    /// Where the scaled picture sits on the panel when its framing fits it
+    /// inside (D-2026-10-01-video-background-framing-3); `None`, today's
+    /// chain: it is scaled to the whole panel.
+    pub pad: Option<Pad>,
     /// Output frame rate (the vendor's optional 24 fps); `None` keeps the
     /// source's.
     pub frame_rate: Option<u32>,
@@ -282,30 +287,9 @@ pub struct ConvertOptions {
 /// clockwise, fills `target` without distortion ("cover"): what a video of
 /// another shape keeps before it is scaled to the panel. `None` when the
 /// shapes already match (the vendor then only scales). Edges are even, as
-/// yuv420p needs.
+/// yuv420p needs. The crop of the plain framing's [`geometry`].
 pub fn cover_crop(source: Size, quarter_turns: u8, target: Size) -> Option<Rect> {
-    let turned = if quarter_turns % 2 == 1 {
-        source.transposed()
-    } else {
-        source
-    };
-    let (sw, sh) = (u64::from(turned.width), u64::from(turned.height));
-    let (tw, th) = (u64::from(target.width), u64::from(target.height));
-    if sw == 0 || sh == 0 || tw == 0 || th == 0 || sw * th == sh * tw {
-        return None;
-    }
-    let even = |v: u64| u32::try_from(v & !1).unwrap_or(u32::MAX).max(2);
-    let (width, height) = if sw * th > sh * tw {
-        (even(sh * tw / th), even(sh))
-    } else {
-        (even(sw), even(sw * th / tw))
-    };
-    Some(Rect {
-        x: ((turned.width - width) / 2) & !1,
-        y: ((turned.height - height) / 2) & !1,
-        width,
-        height,
-    })
+    geometry(source, &ResolvedFraming::plain(quarter_turns), target).crop
 }
 
 /// The conversion that makes a video stand on `model`'s panel the way it
@@ -314,11 +298,27 @@ pub fn cover_crop(source: Size, quarter_turns: u8, target: Size) -> Option<Rect>
 /// distortion ([`cover_crop`]; no crop when its size is unknown or already
 /// has the panel's shape). Still pictures, and screens that store no media,
 /// need no adjustment; an animated GIF is fitted like a video. The frame
-/// rate and tone are left to the caller.
+/// rate and tone are left to the caller. [`framed_options`] with the plain
+/// framing.
 pub fn fitting_options(
     model: &DeviceModel,
     orientation: Orientation,
     media: &MediaInfo,
+) -> ConvertOptions {
+    framed_options(model, orientation, media, &ResolvedFraming::plain(0))
+}
+
+/// The conversion that puts a theme's video `media` on `model`'s panel as
+/// `framing` (resolved for the theme's canvas in `orientation`) frames it on
+/// the canvas: the framing turned to the panel ([`ResolvedFraming::turned`])
+/// and its [`geometry`] onto the panel's native picture. A video of unknown
+/// size is only turned. Still pictures, and screens that store no media,
+/// need no adjustment. The frame rate and tone are left to the caller.
+pub fn framed_options(
+    model: &DeviceModel,
+    orientation: Orientation,
+    media: &MediaInfo,
+    framing: &ResolvedFraming,
 ) -> ConvertOptions {
     let Some(profile) = UploadProfile::for_model(model) else {
         return ConvertOptions::default();
@@ -326,21 +326,31 @@ pub fn fitting_options(
     if media.video.is_none() {
         return ConvertOptions::default();
     }
-    let quarter_turns = orientation.quarter_turns_to(model.native_orientation);
-    ConvertOptions {
-        quarter_turns,
-        crop: media
-            .dimensions
-            .and_then(|size| cover_crop(size, quarter_turns, profile.video_size)),
-        ..ConvertOptions::default()
-    }
+    let on_panel = framing.turned(orientation.quarter_turns_to(model.native_orientation));
+    let framed = match media.dimensions {
+        Some(size) => geometry(size, &on_panel, profile.video_size),
+        None => FramingGeometry::turning(on_panel.turns, profile.video_size),
+    };
+    ConvertOptions::from_geometry(&framed)
 }
 
 impl ConvertOptions {
+    /// The options that turn, crop and pad as `geometry` says, the rest
+    /// left as it is.
+    pub fn from_geometry(geometry: &FramingGeometry) -> Self {
+        Self {
+            quarter_turns: geometry.turns,
+            crop: geometry.crop,
+            pad: geometry.pad,
+            ..Self::default()
+        }
+    }
+
     /// True when the options leave the picture as it is.
     pub fn is_identity(&self) -> bool {
         self.quarter_turns.is_multiple_of(4)
             && self.crop.is_none()
+            && self.pad.is_none()
             && self.frame_rate.is_none()
             && self.tone == Tone::Natural
     }
@@ -369,7 +379,7 @@ pub const MAX_RESAMPLED_FPS: u32 = 30;
 
 /// A conversion into a screen's video profile. The output is always H.264
 /// with yuv420p pixels, no audio, exactly `size` pixels (the vendor chain:
-/// rotate, crop, scale, square pixels, CRF 20).
+/// rotate, crop, scale, pad, square pixels, CRF 20).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TranscodeTarget {
     /// Output container: [`MediaFormat::Mp4`] or [`MediaFormat::H264`].
@@ -382,6 +392,9 @@ pub struct TranscodeTarget {
     pub quarter_turns: u8,
     /// Crop in source pixels after the rotation; `None` = whole picture.
     pub crop: Option<Rect>,
+    /// Where the scaled picture sits in `size`, and the color around it;
+    /// `None` = scaled to the whole `size` (today's chain).
+    pub pad: Option<Pad>,
     /// Output frame rate; `None` keeps the source's.
     pub frame_rate: Option<u32>,
     /// Colour treatment.
@@ -393,14 +406,56 @@ pub struct TranscodeTarget {
     pub max_bytes: Option<u64>,
 }
 
-/// Host-side decoding of a video or animated GIF into frames (the fallback
-/// for screens that cannot play stored videos).
+impl TranscodeTarget {
+    /// How the source becomes the output picture: turned, cropped, scaled to
+    /// `size` or padded into it.
+    pub fn geometry(&self) -> FramingGeometry {
+        FramingGeometry {
+            turns: self.quarter_turns % 4,
+            crop: self.crop,
+            size: self.size,
+            pad: self.pad,
+        }
+    }
+}
+
+/// Highest rate a studio preview decodes a video background at
+/// (D-2026-10-01-video-background-framing-5).
+pub const PREVIEW_FPS: u32 = 15;
+
+/// Host-side decoding of a video or animated GIF into frames: for screens
+/// that cannot play stored videos, and for previews. The decoder hands over
+/// the whole source picture, never turned or cropped, scaled to `size`; the
+/// caller frames each picture with the [`geometry`] of its framing, so a
+/// framing edit never restarts the decoder
+/// (D-2026-10-01-video-background-framing-3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StreamSpec {
-    /// Size of the frames produced (the source covers it, cropped to fit).
+    /// Size of the frames produced: the whole source picture scaled to it.
     pub size: Size,
     /// Frames per second produced; callers cap it to the link's rate.
     pub fps: u32,
+}
+
+impl StreamSpec {
+    /// Decoding a `source` picture shown on `canvas`: its own shape, scaled
+    /// down (never up) so that its longer side is at most twice the
+    /// canvas's longer side, at `fps`.
+    pub fn raw(source: Size, canvas: Size, fps: u32) -> Self {
+        let longest = u64::from(source.width.max(source.height));
+        let limit = 2 * u64::from(canvas.width.max(canvas.height));
+        if longest <= limit || longest == 0 {
+            return Self { size: source, fps };
+        }
+        let side = |v: u32| {
+            let scaled = (u64::from(v) * limit + longest / 2) / longest;
+            u32::try_from(scaled.max(1)).unwrap_or(u32::MAX)
+        };
+        Self {
+            size: Size::new(side(source.width), side(source.height)),
+            fps,
+        }
+    }
 }
 
 /// One way a file differs from what the screen accepts.
@@ -576,6 +631,7 @@ impl UploadProfile {
             b_frames: self.b_frames,
             quarter_turns: options.quarter_turns % 4,
             crop: options.crop,
+            pad: options.pad,
             frame_rate: options.frame_rate,
             tone: options.tone,
             max_bytes: Some(self.max_upload_bytes),
@@ -602,13 +658,34 @@ impl UploadProfile {
     }
 }
 
-/// The name a theme's video has on a screen: the asset's file name, the
-/// vendor's suffix for a copy turned to the panel (`_90`, `_180`, `_270`
-/// clockwise) and the screen's video extension, as an upload name
-/// (`assets/AMD.mp4` turned once for an MP4 screen: `amd_90.mp4`). The
-/// runtime looks for it on a screen; the cleanup assistant never suggests
-/// it (D-2026-09-30-storage-manager-9).
-pub fn device_video_name(asset: &AssetRef, quarter_turns: u8, profile: &UploadProfile) -> FileName {
+/// The name a theme's video has on a screen (D-2026-10-01-video-background-
+/// framing-4): the asset's file name, the vendor's suffix for a copy turned
+/// to the panel (`_90`, `_180`, `_270` clockwise, from `framing.turns`), for
+/// a framing other than the plain one `_f` and its 8 hex
+/// [`ResolvedFraming::fingerprint`], and the screen's video extension, as an
+/// upload name (`assets/AMD.mp4` turned once for an MP4 screen:
+/// `amd_90.mp4`; zoomed: `amd_90_f1a2b3c4.mp4`). `framing` is the theme's
+/// resolved framing turned to the panel ([`ResolvedFraming::turned`]): its
+/// turns are the total ones (the pre-turned Dragon Ball video: none, so
+/// `dragon.mp4`). A long stem is shortened, never the suffixes. The runtime
+/// looks for it on a screen; the cleanup assistant never suggests it
+/// (D-2026-09-30-storage-manager-9).
+pub fn device_video_name(
+    asset: &AssetRef,
+    framing: &ResolvedFraming,
+    profile: &UploadProfile,
+) -> FileName {
+    video_name(asset, framing.turns, framing.fingerprint(), profile)
+}
+
+/// [`device_video_name`] from the total `quarter_turns` and the framing's
+/// `fingerprint` (`None`: plain).
+pub(crate) fn video_name(
+    asset: &AssetRef,
+    quarter_turns: u8,
+    fingerprint: Option<u32>,
+    profile: &UploadProfile,
+) -> FileName {
     let file = asset.0.rsplit(['/', '\\']).next().unwrap_or_default();
     let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
     let turned = match quarter_turns % 4 {
@@ -617,9 +694,15 @@ pub fn device_video_name(asset: &AssetRef, quarter_turns: u8, profile: &UploadPr
         3 => "_270",
         _ => "",
     };
+    let framed = fingerprint.map_or_else(String::new, |hash| format!("_f{hash:08x}"));
     let extension = profile.video_format.extensions().first().copied();
     let extension = extension.unwrap_or_default();
-    FileName::suggest(&format!("{stem}{turned}.{extension}"), extension)
+    // Every character of the stem becomes at most one of the name: keeping
+    // `room` characters leaves room for the suffixes.
+    let suffixes = turned.len() + framed.len() + extension.len() + 1;
+    let room = FileName::MAX_BYTES.saturating_sub(suffixes);
+    let stem: String = stem.chars().take(room).collect();
+    FileName::suggest(&format!("{stem}{turned}{framed}.{extension}"), extension)
 }
 
 #[cfg(test)]
@@ -770,6 +853,9 @@ pub(crate) mod tests {
 
     use crate::domain::catalog::model_by_id;
     use crate::domain::device::ModelId;
+    use crate::domain::framing::{
+        FramingPosition, PanelLayout, Permille, ResolvedFraming, VideoFit, VideoFraming, Zoom,
+    };
 
     /// An MP4 in the rev C profile of a panel whose native size is `size`.
     pub(crate) fn mp4(size: Size, bytes: u64) -> MediaInfo {
@@ -925,19 +1011,34 @@ pub(crate) mod tests {
     #[test]
     fn transcode_target_carries_the_profile_and_the_options() {
         let p = profile("turing-8.8").unwrap();
+        let pad = Pad {
+            scaled: Size::new(480, 960),
+            x: 0,
+            y: 480,
+            color: crate::domain::frame::Rgba::BLACK,
+        };
         let options = ConvertOptions {
             quarter_turns: 5,
             crop: Some(Rect::new(0, 0, 100, 400)),
+            pad: Some(pad),
             frame_rate: Some(24),
             tone: Tone::Darkened,
         };
         assert!(!options.is_identity());
         assert!(ConvertOptions::default().is_identity());
+        let padded = ConvertOptions {
+            pad: Some(pad),
+            ..ConvertOptions::default()
+        };
+        assert!(!padded.is_identity(), "a pad changes the picture");
         let t = p.transcode_target(options);
         assert_eq!(t.format, MediaFormat::Mp4);
         assert_eq!(t.size, Size::new(480, 1920));
         assert_eq!(t.quarter_turns, 1);
         assert_eq!(t.crop, Some(Rect::new(0, 0, 100, 400)));
+        assert_eq!(t.pad, Some(pad));
+        let g = t.geometry();
+        assert_eq!((g.turns, g.crop, g.size, g.pad), (1, t.crop, t.size, t.pad));
         assert_eq!(t.frame_rate, Some(24));
         assert_eq!(t.tone, Tone::Darkened);
         assert_eq!(t.b_frames, BFrames::Allowed);
@@ -947,6 +1048,125 @@ pub(crate) mod tests {
             usb.transcode_target(ConvertOptions::default()).max_bytes,
             Some(MAX_UPLOAD_BYTES)
         );
+    }
+
+    #[test]
+    fn device_video_names_carry_the_framing() {
+        let rev_c = profile("turing-8.8").unwrap();
+        let screen = model_by_id(ModelId("turing-8.8")).expect("model");
+        let panel = Some(PanelLayout::of(screen));
+        let to_panel = Orientation::Landscape.quarter_turns_to(screen.native_orientation);
+        let on_panel = |video: Size| {
+            VideoFraming::default()
+                .resolve(Some(video), Orientation::Landscape, panel)
+                .turned(to_panel)
+        };
+        let name = |asset: &str, framing: &ResolvedFraming| {
+            device_video_name(&AssetRef(asset.into()), framing, &rev_c).to_string()
+        };
+        // The user's Dragon Ball theme: its pre-turned 480x1920 video is the
+        // vendor's `dragon.mp4` the screen already stores.
+        let dragon = on_panel(Size::new(480, 1920));
+        assert_eq!(dragon.turns, 0);
+        assert_eq!(name("assets/dragon.mp4", &dragon), "dragon.mp4");
+        // A landscape clip in the same theme is turned once, as before.
+        let clip = on_panel(Size::new(1920, 1080));
+        assert_eq!(name("assets/AMD.mp4", &clip), "amd_90.mp4");
+        // Any other framing gets a file of its own.
+        let zoomed = ResolvedFraming {
+            zoom: Zoom::from_percent(125),
+            ..clip
+        };
+        assert_eq!(name("assets/AMD.mp4", &zoomed), "amd_90_f8ca275f8.mp4");
+        let fitted = ResolvedFraming {
+            fit: VideoFit::Contain,
+            ..dragon
+        };
+        assert_eq!(name("assets/dragon.mp4", &fitted), "dragon_f8ec2b24d.mp4");
+        // Moved up on the canvas is moved right on the panel turned once.
+        let up = VideoFraming {
+            position: FramingPosition {
+                y: Permille::from_permille(400),
+                ..FramingPosition::CENTER
+            },
+            ..VideoFraming::default()
+        };
+        let up = up
+            .resolve(Some(Size::new(1920, 1080)), Orientation::Landscape, panel)
+            .turned(to_panel);
+        assert_eq!(up.canonical(), "fit=cover;zoom=100;x=600;y=500");
+        let up_name = name("assets/AMD.mp4", &up);
+        assert!(up_name.starts_with("amd_90_f") && up_name != "amd_90_f8ca275f8.mp4");
+        // TUR_USB keeps its raw stream extension.
+        let usb = profile("turing-usb-8.8").unwrap();
+        let usb_name = device_video_name(&AssetRef("assets/bg.mp4".into()), &zoomed, &usb);
+        assert_eq!(usb_name.as_str(), "bg_90_f8ca275f8.h264");
+        // A long stem is shortened, never the suffixes.
+        let long = format!("assets/{}.mp4", "x".repeat(300));
+        let shortened = name(&long, &zoomed);
+        assert_eq!(shortened.len(), FileName::MAX_BYTES);
+        assert!(shortened.ends_with("x_90_f8ca275f8.mp4"), "{shortened}");
+    }
+
+    #[test]
+    fn framed_options_turn_the_framing_to_the_panel() {
+        let screen = model_by_id(ModelId("turing-8.8")).expect("model");
+        let panel = Some(PanelLayout::of(screen));
+        // Dragon Ball goes to the 8.8" as it is.
+        let dragon = mp4(Size::new(480, 1920), 2_588_343);
+        let auto =
+            VideoFraming::default().resolve(dragon.dimensions, Orientation::Landscape, panel);
+        let options = framed_options(screen, Orientation::Landscape, &dragon, &auto);
+        assert!(options.is_identity(), "{options:?}");
+        // Fitted on the canvas: fitted on the panel, turned.
+        let wide = mp4(Size::new(1920, 1080), 1000);
+        let contain = ResolvedFraming {
+            fit: VideoFit::Contain,
+            ..ResolvedFraming::plain(0)
+        };
+        let fitted = framed_options(screen, Orientation::Landscape, &wide, &contain);
+        assert_eq!((fitted.quarter_turns, fitted.crop), (1, None));
+        let pad = fitted.pad.expect("padded");
+        assert_eq!((pad.scaled, pad.x, pad.y), (Size::new(480, 852), 0, 534));
+        // Unknown size: turned only; a picture or a screen without storage:
+        // nothing.
+        let unknown = MediaInfo {
+            dimensions: None,
+            ..wide.clone()
+        };
+        let turned = framed_options(screen, Orientation::Landscape, &unknown, &contain);
+        assert_eq!(
+            turned,
+            ConvertOptions {
+                quarter_turns: 1,
+                ..ConvertOptions::default()
+            }
+        );
+        let picture = still(MediaFormat::Png, 1);
+        let none = ConvertOptions::default();
+        assert_eq!(
+            framed_options(screen, Orientation::Landscape, &picture, &contain),
+            none
+        );
+        let tiny = model_by_id(ModelId("weact-fs-0.96")).expect("model");
+        assert_eq!(
+            framed_options(tiny, Orientation::Landscape, &wide, &contain),
+            none
+        );
+    }
+
+    #[test]
+    fn host_decoding_keeps_the_whole_picture_at_most_twice_the_canvas() {
+        let canvas = Size::new(1920, 480);
+        let dragon = StreamSpec::raw(Size::new(480, 1920), canvas, PREVIEW_FPS);
+        assert_eq!(dragon.size, Size::new(480, 1920), "never scaled up");
+        assert_eq!(dragon.fps, 15);
+        let big = StreamSpec::raw(Size::new(7680, 4320), canvas, 10);
+        assert_eq!(big.size, Size::new(3840, 2160));
+        let odd = StreamSpec::raw(Size::new(8001, 3), canvas, 10);
+        assert_eq!(odd.size, Size::new(3840, 1));
+        let tiny = StreamSpec::raw(Size::new(0, 0), canvas, 10);
+        assert_eq!(tiny.size, Size::new(0, 0));
     }
 
     #[test]

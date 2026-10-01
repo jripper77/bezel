@@ -361,8 +361,122 @@ tema por cima.
 
 - Se o vídeo ainda não está na tela, ela mostra a imagem de capa do tema e o
   aplicativo oferece **Enviar para a tela**; o `bezel run` imprime o comando
-  `bezel storage put` exato.
+  `bezel storage put` exato (para um vídeo reenquadrado, ele indica o
+  aplicativo; veja [Enquadrar o vídeo](#enquadrar-o-vídeo)).
 - Telas que não tocam vídeo recebem o vídeo decodificado no computador, o que
   precisa do ffmpeg (`bezel run --ffmpeg CAMINHO` se ele não estiver no `PATH`).
 - Para dar a um tema um vídeo de fundo pelo aplicativo (um vídeo ou um GIF
   animado), veja [Um vídeo no fundo](first-theme.md#um-vídeo-no-fundo).
+
+### Enquadrar o vídeo
+
+O enquadramento decide como o vídeo ocupa a tela: girado, preenchendo ou
+cabendo, com zoom e posição. Sem nenhum elemento selecionado, o painel
+**Propriedades** mostra o tema; em **Fundo**, um vídeo tem o grupo
+**Enquadramento**.
+
+**Auto.** Alguns vídeos já vêm guardados girados para a tela: os temas
+horizontais do app do fabricante guardam, para um tema de 1920×480 na 8,8", um
+vídeo de 480×1920, o formato do próprio painel. Um vídeo com exatamente o
+tamanho nativo do painel, num tema na outra orientação (um tema horizontal na
+8,8", cujo painel é vertical), é girado de volta sozinho e toca em pé por
+baixo do tema: a **Rotação** mostra então, por exemplo, **Auto · 270°**, e uma
+nota diz que o Auto girou o vídeo. Qualquer outro vídeo fica em 0°. Temas
+importados, os temas que já estão na biblioteca e um vídeo que você adiciona
+começam todos em Auto, e o Bezel lê sozinho o tamanho de um MP4, então o Auto
+funciona sem o ffmpeg.
+
+Os controles:
+
+- **Rotação**: **Auto** (com o ângulo que escolheu), **0°**, **90°**, **180°**
+  ou **270°**, no sentido horário.
+- **Ajuste**: **Preencher** (o padrão) cobre a tela toda e corta o que sobra;
+  **Caber** mostra o vídeo inteiro, com a **Cor das sobras** em volta (preta
+  por padrão; a cor só aparece com Caber).
+- **Zoom**: de 100% a 400%, de 5% em 5%, pelo controle deslizante ou pelo
+  número.
+- **Posição X** e **Posição Y**: de 0% a 100%. Onde o vídeo passa da tela,
+  elas escolhem a parte que aparece (com Preencher a borda nunca fica vazia);
+  onde ele é menor, elas o posicionam. **Centralizar** volta as duas a 50%.
+- **Redefinir enquadramento**: volta a Auto, Preencher, 100%, centralizado.
+
+Cada mudança é um passo de Desfazer (Ctrl+Z) e Refazer.
+
+**No canvas.** **Enquadrar no canvas**, ou um duplo clique no vídeo longe dos
+elementos, enquadra o vídeo direto na área de edição, que mostra as bordas do
+vídeo e uma grade:
+
+- arraste para movê-lo; gire a roda do mouse para dar zoom em volta do
+  ponteiro (Ctrl+roda continua dando zoom na visualização);
+- as setas o movem 1% (com Shift, 10%); + e − dão zoom de 5%; 0 volta o zoom
+  e a posição ao início;
+- Esc, Enter ou **Concluir** terminam.
+
+Uma barra no alto da área de edição mostra o zoom, a posição, essas teclas e
+**Concluir**; leitores de tela anunciam o zoom e a posição. Enquanto isso os
+elementos não podem ser selecionados; Desfazer, Refazer e Salvar continuam
+funcionando. Cada arrasto, e cada sequência de giros da roda, é um passo de
+desfazer.
+
+**A prévia.** A área de edição toca o vídeo por baixo dos elementos, já
+enquadrado, a até 15 imagens por segundo; uma mudança no enquadramento aparece
+na hora. Ela mostra o pôster (a imagem de capa) no lugar:
+
+- quando o movimento está reduzido no computador (a opção de reduzir
+  movimento do sistema); o **Enquadramento** avisa;
+- sem o ffmpeg: o **Enquadramento** avisa e oferece **Como instalar o
+  ffmpeg** ([Instalar o ffmpeg](ffmpeg.md)). O enquadramento continua editável
+  e é salvo, e o Auto continua funcionando.
+
+Ela não toca enquanto a janela está escondida. A imagem de capa é tirada com o
+enquadramento quando o vídeo é adicionado, e de novo quando o tema é salvo com
+outro enquadramento (com o ffmpeg; sem ele a imagem de capa fica como estava).
+
+**Na tela.** Uma tela que toca vídeo sozinha repete uma cópia do vídeo feita
+para o enquadramento:
+
+- Com Preencher, 100% e centralizado, qualquer que seja a rotação, a cópia
+  mantém os nomes do fabricante: o nome do vídeo, com `_90`, `_180` ou `_270`
+  quando a cópia é girada para o painel (`amd_90.mp4`). O vídeo do Dragon
+  Ball, guardado girado para a 8,8", não precisa girar nela: ele é o
+  `dragon.mp4`, e um vídeo assim, já no formato da tela, vai como está, sem
+  conversão e sem o ffmpeg. Um arquivo com esse nome que já esteja na tela com
+  exatamente o tamanho do vídeo é usado e nada é enviado; um de outro tamanho é
+  outro arquivo, que **Enviar para a tela** substitui depois de uma
+  confirmação.
+- Caber, um zoom ou outra posição geram uma cópia própria, convertida com o
+  ffmpeg: o nome dela ganha `_f` e 8 dígitos hexadecimais (por exemplo
+  `dragon_f8ec2b24d.mp4`), então **Enviar para a tela** envia um arquivo novo
+  a cada reenquadramento, e voltar a um enquadramento já enviado encontra a
+  cópia dele de novo. Sem o ffmpeg, **Enviar para a tela** recusa um vídeo
+  reenquadrado e diz como instalá-lo.
+- O Bezel nunca apaga as cópias anteriores, e o
+  [assistente de limpeza](#o-assistente-de-limpeza) também não as sugere (ele
+  nunca sugere um vídeo que um tema toca, em nenhum enquadramento): apague as
+  que você não usa mais em **Tela → Armazenamento** (**Apagar…**) ou com
+  `bezel storage rm CAMINHO --yes`.
+- Os [25 MiB por arquivo](#qual-o-tamanho-máximo-de-um-arquivo) das telas
+  Turing rev C continuam valendo: uma conversão é feita para caber, e um vídeo
+  enviado como está precisa ele mesmo caber no limite, senão nada é enviado.
+- Telas que não tocam vídeo recebem o vídeo decodificado no computador e
+  enquadrado do mesmo jeito.
+
+**Pela linha de comando.** A linha de comando respeita o enquadramento que o
+tema tem, mas não o muda. O `bezel run` lê o tamanho do vídeo no cabeçalho do
+MP4 (sem precisar do ffmpeg) e procura a cópia pelo nome que o enquadramento
+dá. Quando a cópia não está na tela, ele imprime o comando `bezel storage put`
+para um vídeo com o enquadramento padrão e, para um vídeo reenquadrado, indica
+**Enviar para a tela** no aplicativo, que faz a cópia enquadrada.
+
+No arquivo do tema (o `theme.json` dentro do `.bezeltheme`), o enquadramento é
+um objeto `framing` opcional no fundo de vídeo, omitido quando tudo está no
+padrão:
+
+```json
+"framing": {"rotation": 270, "fit": "contain", "zoom": 1.25, "position": {"x": 0.5, "y": 0.4}, "padColor": "#000000ff"}
+```
+
+`rotation` é 0, 90, 180 ou 270 (ausente: Auto) e qualquer outro valor é um
+erro; `fit` é `cover` (Preencher) ou `contain` (Caber); `zoom` vai de 1 a 4 e
+cada eixo de `position` de 0 a 1, e números fora da faixa são trazidos para
+dentro dela. Uma chave ausente fica com o padrão.

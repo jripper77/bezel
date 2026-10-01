@@ -1,11 +1,12 @@
 // An in-memory backend for demo mode: a simulated screen, sensors that move,
 // themes, media and an approximate renderer. Nothing here reaches hardware.
-import { DEMO_BACK_FROM_DESKTOP, DEMO_LIBRARY, DEMO_LOCAL_FILES, DEMO_ORIGINALS, DEMO_ORIGINALS_FOLDER, DEMO_PANELS, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
+import { DEMO_BACK_FROM_DESKTOP, DEMO_LIBRARY, DEMO_LOCAL_FILES, DEMO_ORIGINALS, DEMO_ORIGINALS_FOLDER, DEMO_PANELS, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_THEME_VIDEOS, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
 import { demoFindings, demoPlanAcross, demoPlanRename, demoPlanRestore, demoRank, demoSameFile } from './demo-manager.js';
 import { DEMO_THEME } from './demo-theme.js';
-import { DEMO_GIF_FRAME_MS, renderApprox } from './demo-render.js';
+import { DEMO_GIF_FRAME_MS, DEMO_VIDEO_LOOP_MS, renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
 import { IMAGE_EXTENSIONS as PICTURES, droppable, extensionOf, fileNameOf } from './editor/background.js';
+import { framingOf, isPlainFraming, pictureBox, resolvedRotation } from './editor/video-framing.js';
 import { pickLocale } from './i18n/index.js';
 import { AXES, SCOPES } from './theme-filter.js';
 
@@ -220,12 +221,134 @@ export function demoTurns(orientation) {
   return (2 + 4 - (QUARTERS[orientation] ?? 2)) % 4;
 }
 
-/** Where the 8.8" keeps a theme's video (`assets/nebula.mp4`, landscape: `nebula_90.mp4`). */
-export function demoVideoName(theme) {
-  const file = theme.background.asset.split('/').pop();
+/** A theme video asset's name stem on a screen: `assets/Nebula Azul.mp4` → `nebula_azul`. */
+function videoStem(asset) {
+  const file = fileNameOf(asset);
   const stem = file.includes('.') ? file.slice(0, file.lastIndexOf('.')) : file;
-  return demoSuggestName(`${stem}${['', '_90', '_180', '_270'][demoTurns(theme.orientation)]}.mp4`, 'mp4');
+  return demoSuggestName(`${stem}.mp4`, 'mp4').slice(0, -'.mp4'.length);
 }
+
+/**
+ * The `_f` and 8 hex digits a re-framed video's name gets: FNV-1a over the
+ * demo's canonical framing (Fill, 100 % and centered: none). The core keeps
+ * its own canonical form (D-2026-10-01-video-background-framing-4).
+ */
+export function demoFramingSuffix(framing) {
+  if (isPlainFraming(framing)) return '';
+  const pad = framing.fit === 'contain' ? framing.padColor : '';
+  const canonical = [framing.fit, Math.round(framing.zoom * 100), Math.round(framing.position.x * 1000), Math.round(framing.position.y * 1000), pad].join(';');
+  let hash = 0x811c9dc5;
+  for (const c of canonical) hash = Math.imul(hash ^ c.codePointAt(0), 0x01000193) >>> 0;
+  return `_f${hash.toString(16).padStart(8, '0')}`;
+}
+
+/**
+ * How the 8.8" gets a theme's video, given what Auto is (`video_auto`) and
+ * the video's own size (`info`): the clockwise quarter turns in total (the
+ * framing's rotation and the theme's to the panel), whether it is sent as it
+ * is (no turn, Fill, 100 %, centered, already panel-native), and the name it
+ * has there: the vendor's by the total turns (`dragon.mp4`, `nebula_90.mp4`),
+ * plus `_f…` for another framing.
+ */
+export function demoThemeVideo(theme, auto = null, info = null) {
+  const framing = framingOf(theme.background);
+  const turns = (demoTurns(theme.orientation) + resolvedRotation(framing, auto) / 90) % 4;
+  const asIs = turns === 0 && isPlainFraming(framing) && info?.width === NATIVE.width && info?.height === NATIVE.height;
+  const name = `${videoStem(theme.background.asset)}${['', '_90', '_180', '_270'][turns]}${demoFramingSuffix(framing)}.mp4`;
+  return { turns, asIs, name };
+}
+
+/** Where the 8.8" keeps a theme's video (`assets/nebula.mp4`, landscape: `nebula_90.mp4`); see `demoThemeVideo`. */
+export function demoVideoName(theme, auto = null) {
+  return demoThemeVideo(theme, auto).name;
+}
+
+/** Whether a screen file named `fileName` is one of `asset`'s: any turn, any framing. */
+export function demoIsThemeVideo(asset, fileName) {
+  const name = String(fileName).toLowerCase();
+  const stem = videoStem(asset);
+  if (!name.startsWith(stem) || !name.endsWith('.mp4')) return false;
+  let rest = name.slice(stem.length, -'.mp4'.length);
+  const turn = ['_90', '_180', '_270'].find((suffix) => rest.startsWith(suffix));
+  if (turn) rest = rest.slice(turn.length);
+  return rest === '' || /^_f[0-9a-f]{8}$/.test(rest);
+}
+
+/**
+ * The panel (portrait form, like the catalog's) a theme's Auto is told
+ * against: the live screen's model, else the catalog's panel the canvas is
+ * turned from, else `null`.
+ * @param {{canvas: {width: number, height: number}, orientation: string}} theme
+ * @param {{width: number, height: number}|null} [livePanel]
+ */
+export function demoPanelFor(theme, livePanel = null) {
+  if (livePanel) return { width: livePanel.width, height: livePanel.height };
+  const { width, height } = theme.canvas;
+  const [w, h] = isHorizontal(theme.orientation) ? [height, width] : [width, height];
+  return DEMO_PANELS.some((p) => p.width === w && p.height === h) ? { width: w, height: h } : null;
+}
+
+/**
+ * What Auto is for a theme's video of `size` on `panel`, like the backend's
+ * `video_auto`: a panel-native video in a theme an odd number of quarter
+ * turns from the panel is already turned for it and gets the turns that
+ * cancel the theme's (a landscape theme on the 8.8": 270); else 0.
+ */
+export function demoVideoAuto(theme, size, panel) {
+  if (theme?.background?.type !== 'video' || !size) return { rotation: 0, size: null };
+  const turns = demoTurns(theme.orientation);
+  const native = Boolean(panel) && size.width === panel.width && size.height === panel.height;
+  return { rotation: native && turns % 2 === 1 ? (4 - turns) * 90 : 0, size: { width: size.width, height: size.height } };
+}
+
+/** Most pictures a second the preview's video decoder gives (the backend's PREVIEW_FPS). */
+export const DEMO_VIDEO_FPS = 15;
+/** A preview decoder no picture is asked of for this long ends, ms (D-2026-10-01-video-background-framing-5). */
+export const DEMO_DECODER_IDLE_MS = 2000;
+/** Where in its video the demo takes a poster, ms. */
+export const DEMO_POSTER_MS = 2000;
+
+/**
+ * The preview's simulated video decoder: at most one, for one video. The
+ * first picture asked for starts it, another video restarts it, and it ends
+ * when no picture is asked for during `DEMO_DECODER_IDLE_MS` (a hidden
+ * window, reduced motion). Pictures follow the clock, so a decoder that
+ * starts again resumes where the video would be.
+ * @param {{wait?: (fn: () => void, ms: number) => unknown, cancel?: (timer: unknown) => void, onState?: (state: 'running'|'stopped') => void}} [deps]
+ */
+export function createDemoDecoder({ wait = (fn, ms) => setTimeout(fn, ms), cancel = (timer) => clearTimeout(timer), onState = () => {} } = {}) {
+  let playing = null;
+  let idle = null;
+  const epochs = new Map();
+  function stop() {
+    if (idle !== null) cancel(idle);
+    idle = null;
+    if (playing === null) return;
+    playing = null;
+    onState('stopped');
+  }
+  return {
+    /** The picture of `asset` (a video `durationMs` long) due at `nowMs`: its time in the video and when the next is due. */
+    picture(asset, durationMs, nowMs) {
+      if (playing !== asset) {
+        playing = asset;
+        onState('running');
+      }
+      if (!epochs.has(asset)) epochs.set(asset, nowMs);
+      if (idle !== null) cancel(idle);
+      idle = wait(stop, DEMO_DECODER_IDLE_MS);
+      const elapsed = nowMs - epochs.get(asset);
+      const period = 1000 / DEMO_VIDEO_FPS;
+      return { ms: elapsed % Math.max(1, durationMs), nextMs: Math.max(1, Math.ceil(period - (elapsed % period))) };
+    },
+    /** The video it decodes now, or `null`. */
+    playing: () => playing,
+    stop,
+  };
+}
+
+/** The guide pages `open_guide` opens. */
+export const DEMO_GUIDE_PAGES = Object.freeze(['ffmpeg']);
 
 /**
  * Holds a job phase in the middle until it is let go: a test sees the job
@@ -285,13 +408,6 @@ export function demoFileThumbnail(name, kind) {
   return `data:image/svg+xml,${encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
 }
 
-/** The names a theme's video `asset` may have on the 8.8", in all four turns. */
-export function demoThemeVideoNames(asset) {
-  const file = asset.split('/').pop();
-  const stem = file.includes('.') ? file.slice(0, file.lastIndexOf('.')) : file;
-  return ['', '_90', '_180', '_270'].map((turn) => demoSuggestName(`${stem}${turn}.mp4`, 'mp4'));
-}
-
 /**
  * A simulated screen storage: capacity, files, uploads with progress over
  * time and cancel, deletes, playback and the boot media, with the same
@@ -302,7 +418,7 @@ export function demoThemeVideoNames(asset) {
  * With `hold`, every phase of a job waits after its first step until
  * `letGo` (tests only).
  */
-function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, hold = false, hung = () => false }) {
+function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, hold = false, hung = () => false, videoInfo = () => null, autoOf = () => null }) {
   const layout = chosen.storage ?? DEMO_STORAGE;
   const card = chosen.card !== false;
   const files = new Map(layout.files.filter(([p]) => card || !p.startsWith('sd/')));
@@ -401,9 +517,9 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
   }
   /** The boot media Bezel set and every video a theme plays (D-2026-09-30-storage-manager-9). */
   function guarded() {
-    const names = new Set(themes().filter((t) => t?.background?.type === 'video').flatMap((t) => demoThemeVideoNames(t.background.asset)));
+    const assets = themes().filter((t) => t?.background?.type === 'video').map((t) => t.background.asset);
     const isBoot = (path) => Boolean(state.boot) && demoSameFile(state.boot, path);
-    const isThemeVideo = (path) => path.split('/')[1] === 'video' && names.has(path.split('/')[2].toLowerCase());
+    const isThemeVideo = (path) => path.split('/')[1] === 'video' && assets.some((asset) => demoIsThemeVideo(asset, path.split('/')[2]));
     return { isBoot, isThemeVideo };
   }
   /** Sizes as listed: a TUR_USB screen tells none, the catalog's stand in (D-2026-09-30-storage-manager-11). */
@@ -464,11 +580,19 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
     return null;
   }
 
+  /**
+   * How the live theme's video reaches the screen: its name there (Auto and
+   * the framing included); a file sent as it is counts only with the
+   * asset's exact bytes, a converted one when present
+   * (D-2026-10-01-video-background-framing-4).
+   */
   function videoOfTheme() {
     const current = theme();
     if (!live() || current.background?.type !== 'video') return null;
-    const name = demoVideoName(current);
-    const stored = ['internal', ...(card ? ['sd'] : [])].map((m) => `${m}/video/${name}`).find((p) => files.get(p) > 0);
+    const info = videoInfo(current.background.asset);
+    const { name, asIs } = demoThemeVideo(current, autoOf(current), info);
+    const holds = (p) => (asIs ? files.get(p) === info.bytes : files.get(p) > 0);
+    const stored = ['internal', ...(card ? ['sd'] : [])].map((m) => `${m}/video/${name}`).find(holds);
     if (stored) return { state: 'onDevice', path: stored };
     return { state: 'missing', path: `${card ? 'sd' : 'internal'}/video/${name}` };
   }
@@ -490,7 +614,7 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
     };
   }
 
-  function check(local, medium, cap, name) {
+  function check(local, medium, cap, name, turns = demoTurns(theme().orientation)) {
     const kind = demoKindOf(local.name);
     if (!kind) return refused('wrongKind');
     if (!local.size) return refused('emptyFile');
@@ -508,7 +632,7 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       const candidates = [...files.keys()].filter((p) => p.startsWith(`${medium}/`)).map((p) => entry(p)).sort((a, b) => b.size - a.size);
       return refused('noSpace', { bytes: local.size, limit: free, candidates });
     }
-    const convert = needsConversion ? { ...NATIVE, quarterTurns: demoTurns(theme().orientation), cropped: local.width * NATIVE.height !== local.height * NATIVE.width } : null;
+    const convert = needsConversion ? { ...NATIVE, quarterTurns: turns, cropped: local.width * NATIVE.height !== local.height * NATIVE.width } : null;
     return readyAnswer(local, path, convert, cap);
   }
 
@@ -826,8 +950,11 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       if (live() !== key || video?.state !== 'missing') return refuse('noVideo', 'the live screen is not missing the theme video');
       const [medium, , name] = video.path.split('/');
       const asset = theme().background.asset;
-      const local = { name: asset.split('/').pop(), source: asset, size: 18_874_368, format: 'MP4', width: 1920, height: 480, native: false };
-      return Promise.resolve(check(local, medium, capOf(key), name));
+      const info = videoInfo(asset);
+      // A framing that leaves a panel-native video as it is sends the file without converting it.
+      const { turns, asIs } = demoThemeVideo(theme(), autoOf(theme()), info);
+      const local = { name: fileNameOf(asset), source: asset, size: info?.bytes ?? 18_874_368, format: 'MP4', width: info?.width ?? 1920, height: info?.height ?? 480, native: asIs };
+      return Promise.resolve(check(local, medium, capOf(key), name, turns));
     },
     runUpload: async (ticket, overwrite) => {
       const p = pending.get(ticket);
@@ -878,6 +1005,8 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       return () => listeners.delete(cb);
     },
     videoOfTheme,
+    /** Whether ffmpeg is there (or was located): it decodes the preview's video. */
+    toolsReady: () => tools.ready,
     /** What the simulated screen plays, shows at power-up and starts with, and the catalog. */
     storageState: () => ({ ...state, files: new Map(files), catalog: catalog.entries.map((e) => ({ ...e })), limit: catalog.limit }),
   };
@@ -885,10 +1014,12 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
 
 /**
  * @param {string} scenario key of SCENARIOS
- * @param {{now?: () => number, delay?: (ms: number) => Promise<void>}} [clock]
- * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, onSensorsShown?: (keys: string[]) => void, languages?: readonly string[], hold?: boolean}} [hooks]
- *   what the window does, the sensors the list shows, the system's
- *   languages, and whether job phases wait in the middle until `letGo` (tests)
+ * @param {{now?: () => number, delay?: (ms: number) => Promise<void>, wait?: (fn: () => void, ms: number) => unknown, cancel?: (timer: unknown) => void}} [clock]
+ *   seconds now, a pause, and the timer the preview's video decoder idles out with
+ * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, onSensorsShown?: (keys: string[]) => void, onDecoder?: (state: 'running'|'stopped') => void, onGuide?: (page: string, language: string) => void, languages?: readonly string[], hold?: boolean}} [hooks]
+ *   what the window does, the sensors the list shows, the preview's video
+ *   decoder, the guide pages opened, the system's languages, and whether
+ *   job phases wait in the middle until `letGo` (tests)
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const now = clock.now ?? (() => Date.now() / 1000);
@@ -909,14 +1040,30 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   // Which themes the Themes tab lists, as remembered.
   let themeFilter = { scope: null, axis: 'all' };
   const images = [];
-  // Videos and animated GIFs added for a background (with their posters),
-  // and the sizes of files dropped on the window, by demo source.
+  // Videos and animated GIFs added for a background (with their posters,
+  // ref → data URL, and their own size, play time and bytes), and the sizes
+  // of files dropped on the window, by demo source.
   const videos = new Map();
-  const posters = [];
+  const posters = new Map();
+  const videoFiles = new Map(Object.entries(DEMO_THEME_VIDEOS));
   const dropped = new Map();
+  // The scenario theme's video is in its assets, with its poster.
+  const ownVideo = DEMO_THEME_VIDEOS[theme.background?.asset];
+  if (ownVideo?.poster) {
+    const ref = theme.background.asset;
+    posters.set(ownVideo.poster, ownVideo.posterUrl);
+    videos.set(ref, { ref, kind: 'video', animated: false, dataUrl: null, poster: ownVideo.poster, bytes: ownVideo.bytes, durationMs: ownVideo.durationMs });
+  }
   /** Screen key → last orientation shown on it or chosen for it. */
   const remembered = new Map();
   const modelOf = (key) => devices.screens.find((s) => s.key === key)?.models[0];
+  /** What Auto is for a theme, told against the live screen's panel (`video_auto`). */
+  const autoOf = (t) => {
+    const info = videoFiles.get(t?.background?.asset) ?? null;
+    if (!t?.canvas) return demoVideoAuto(t, info, null);
+    const model = live ? modelOf(live) : null;
+    return demoVideoAuto(t, info, demoPanelFor(t, model));
+  };
   // The `hung` scenario: the screen stops reading until it is restarted. The
   // `flaky` one: it drops once after going live and comes back by itself.
   const screenState = { hung: Boolean(chosen.hung), away: chosen.flaky ? DEMO_AWAY_SAMPLES : 0 };
@@ -930,9 +1077,30 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     screens: () => devices.screens,
     hold: Boolean(hooks.hold),
     hung: () => screenState.hung,
+    videoInfo: (ref) => videoFiles.get(ref) ?? null,
+    autoOf,
   });
-  const { videoOfTheme, ...storageApi } = storage;
-  const taken = () => new Set([...images, ...posters, ...videos.keys()]);
+  const { videoOfTheme, toolsReady, ...storageApi } = storage;
+  const taken = () => new Set([...images, ...posters.keys(), ...videos.keys()]);
+  const decoder = createDemoDecoder({ wait: clock.wait, cancel: clock.cancel, onState: (state) => hooks.onDecoder?.(state) });
+
+  /**
+   * What the preview shows of a theme's video background: its picture
+   * playing (ffmpeg there, motion allowed), else its poster, turned and
+   * framed; `null` without a video background or anything to show.
+   */
+  function videoPicture(next, motion, nowMs) {
+    const bg = next?.background;
+    if (bg?.type !== 'video') return null;
+    const info = videoFiles.get(bg.asset) ?? null;
+    const framing = framingOf(bg);
+    const rotation = resolvedRotation(framing, autoOf(next));
+    const sideways = rotation % 180 === 90;
+    const source = info ? { width: info.width, height: info.height } : { width: sideways ? next.canvas.height : next.canvas.width, height: sideways ? next.canvas.width : next.canvas.height };
+    const shown = { source, preTurned: Boolean(info?.preTurned), rotation, framing, box: pictureBox(source, rotation, framing, next.canvas) };
+    if (motion && toolsReady()) return { ...shown, ...decoder.picture(bg.asset, info?.durationMs ?? DEMO_VIDEO_LOOP_MS, nowMs) };
+    return bg.poster ? { ...shown, ms: DEMO_POSTER_MS, nextMs: null } : null;
+  }
   /** A free asset reference for `fileName`, like the backend's. */
   const freeRef = (fileName) => {
     const name = demoAssetName(fileName);
@@ -965,10 +1133,12 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     }
     const tools = await storageApi.mediaTools();
     const poster = tools.ready ? freeRef(`${ref.slice('assets/'.length, ref.lastIndexOf('.'))}-poster.png`) : null;
-    if (poster) posters.push(poster);
+    if (poster) posters.set(poster, DEMO_POSTER_URL);
     const animated = extension === 'gif';
     const durationMs = known?.durationMs ?? (animated ? 2_400 : 12_400);
     videos.set(ref, { ref, kind: animated ? 'image' : 'video', animated, dataUrl: animated ? DEMO_POSTER_URL : null, poster, bytes, durationMs });
+    // Its own size, as the backend reads it from the file (a dropped one: 1920x1080).
+    videoFiles.set(ref, { width: known?.width ?? 1920, height: known?.height ?? 1080, durationMs, bytes });
     return { ref, kind: 'video', poster, bytes, durationMs, posterError: poster ? null : { ...NO_POSTER } };
   }
   // The window, like the app: the close button hides it while a screen is
@@ -1025,12 +1195,28 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError, video: videoOfTheme(), reconnecting });
     },
     session: () => Promise.resolve({ theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location, minRefreshSeconds: DEMO_MIN_REFRESH }),
-    render: (next) => {
+    /** The preview, like `render_preview`: a video background plays with `motion` (see the bridge). */
+    render: (next, { motion = true } = {}) => {
       const started = performance.now();
       const t = now();
-      const frame = renderApprox(next, t);
-      return Promise.resolve({ ...frame, millis: performance.now() - started, nextMs: demoNextChange(next, t * 1000) });
+      const video = videoPicture(next, motion, t * 1000);
+      const frame = renderApprox(next, t, video);
+      const due = [demoNextChange(next, t * 1000), video?.nextMs ?? null].filter((ms) => ms !== null);
+      return Promise.resolve({ ...frame, millis: performance.now() - started, nextMs: due.length ? Math.min(...due) : null });
     },
+    /** What Auto is for the theme's video background, like `video_auto`. */
+    videoAuto: (next) => Promise.resolve(autoOf(next)),
+    /** Opens a guide page (the demo shows which on the page). */
+    openGuide: (page, language) => {
+      if (!DEMO_GUIDE_PAGES.includes(page) || !['pt-BR', 'en'].includes(language)) {
+        const detail = `guide page "${page}" in "${language}"`;
+        return Promise.reject(Object.assign(new Error(`invalid input: ${detail}`), { code: 'invalidInput', args: { detail } }));
+      }
+      hooks.onGuide?.(page, language);
+      return Promise.resolve();
+    },
+    /** The video the preview decodes now (`null`: none), for tests. */
+    decoding: () => decoder.playing(),
     pushTheme: (next) => {
       theme = structuredClone(next);
       if (live) remembered.set(live, theme.orientation);
@@ -1099,7 +1285,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     },
     assets: () => Promise.resolve([
       ...images.map((ref) => ({ ref, kind: 'image' })),
-      ...posters.map((ref) => ({ ref, kind: 'image', dataUrl: DEMO_POSTER_URL, bytes: 184_320 })),
+      ...[...posters].map(([ref, dataUrl]) => ({ ref, kind: 'image', dataUrl, bytes: 184_320 })),
       ...[...videos.values()].map((v) => ({ ...v })),
     ]),
     /** A video, GIF or picture: dropped (`source`), else picked in the dialog. */

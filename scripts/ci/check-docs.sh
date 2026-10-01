@@ -6,13 +6,15 @@
 #   - every page covers its topic (the phrases each page must contain: the
 #     commands, the storage manager's `mv`, `cleanup --dry-run` and
 #     `cache clear`, the Windows drivers, the unsigned installers, the
-#     "not validated on hardware" label of desktop mode and game FPS);
+#     "not validated on hardware" label of desktop mode and game FPS) and has
+#     the headings expected of it (the video framing section of each language);
 #   - every relative link of the docs, README.md and CHANGELOG.md points at a
 #     file that exists, and an `#anchor` at a heading of that file;
 #   - nothing private: no home-folder paths, e-mail addresses, tokens, keys or
 #     screen serial numbers;
 #   - README.md no longer says "early development" and links to the guide;
-#     CHANGELOG.md has an `## [Unreleased]` section with this phase's changes.
+#     CHANGELOG.md has an `## [Unreleased]` section with the changes of each
+#     phase (the video framing's included).
 #
 #   bash scripts/ci/check-docs.sh
 set -euo pipefail
@@ -73,6 +75,12 @@ BY_LANGUAGE = {
         "fps.md": ["não validado no hardware"],
         "troubleshooting.md": ["desconecte"],
     },
+}
+# Headings a page must have, each a whole line outside code blocks
+# (phase video-background-framing: the guide to framing a video background).
+HEADINGS = {
+    EN: {"storage-and-video.md": ["### Framing the video"]},
+    PT: {"storage-and-video.md": ["### Enquadrar o vídeo"]},
 }
 PRIVATE = [
     (re.compile(r"/home/(?!<)[A-Za-z0-9._-]+"), "a home-folder path (use ~ or <you>)"),
@@ -190,6 +198,10 @@ for lang in (EN, PT):
         for phrase in COMMON.get(page, []) + BY_LANGUAGE[lang].get(page, []):
             if phrase not in body:
                 fail(path, f"does not mention {phrase!r}")
+        lines = [line.rstrip() for line in FENCE.sub("", text_of(path)).splitlines()]
+        for heading in HEADINGS[lang].get(page, []):
+            if heading not in lines:
+                fail(path, f"has no heading {heading!r}")
 
 # 3 and 4. Links and privacy, over the guide, README.md and CHANGELOG.md.
 documents = sorted(EN.rglob("*.md")) + [Path("README.md"), Path("CHANGELOG.md")]
@@ -211,7 +223,8 @@ if not m:
 else:
     unreleased = m.group(1)
     for phrase in ("bezel udev-rules", "bezel monitor-mode", "gpu.fps", "net.ping",
-                   "bezel-run@", "/usr/bin/bezel", "docs/user", "bezel storage mv"):
+                   "bezel-run@", "/usr/bin/bezel", "docs/user", "bezel storage mv",
+                   "framing"):
         if phrase not in unreleased:
             fail("CHANGELOG.md", f"## [Unreleased] does not mention {phrase!r}")
 

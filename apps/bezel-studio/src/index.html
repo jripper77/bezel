@@ -143,6 +143,16 @@
       </nav>
 
       <section class="stage" id="stage" data-i18n-aria-label="stage.title">
+        <div class="framing-hud" id="framing-hud" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5M12 8v8M8 12h8" /></svg>
+          <div class="framing-hud-text">
+            <strong data-i18n="framing.hudTitle"></strong>
+            <span class="framing-numbers" id="framing-numbers"></span>
+            <span class="framing-keys" id="framing-keys" data-i18n="framing.hudKeys"></span>
+          </div>
+          <button type="button" class="primary-button" id="framing-done" data-i18n="framing.done"></button>
+        </div>
+        <p class="visually-hidden" id="framing-live" aria-live="polite"></p>
         <div class="stage-scroll" id="stage-scroll">
           <div class="bezel" id="bezel">
             <div class="canvas-box" id="canvas-box">

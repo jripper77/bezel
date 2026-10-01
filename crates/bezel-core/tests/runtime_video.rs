@@ -1,21 +1,27 @@
 //! The theme runtime's video background (D-2026-09-30-storage-video-4)
-//! through the adapters' fakes: the device fake's 8.8" (storage and
-//! device-side playback) and WeAct 0.96" (neither), and the sensor fake. The
-//! renderer and the host decoder are recording doubles defined here: no
-//! adapter ships a fake of them.
+//! and its framing (D-2026-10-01-video-background-framing-2 to -4) through
+//! the adapters' fakes: the device fake's 8.8" (storage and device-side
+//! playback) and WeAct 0.96" (neither), and the sensor fake. The renderer
+//! and the host decoder are recording doubles defined here: no adapter
+//! ships a fake of them.
 #![allow(clippy::expect_used)] // helpers of a failing test panic
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bezel_core::app::{HostVideo, ThemeRuntime, VideoState, open_screen};
+use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::clock::{Language, LocalTime};
-use bezel_core::domain::device::{Transport, UsbId};
+use bezel_core::domain::device::{ModelId, Transport, UsbId};
 use bezel_core::domain::discovery::{DeviceAddress, Endpoint};
-use bezel_core::domain::frame::{Frame, Rgba};
+use bezel_core::domain::frame::{Frame, Rect, Rgba};
+use bezel_core::domain::framing::{Pad, VideoFit, VideoFraming, Zoom};
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::job::Job;
-use bezel_core::domain::media::{MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
+use bezel_core::domain::media::{
+    ConvertOptions, FrameRate, MediaFormat, MediaInfo, MediaTools, PREVIEW_FPS, StreamSpec,
+    TranscodeTarget, VideoCodec, VideoPixelFormat, VideoTrack, framed_options,
+};
 use bezel_core::domain::poster::PosterSpec;
 use bezel_core::domain::storage::{RemotePath, Repeat};
 use bezel_core::domain::theme::{AssetRef, Background, Theme};
@@ -37,11 +43,13 @@ const TIME: LocalTime = LocalTime {
     weekday: 2,
 };
 
-/// A renderer that records what each frame was drawn over and returns a
-/// blank frame of the theme's canvas.
+/// A renderer that records what each frame was drawn over (and the
+/// pictures of a video drawn) and returns a blank frame of the theme's
+/// canvas.
 #[derive(Default)]
 struct Recorder {
     seen: Vec<String>,
+    pictures: Vec<Frame>,
 }
 
 impl FrameRenderer for Recorder {
@@ -54,13 +62,45 @@ impl FrameRenderer for Recorder {
         self.seen.push(match context.backdrop {
             Backdrop::Poster => "poster".into(),
             Backdrop::OnDevice => "on-device".into(),
-            Backdrop::Frame(f) => format!("picture {}", f.pixel(0, 0).map_or(0, |p| p.r)),
+            Backdrop::Frame(f) => {
+                self.pictures.push(f.clone());
+                format!("picture {}", f.pixel(0, 0).map_or(0, |p| p.r))
+            }
         });
         Ok(Frame::filled(theme.canvas, Rgba::default()))
     }
 }
 
-/// A host decoder whose videos alternate two pictures (red 10, red 20).
+/// A decoded picture of `size` that shows where its pixels came from: red
+/// `shade`, green 0 on its top half and 255 below, blue 0 on its left half
+/// and 255 right of it.
+fn quadrants(size: Size, shade: u8) -> Frame {
+    let mut frame = Frame::filled(size, Rgba::opaque(shade, 0, 0));
+    let (w, h) = (size.width, size.height);
+    frame.fill_rect(
+        Rect::new(0, h / 2, w, h - h / 2),
+        Rgba::opaque(shade, 255, 0),
+    );
+    frame.fill_rect(
+        Rect::new(w / 2, 0, w - w / 2, h / 2),
+        Rgba::opaque(shade, 0, 255),
+    );
+    frame.fill_rect(
+        Rect::new(w / 2, h / 2, w - w / 2, h - h / 2),
+        Rgba::opaque(shade, 255, 255),
+    );
+    frame
+}
+
+/// The green and blue of `frame` at (x, y): which quadrant of the decoded
+/// picture it shows.
+fn quadrant(frame: &Frame, x: u32, y: u32) -> (u8, u8) {
+    let p = frame.pixel(x, y).expect("inside");
+    (p.g, p.b)
+}
+
+/// A host decoder whose videos alternate two pictures of the size asked
+/// for ([`quadrants`], red 10 then red 20).
 struct Decoder {
     tools: MediaTools,
     opened: Vec<(MediaLocation, StreamSpec)>,
@@ -105,9 +145,8 @@ impl MediaTranscoder for Decoder {
     }
     fn stream(&mut self, source: &MediaLocation, spec: StreamSpec) -> Result<Box<dyn VideoFrames>> {
         self.opened.push((source.clone(), spec));
-        let picture = |r| Frame::filled(Size::new(1, 1), Rgba::opaque(r, 0, 0));
         Ok(Box::new(Clip {
-            pictures: vec![picture(10), picture(20)],
+            pictures: vec![quadrants(spec.size, 10), quadrants(spec.size, 20)],
             fps: spec.fps,
         }))
     }
@@ -134,6 +173,7 @@ fn video_theme(asset: &str) -> Theme {
     theme.background = Background::Video {
         asset: AssetRef(asset.into()),
         poster: None,
+        framing: None,
     };
     theme
 }
@@ -471,6 +511,59 @@ fn a_forgotten_screen_leaves_the_poster_and_nothing_to_stop() {
 }
 
 #[test]
+fn the_themes_framing_names_the_video_looked_for() {
+    // An explicit 270 degrees on the landscape theme turns nothing on the
+    // 8.8": the vendor's own name, as the screen stores it.
+    let turned_back = VideoFraming {
+        rotation: Some(3),
+        ..VideoFraming::default()
+    };
+    let framed = |framing| {
+        let mut theme = video_theme("assets/dragon.mp4");
+        theme.background = Background::Video {
+            asset: AssetRef("assets/dragon.mp4".into()),
+            poster: None,
+            framing: Some(framing),
+        };
+        theme
+    };
+    let (connector, mut screen) = turing_88(stored("internal/video/dragon.mp4"));
+    let mut rt = runtime(framed(turned_back));
+    let dragon = path("internal/video/dragon.mp4");
+    let state = rt.start_video(screen.as_mut(), None).expect("start");
+    assert_eq!(state, &VideoState::OnDevice(dragon.clone()));
+    assert_eq!(
+        calls(&connector),
+        [
+            StorageCall::Info,
+            StorageCall::Size(dragon.clone()),
+            StorageCall::PlayVideo(dragon, Repeat::Loop),
+        ]
+    );
+    // Zoomed, it is another file: looked for under its own name.
+    let zoomed = VideoFraming {
+        zoom: Zoom::from_percent(125),
+        ..turned_back
+    };
+    let (connector, mut screen) = turing_88(stored("internal/video/dragon.mp4"));
+    let mut rt = runtime(framed(zoomed));
+    let state = rt
+        .start_video(screen.as_mut(), None)
+        .expect("start")
+        .clone();
+    let VideoState::VideoMissing(missing) = state else {
+        panic!("{state:?}")
+    };
+    assert_eq!(missing.path, path("internal/video/dragon_f8ca275f8.mp4"));
+    assert_eq!(missing.options.quarter_turns, 0);
+    assert!(
+        !calls(&connector)
+            .iter()
+            .any(StorageCall::changes_the_screen)
+    );
+}
+
+#[test]
 fn a_converter_that_takes_no_pictures_says_so() {
     let clip = MediaInfo {
         format: bezel_core::domain::media::MediaFormat::Mp4,
@@ -485,4 +578,356 @@ fn a_converter_that_takes_no_pictures_says_so() {
         matches!(taken, Err(BezelError::Unsupported(_))),
         "{taken:?}"
     );
+}
+
+/// Bytes of the vendor's `dragon.mp4`, the theme asset and the copy the
+/// user's 8.8" already stores alike.
+const DRAGON_BYTES: u64 = 2_588_343;
+
+/// The user's "Dragon Ball" theme: a 1920x480 landscape canvas on the 8.8"
+/// over `assets/dragon.mp4`, framed as `framing` says (`None`: Auto).
+fn dragon_ball(framing: Option<VideoFraming>) -> Theme {
+    let mut theme = Theme::blank("Dragon Ball", Size::new(480, 1920), Orientation::Landscape);
+    theme.background = Background::Video {
+        asset: AssetRef("assets/dragon.mp4".into()),
+        poster: None,
+        framing,
+    };
+    theme
+}
+
+/// An H.264 yuv420p MP4 of `size` and `bytes`, 24 fps, 10.2 s, no audio:
+/// what probing its header says.
+fn mp4(size: Size, bytes: u64) -> MediaInfo {
+    MediaInfo {
+        format: MediaFormat::Mp4,
+        bytes,
+        dimensions: Some(size),
+        video: Some(VideoTrack {
+            codec: VideoCodec::H264,
+            pixel_format: Some(VideoPixelFormat::Yuv420p),
+            b_frames: Some(true),
+            frame_rate: FrameRate::new(24, 1),
+            duration: Some(Duration::from_millis(10_200)),
+        }),
+        has_audio: false,
+    }
+}
+
+/// The Dragon Ball video as probed: panel-native, 480x1920, turned for the
+/// panel by the vendor.
+fn dragon_info() -> MediaInfo {
+    mp4(Size::new(480, 1920), DRAGON_BYTES)
+}
+
+/// A stored copy of the asset itself, `bytes` long.
+fn stored_bytes(text: &str, bytes: u64) -> FakeStorage {
+    let data = vec![0; usize::try_from(bytes).expect("fits")];
+    FakeStorage::default().with_file(path(text), data)
+}
+
+/// The calls of `connector` that changed what the screen stores or shows.
+fn changes(connector: &FakeConnector) -> Vec<StorageCall> {
+    calls(connector)
+        .into_iter()
+        .filter(StorageCall::changes_the_screen)
+        .collect()
+}
+
+#[test]
+fn the_stored_dragon_ball_video_loops_without_an_upload() {
+    let dragon = path("internal/video/dragon.mp4");
+    let (connector, mut screen) =
+        turing_88(stored_bytes("internal/video/dragon.mp4", DRAGON_BYTES));
+    let mut rt = runtime(dragon_ball(None));
+
+    // Without the probed size Auto turns nothing: the copy turned to the
+    // panel is looked for, and the poster stays.
+    assert_eq!(rt.video_framing().map(|f| f.turns), Some(0));
+    let state = rt.start_video(screen.as_mut(), None).expect("start");
+    let VideoState::VideoMissing(missing) = state else {
+        panic!("{state:?}")
+    };
+    assert_eq!(missing.path, path("internal/video/dragon_90.mp4"));
+
+    // Probed (the MP4 header), the video is panel-native in a landscape
+    // theme: 270 degrees on the canvas, nothing in total on the panel. The
+    // screen looks again, for the vendor's own name.
+    rt.set_video_info(Some(dragon_info()));
+    assert_eq!(rt.video(), &VideoState::NotStarted, "looks again");
+    assert_eq!(rt.video_info(), Some(&dragon_info()));
+    assert_eq!(rt.video_framing().map(|f| f.turns), Some(3));
+    let before = calls(&connector).len();
+    let state = rt.start_video(screen.as_mut(), None).expect("start");
+    assert_eq!(state, &VideoState::OnDevice(dragon.clone()));
+    assert_eq!(
+        calls(&connector)[before..],
+        [
+            StorageCall::Info,
+            StorageCall::Size(dragon.clone()),
+            StorageCall::PlayVideo(dragon.clone(), Repeat::Loop),
+        ],
+        "a size query, then the loop: nothing sent"
+    );
+    let (mut sensors, mut r) = (FakeSensors::default(), Recorder::default());
+    for _ in 0..2 {
+        rt.show(&mut sensors, &mut r, screen.as_mut(), TIME)
+            .expect("show");
+    }
+    assert_eq!(r.seen, ["on-device", "on-device"]);
+    assert_eq!(
+        changes(&connector),
+        [StorageCall::PlayVideo(dragon, Repeat::Loop)],
+        "no upload, no delete"
+    );
+}
+
+#[test]
+fn a_stored_file_of_another_size_is_not_reused() {
+    // A copy sent as it is holds the asset's bytes: a `dragon.mp4` of
+    // another size is another video. The poster stays, and sending puts
+    // the asset in its place as it is.
+    let dragon = path("internal/video/dragon.mp4");
+    let (connector, mut screen) = turing_88(stored("internal/video/dragon.mp4"));
+    let mut rt = runtime(dragon_ball(None));
+    rt.set_video_info(Some(dragon_info()));
+    let state = rt
+        .start_video(screen.as_mut(), None)
+        .expect("start")
+        .clone();
+    let VideoState::VideoMissing(missing) = state else {
+        panic!("{state:?}")
+    };
+    assert_eq!(missing.path, dragon, "the same place");
+    assert_eq!(missing.options, ConvertOptions::default());
+    assert!(missing.options.is_identity(), "sent as it is");
+    let source = MediaLocation("/themes/dragon/assets/dragon.mp4".into());
+    assert_eq!(missing.upload_request(source).name, "dragon.mp4");
+    assert_eq!(
+        calls(&connector),
+        [StorageCall::Info, StorageCall::Size(dragon.clone())]
+    );
+    let mut r = Recorder::default();
+    rt.frame(&mut FakeSensors::default(), &mut r, TIME)
+        .expect("frame");
+    assert_eq!(r.seen, ["poster"]);
+
+    // The asset's copy on the card is found past the other one.
+    let on_card = path("sd/video/dragon.mp4");
+    let storage = stored("internal/video/dragon.mp4")
+        .with_card(CARD)
+        .with_file(on_card.clone(), vec![0; DRAGON_BYTES as usize]);
+    let (connector, mut screen) = turing_88(storage);
+    let state = rt.start_video(screen.as_mut(), None).expect("start");
+    assert_eq!(state, &VideoState::OnDevice(on_card.clone()));
+    assert_eq!(
+        calls(&connector),
+        [
+            StorageCall::Info,
+            StorageCall::Size(dragon.clone()),
+            StorageCall::Size(on_card.clone()),
+            StorageCall::PlayVideo(on_card, Repeat::Loop),
+        ]
+    );
+
+    // A size the screen cannot report counts (D-2026-09-30-storage-video-7).
+    let unknown = FakeStorage::default().with_file_of_unknown_size(dragon.clone(), vec![7; 10]);
+    let (_, mut screen) = turing_88(unknown);
+    let state = rt.start_video(screen.as_mut(), None).expect("start");
+    assert_eq!(state, &VideoState::OnDevice(dragon));
+
+    // A converted copy keeps the presence check: its size is unknown before
+    // converting, so any file under its name is it.
+    let mut clip = runtime(video_theme("assets/clip.mp4"));
+    clip.set_video_info(Some(mp4(Size::new(1920, 1080), 5_000_000)));
+    let (_, mut screen) = turing_88(stored("internal/video/clip_90.mp4"));
+    let state = clip.start_video(screen.as_mut(), None).expect("start");
+    assert_eq!(
+        state,
+        &VideoState::OnDevice(path("internal/video/clip_90.mp4"))
+    );
+}
+
+#[test]
+fn a_reframed_video_is_looked_for_under_its_own_name() {
+    // Zoomed 125 % (rotation Auto): another file than the vendor's, looked
+    // for under its own name while the vendor's copy stays untouched.
+    let zoomed = VideoFraming {
+        zoom: Zoom::from_percent(125),
+        ..VideoFraming::default()
+    };
+    let storage = stored_bytes("internal/video/dragon.mp4", DRAGON_BYTES);
+    let (connector, mut screen) = turing_88(storage);
+    let mut rt = runtime(dragon_ball(Some(zoomed)));
+    rt.set_video_info(Some(dragon_info()));
+    let state = rt
+        .start_video(screen.as_mut(), None)
+        .expect("start")
+        .clone();
+    let VideoState::VideoMissing(missing) = state else {
+        panic!("{state:?}")
+    };
+    assert_eq!(missing.path, path("internal/video/dragon_f8ca275f8.mp4"));
+    // Converted from the panel's geometry: the centered 80 % of the
+    // panel-native picture, nothing turned.
+    let expected = ConvertOptions {
+        crop: Some(Rect::new(48, 192, 384, 1536)),
+        ..ConvertOptions::default()
+    };
+    assert_eq!(missing.options, expected);
+    let model = model_by_id(ModelId("turing-8.8")).expect("model");
+    let framing = rt.video_framing().expect("a video");
+    assert_eq!(
+        framed_options(model, Orientation::Landscape, &dragon_info(), &framing),
+        expected,
+        "what \"Send to screen\" converts"
+    );
+    assert!(changes(&connector).is_empty(), "nothing sent or deleted");
+
+    // Fitted without turning on the canvas: a copy turned to the panel,
+    // padded. Editing the framing on a started screen looks again.
+    let fitted = VideoFraming {
+        rotation: Some(0),
+        fit: VideoFit::Contain,
+        ..VideoFraming::default()
+    };
+    rt.replace_theme(dragon_ball(Some(fitted)));
+    assert_eq!(rt.video(), &VideoState::NotStarted, "looks again");
+    let state = rt
+        .start_video(screen.as_mut(), None)
+        .expect("start")
+        .clone();
+    let VideoState::VideoMissing(missing) = state else {
+        panic!("{state:?}")
+    };
+    assert_eq!(missing.path, path("internal/video/dragon_90_f8ec2b24d.mp4"));
+    let pad = Pad {
+        scaled: Size::new(480, 120),
+        x: 0,
+        y: 900,
+        color: Rgba::BLACK,
+    };
+    assert_eq!(
+        missing.options,
+        ConvertOptions {
+            quarter_turns: 1,
+            pad: Some(pad),
+            ..ConvertOptions::default()
+        }
+    );
+    // An edit that frames the video the same keeps what the screen found.
+    let mut renamed = dragon_ball(Some(fitted));
+    renamed.name = "renamed".into();
+    rt.replace_theme(renamed);
+    assert!(matches!(rt.video(), VideoState::VideoMissing(_)));
+
+    // Once its own copy is on the screen (converted: any size), it loops.
+    let own = path("internal/video/dragon_f8ca275f8.mp4");
+    let (_, mut screen) = turing_88(stored("internal/video/dragon_f8ca275f8.mp4"));
+    rt.replace_theme(dragon_ball(Some(zoomed)));
+    let state = rt.start_video(screen.as_mut(), None).expect("start");
+    assert_eq!(state, &VideoState::OnDevice(own));
+}
+
+#[test]
+fn the_host_decodes_the_video_with_its_framing() {
+    // The WeAct 0.96" plays no videos: the host decodes them. A landscape
+    // theme over a video of its panel's native size (80x160, turned for the
+    // panel) is turned back by Auto, as the Dragon Ball is on the 8.8".
+    let mut theme = Theme::blank("clip", Size::new(80, 160), Orientation::Landscape);
+    theme.background = Background::Video {
+        asset: AssetRef("assets/clip.mp4".into()),
+        poster: None,
+        framing: None,
+    };
+    let canvas = theme.canvas;
+    assert_eq!(canvas, Size::new(160, 80));
+    let native = Size::new(80, 160);
+    let mut rt = runtime(theme.clone());
+    rt.set_video_info(Some(mp4(native, 1000)));
+    let (connector, mut screen) = weact();
+    let mut media = Decoder::ready();
+    let source = MediaLocation("clip.mp4".into());
+    let host = HostVideo {
+        media: &mut media,
+        source: source.clone(),
+        fps: 10,
+    };
+    let state = rt.start_video(screen.as_mut(), Some(host)).expect("start");
+    assert_eq!(state, &VideoState::Host);
+    // The decoder hands over the whole source picture, never turned.
+    let raw = StreamSpec {
+        size: native,
+        fps: 10,
+    };
+    assert_eq!(media.opened, [(source, raw)]);
+    assert_eq!(rt.video_stream(10), raw);
+
+    // Each picture is framed in Rust: a quarter turn clockwise, so the
+    // source's top half is the canvas's right half.
+    let mut r = Recorder::default();
+    rt.sample(&mut FakeSensors::default()).expect("sample");
+    rt.render(&mut r, TIME, Duration::ZERO).expect("render");
+    let turned = &r.pictures[0];
+    assert_eq!(turned.size(), canvas);
+    assert_eq!(*turned, quadrants(native, 10).rotated(1));
+    assert_eq!(
+        quadrant(turned, 0, 0),
+        (255, 0),
+        "bottom-left of the source"
+    );
+    assert_eq!(quadrant(turned, 159, 79), (0, 255), "its top-right");
+
+    // A framing edit shows at the next picture; the decoder goes on.
+    let padded = Rgba::opaque(0, 0, 99);
+    let fitted = VideoFraming {
+        rotation: Some(0),
+        fit: VideoFit::Contain,
+        pad: padded,
+        ..VideoFraming::default()
+    };
+    let mut edited = theme.clone();
+    edited.background = Background::Video {
+        asset: AssetRef("assets/clip.mp4".into()),
+        poster: None,
+        framing: Some(fitted),
+    };
+    rt.replace_theme(edited.clone());
+    assert_eq!(rt.video(), &VideoState::Host, "still decoding");
+    rt.render(&mut r, TIME, Duration::from_millis(100))
+        .expect("render");
+    assert_eq!(media.opened.len(), 1, "the decoder was not reopened");
+    let fitted_picture = &r.pictures[1];
+    assert_eq!(fitted_picture.pixel(0, 40), Some(padded));
+    assert_eq!(fitted_picture.pixel(159, 40), Some(padded));
+    assert_eq!(fitted_picture.pixel(60, 0).map(|p| p.r), Some(20));
+    assert_eq!(quadrant(fitted_picture, 60, 0), (0, 0), "top-left");
+    assert_eq!(quadrant(fitted_picture, 99, 79), (255, 255), "bottom-right");
+    assert!(calls(&connector).is_empty());
+
+    // An editor's preview frames the pictures it decoded the same way,
+    // without a screen (the canvas names the WeAct's panel).
+    let mut editor = runtime(theme);
+    editor.set_video_info(Some(mp4(native, 1000)));
+    let spec = editor.video_stream(PREVIEW_FPS);
+    assert_eq!(
+        spec,
+        StreamSpec {
+            size: native,
+            fps: 15
+        }
+    );
+    let picture = quadrants(spec.size, 30);
+    let mut r = Recorder::default();
+    editor
+        .preview_video(&mut r, TIME, Duration::ZERO, &picture)
+        .expect("preview");
+    assert_eq!(r.pictures, [picture.rotated(1)]);
+    editor.replace_theme(edited);
+    let (_, next) = editor
+        .preview_video(&mut r, TIME, Duration::from_millis(66), &picture)
+        .expect("preview");
+    assert_eq!(next, None, "when the next picture is due is the caller's");
+    assert_eq!(r.pictures[1].pixel(0, 40), Some(padded));
+    assert_eq!(r.seen, ["picture 30", "picture 0"]);
 }

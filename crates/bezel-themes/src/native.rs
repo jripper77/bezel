@@ -217,6 +217,9 @@ impl ThemeStore for FsThemeStore {
 mod tests {
     use super::*;
     use bezel_core::domain::frame::Rgba;
+    use bezel_core::domain::framing::{
+        FramingPosition, PanelLayout, Permille, ResolvedFraming, VideoFit, VideoFraming, Zoom,
+    };
     use bezel_core::domain::geometry::{Orientation, Size};
     use bezel_core::domain::sensor::{DisplayFormat, SensorKey, TemperatureUnit};
     use bezel_core::domain::theme::{
@@ -282,6 +285,7 @@ mod tests {
             background: Background::Video {
                 asset: AssetRef("assets/bg.mp4".into()),
                 poster: Some(AssetRef("assets/bg.png".into())),
+                framing: None,
             },
             refresh_seconds: 0.5,
             elements: vec![
@@ -537,5 +541,236 @@ mod tests {
         assert_eq!(loaded, theme);
         assert!(assets.is_empty());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A `theme.json` as Bezel wrote it before framing existed, shaped like
+    /// the user's "Dragon Ball": a landscape 1920x480 theme over a 480x1920
+    /// video, already turned for the 8.8" panel.
+    const DRAGON_BALL: &str = r#"{
+  "schema": 1,
+  "name": "Dragon Ball",
+  "canvas": {
+    "width": 1920,
+    "height": 480
+  },
+  "orientation": "landscape",
+  "refreshSeconds": 1.0,
+  "background": {
+    "type": "video",
+    "asset": "assets/dragon.mp4",
+    "poster": "assets/poster-195.png"
+  },
+  "elements": []
+}
+"#;
+
+    /// [`DRAGON_BALL`] with `framing` set to the JSON object `framing`.
+    fn dragon_ball_framed(framing: &str) -> Result<Theme> {
+        let poster = r#""poster": "assets/poster-195.png""#;
+        parse_manifest(
+            DRAGON_BALL
+                .replace(poster, &format!("{poster}, \"framing\": {framing}"))
+                .as_bytes(),
+        )
+    }
+
+    fn framing_of(theme: &Theme) -> Option<VideoFraming> {
+        match &theme.background {
+            Background::Video { framing, .. } => *framing,
+            other => panic!("not a video background: {other:?}"),
+        }
+    }
+
+    fn with_framing(theme: &Theme, framing: VideoFraming) -> Theme {
+        let Background::Video { asset, poster, .. } = theme.background.clone() else {
+            panic!("not a video background")
+        };
+        Theme {
+            background: Background::Video {
+                asset,
+                poster,
+                framing: Some(framing),
+            },
+            ..theme.clone()
+        }
+    }
+
+    fn framing_json(theme: &Theme) -> serde_json::Value {
+        let json: serde_json::Value =
+            serde_json::from_slice(&manifest(theme).expect("manifest")).expect("json");
+        json["background"]["framing"].clone()
+    }
+
+    #[test]
+    fn video_framing_round_trips_and_older_themes_load_as_auto() {
+        // An older theme loads with Auto, which turns its pre-turned video
+        // 270 degrees on the canvas (0 in total on the 8.8"), and is written
+        // back byte for byte.
+        let older = parse_manifest(DRAGON_BALL.as_bytes()).expect("older theme loads");
+        assert_eq!(framing_of(&older), None, "Auto");
+        let resolved = VideoFraming::default().resolve(
+            Some(Size::new(480, 1920)),
+            older.orientation,
+            PanelLayout::for_canvas(older.canvas),
+        );
+        assert_eq!(resolved, ResolvedFraming::plain(3));
+        assert_eq!(manifest(&older).expect("manifest"), DRAGON_BALL.as_bytes());
+        // The default framing is not written: the same bytes again.
+        let default = with_framing(&older, VideoFraming::default());
+        assert_eq!(
+            manifest(&default).expect("manifest"),
+            DRAGON_BALL.as_bytes()
+        );
+
+        // Every field goes and comes back exactly, in a zip and a folder.
+        let turned = VideoFraming {
+            rotation: Some(3),
+            fit: VideoFit::Contain,
+            zoom: Zoom::from_percent(125),
+            position: FramingPosition {
+                x: Permille::CENTER,
+                y: Permille::from_permille(400),
+            },
+            pad: Rgba::opaque(0x10, 0x20, 0x30),
+        };
+        let auto = VideoFraming {
+            zoom: Zoom::MAX,
+            position: FramingPosition {
+                x: Permille::from_permille(333),
+                y: Permille::START,
+            },
+            ..VideoFraming::default()
+        };
+        let root = scratch("framing");
+        let assets: BTreeMap<_, _> = [(AssetRef("assets/dragon.mp4".into()), b"MP4".to_vec())]
+            .into_iter()
+            .collect();
+        for (case, framing) in [("turned", turned), ("auto", auto)] {
+            let theme = with_framing(&older, framing);
+            for location in [root.join(format!("{case}.bezeltheme")), root.join(case)] {
+                let loc = ThemeLocation(location.display().to_string());
+                FsThemeStore.save(&loc, &theme, &assets).expect("saves");
+                let (loaded, _) = FsThemeStore.load(&loc).expect("loads");
+                assert_eq!(loaded, theme, "{loc:?}");
+                assert_eq!(framing_of(&loaded), Some(framing), "{loc:?}");
+            }
+        }
+        let _ = fs::remove_dir_all(&root);
+
+        // The JSON shape (D-2026-10-01-video-background-framing-2); Auto
+        // writes no rotation.
+        assert_eq!(
+            framing_json(&with_framing(&older, turned)),
+            serde_json::json!({
+                "rotation": 270,
+                "fit": "contain",
+                "zoom": 1.25,
+                "position": {"x": 0.5, "y": 0.4},
+                "padColor": "#102030ff"
+            })
+        );
+        assert_eq!(
+            framing_json(&with_framing(&older, auto)),
+            serde_json::json!({
+                "fit": "cover",
+                "zoom": 4.0,
+                "position": {"x": 0.333, "y": 0.0},
+                "padColor": "#000000ff"
+            })
+        );
+        for rotation in [0_u8, 1, 2] {
+            let theme = with_framing(
+                &older,
+                VideoFraming {
+                    rotation: Some(rotation),
+                    ..VideoFraming::default()
+                },
+            );
+            assert_eq!(
+                framing_json(&theme)["rotation"],
+                serde_json::json!(u32::from(rotation) * 90)
+            );
+            assert_eq!(
+                parse_manifest(&manifest(&theme).expect("manifest")).ok(),
+                Some(theme)
+            );
+        }
+
+        // A missing key takes its default; an empty or default framing is Auto.
+        let fit_only = dragon_ball_framed(r#"{"fit": "contain"}"#).expect("loads");
+        assert_eq!(
+            framing_of(&fit_only),
+            Some(VideoFraming {
+                fit: VideoFit::Contain,
+                ..VideoFraming::default()
+            })
+        );
+        for default in [
+            "{}",
+            r#"{"rotation": null}"#,
+            r##"{"fit": "cover", "zoom": 1, "position": {"x": 0.5, "y": 0.5}, "padColor": "#000"}"##,
+        ] {
+            let theme = dragon_ball_framed(default).expect("loads");
+            assert_eq!(framing_of(&theme), None, "{default}");
+            assert_eq!(manifest(&theme).expect("manifest"), DRAGON_BALL.as_bytes());
+        }
+    }
+
+    #[test]
+    fn video_framing_numbers_are_clamped_and_other_rotations_refused() {
+        let clamped =
+            dragon_ball_framed(r#"{"zoom": 9, "position": {"x": -1, "y": 7}}"#).expect("loads");
+        assert_eq!(
+            framing_of(&clamped),
+            Some(VideoFraming {
+                zoom: Zoom::MAX,
+                position: FramingPosition {
+                    x: Permille::START,
+                    y: Permille::END,
+                },
+                ..VideoFraming::default()
+            })
+        );
+        let rounded =
+            dragon_ball_framed(r#"{"zoom": 1.234, "position": {"y": 0.4004}}"#).expect("loads");
+        assert_eq!(
+            framing_of(&rounded),
+            Some(VideoFraming {
+                zoom: Zoom::from_percent(123),
+                position: FramingPosition {
+                    x: Permille::CENTER,
+                    y: Permille::from_permille(400),
+                },
+                ..VideoFraming::default()
+            })
+        );
+        let unzoomed = dragon_ball_framed(r#"{"zoom": 0.2}"#).expect("loads");
+        assert_eq!(
+            framing_of(&unzoomed),
+            None,
+            "clamped to no zoom: the default"
+        );
+        let whole = dragon_ball_framed(r#"{"rotation": 90.0}"#).expect("loads");
+        assert_eq!(framing_of(&whole).and_then(|f| f.rotation), Some(1));
+
+        for (bad, says) in [
+            (
+                r#"{"rotation": 45}"#,
+                "rotation 45 is not 0, 90, 180 or 270",
+            ),
+            (r#"{"rotation": 360}"#, "rotation 360"),
+            (r#"{"rotation": -90}"#, "rotation -90"),
+            (r#"{"rotation": 90.5}"#, "rotation 90.5 is not"),
+            (r#"{"rotation": "90"}"#, "invalid type"),
+            (r#"{"fit": "stretch"}"#, "stretch"),
+            (r#"{"padColor": "red"}"#, "padColor"),
+        ] {
+            match dragon_ball_framed(bad) {
+                Err(BezelError::ThemeFile(message)) => {
+                    assert!(message.contains(says), "{bad}: {message}");
+                }
+                other => panic!("{bad}: {other:?}"),
+            }
+        }
     }
 }

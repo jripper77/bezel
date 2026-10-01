@@ -571,9 +571,14 @@ impl Backend {
 
     /// Prepares "Send to screen" for the live screen missing the theme's
     /// video (D-2026-09-30-storage-video-4): where the runtime looks for it,
-    /// turned to the panel and cropped to cover it.
+    /// converted as the runtime says (`MissingVideo::options`: the theme's
+    /// framing on the panel, D-2026-10-01-video-background-framing-3). A
+    /// video already in the screen's profile whose framing leaves it as it
+    /// is (a panel-native video in a turned theme, like the Dragon Ball's)
+    /// is sent as it is under the same name, within the screen's size cap;
+    /// any other framing needs ffmpeg, and is refused without it.
     pub fn prepare_theme_video(&self, screen: &str, time: LocalTime) -> UiResult<PrepareDto> {
-        let (missing, bytes, orientation) = {
+        let (missing, bytes) = {
             let studio = self.studio();
             let missing = studio
                 .missing_video(screen)
@@ -582,17 +587,13 @@ impl Backend {
             let bytes = bytes.ok_or_else(|| {
                 UiError::new(ErrorCode::VideoNotInTheme).arg("asset", &missing.asset.0)
             })?;
-            (missing, bytes, studio.theme().orientation)
+            (missing, bytes)
         };
         let file = self.storage.write_scratch(&missing.asset, &bytes)?;
         let location = MediaLocation(file.display().to_string());
         let source = file_name(&file);
-        self.prepare(screen, time, source, Some(file), move |link, media| {
-            let mut request = missing.upload_request(location);
-            let probed = media.probe(&request.source)?;
-            // The runtime's turns for this theme and screen, and the crop.
-            request.options = fitting_options(link.identity().model, orientation, &probed);
-            Ok(request)
+        self.prepare(screen, time, source, Some(file), move |_, _| {
+            Ok(missing.upload_request(location))
         })
     }
 

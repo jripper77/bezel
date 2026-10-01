@@ -3,11 +3,13 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use bezel_core::domain::clock::{Language, LocalTime};
-use bezel_core::domain::frame::{Frame, Rgba};
+use bezel_core::domain::frame::{Frame, Rect, Rgba};
+use bezel_core::domain::framing::{VideoFit, VideoFraming, Zoom};
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::job::{Job, JobPhase, Progress};
 use bezel_core::domain::media::{
@@ -30,7 +32,7 @@ use super::*;
 use crate::library::ThemeLibrary;
 use crate::manager::Copies;
 use crate::settings::SettingsFile;
-use crate::studio::Studio;
+use crate::studio::{Motion, Studio};
 
 pub(crate) const TIME: LocalTime = LocalTime {
     year: 2026,
@@ -50,11 +52,16 @@ const WIDE: Size = Size::new(1920, 1080);
 const CONVERTED_BYTES: usize = 5000;
 
 /// A media converter over real files on disk, scripted by name: `native*.mp4`
-/// is already in the 8.8"'s profile, other videos (`.mp4`, `.mov`, and `.mkv`
-/// with ffmpeg) are 1920x1080 with sound, `.png` is an image, `.gif` an
-/// animated 1920x480 GIF (`still*.gif`: one picture), anything else is
-/// unknown. A conversion writes a `native-converted-N.mp4` next to the
-/// source; a poster is a picture of [`POSTER`].
+/// and `dragon*.mp4` are already in the 8.8"'s profile (480x1920, like the
+/// Dragon Ball theme's pre-turned video), other videos (`.mp4`, `.mov`, and
+/// `.mkv` with ffmpeg) are 1920x1080 with sound, `.png` is an image, `.gif`
+/// an animated 1920x480 GIF (`still*.gif`: one picture), anything else is
+/// unknown; every video plays 2 s. A conversion writes a
+/// `native-converted-N.mp4` next to the source; a poster is a picture of
+/// [`POSTER`]; a decoded picture is [`STREAMED`] (with [`Self::two_tone`],
+/// its second half [`STREAMED_END`]). With [`Self::holding`] a call waits
+/// inside it until the test lets it go (a slow ffprobe or ffmpeg); with
+/// [`Self::failing`] decoders stop at their first picture.
 #[derive(Clone)]
 pub(crate) struct FakeMedia {
     ready: bool,
@@ -63,11 +70,48 @@ pub(crate) struct FakeMedia {
     pub(crate) converted: Arc<Mutex<Vec<TranscodeTarget>>>,
     /// The videos decoded on the host, and how.
     pub(crate) streamed: Arc<Mutex<Vec<(MediaLocation, StreamSpec)>>>,
+    /// The times into a video its decoders were asked for, in order.
+    pub(crate) asked: Arc<Mutex<Vec<Duration>>>,
+    /// The decoders running (started and not dropped).
+    pub(crate) decoding: Arc<AtomicUsize>,
+    /// Decoded pictures are two-toned.
+    two_tone: bool,
     /// Bytes of every conversion's output (a sparse file past
     /// [`CONVERTED_BYTES`]).
     output_bytes: u64,
     /// The posters taken, and how.
     pub(crate) posters: Arc<Mutex<Vec<(MediaLocation, PosterSpec)>>>,
+    /// Decoders still to fail, each at its first picture.
+    pub(crate) failing: Arc<AtomicUsize>,
+    /// Where a call waits until the test lets it go.
+    gate: Option<Gate>,
+}
+
+/// A call of the converter that can be held ([`FakeMedia::holding`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Call {
+    /// Probing a file.
+    Probe,
+    /// Taking a poster.
+    Poster,
+}
+
+/// Holds every `call` inside the converter: it says it arrived, then waits
+/// for the test's word (or for the test to drop its sender).
+#[derive(Clone)]
+struct Gate {
+    call: Call,
+    arrived: mpsc::Sender<Call>,
+    through: Arc<Mutex<mpsc::Receiver<()>>>,
+}
+
+impl Gate {
+    fn pass(gate: Option<&Self>, call: Call) {
+        if let Some(gate) = gate.filter(|g| g.call == call) {
+            gate.arrived.send(call).unwrap();
+            let _ = gate.through.lock().unwrap().recv();
+        }
+    }
 }
 
 /// The color of every poster [`FakeMedia`] takes.
@@ -76,13 +120,59 @@ pub(crate) const POSTER: Rgba = Rgba::opaque(200, 0, 100);
 /// The color of every picture of a video [`FakeMedia`] decodes.
 pub(crate) const STREAMED: Rgba = Rgba::opaque(0, 200, 0);
 
-/// A decoded video whose pictures are all [`STREAMED`].
-struct Solid(Frame);
+/// The color of the second half (along its longer side) of a two-tone
+/// picture ([`FakeMedia::two_tone`]).
+pub(crate) const STREAMED_END: Rgba = Rgba::opaque(0, 0, 200);
 
-impl VideoFrames for Solid {
-    fn frame_at(&mut self, _: Duration) -> Result<&Frame> {
-        Ok(&self.0)
+/// A decoded video whose pictures are all the same; it counts itself among
+/// the running decoders and tells the times it is asked for. A broken one
+/// fails at its first picture.
+struct Still {
+    picture: Frame,
+    asked: Arc<Mutex<Vec<Duration>>>,
+    decoding: Arc<AtomicUsize>,
+    broken: bool,
+}
+
+impl VideoFrames for Still {
+    fn frame_at(&mut self, elapsed: Duration) -> Result<&Frame> {
+        if self.broken {
+            return Err(BezelError::Transport("ffmpeg stopped".into()));
+        }
+        self.asked.lock().unwrap().push(elapsed);
+        Ok(&self.picture)
     }
+}
+
+impl Drop for Still {
+    fn drop(&mut self) {
+        self.decoding.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// A picture of `size`, [`STREAMED`] then (with `two_tone`, from the middle
+/// of its longer side on) [`STREAMED_END`].
+fn decoded(size: Size, two_tone: bool) -> Frame {
+    let mut picture = Frame::filled(size, STREAMED);
+    if two_tone {
+        let tall = size.height >= size.width;
+        let half = Rect::new(
+            if tall { 0 } else { size.width / 2 },
+            if tall { size.height / 2 } else { 0 },
+            if tall {
+                size.width
+            } else {
+                size.width - size.width / 2
+            },
+            if tall {
+                size.height - size.height / 2
+            } else {
+                size.height
+            },
+        );
+        picture.fill_rect(half, STREAMED_END);
+    }
+    picture
 }
 
 impl FakeMedia {
@@ -93,8 +183,13 @@ impl FakeMedia {
             tool: Some(PathBuf::from("/usr/bin/ffmpeg")),
             converted: Arc::default(),
             streamed: Arc::default(),
+            asked: Arc::default(),
+            decoding: Arc::default(),
+            two_tone: false,
             output_bytes: CONVERTED_BYTES as u64,
             posters: Arc::default(),
+            failing: Arc::default(),
+            gate: None,
         }
     }
 
@@ -103,11 +198,37 @@ impl FakeMedia {
         Self {
             ready: false,
             tool: None,
-            converted: Arc::default(),
-            streamed: Arc::default(),
-            output_bytes: CONVERTED_BYTES as u64,
-            posters: Arc::default(),
+            ..Self::ready()
         }
+    }
+
+    /// Its decoded pictures are two-toned: [`STREAMED`], then
+    /// [`STREAMED_END`] from the middle of their longer side on (the top
+    /// and bottom of a portrait picture tell where it was turned).
+    pub(crate) fn two_tone(mut self) -> Self {
+        self.two_tone = true;
+        self
+    }
+
+    /// Its next `decoders` decoders fail at their first picture (ffmpeg
+    /// stopped).
+    pub(crate) fn failing(self, decoders: usize) -> Self {
+        self.failing.store(decoders, Ordering::SeqCst);
+        self
+    }
+
+    /// Every `call` waits inside it: the receiver tells when one arrived,
+    /// and each goes on at the next word of the sender (all of them once it
+    /// is dropped).
+    pub(crate) fn holding(mut self, call: Call) -> (Self, mpsc::Receiver<Call>, mpsc::Sender<()>) {
+        let (arrived, arrivals) = mpsc::channel();
+        let (go, through) = mpsc::channel();
+        self.gate = Some(Gate {
+            call,
+            arrived,
+            through: Arc::new(Mutex::new(through)),
+        });
+        (self, arrivals, go)
     }
 }
 
@@ -136,6 +257,7 @@ impl MediaTranscoder for FakeMedia {
     }
 
     fn probe(&mut self, source: &MediaLocation) -> Result<MediaInfo> {
+        Gate::pass(self.gate.as_ref(), Call::Probe);
         let path = Path::new(&source.0);
         let bytes = std::fs::metadata(path)
             .map_err(|e| BezelError::InvalidInput(e.to_string()))?
@@ -157,7 +279,9 @@ impl MediaTranscoder for FakeMedia {
                 return Err(BezelError::Unsupported("reading it needs ffmpeg".into()));
             }
             "mkv" => video(WIDE, true),
-            "mp4" if name.starts_with("native") => video(NATIVE, false),
+            "mp4" if name.starts_with("native") || name.starts_with("dragon") => {
+                video(NATIVE, false)
+            }
             "mp4" | "mov" => video(WIDE, true),
             _ => (MediaFormat::Other, None, None, false),
         };
@@ -205,13 +329,24 @@ impl MediaTranscoder for FakeMedia {
             return Err(BezelError::Unsupported("no ffmpeg".into()));
         }
         self.streamed.lock().unwrap().push((source.clone(), spec));
-        Ok(Box::new(Solid(Frame::filled(spec.size, STREAMED))))
+        self.decoding.fetch_add(1, Ordering::SeqCst);
+        let broken = self
+            .failing
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
+        Ok(Box::new(Still {
+            picture: decoded(spec.size, self.two_tone),
+            asked: Arc::clone(&self.asked),
+            decoding: Arc::clone(&self.decoding),
+            broken,
+        }))
     }
 
     fn poster(&mut self, source: &MediaLocation, spec: PosterSpec) -> Result<Frame> {
         if !self.ready {
             return Err(BezelError::Unsupported("no ffmpeg".into()));
         }
+        Gate::pass(self.gate.as_ref(), Call::Poster);
         self.posters.lock().unwrap().push((source.clone(), spec));
         Ok(Frame::filled(spec.size, POSTER))
     }
@@ -322,12 +457,15 @@ pub(crate) fn fixture_on(
     let connector = FakeConnector::with_storage(storage);
     let converted = Arc::clone(&media.converted);
     let theme = Theme::blank("Start", NATIVE, Orientation::ReversePortrait);
+    let storage = StorageState::new(Box::new(media), copies, root.join("scratch"));
+    // As the app does: the session probes and decodes with the same converter.
     let studio = Studio::new(
         Box::new(FakeSensors::demo()),
         Box::new(SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip)),
         Language::English,
         theme,
-    );
+    )
+    .with_host_decoding(storage.shared_media(), root.join("playing"));
     let backend = Backend {
         bus: Arc::new(bus),
         connector: Arc::new(connector.clone()),
@@ -340,7 +478,7 @@ pub(crate) fn fixture_on(
         udev: None,
         fonts: Vec::new(),
         studio: crate::backend::Session::new(studio),
-        storage: StorageState::new(Box::new(media), copies, root.join("scratch")),
+        storage,
         thumbnails: crate::thumbnails::tests::thumbnails(root.join("thumbnails")),
     };
     Fixture {
@@ -876,7 +1014,10 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
             // The session is not locked: previews render and the loop samples,
             // but no frame reaches the screen.
             let theme = f.backend.session().theme;
-            assert!(f.backend.render(&theme, TIME, Instant::now()).is_ok());
+            let previewed = f
+                .backend
+                .render(&theme, TIME, Instant::now(), Motion::Allowed);
+            assert!(previewed.is_ok());
             f.backend.tick(TIME, Instant::now());
             assert_eq!(f.connector.log().frames.len(), 2);
             // The screen's port has one owner meanwhile.
@@ -949,6 +1090,7 @@ fn video_theme() -> (Theme, BTreeMap<AssetRef, Vec<u8>>) {
     theme.background = Background::Video {
         asset: AssetRef("assets/intro.mp4".into()),
         poster: None,
+        framing: None,
     };
     let mut assets = BTreeMap::new();
     assets.insert(AssetRef("assets/intro.mp4".into()), vec![3; 7000]);
@@ -1006,10 +1148,12 @@ fn sending_the_theme_video_lets_the_live_screen_play_it() {
     );
     let overlay = f.connector.log().frames.last().cloned().unwrap();
     assert_eq!(alpha_at(&overlay, 0, 0), 0, "the video shows through");
-    // The preview keeps the poster.
+    // The preview is opaque: its poster with motion reduced.
     let theme = f.backend.session().theme;
-    let preview = f.backend.render(&theme, TIME, Instant::now()).unwrap();
-    assert_eq!(preview[12 + 3], 255);
+    let preview = f
+        .backend
+        .render(&theme, TIME, Instant::now(), Motion::Reduced);
+    assert_eq!(preview.unwrap()[12 + 3], 255);
 
     // Another background stops the video on the screen.
     let mut plain = f.backend.session().theme;
@@ -1021,6 +1165,131 @@ fn sending_the_theme_video_lets_the_live_screen_play_it() {
     assert_eq!(f.backend.sample().video, None);
 }
 
+/// The Dragon Ball theme: 1920x480 on the 8.8", its video the vendor's
+/// pre-turned 480x1920 `dragon.mp4` of `bytes` bytes, framed by `framing`.
+fn dragon_ball(
+    bytes: usize,
+    framing: Option<VideoFraming>,
+) -> (Theme, BTreeMap<AssetRef, Vec<u8>>) {
+    let mut theme = Theme::blank("Dragon Ball", NATIVE, Orientation::Landscape);
+    let asset = AssetRef("assets/dragon.mp4".into());
+    theme.background = Background::Video {
+        asset: asset.clone(),
+        poster: None,
+        framing,
+    };
+    let video: Vec<u8> = (0..bytes).map(|i| (i % 253) as u8).collect();
+    (theme, BTreeMap::from([(asset, video)]))
+}
+
+/// The prepared "Send to screen" of the live 8.8" showing `theme`.
+fn send_theme_video(
+    f: &Fixture,
+    (theme, assets): (Theme, BTreeMap<AssetRef, Vec<u8>>),
+) -> PrepareDto {
+    f.backend.studio().start(theme, assets, None);
+    f.backend.set_live(true, Some(KEY), TIME).unwrap();
+    f.backend.prepare_theme_video(KEY, TIME).unwrap()
+}
+
+/// D-2026-10-01-video-background-framing-3, -4: a panel-native video in a
+/// turned theme (Auto: 270 degrees on the canvas, none on the panel) goes as
+/// it is, under its own name, within the screen's cap; any other framing
+/// needs ffmpeg.
+#[test]
+fn a_panel_native_theme_video_is_sent_as_it_is() {
+    let f = fixture("dragon");
+    let (theme, assets) = dragon_ball(4096, None);
+    let video = assets.values().next().unwrap().clone();
+    let PrepareDto::Ready(ready) = send_theme_video(&f, (theme, assets)) else {
+        panic!("refused");
+    };
+    let missing = f.backend.sample().video.unwrap();
+    assert_eq!(
+        (missing.state, missing.path.as_deref()),
+        ("missing", Some("internal/video/dragon.mp4")),
+        "the vendor's name, not dragon_90.mp4"
+    );
+    assert_eq!(
+        (ready.source.as_str(), ready.target.path.as_str()),
+        ("dragon.mp4", "internal/video/dragon.mp4")
+    );
+    assert_eq!((ready.bytes, ready.convert), (4096, None), "as it is");
+    let (result, _) = f.run(ready.ticket, Confirm::No);
+    assert!(matches!(
+        result,
+        Ok(JobDto::Done {
+            converted: false,
+            ..
+        })
+    ));
+    assert!(f.converted.lock().unwrap().is_empty(), "nothing converted");
+    let stored = &f.storage().files[&remote_path("internal/video/dragon.mp4")];
+    assert_eq!(*stored, video, "the asset's own bytes");
+    assert_eq!(f.backend.sample().video.unwrap().state, "onDevice");
+
+    // The screen's 25 MiB cap holds all the same.
+    let f = fixture("dragon-big");
+    let PrepareDto::Refused(refusal) = send_theme_video(&f, dragon_ball(26 << 20, None)) else {
+        panic!("sent over the cap");
+    };
+    assert_eq!(refusal.code, "tooLarge");
+    assert!(f.writes().is_empty());
+
+    // Another framing is a conversion: refused without ffmpeg.
+    let framing = VideoFraming {
+        fit: VideoFit::Contain,
+        zoom: Zoom::from_percent(125),
+        ..VideoFraming::default()
+    };
+    let f = fixture_with(
+        "dragon-framed",
+        FakeStorage::default(),
+        FakeMedia::missing(),
+    );
+    let PrepareDto::Refused(refusal) = send_theme_video(&f, dragon_ball(4096, Some(framing)))
+    else {
+        panic!("sent without ffmpeg");
+    };
+    assert_eq!(refusal.code, "needsConverter");
+    let path = f.backend.sample().video.unwrap().path.unwrap();
+    assert!(path.starts_with("internal/video/dragon_f"), "{path}");
+    assert!(f.writes().is_empty());
+}
+
+/// D-2026-10-01-video-background-framing-5: without ffmpeg, "Send to
+/// screen" still sends a theme video whose framing is the identity (the
+/// Dragon Ball video in Auto), as it is.
+#[test]
+fn a_panel_native_theme_video_is_sent_without_ffmpeg() {
+    let f = fixture_with(
+        "dragon-no-ffmpeg",
+        FakeStorage::default(),
+        FakeMedia::missing(),
+    );
+    assert!(!f.backend.media_tools().ready);
+    let (theme, assets) = dragon_ball(4096, None);
+    let video = assets.values().next().unwrap().clone();
+    let PrepareDto::Ready(ready) = send_theme_video(&f, (theme, assets)) else {
+        panic!("refused without ffmpeg");
+    };
+    assert_eq!(
+        (ready.target.path.as_str(), ready.bytes, ready.convert),
+        ("internal/video/dragon.mp4", 4096, None)
+    );
+    let (result, _) = f.run(ready.ticket, Confirm::No);
+    assert!(matches!(
+        result,
+        Ok(JobDto::Done {
+            converted: false,
+            ..
+        })
+    ));
+    let stored = &f.storage().files[&remote_path("internal/video/dragon.mp4")];
+    assert_eq!(*stored, video, "the asset's own bytes");
+    assert_eq!(f.backend.sample().video.unwrap().state, "onDevice");
+}
+
 #[test]
 fn an_animated_gif_background_is_sent_as_a_video_at_a_constant_rate() {
     let f = fixture("theme-gif");
@@ -1029,6 +1298,7 @@ fn an_animated_gif_background_is_sent_as_a_video_at_a_constant_rate() {
     theme.background = Background::Video {
         asset: asset.clone(),
         poster: None,
+        framing: None,
     };
     let assets = BTreeMap::from([(asset, vec![5; 3000])]);
     f.backend.studio().start(theme, assets, None);

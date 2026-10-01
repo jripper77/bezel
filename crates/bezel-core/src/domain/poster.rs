@@ -7,8 +7,9 @@
 use std::time::Duration;
 
 use super::frame::Rect;
+use super::framing::{FramingGeometry, Pad, ResolvedFraming, geometry};
 use super::geometry::Size;
-use super::media::{MediaFormat, MediaInfo, cover_crop};
+use super::media::{MediaFormat, MediaInfo};
 
 /// How far into a video its poster is taken: past the fade from black many
 /// clips open with.
@@ -21,12 +22,18 @@ pub struct PosterSpec {
     pub size: Size,
     /// The picture shown this long after the start.
     pub at: Duration,
-    /// The centered part of the video that covers the canvas, in video
-    /// pixels ([`cover_crop`], as a conversion for a screen crops it).
-    /// `None` when the shapes already match or the video's size is unknown:
-    /// the converter scales the picture to cover the canvas and keeps its
-    /// middle.
+    /// Clockwise quarter turns applied to the video first (0..=3): the
+    /// theme's framing (D-2026-10-01-video-background-framing-3).
+    pub quarter_turns: u8,
+    /// The part of the turned video kept, in its pixels, as a conversion for
+    /// a screen crops it (the plain framing: the centered part that covers
+    /// the canvas, [`super::media::cover_crop`]). `None` when the shapes
+    /// already match or the video's size is unknown: the converter scales
+    /// the picture to cover the canvas and keeps its middle.
     pub crop: Option<Rect>,
+    /// Where the scaled picture sits when the framing fits it inside the
+    /// canvas; `None`: it covers the canvas.
+    pub pad: Option<Pad>,
 }
 
 impl PosterSpec {
@@ -34,8 +41,17 @@ impl PosterSpec {
     /// picture at [`POSTER_AT`], or the first one of an animated GIF and of
     /// a clip shorter than twice that (or of unknown length). The video is
     /// taken to stand like the theme, as a conversion for a screen takes it:
-    /// it is cropped to the canvas's shape, never turned.
+    /// it is cropped to the canvas's shape, never turned (the plain framing,
+    /// [`Self::framed`]).
     pub fn for_canvas(canvas: Size, media: &MediaInfo) -> Self {
+        Self::framed(canvas, media, &ResolvedFraming::plain(0))
+    }
+
+    /// The poster of `media` framed on the canvas by `framing` (resolved for
+    /// the theme's canvas): the picture of [`Self::for_canvas`], turned,
+    /// cropped, scaled and padded by the framing's [`geometry`]. A video of
+    /// unknown size is only turned.
+    pub fn framed(canvas: Size, media: &MediaInfo, framing: &ResolvedFraming) -> Self {
         let long = media
             .video
             .and_then(|track| track.duration)
@@ -45,12 +61,27 @@ impl PosterSpec {
         } else {
             Duration::ZERO
         };
+        let framed = media.dimensions.map_or_else(
+            || FramingGeometry::turning(framing.turns, canvas),
+            |size| geometry(size, framing, canvas),
+        );
         Self {
             size: canvas,
             at,
-            crop: media
-                .dimensions
-                .and_then(|size| cover_crop(size, 0, canvas)),
+            quarter_turns: framed.turns,
+            crop: framed.crop,
+            pad: framed.pad,
+        }
+    }
+
+    /// How the video becomes the poster: turned, cropped, scaled to the
+    /// canvas or padded into it.
+    pub fn geometry(&self) -> FramingGeometry {
+        FramingGeometry {
+            turns: self.quarter_turns % 4,
+            crop: self.crop,
+            size: self.size,
+            pad: self.pad,
         }
     }
 }
@@ -86,6 +117,45 @@ mod tests {
             ..clip.clone()
         };
         assert_eq!(PosterSpec::for_canvas(wide, &unknown).crop, None);
+        assert_eq!((spec.quarter_turns, spec.pad), (0, None));
+    }
+
+    #[test]
+    fn the_poster_follows_the_framing() {
+        use crate::domain::framing::{VideoFit, VideoFraming};
+        use crate::domain::geometry::Orientation;
+
+        // Dragon Ball: the pre-turned 480x1920 video stands on its 1920x480
+        // canvas, turned back and nothing cut.
+        let canvas = Size::new(1920, 480);
+        let dragon = mp4(Size::new(480, 1920), 2_588_343);
+        let panel = crate::domain::framing::PanelLayout::for_canvas(canvas);
+        let auto =
+            VideoFraming::default().resolve(dragon.dimensions, Orientation::Landscape, panel);
+        let spec = PosterSpec::framed(canvas, &dragon, &auto);
+        assert_eq!((spec.quarter_turns, spec.crop, spec.pad), (3, None, None));
+        assert_eq!(
+            spec.geometry(),
+            geometry(Size::new(480, 1920), &auto, canvas)
+        );
+        // Fitted: padded on the canvas.
+        let clip = mp4(Size::new(1920, 1080), 1000);
+        let fitted = ResolvedFraming {
+            fit: VideoFit::Contain,
+            ..ResolvedFraming::plain(0)
+        };
+        let spec = PosterSpec::framed(canvas, &clip, &fitted);
+        assert_eq!(
+            spec.pad.map(|p| (p.scaled, p.x)),
+            Some((Size::new(852, 480), 534))
+        );
+        // Unknown size: turned only.
+        let unknown = MediaInfo {
+            dimensions: None,
+            ..clip
+        };
+        let spec = PosterSpec::framed(canvas, &unknown, &ResolvedFraming::plain(1));
+        assert_eq!((spec.quarter_turns, spec.crop, spec.pad), (1, None, None));
     }
 
     #[test]

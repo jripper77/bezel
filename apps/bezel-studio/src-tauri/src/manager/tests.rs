@@ -149,6 +149,7 @@ fn the_overview_shows_entries_findings_and_protected_files() {
     theme.background = Background::Video {
         asset: AssetRef("assets/intro.mp4".into()),
         poster: None,
+        framing: None,
     };
     f.backend.studio().set_theme(theme);
     let before = crate::clock::unix_seconds();

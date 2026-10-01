@@ -14,6 +14,8 @@
     "allow-sample-sensors",
     "allow-editor-session",
     "allow-render-preview",
+    "allow-video-auto",
+    "allow-open-guide",
     "allow-push-theme",
     "allow-set-live",
     "allow-set-brightness",

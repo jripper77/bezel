@@ -13,7 +13,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::archive::{EntryState, Listing, ScreenRecord};
-use super::media::{MediaKind, UploadProfile, device_video_name};
+use super::media::{MediaKind, UploadProfile, video_name};
 use super::storage::{FileEntry, RemotePath, StorageLocation};
 use super::theme::AssetRef;
 
@@ -29,6 +29,18 @@ pub const HANG_PARTIAL_BYTES: u64 = 29_577_216;
 pub struct Protected {
     boot: Option<RemotePath>,
     videos: BTreeSet<String>,
+    /// The names of framed copies, their fingerprint zeroed.
+    framed: BTreeSet<String>,
+}
+
+/// `name` (lower-case) with the fingerprint of a framed copy zeroed: the 8
+/// hex digits after the last `_f` before the extension
+/// (`amd_90_f1a2b3c4.mp4`: `amd_90_f00000000.mp4`); `None` without one.
+fn zeroed_fingerprint(name: &str) -> Option<String> {
+    let (stem, ext) = name.rsplit_once('.')?;
+    let (base, hex) = stem.rsplit_once("_f")?;
+    let hex_digit = |b: u8| b.is_ascii_digit() || (b'a'..=b'f').contains(&b);
+    (hex.len() == 8 && hex.bytes().all(hex_digit)).then(|| format!("{base}_f00000000.{ext}"))
 }
 
 impl Protected {
@@ -37,16 +49,20 @@ impl Protected {
         Self {
             boot,
             videos: BTreeSet::new(),
+            framed: BTreeSet::new(),
         }
     }
 
     /// Protects a theme's video `asset` under every name a screen of
-    /// `profile` may store it as: [`device_video_name`] in all four turns,
-    /// in the video folder of either medium.
+    /// `profile` may store it as: [`super::media::device_video_name`] in all
+    /// four turns, plain or with any framing (`<name>_f<8 hex>`), in the
+    /// video folder of either medium.
     pub fn theme_video(&mut self, asset: &AssetRef, profile: &UploadProfile) {
         for turns in 0..4 {
-            let name = device_video_name(asset, turns, profile);
-            self.videos.insert(name.as_str().to_ascii_lowercase());
+            let plain = video_name(asset, turns, None, profile);
+            self.videos.insert(plain.as_str().to_ascii_lowercase());
+            let framed = video_name(asset, turns, Some(0), profile);
+            self.framed.insert(framed.as_str().to_ascii_lowercase());
         }
     }
 
@@ -62,7 +78,8 @@ impl Protected {
     /// Whether `path` is a video a theme plays (letter case aside).
     pub fn is_theme_video(&self, path: &RemotePath) -> bool {
         let name = path.name.as_str().to_ascii_lowercase();
-        path.location.kind == MediaKind::Video && self.videos.contains(&name)
+        let framed = || zeroed_fingerprint(&name).is_some_and(|n| self.framed.contains(&n));
+        path.location.kind == MediaKind::Video && (self.videos.contains(&name) || framed())
     }
 
     /// Whether `path` is protected.
@@ -567,6 +584,51 @@ mod tests {
         assert!(protected.is_boot(&path("sd/video/boot.mp4")));
         assert!(!protected.is_boot(&path("internal/video/boot.mp4")));
         assert!(!Protected::default().covers(&path("sd/video/boot.mp4")));
+    }
+
+    #[test]
+    fn framed_copies_of_a_theme_video_are_protected_too() {
+        let profile = model_by_id(ModelId("turing-8.8")).and_then(UploadProfile::for_model);
+        let mut protected = Protected::default();
+        protected.theme_video(
+            &AssetRef("assets/dragon.mp4".into()),
+            &profile.expect("profile"),
+        );
+        // D-2026-10-01-video-background-framing-4: a re-framed video has a
+        // file of its own and Bezel deletes none.
+        for kept in [
+            "internal/video/dragon.mp4",
+            "internal/video/dragon_f8ec2b24d.mp4",
+            "sd/video/DRAGON_270_F1A2B3C4D.mp4",
+            "sd/video/dragon_90_f00000000.mp4",
+        ] {
+            assert!(protected.is_theme_video(&path(kept)), "{kept}");
+        }
+        for other in [
+            "internal/video/dragon_f8ec2b24.mp4",
+            "internal/video/dragon_f8ec2b24dd.mp4",
+            "internal/video/dragon_fzzzzzzzz.mp4",
+            "internal/video/dragon_45_f8ec2b24d.mp4",
+            "internal/video/dragonball_f8ec2b24d.mp4",
+            "internal/video/dragon_f8ec2b24d.h264",
+            "internal/image/dragon_f8ec2b24d.mp4",
+            "internal/video/dragon",
+        ] {
+            assert!(!protected.is_theme_video(&path(other)), "{other}");
+        }
+        let listing = Listing {
+            files: vec![
+                file("internal/video/dragon.mp4", 2_588_343),
+                file("internal/video/dragon_f8ec2b24d.mp4", 3_000_000),
+                file("internal/video/m04.mp4", 876_578),
+            ],
+            card: None,
+        };
+        let found = findings(&listing, None, &protected);
+        assert_eq!(
+            codes(&found),
+            [("internal/video/m04.mp4".to_string(), "unused")]
+        );
     }
 
     #[test]

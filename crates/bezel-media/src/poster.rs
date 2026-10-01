@@ -2,9 +2,12 @@
 //! animated GIF, decoded by ffmpeg into raw RGBA of the theme's canvas.
 //!
 //! The framing is the core's `PosterSpec`: seek to `at` (input seeking,
-//! frame-accurate), crop to the canvas's shape like a conversion for a
-//! screen, then scale to cover the canvas exactly (the last crop only trims
-//! a rounding pixel, or keeps the middle when the video's size was unknown).
+//! frame-accurate), then the filter chain of its geometry
+//! ([`crate::framing::filter_chain`], D-2026-10-01-video-background-
+//! framing-3): turned and cropped like a conversion for a screen, scaled to
+//! cover the canvas exactly (the last crop only trims a rounding pixel, or
+//! keeps the middle when the video's size was unknown) or, for a fitted
+//! framing, into part of it, the rest painted with the pad color.
 
 use std::ffi::OsString;
 use std::io::Read;
@@ -17,6 +20,7 @@ use bezel_core::domain::frame::{Frame, RGBA_BYTES};
 use bezel_core::domain::poster::PosterSpec;
 use bezel_core::{BezelError, Result};
 
+use crate::framing::{self, Scaling};
 use crate::process::{self, StderrTail, file_url};
 
 /// Longest ffmpeg may take to hand over the picture.
@@ -25,23 +29,7 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 /// ffmpeg's arguments decoding the poster of `source` described by `spec`
 /// into one raw RGBA picture on stdout.
 pub(crate) fn arguments(source: &Path, spec: PosterSpec) -> Result<Vec<OsString>> {
-    let (w, h) = (spec.size.width, spec.size.height);
-    if spec.size.area() == 0 {
-        return Err(BezelError::InvalidInput("the poster size is empty".into()));
-    }
-    let mut filters = String::new();
-    if let Some(crop) = spec.crop {
-        if crop.width == 0 || crop.height == 0 {
-            return Err(BezelError::InvalidInput("the poster crop is empty".into()));
-        }
-        filters.push_str(&format!(
-            "crop={}:{}:{}:{},",
-            crop.width, crop.height, crop.x, crop.y
-        ));
-    }
-    filters.push_str(&format!(
-        "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
-    ));
+    let filters = framing::filter_chain(&spec.geometry(), Scaling::Cover)?;
     let mut args: Vec<OsString> = ["-hide_banner", "-nostdin", "-nostats", "-v", "error"]
         .iter()
         .map(OsString::from)
@@ -118,7 +106,8 @@ pub(crate) fn take(ffmpeg: &Path, args: &[OsString], spec: PosterSpec) -> Result
 
 #[cfg(test)]
 mod tests {
-    use bezel_core::domain::frame::Rect;
+    use bezel_core::domain::frame::{Rect, Rgba};
+    use bezel_core::domain::framing::{FramingPosition, ResolvedFraming, VideoFit};
     use bezel_core::domain::geometry::Size;
 
     use super::*;
@@ -133,7 +122,9 @@ mod tests {
         PosterSpec {
             size: Size::new(1920, 480),
             at,
+            quarter_turns: 0,
             crop,
+            pad: None,
         }
     }
 
@@ -193,6 +184,63 @@ mod tests {
         assert!(arguments(Path::new("a"), no_crop).is_err());
     }
 
+    #[test]
+    fn a_framed_poster_is_turned_and_padded_like_its_geometry() {
+        use bezel_core::domain::framing::{Pad, Permille};
+        use bezel_core::domain::media::{MediaFormat, MediaInfo};
+
+        // Dragon Ball's pre-turned 480x1920 video, Auto on its landscape
+        // canvas: turned back (270 degrees, `transpose=2`), nothing cut.
+        let dragon = MediaInfo {
+            format: MediaFormat::Mp4,
+            bytes: 2_588_343,
+            dimensions: Some(Size::new(480, 1920)),
+            video: None,
+            has_audio: false,
+        };
+        let canvas = Size::new(1920, 480);
+        let auto = PosterSpec::framed(canvas, &dragon, &ResolvedFraming::plain(3));
+        let args = strings(&arguments(Path::new("dragon.mp4"), auto).unwrap());
+        assert_eq!(
+            args[13],
+            "transpose=2,scale=1920:480:force_original_aspect_ratio=increase,crop=1920:480,setsar=1"
+        );
+        // Fitted at the start of the canvas, with the pad color around.
+        let fitted = ResolvedFraming {
+            fit: VideoFit::Contain,
+            position: FramingPosition {
+                x: Permille::START,
+                y: Permille::CENTER,
+            },
+            pad: Rgba::opaque(255, 255, 255),
+            ..ResolvedFraming::plain(0)
+        };
+        let clip = MediaInfo {
+            dimensions: Some(Size::new(1920, 1080)),
+            ..dragon
+        };
+        let spec = PosterSpec::framed(canvas, &clip, &fitted);
+        assert_eq!(
+            spec.pad,
+            Some(Pad {
+                scaled: Size::new(852, 480),
+                x: 0,
+                y: 0,
+                color: Rgba::WHITE,
+            })
+        );
+        let args = strings(&arguments(Path::new("clip.mp4"), spec).unwrap());
+        assert_eq!(
+            args[13],
+            "scale=852:480:force_original_aspect_ratio=increase,crop=852:480,pad=1920:480:0:0:color=0xffffff,setsar=1"
+        );
+        let outside = PosterSpec {
+            pad: spec.pad.map(|pad| Pad { x: 1600, ..pad }),
+            ..spec
+        };
+        assert!(arguments(Path::new("a"), outside).is_err());
+    }
+
     #[cfg(unix)]
     mod with_fake_ffmpeg {
         use super::*;
@@ -203,7 +251,9 @@ mod tests {
             PosterSpec {
                 size: Size::new(2, 1),
                 at: Duration::ZERO,
+                quarter_turns: 0,
                 crop: None,
+                pad: None,
             }
         }
 
@@ -222,7 +272,7 @@ mod tests {
             let bigger = PosterSpec {
                 size: Size::new(4, 4),
                 at: Duration::from_secs(1),
-                crop: None,
+                ..two_pixels()
             };
             let err = take(&fakes::dir().join("ready/ffmpeg"), &args, bigger).unwrap_err();
             assert!(err.to_string().contains("no picture 1.0 s in"), "{err}");

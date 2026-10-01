@@ -125,6 +125,7 @@ pub(crate) fn backgrounds(r: &mut SkiaRenderer) {
     let video = |poster: Option<&str>| Background::Video {
         asset: AssetRef("clip.mp4".into()),
         poster: poster.map(|p| AssetRef(p.into())),
+        framing: None,
     };
     let f = shot(
         r,
@@ -158,6 +159,7 @@ fn video_backdrops(r: &mut SkiaRenderer) {
         Background::Video {
             asset: AssetRef("clip.mp4".into()),
             poster: Some(AssetRef("poster.png".into())),
+            framing: None,
         },
         vec![square],
     );

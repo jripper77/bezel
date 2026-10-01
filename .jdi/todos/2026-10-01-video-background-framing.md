@@ -1,0 +1,4 @@
+- [backlog] Edit a theme video's framing from the CLI (flags on `bezel theme`/`bezel storage put`); 1.x honours the framing only (D-2026-10-01-video-background-framing-6)
+- [backlog] Trim, speed and keyframed (animated) framing of a video background; framing is static in this phase (D-2026-10-01-video-background-framing-2)
+- [backlog] Offer to re-encode a panel-native file over the 25 MiB rev C cap instead of refusing it (D-2026-10-01-video-background-framing-4, D-2026-09-30-release-polish-12)
+- [backlog] List stale framed copies of a theme video (`*_f<hex>.mp4` no theme uses) in the cleanup assistant; never deleted automatically (D-2026-10-01-video-background-framing-4)

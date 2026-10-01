@@ -8,8 +8,9 @@ export const STILL = 0xffffffff;
 
 /**
  * Parses the renderer's frame: u32 LE width, u32 LE height, u32 LE
- * milliseconds until its animated GIFs change (`STILL`: none shows), then
- * RGBA8. `nextMs` is `null` for a still frame.
+ * milliseconds until its next picture is due — its animated GIFs change or
+ * its video background shows the next picture (`STILL`: nothing moves) —
+ * then RGBA8. `nextMs` is `null` for a still frame.
  */
 export function parseFrame(buffer) {
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
@@ -149,6 +150,57 @@ export const PROGRESS_EVENT = 'storage-progress';
  *   A file on the PC of exactly the screen file's size and kind.
  */
 
+// ------------------------------------------- video background framing --
+// The video background plays in the preview and is framed
+// (D-2026-10-01-video-background-framing-2, -3, -5, -6). The theme JSON the
+// UI sends to `render_preview`, `push_theme` and `save_theme` carries the
+// framing inside the video background; `video_auto` says what Auto is.
+/**
+ * @typedef {{
+ *   rotation?: 0|90|180|270,
+ *   fit?: 'cover'|'contain',
+ *   zoom?: number,
+ *   position?: {x: number, y: number},
+ *   padColor?: string,
+ * }} FramingDto The optional `framing` of a video background
+ *   (`theme.background = {type: 'video', asset, poster?, framing?}`), exactly
+ *   the `.bezeltheme` JSON (schema 1):
+ *   - `rotation`: clockwise degrees the video is turned; absent = Auto;
+ *   - `fit`: `cover` (Fill, the default: no blank edge) or `contain` (Fit:
+ *     the whole picture, `padColor` around it);
+ *   - `zoom`: 1.0–4.0 on top of the fit's scale (default 1.0);
+ *   - `position`: `x` and `y` in 0–1 with CSS `object-position` semantics
+ *     (default 0.5 each): on an axis where the picture overflows it picks
+ *     the part shown, where it is smaller it places the picture;
+ *   - `padColor`: `#rrggbbaa`, opaque (default `#000000ff`).
+ *   The UI leaves out every key at its default, and `framing` itself when
+ *   all are (adding or replacing a video writes none); it rounds `zoom` to
+ *   hundredths and `position` to thousandths. The backend takes a missing
+ *   key as its default, clamps numbers out of range and refuses another
+ *   rotation with `invalidInput`. Example (the user's Fit at 125 %):
+ *   `{"rotation": 270, "fit": "contain", "zoom": 1.25, "position": {"x": 0.5, "y": 0.4}, "padColor": "#000000ff"}`.
+ * @typedef {{rotation: 0|90|180|270, size: {width: number, height: number}|null}} VideoAutoDto
+ *   What Auto resolves to for the theme's video background (`video_auto`):
+ *   - `size`: the video's own size as the backend probes it without ffmpeg
+ *     (`bezel-media`'s probe: the MP4/MOV boxes, a GIF's header; the
+ *     `MediaInfo.dimensions`); `null` when the probe gives none (a missing
+ *     or broken file, another container);
+ *   - `rotation`: the clockwise turn Auto gives the video. When `size` is
+ *     exactly the panel's native size (480x1920 on the 8.8") and the theme
+ *     is an odd number of quarter turns from the panel, the video is taken
+ *     as already turned for the panel (the vendor keeps every theme video
+ *     panel-native) and gets the turns that cancel the theme-to-panel turns
+ *     (a landscape theme on the 8.8", the Dragon Ball case: 270, so 0 turns
+ *     in total); any other size, an unknown size or a half-turned theme: 0.
+ *   The panel is the live screen's; with no screen live, the catalog's
+ *   panel whose native size is the canvas turned back (one size, e.g. the
+ *   8.8"'s for a 1920x480 canvas); without one, `rotation` is 0. The
+ *   preview's Auto is resolved the same way. A theme without a video
+ *   background answers `{rotation: 0, size: null}`.
+ * @typedef {{width: number, height: number, rgba: Uint8ClampedArray, nextMs: number|null, millis: number}} PreviewFrameDto
+ *   A preview frame (`parseFrame`) and how long the render took, ms.
+ */
+
 /**
  * Event the app sends when the window's close button is pressed with unsaved
  * edits and no screen live: the UI asks, then calls `closeWindow`.
@@ -194,11 +246,51 @@ function tauriBridge(invoke, tauri = {}) {
     catalog: () => invoke('sensor_catalog'),
     sample: () => invoke('sample_sensors'),
     session: () => invoke('editor_session'),
-    render: async (theme) => {
+    /**
+     * Renders the theme for the preview: `render_preview {theme, motion}`.
+     * With `motion` (the default) a video background plays: the backend
+     * keeps at most one preview decoder per session (ffmpeg decodes the raw
+     * source, at most 15 pictures a second, and Rust turns and frames each
+     * picture with the theme's framing), started by the first frame asked
+     * for and ended when none is asked for during 2 s (a hidden window); it
+     * resumes from the clock at the next frame. Changing the framing never
+     * restarts it; another video does. `motion: false` (motion reduced, or
+     * the window hidden) shows the video's poster and starts no decoder.
+     * Without ffmpeg the poster shows too (the UI says why). The frame's
+     * `nextMs` is when its next picture is due (the video's next picture or
+     * a GIF's, whichever is first; at least 1000/15 ms apart for the
+     * video), `null` when nothing moves (no motion, no ffmpeg, a still theme).
+     * @param {object} theme
+     * @param {{motion?: boolean}} [options]
+     * @returns {Promise<PreviewFrameDto>}
+     */
+    render: async (theme, { motion = true } = {}) => {
       const started = performance.now();
-      const frame = parseFrame(await invoke('render_preview', { theme }));
+      const frame = parseFrame(await invoke('render_preview', { theme, motion }));
       return { ...frame, millis: performance.now() - started };
     },
+    /**
+     * What Auto resolves to for the theme's video background: `video_auto
+     * {theme}` (the theme as edited, unsaved edits included). Rejects only
+     * like every command (`{code, args, message}`, e.g. `invalidInput` for
+     * a theme the backend cannot read).
+     * @returns {Promise<VideoAutoDto>}
+     */
+    videoAuto: (theme) => invoke('video_auto', { theme }),
+    /**
+     * Opens a page of the user guide in the system's browser: `open_guide
+     * {page, language}`. `page`: `ffmpeg` (installing ffmpeg,
+     * `docs/user/ffmpeg.md`); `language`: `pt-BR` (the guide's
+     * `docs/user/pt-BR/` page) or `en`. The backend maps the page to its
+     * fixed URL on the project's site
+     * (`https://github.com/slipalison/bezel/blob/main/docs/user/[pt-BR/]ffmpeg.md`),
+     * so the webview never navigates and no other URL can be opened; an
+     * unknown page or language rejects with `invalidInput`.
+     * @param {'ffmpeg'} page
+     * @param {'pt-BR'|'en'} language
+     * @returns {Promise<void>}
+     */
+    openGuide: (page, language) => invoke('open_guide', { page, language }),
     pushTheme: (theme) => invoke('push_theme', { theme }),
     setLive: (on, screen) => invoke('set_live', { on, screen }),
     setBrightness: (screen, percent) => invoke('set_brightness', { screen, percent }),
@@ -301,9 +393,12 @@ export function createBridge(win) {
   // close button is a window event: Playwright drives and checks both. So
   // are the sensors the list shows (`data-demo-sensors`).
   const root = win.document?.documentElement;
+  // So are the preview's video decoder and the guide pages opened.
   const demo = createDemoBackend(scenario, {}, {
     onWindow: (state) => root?.setAttribute('data-demo-window', state),
     onSensorsShown: (keys) => root?.setAttribute('data-demo-sensors', keys.join(' ')),
+    onDecoder: (state) => root?.setAttribute('data-demo-decoder', state),
+    onGuide: (page, language) => root?.setAttribute('data-demo-guide', `${page} ${language}`),
     languages: win.navigator?.languages ?? [],
     hold: params.has('hold'),
   });

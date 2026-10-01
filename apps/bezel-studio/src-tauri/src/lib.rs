@@ -133,6 +133,13 @@ pub fn run() -> Result<(), tauri::Error> {
             show_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
+        // Opens the guide's fixed pages from Rust only (`open_guide`): no
+        // permission lets the webview call it, nor are its links opened.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 .args([HIDDEN_ARG])
@@ -186,6 +193,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::sample_sensors,
             commands::editor_session,
             commands::render_preview,
+            commands::video_auto,
+            commands::open_guide,
             commands::push_theme,
             commands::set_live,
             commands::set_brightness,

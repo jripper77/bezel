@@ -18,6 +18,15 @@
 //! but never sends one: putting the video on the screen is an explicit user
 //! action ([`MissingVideo::upload_request`]).
 //!
+//! The theme frames its video (D-2026-10-01-video-background-framing-2 to
+//! -4) from the video's probed size, which the caller hands over
+//! ([`ThemeRuntime::set_video_info`]; without it Auto turns nothing): the
+//! screen looks for the copy framed that way ([`device_video_name`]), a copy
+//! that is the asset as it is only at the asset's size, and the pictures
+//! decoded on the host (or for an editor's preview,
+//! [`ThemeRuntime::preview_video`]) are framed here, so a framing edit never
+//! restarts the decoder.
+//!
 //! An editor drives the same runtime: it swaps every edit in place
 //! ([`ThemeRuntime::replace_theme`], histories kept), shows the readings of
 //! the last sample ([`ThemeRuntime::snapshot`]) and previews frames over the
@@ -30,6 +39,7 @@
 //! list). A sensor whose measuring reaches outside the machine (`net.ping`)
 //! is measured only while wanted (D-2026-09-30-release-polish-11).
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
@@ -38,11 +48,16 @@ use crate::Result;
 use crate::app::storage::{Presence, UploadRequest, presence};
 use crate::domain::animation::{MIN_FRAME_STEP, Timeline};
 use crate::domain::clock::{Language, LocalTime};
+use crate::domain::device::DeviceModel;
 use crate::domain::frame::Frame;
+use crate::domain::framing::{
+    FramingGeometry, PanelLayout, ResolvedFraming, VideoFraming, frame_picture,
+};
 use crate::domain::geometry::Orientation;
 use crate::domain::history::Histories;
 use crate::domain::media::{
-    ConvertOptions, MediaKind, MediaTools, StreamSpec, UploadProfile, device_video_name,
+    ConvertOptions, MediaInfo, MediaKind, MediaTools, StreamSpec, UploadProfile, device_video_name,
+    framed_options,
 };
 use crate::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use crate::domain::storage::{FileName, Medium, RemotePath, Repeat, StorageLocation};
@@ -63,12 +78,14 @@ pub enum VideoState {
     /// The screen loops this stored file; frames are overlays on a
     /// transparent base (A = 0 shows the video).
     OnDevice(RemotePath),
-    /// The screen can play the video but does not store it: frames show the
-    /// poster until the user sends it ("Send to screen") and the video is
-    /// started again.
+    /// The screen can play the video but does not store it (framed as the
+    /// theme says, or, for a copy that is the asset as it is, at the
+    /// asset's size): frames show the poster until the user sends it ("Send
+    /// to screen") and the video is started again.
     VideoMissing(MissingVideo),
     /// The screen cannot play stored videos: the host decodes the video and
-    /// frames draw its pictures under the elements.
+    /// frames draw its pictures, framed as the theme says, under the
+    /// elements.
     Host,
     /// The screen cannot play stored videos and the host's converter is
     /// missing: frames show the poster.
@@ -89,10 +106,15 @@ pub struct MissingVideo {
     pub asset: AssetRef,
     /// Where it belongs: [`device_video_name`] in the card's video folder
     /// when a card is present, else in the internal one (the vendor's
-    /// choice). The runtime looks for that name in both.
+    /// choice). The runtime looks for that name in both. A stored file
+    /// there that is not the asset (a copy sent as it is, of another size)
+    /// keeps its path: sending replaces it.
     pub path: RemotePath,
-    /// The conversion that fits the video to the panel: the quarter turns
-    /// from the theme's orientation to the panel's native one.
+    /// The conversion that puts the video on the panel as the theme frames
+    /// it ([`framed_options`]: the framing turned to the panel, cropped,
+    /// scaled and padded onto its picture; only the turns while the
+    /// video's size is unknown). The identity for a video already in the
+    /// screen's profile: it is sent as it is.
     pub options: ConvertOptions,
 }
 
@@ -197,6 +219,11 @@ pub struct ThemeRuntime {
     /// The theme's sensors and `also`, declared at every sample.
     wanted: Wanted,
     video: VideoState,
+    /// The theme's video as probed ([`ThemeRuntime::set_video_info`]).
+    info: Option<MediaInfo>,
+    /// The model of the screen the video was started on (its panel decides
+    /// Auto and the stored copy's name).
+    screen: Option<&'static DeviceModel>,
     /// Pictures of the host-decoded video ([`VideoState::Host`]).
     host: Option<Box<dyn VideoFrames>>,
     /// The stored video this runtime told the screen to loop.
@@ -220,12 +247,63 @@ fn video_of(theme: &Theme) -> Option<(&AssetRef, Orientation)> {
     }
 }
 
+/// The theme's video asset and its bytes among `assets`.
+fn video_bytes<'a>(
+    theme: &'a Theme,
+    assets: &'a BTreeMap<AssetRef, Vec<u8>>,
+) -> Option<(&'a AssetRef, Option<&'a Vec<u8>>)> {
+    video_of(theme).map(|(asset, _)| (asset, assets.get(asset)))
+}
+
+/// The framing of the theme's video background (the default when the theme
+/// sets none, or has no video).
+fn framing_of(theme: &Theme) -> VideoFraming {
+    match &theme.background {
+        Background::Video { framing, .. } => framing.unwrap_or_default(),
+        _ => VideoFraming::default(),
+    }
+}
+
 /// How a theme's video is shown before it is started on a screen.
 fn unstarted(theme: &Theme) -> VideoState {
     match video_of(theme) {
         Some(_) => VideoState::NotStarted,
         None => VideoState::NoVideo,
     }
+}
+
+/// Which stored file under the theme video's name is that video.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Expect {
+    /// Any: a conversion's size is not known before it runs.
+    Any,
+    /// One of exactly these bytes: the asset sent as it is
+    /// (D-2026-10-01-video-background-framing-4).
+    Bytes(u64),
+}
+
+impl Expect {
+    /// Whether a stored file found as `presence` is the video. A file whose
+    /// size the screen cannot report is.
+    fn met_by(self, presence: Presence) -> bool {
+        match (self, presence) {
+            (_, Presence::Absent) => false,
+            (Expect::Bytes(bytes), Presence::Stored(Some(size))) => size == bytes,
+            _ => true,
+        }
+    }
+}
+
+/// The theme's video on a screen that stores and plays videos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeviceVideo {
+    /// The name its copy has ([`device_video_name`]).
+    name: FileName,
+    /// The conversion that makes that copy (the identity: the asset as it
+    /// is).
+    options: ConvertOptions,
+    /// Which stored file under that name is the copy.
+    expect: Expect,
 }
 
 /// Where a screen stores the theme's video.
@@ -237,9 +315,11 @@ enum Lookup {
 }
 
 /// Looks for `name` in the internal and (with a card) the card video folder
-/// with size queries only: listing a folder creates it. A file whose size
-/// the screen cannot report is there.
-fn find_video(storage: &mut dyn ScreenStorage, name: FileName) -> Result<Lookup> {
+/// with size queries only: listing a folder creates it. The first file that
+/// meets `expect` is the video; without one, a file of another size keeps
+/// the place (sending replaces it), else the card's folder when there is a
+/// card, the internal one otherwise.
+fn find_video(storage: &mut dyn ScreenStorage, name: FileName, expect: Expect) -> Result<Lookup> {
     let card = storage.info()?.card.is_some();
     let media: &[Medium] = if card {
         &[Medium::Internal, Medium::Card]
@@ -247,14 +327,21 @@ fn find_video(storage: &mut dyn ScreenStorage, name: FileName) -> Result<Lookup>
         &[Medium::Internal]
     };
     let at = |medium| StorageLocation::new(medium, MediaKind::Video);
+    let mut taken = None;
     for medium in media {
         let path = RemotePath::new(at(*medium), name.clone());
-        if presence(storage, &path)? != Presence::Absent {
+        let found = presence(storage, &path)?;
+        if expect.met_by(found) {
             return Ok(Lookup::Stored(path));
+        }
+        if found != Presence::Absent && taken.is_none() {
+            taken = Some(path);
         }
     }
     let target = if card { Medium::Card } else { Medium::Internal };
-    Ok(Lookup::Absent(RemotePath::new(at(target), name)))
+    Ok(Lookup::Absent(
+        taken.unwrap_or_else(|| RemotePath::new(at(target), name)),
+    ))
 }
 
 impl ThemeRuntime {
@@ -276,6 +363,8 @@ impl ThemeRuntime {
                 language,
             },
             video,
+            info: None,
+            screen: None,
             host: None,
             playing: None,
             timelines: BTreeMap::new(),
@@ -296,10 +385,19 @@ impl ThemeRuntime {
     }
 
     /// Adds `asset` for the theme to use (new bytes for one it has replace
-    /// them); the other assets stay.
+    /// them); the other assets stay. New bytes for the theme's video drop
+    /// what [`Self::set_video_info`] said of it.
     pub fn add_asset(&mut self, asset: AssetRef, bytes: Vec<u8>) {
         self.timelines.remove(&asset);
+        if self.is_video(&asset) && self.scene.assets.get(&asset) != Some(&bytes) {
+            self.set_video_info(None);
+        }
         self.scene.assets.insert(asset, bytes);
+    }
+
+    /// Whether `asset` is the theme's video.
+    fn is_video(&self, asset: &AssetRef) -> bool {
+        video_of(&self.scene.theme).is_some_and(|(video, _)| video == asset)
     }
 
     /// How the theme's video background is shown.
@@ -346,15 +444,35 @@ impl ThemeRuntime {
     /// Swaps in an edited theme, keeping the history of sensors still graphed.
     /// Another video (a different file or orientation) goes back to
     /// [`VideoState::NotStarted`] (or [`VideoState::NoVideo`]): start it
-    /// again with [`Self::start_video`].
+    /// again with [`Self::start_video`]. New bytes for the video drop what
+    /// [`Self::set_video_info`] said of it.
     pub fn replace(&mut self, theme: Theme, assets: BTreeMap<AssetRef, Vec<u8>>) {
+        let before = self.device_video();
+        if video_bytes(&theme, &assets) != video_bytes(&self.scene.theme, &self.scene.assets) {
+            self.info = None;
+        }
         self.scene.assets = assets;
         self.timelines.clear();
-        self.replace_theme(theme);
+        self.swap_theme(theme);
+        self.look_again_unless(before);
     }
 
-    /// [`Self::replace`] keeping the assets: an edit of the theme.
+    /// [`Self::replace`] keeping the assets: an edit of the theme. A
+    /// framing edit keeps the host decoding; a screen that stores videos
+    /// looks again when the edit changes the copy it looks for.
     pub fn replace_theme(&mut self, theme: Theme) {
+        let before = self.device_video();
+        let asset = |theme: &Theme| video_of(theme).map(|(asset, _)| asset.clone());
+        if asset(&theme) != asset(&self.scene.theme) {
+            self.info = None;
+        }
+        self.swap_theme(theme);
+        self.look_again_unless(before);
+    }
+
+    /// Puts `theme` in place, keeping the history of sensors still graphed;
+    /// another video goes back to [`VideoState::NotStarted`].
+    fn swap_theme(&mut self, theme: Theme) {
         let mut histories = Histories::new(&theme.history_lengths());
         histories.adopt(&self.scene.histories);
         if video_of(&theme) != video_of(&self.scene.theme) {
@@ -366,11 +484,111 @@ impl ThemeRuntime {
         self.update_wanted();
     }
 
+    /// The theme's video as probed by the caller (`None`: unknown), for
+    /// framing it: Auto turns a video of the panel's native size in a theme
+    /// turned a quarter from the panel ([`VideoFraming::resolve`]), the
+    /// geometry crops and pads from its size, and a copy sent as it is is
+    /// recognised by its bytes. Hand it over before [`Self::start_video`]
+    /// (and again after the video changes); without it Auto turns nothing.
+    /// A screen that stores videos looks again when it changes the copy
+    /// looked for.
+    pub fn set_video_info(&mut self, info: Option<MediaInfo>) {
+        let before = self.device_video();
+        self.info = info;
+        self.look_again_unless(before);
+    }
+
+    /// The theme's video as probed ([`Self::set_video_info`]).
+    pub fn video_info(&self) -> Option<&MediaInfo> {
+        self.info.as_ref()
+    }
+
+    /// Goes back to [`VideoState::NotStarted`] when a screen that stores
+    /// videos was looking for another copy than `before`.
+    fn look_again_unless(&mut self, before: Option<DeviceVideo>) {
+        let on_device = matches!(
+            self.video,
+            VideoState::OnDevice(_) | VideoState::VideoMissing(_)
+        );
+        if on_device && self.device_video() != before {
+            self.video = unstarted(&self.scene.theme);
+        }
+    }
+
+    /// The panel Auto frames the video for: the screen's once the video was
+    /// started on one, else the one the canvas is drawn for
+    /// ([`PanelLayout::for_theme`]).
+    pub fn video_panel(&self) -> Option<PanelLayout> {
+        PanelLayout::for_theme(self.screen, self.scene.theme.canvas)
+    }
+
+    /// The theme's framing of its video on its canvas, Auto decided from
+    /// the probed size ([`Self::set_video_info`]) for [`Self::video_panel`].
+    /// `None` without a video background.
+    pub fn video_framing(&self) -> Option<ResolvedFraming> {
+        video_of(&self.scene.theme)?;
+        let size = self.info.as_ref().and_then(|info| info.dimensions);
+        let theme = &self.scene.theme;
+        Some(framing_of(theme).resolve(size, theme.orientation, self.video_panel()))
+    }
+
+    /// How to decode the theme's video on the host at `fps`: the whole
+    /// picture at its probed size, at most twice the canvas
+    /// ([`StreamSpec::raw`]); the canvas's size while its size is unknown.
+    pub fn video_stream(&self, fps: u32) -> StreamSpec {
+        let canvas = self.scene.theme.canvas;
+        let size = self.info.as_ref().and_then(|info| info.dimensions);
+        let source = size.filter(|size| size.area() > 0).unwrap_or(canvas);
+        StreamSpec::raw(source, canvas, fps)
+    }
+
+    /// A picture of the theme's video decoded on the host
+    /// ([`Self::video_stream`]) framed onto the canvas as the theme says
+    /// ([`frame_picture`]; the picture itself when it already is that).
+    pub fn framed_video<'p>(&self, picture: &'p Frame) -> Cow<'p, Frame> {
+        let framing = self.video_framing().unwrap_or(ResolvedFraming::plain(0));
+        frame_picture(picture, &framing, self.scene.theme.canvas)
+    }
+
+    /// The theme's video on the screen it was started on, when that screen
+    /// stores and plays videos: the copy's name and conversion
+    /// ([`framed_options`]) and which stored file is it. A video in the
+    /// screen's profile whose framing leaves it as it is is sent as it is,
+    /// so only a file of its bytes is it; a converted copy's size is
+    /// unknown, so any file under its name is.
+    fn device_video(&self) -> Option<DeviceVideo> {
+        let model = self.screen?;
+        let profile = UploadProfile::for_model(model)?;
+        if !model.capabilities.video_playback {
+            return None;
+        }
+        let (asset, orientation) = video_of(&self.scene.theme)?;
+        let framing = self.video_framing()?;
+        let on_panel = framing.turned(orientation.quarter_turns_to(model.native_orientation));
+        let options = match &self.info {
+            Some(info) => framed_options(model, orientation, info, &framing),
+            None => {
+                let turned = FramingGeometry::turning(on_panel.turns, profile.video_size);
+                ConvertOptions::from_geometry(&turned)
+            }
+        };
+        let as_is = self.info.as_ref().filter(|info| {
+            options.is_identity() && profile.mismatches(MediaKind::Video, info).is_empty()
+        });
+        Some(DeviceVideo {
+            name: device_video_name(asset, &on_panel, &profile),
+            options,
+            expect: as_is.map_or(Expect::Any, |info| Expect::Bytes(info.bytes)),
+        })
+    }
+
     /// Forgets the screen the video was started on (closed, handed back or
     /// lost): frames show the poster again ([`VideoState::NotStarted`]) and
-    /// the host decoding stops. Nothing is sent: the screen is gone.
+    /// the host decoding stops. Nothing is sent: the screen is gone. What
+    /// [`Self::set_video_info`] said stays.
     pub fn forget_screen(&mut self) {
         self.video = unstarted(&self.scene.theme);
+        self.screen = None;
         self.host = None;
         self.playing = None;
         self.cadence.drawn = None;
@@ -381,11 +599,15 @@ impl ThemeRuntime {
     /// after the video was sent to the screen.
     ///
     /// - A screen that plays stored videos and has storage over this link:
-    ///   [`device_video_name`] is looked for in its video folders with size
-    ///   queries only (never a listing, never an upload) and looped
-    ///   ([`VideoState::OnDevice`]); absent, [`VideoState::VideoMissing`].
-    /// - Any other screen: the host decodes the video when `host` is offered
-    ///   and its converter is ready ([`VideoState::Host`]); otherwise
+    ///   the copy framed as the theme says ([`device_video_name`] of the
+    ///   framing turned to the panel, Auto decided for the screen's panel)
+    ///   is looked for in its video folders with size queries only (never a
+    ///   listing, never an upload) and looped ([`VideoState::OnDevice`]).
+    ///   A copy that is the asset as it is counts only at the asset's size
+    ///   ([`Self::set_video_info`]). Absent, [`VideoState::VideoMissing`].
+    /// - Any other screen: the host decodes the whole video when `host` is
+    ///   offered and its converter is ready ([`Self::video_stream`]) and
+    ///   every frame frames its picture ([`VideoState::Host`]); otherwise
     ///   [`VideoState::NoConverter`] or [`VideoState::NoPlayback`].
     ///
     /// A stored video this runtime looped and no longer shows is stopped. On
@@ -397,6 +619,7 @@ impl ThemeRuntime {
     ) -> Result<&VideoState> {
         self.host = None;
         self.video = unstarted(&self.scene.theme);
+        self.screen = Some(screen.identity().model);
         let video = match video_of(&self.scene.theme) {
             Some((asset, _)) => asset.clone(),
             None => {
@@ -404,15 +627,8 @@ impl ThemeRuntime {
                 return Ok(&self.video);
             }
         };
-        let model = screen.identity().model;
-        let turns = self
-            .scene
-            .theme
-            .orientation
-            .quarter_turns_to(model.native_orientation);
-        let profile = UploadProfile::for_model(model).filter(|_| model.capabilities.video_playback);
-        let state = match (profile, screen.storage()) {
-            (Some(profile), Some(storage)) => self.on_device(storage, video, turns, &profile)?,
+        let state = match (self.device_video(), screen.storage()) {
+            (Some(device), Some(storage)) => self.on_device(storage, video, device)?,
             _ => self.on_host(host)?,
         };
         if !matches!(state, VideoState::OnDevice(_)) {
@@ -422,16 +638,14 @@ impl ThemeRuntime {
         Ok(&self.video)
     }
 
-    /// Loops the stored video, or says where it belongs.
+    /// Loops the stored copy of the video, or says where it belongs.
     fn on_device(
         &mut self,
         storage: &mut dyn ScreenStorage,
         asset: AssetRef,
-        quarter_turns: u8,
-        profile: &UploadProfile,
+        device: DeviceVideo,
     ) -> Result<VideoState> {
-        let name = device_video_name(&asset, quarter_turns, profile);
-        match find_video(storage, name)? {
+        match find_video(storage, device.name, device.expect)? {
             Lookup::Stored(path) => {
                 storage.play_video(&path, Repeat::Loop)?;
                 self.playing = Some(path.clone());
@@ -440,10 +654,7 @@ impl ThemeRuntime {
             Lookup::Absent(path) => Ok(VideoState::VideoMissing(MissingVideo {
                 asset,
                 path,
-                options: ConvertOptions {
-                    quarter_turns,
-                    ..ConvertOptions::default()
-                },
+                options: device.options,
             })),
         }
     }
@@ -456,10 +667,7 @@ impl ThemeRuntime {
         if let MediaTools::Missing { install_hints } = host.media.tools() {
             return Ok(VideoState::NoConverter { install_hints });
         }
-        let spec = StreamSpec {
-            size: self.scene.theme.canvas,
-            fps: host.fps,
-        };
+        let spec = self.video_stream(host.fps);
         self.host = Some(host.media.stream(&host.source, spec)?);
         Ok(VideoState::Host)
     }
@@ -494,7 +702,8 @@ impl ThemeRuntime {
     /// at the clock of the last [`Self::render_at`] or [`Self::preview`].
     /// `video` is how long the host-decoded video has played
     /// ([`VideoState::Host`]; ignored otherwise): a loop streaming it
-    /// renders at the video's rate and samples at the theme's.
+    /// renders at the video's rate and samples at the theme's. Its picture
+    /// is framed as the theme says now ([`Self::framed_video`]).
     pub fn render(
         &mut self,
         renderer: &mut dyn FrameRenderer,
@@ -502,9 +711,17 @@ impl ThemeRuntime {
         video: Duration,
     ) -> Result<Frame> {
         self.learn_animations(renderer);
-        let backdrop = match (&self.video, self.host.as_mut()) {
+        let framing = self.video_framing().unwrap_or(ResolvedFraming::plain(0));
+        let canvas = self.scene.theme.canvas;
+        let picture = match (&self.video, self.host.as_mut()) {
+            (VideoState::Host, Some(frames)) => {
+                Some(frame_picture(frames.frame_at(video)?, &framing, canvas))
+            }
+            _ => None,
+        };
+        let backdrop = match (&self.video, &picture) {
             (VideoState::OnDevice(_), _) => Backdrop::OnDevice,
-            (VideoState::Host, Some(frames)) => Backdrop::Frame(frames.frame_at(video)?),
+            (_, Some(picture)) => Backdrop::Frame(picture),
             _ => Backdrop::Poster,
         };
         self.scene.draw(renderer, time, self.clock, backdrop)
@@ -637,9 +854,36 @@ impl ThemeRuntime {
         time: LocalTime,
         now: Duration,
     ) -> Result<(Frame, Option<Duration>)> {
+        self.preview_over(renderer, time, now, Backdrop::Poster)
+    }
+
+    /// [`Self::preview`] over `picture`, a picture of the theme's video an
+    /// editor decoded ([`Self::video_stream`]), framed as the theme says
+    /// now ([`Self::framed_video`]): a framing edit shows at the next
+    /// picture, the decoder untouched. When the next picture is due is the
+    /// caller's. Not a frame of the screen.
+    pub fn preview_video(
+        &mut self,
+        renderer: &mut dyn FrameRenderer,
+        time: LocalTime,
+        now: Duration,
+        picture: &Frame,
+    ) -> Result<(Frame, Option<Duration>)> {
+        let framed = self.framed_video(picture);
+        self.preview_over(renderer, time, now, Backdrop::Frame(&framed))
+    }
+
+    /// An editor's preview at `now` over `backdrop`.
+    fn preview_over(
+        &mut self,
+        renderer: &mut dyn FrameRenderer,
+        time: LocalTime,
+        now: Duration,
+        backdrop: Backdrop<'_>,
+    ) -> Result<(Frame, Option<Duration>)> {
         self.learn_animations(renderer);
         self.clock = now;
-        let frame = self.scene.draw(renderer, time, now, Backdrop::Poster)?;
+        let frame = self.scene.draw(renderer, time, now, backdrop)?;
         Ok((frame, self.next_animation_change(now)))
     }
 
@@ -702,7 +946,8 @@ mod tests {
         };
         let (rev_c, usb) = (profile("turing-8.8"), profile("turing-usb-8.8"));
         let name = |asset: &str, turns, profile: &UploadProfile| {
-            device_video_name(&AssetRef(asset.into()), turns, profile).to_string()
+            let plain = ResolvedFraming::plain(turns);
+            device_video_name(&AssetRef(asset.into()), &plain, profile).to_string()
         };
         assert_eq!(name("assets/AMD.mp4", 0, &rev_c), "amd.mp4");
         assert_eq!(name("assets/AMD.mp4", 1, &rev_c), "amd_90.mp4");
@@ -743,6 +988,7 @@ mod tests {
         video.background = Background::Video {
             asset: AssetRef("assets/clip.mp4".into()),
             poster: None,
+            framing: None,
         };
         let mut runtime = ThemeRuntime::new(plain.clone(), BTreeMap::new(), Language::English);
         assert_eq!(runtime.video(), &VideoState::NoVideo);
@@ -752,5 +998,54 @@ mod tests {
         assert!(format!("{runtime:?}").contains("NotStarted"));
         runtime.replace(plain, BTreeMap::new());
         assert_eq!(runtime.video(), &VideoState::NoVideo);
+    }
+
+    #[test]
+    fn the_probed_video_is_forgotten_with_its_bytes() {
+        use crate::domain::geometry::Size;
+        let theme = |asset: &str| {
+            let mut theme = Theme::blank("clip", Size::new(480, 1920), Orientation::Landscape);
+            theme.background = Background::Video {
+                asset: AssetRef(asset.into()),
+                poster: None,
+                framing: None,
+            };
+            theme
+        };
+        let clip = AssetRef("assets/clip.mp4".into());
+        let assets = BTreeMap::from([(clip.clone(), vec![1, 2, 3])]);
+        let info = MediaInfo {
+            format: crate::domain::media::MediaFormat::Mp4,
+            bytes: 3,
+            dimensions: Some(Size::new(480, 1920)),
+            video: None,
+            has_audio: false,
+        };
+        let mut runtime =
+            ThemeRuntime::new(theme("assets/clip.mp4"), assets.clone(), Language::English);
+        let probed = |runtime: &mut ThemeRuntime| {
+            runtime.set_video_info(Some(info.clone()));
+            assert_eq!(runtime.video_framing().map(|f| f.turns), Some(3));
+        };
+        probed(&mut runtime);
+        // The same bytes keep it; other bytes, another file or theme drop it.
+        runtime.add_asset(clip.clone(), vec![1, 2, 3]);
+        runtime.replace(theme("assets/clip.mp4"), assets.clone());
+        runtime.add_asset(AssetRef("assets/other.png".into()), vec![9]);
+        assert_eq!(runtime.video_info(), Some(&info));
+        runtime.add_asset(clip.clone(), vec![4]);
+        assert_eq!(runtime.video_info(), None);
+        assert_eq!(runtime.video_framing().map(|f| f.turns), Some(0));
+        probed(&mut runtime);
+        runtime.replace(theme("assets/clip.mp4"), assets.clone());
+        assert_eq!(runtime.video_info(), None, "new bytes");
+        probed(&mut runtime);
+        runtime.replace_theme(theme("assets/other.mp4"));
+        assert_eq!(runtime.video_info(), None, "another video");
+        assert_eq!(runtime.video_stream(10).size, Size::new(1920, 480));
+        assert_eq!(
+            runtime.video_panel().map(|p| p.native),
+            Some(Size::new(480, 1920))
+        );
     }
 }

@@ -1,6 +1,7 @@
 //! `theme.json`, schema 1: serde shapes and their mapping to the core model.
 
 use bezel_core::domain::frame::Rgba;
+use bezel_core::domain::framing::{FramingPosition, Permille, VideoFit, VideoFraming, Zoom};
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::sensor::{ByteUnits, DisplayFormat, SensorKey, TemperatureUnit};
 use bezel_core::domain::theme::{
@@ -63,6 +64,18 @@ fn yes() -> bool {
     true
 }
 
+fn one_f64() -> f64 {
+    1.0
+}
+
+fn half() -> f64 {
+    0.5
+}
+
+fn black() -> String {
+    to_hex(Rgba::BLACK)
+}
+
 /// Width and height.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SizeDto {
@@ -96,7 +109,71 @@ pub enum BackgroundDto {
         /// Poster asset.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         poster: Option<String>,
+        /// How the video is framed; omitted when it is the default, so a
+        /// theme without a framing is written as before.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framing: Option<FramingDto>,
     },
+}
+
+/// A video background's framing (D-2026-10-01-video-background-framing-2).
+/// A missing key takes its default; numbers out of range are clamped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FramingDto {
+    /// Clockwise degrees: 0, 90, 180 or 270; absent is Auto. Any number is
+    /// read, so another one is refused by name rather than by type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<serde_json::Number>,
+    /// Fill or fit.
+    #[serde(default)]
+    pub fit: VideoFitDto,
+    /// Zoom on top of the fit's scale, 1.0 to 4.0.
+    #[serde(default = "one_f64")]
+    pub zoom: f64,
+    /// Where the picture sits, 0..=1 on each axis (CSS `object-position`).
+    #[serde(default)]
+    pub position: PositionDto,
+    /// `#rrggbbaa` of the area a fitted picture leaves.
+    #[serde(default = "black")]
+    pub pad_color: String,
+}
+
+impl FramingDto {
+    /// Clockwise quarter turns of its `rotation` (`None`: Auto). Only 0,
+    /// 90, 180 and 270 degrees are rotations; another number is refused,
+    /// for every reader of a theme (its file, the studio's commands).
+    pub fn quarter_turns(&self) -> Result<Option<u8>, DtoError> {
+        self.rotation.as_ref().map(quarter_turns).transpose()
+    }
+}
+
+/// Video fit names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VideoFitDto {
+    /// Fill: covers the canvas, the overflow cut off.
+    #[default]
+    Cover,
+    /// Fit: inside the canvas, the rest painted with the pad color.
+    Contain,
+}
+
+/// A place on each axis, 0 = start, 0.5 = middle, 1 = end.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PositionDto {
+    /// Across.
+    #[serde(default = "half")]
+    pub x: f64,
+    /// Down.
+    #[serde(default = "half")]
+    pub y: f64,
+}
+
+impl Default for PositionDto {
+    fn default() -> Self {
+        Self { x: 0.5, y: 0.5 }
+    }
 }
 
 /// Fit names.
@@ -423,6 +500,62 @@ fn fit(f: FitDto) -> Fit {
         FitDto::Cover => Fit::Cover,
         FitDto::None => Fit::None,
     }
+}
+
+/// The framing as written: `None` (no `framing` key) when it is the default.
+fn framing_dto(f: Option<&VideoFraming>) -> Option<FramingDto> {
+    let f = f.filter(|f| !f.is_default())?;
+    Some(FramingDto {
+        rotation: f
+            .rotation
+            .map(|turns| serde_json::Number::from(u16::from(turns % 4) * 90)),
+        fit: match f.fit {
+            VideoFit::Cover => VideoFitDto::Cover,
+            VideoFit::Contain => VideoFitDto::Contain,
+        },
+        zoom: f.zoom.factor(),
+        position: PositionDto {
+            x: f.position.x.fraction(),
+            y: f.position.y.fraction(),
+        },
+        pad_color: to_hex(f.pad),
+    })
+}
+
+/// Clockwise quarter turns of a framing's `rotation` in degrees.
+fn quarter_turns(degrees: &serde_json::Number) -> R<u8> {
+    [(0.0, 0), (90.0, 1), (180.0, 2), (270.0, 3)]
+        .into_iter()
+        .find(|(whole, _)| degrees.as_f64() == Some(*whole))
+        .map(|(_, turns)| turns)
+        .ok_or_else(|| {
+            DtoError(format!(
+                "video framing rotation {degrees} is not 0, 90, 180 or 270"
+            ))
+        })
+}
+
+/// The framing read: `None` when it is the default. Numbers are clamped; a
+/// rotation other than 0, 90, 180 or 270 is refused.
+fn framing(d: Option<&FramingDto>) -> R<Option<VideoFraming>> {
+    let Some(d) = d else {
+        return Ok(None);
+    };
+    let framing = VideoFraming {
+        rotation: d.quarter_turns()?,
+        fit: match d.fit {
+            VideoFitDto::Cover => VideoFit::Cover,
+            VideoFitDto::Contain => VideoFit::Contain,
+        },
+        zoom: Zoom::from_factor(d.zoom),
+        position: FramingPosition {
+            x: Permille::from_fraction(d.position.x),
+            y: Permille::from_fraction(d.position.y),
+        },
+        pad: color(&d.pad_color)
+            .map_err(|e| DtoError(format!("video framing padColor: {}", e.0)))?,
+    };
+    Ok((!framing.is_default()).then_some(framing))
 }
 
 fn paint_dto(p: &Paint) -> PaintDto {
@@ -847,9 +980,14 @@ impl From<&Theme> for ThemeDto {
                     asset: asset.0.clone(),
                     fit: fit_dto(*fit),
                 },
-                Background::Video { asset, poster } => BackgroundDto::Video {
+                Background::Video {
+                    asset,
+                    poster,
+                    framing,
+                } => BackgroundDto::Video {
                     asset: asset.0.clone(),
                     poster: poster.as_ref().map(|p| p.0.clone()),
+                    framing: framing_dto(framing.as_ref()),
                 },
             },
             elements: t
@@ -893,9 +1031,14 @@ impl TryFrom<&ThemeDto> for Theme {
                 asset: AssetRef(asset.clone()),
                 fit: fit(*f),
             },
-            BackgroundDto::Video { asset, poster } => Background::Video {
+            BackgroundDto::Video {
+                asset,
+                poster,
+                framing: f,
+            } => Background::Video {
                 asset: AssetRef(asset.clone()),
                 poster: poster.clone().map(AssetRef),
+                framing: framing(f.as_ref())?,
             },
         };
         let elements = d

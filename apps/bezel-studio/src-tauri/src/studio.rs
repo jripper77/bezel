@@ -6,13 +6,33 @@
 //! the theme in place with the histories kept. Everything goes through the
 //! core's ports, so the whole session runs on fakes in tests.
 //!
-//! A theme with a video background (D-2026-09-30-storage-video-4): the
-//! preview always shows the poster; the live screen gets what the runtime's
-//! [`ThemeRuntime::start_video`] chose: the stored video looping under
-//! overlays, the video decoded on this computer for screens that cannot play
-//! videos (a copy of the asset is decoded by the media converter the storage
-//! tab shares), or the poster ([`VideoState::VideoMissing`] carries what
-//! sending it takes).
+//! A theme with a video background (D-2026-09-30-storage-video-4): the live
+//! screen gets what the runtime's [`ThemeRuntime::start_video`] chose: the
+//! stored video looping under overlays, the video decoded on this computer
+//! for screens that cannot play videos (a copy of the asset is decoded by the
+//! media converter the storage tab shares), or the poster
+//! ([`VideoState::VideoMissing`] carries what sending it takes).
+//!
+//! The video is framed (D-2026-10-01-video-background-framing-2 to -5): a
+//! copy of it is probed once (an MP4's header needs no ffmpeg) and what it
+//! said goes to the runtime, which decides Auto, the copy a screen looks for
+//! and how each decoded picture is framed. The preview plays the video when
+//! motion is allowed ([`Motion`]): one decoder per session reads the raw
+//! source at most [`PREVIEW_FPS`] pictures a second, the runtime frames each
+//! picture as the theme says now (a framing edit never restarts it, another
+//! video does), and it ends when no picture is asked for during
+//! [`PREVIEW_IDLE`], to resume from the clock at the next one. A decoder that
+//! fails is tried again after [`PREVIEW_RETRY`], by itself up to
+//! [`PREVIEW_ATTEMPTS`] in a row. Without ffmpeg, with motion reduced or a
+//! hidden window, the preview shows the poster. The poster is taken again on
+//! save when the theme frames its video otherwise than the poster shows.
+//!
+//! Probing the video and taking a poster run external programs (ffprobe for
+//! a container that is not MP4 or GIF, ffmpeg for a poster): the session
+//! hands them out ([`VideoProbe`], [`PosterRetake`]) so the caller runs them
+//! outside its lock, and takes their outcome back only for the video, poster
+//! and framing they were for. Until the video is probed the preview shows
+//! the poster and the live screen does not start it.
 //!
 //! The sensors measure what is shown (D-2026-09-30-release-polish-11): the
 //! theme, which the preview always shows, and the sensors the library's
@@ -35,24 +55,28 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, TryLockError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::{Duration, Instant};
 
 use bezel_core::app::{HOST_VIDEO_FPS, HostVideo, MissingVideo, ThemeRuntime, VideoState};
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::frame::Frame;
+use bezel_core::domain::framing::{PanelLayout, VideoFraming, auto_turns};
 use bezel_core::domain::geometry::{Orientation, Size};
+use bezel_core::domain::media::{MediaInfo, MediaTools, PREVIEW_FPS};
+use bezel_core::domain::poster::PosterSpec;
 use bezel_core::domain::reconnect::{Reconnect, worth_reconnecting};
 use bezel_core::domain::screen::Brightness;
 use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use bezel_core::domain::theme::{AssetRef, Background, Theme, refresh_interval};
 use bezel_core::ports::{
     FrameRenderer, MediaLocation, MediaTranscoder, ScreenLink, SensorSource, ThemeLocation,
-    ThemeStore,
+    ThemeStore, VideoFrames,
 };
 use bezel_core::{BezelError, Result};
 
+use crate::media::png_of;
 use crate::messages::{ErrorCode, UiError};
 use crate::storage::MediaSetup;
 
@@ -96,6 +120,281 @@ struct HostPlayback {
     /// The file the converter reads (kept while it plays).
     _copy: VideoCopy,
     started: Instant,
+}
+
+/// A preview decoder no picture is asked of for this long ends
+/// (D-2026-10-01-video-background-framing-5): a hidden window, or motion
+/// reduced, asks for none.
+pub const PREVIEW_IDLE: Duration = Duration::from_secs(2);
+
+/// After a preview decoder could not start or stopped (no ffmpeg, a file it
+/// cannot read), the next attempt waits this long; the preview shows the
+/// poster.
+pub const PREVIEW_RETRY: Duration = Duration::from_secs(2);
+
+/// Decoders of the same video that may fail in a row before the preview
+/// stops asking for another by itself (the next render, after an edit, still
+/// tries one).
+pub const PREVIEW_ATTEMPTS: u32 = 3;
+
+/// While a storage job holds the converter, the preview shows the poster
+/// and asks again this soon.
+pub(crate) const CONVERTER_BUSY: Duration = Duration::from_millis(500);
+
+/// Folder (under the decoding folder) of the copy of the theme's video the
+/// session probes and previews: apart from the live screen's copy, which
+/// comes and goes with it.
+const PREVIEW_DIR: &str = "preview";
+
+/// Whether work on the media converter waits for a storage job that holds
+/// it (a conversion takes minutes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wait {
+    /// It waits: the caller needs the answer (Auto's angle).
+    Yes,
+    /// It does not: the preview shows the poster meanwhile and asks again
+    /// soon, the live screen tries at its next frame, a save keeps the
+    /// poster.
+    No,
+}
+
+/// The media converter, unless a storage job holds it and `wait` says not
+/// to wait for it.
+fn converter(media: &SharedMedia, wait: Wait) -> Option<MutexGuard<'_, Box<dyn MediaSetup>>> {
+    match wait {
+        Wait::Yes => Some(media.lock().unwrap_or_else(PoisonError::into_inner)),
+        Wait::No => match media.try_lock() {
+            Ok(media) => Some(media),
+            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        },
+    }
+}
+
+/// Probing the theme's video, handed out of the session so that it runs
+/// outside the session's lock ([`Studio::video_to_probe`]): the header of an
+/// MP4 or a GIF is read in Rust, any other container by ffprobe.
+pub struct VideoProbe {
+    /// Which of the session's videos it is ([`ThemeVideo::serial`]).
+    serial: u64,
+    asset: AssetRef,
+    location: MediaLocation,
+    media: SharedMedia,
+}
+
+impl VideoProbe {
+    /// Probes the video; `None` when a storage job holds the converter and
+    /// `wait` says not to wait for it. A probe that fails is said in the log
+    /// and leaves the video unknown (Auto turns nothing).
+    pub fn run(self, wait: Wait) -> Option<Probed> {
+        let probed = converter(&self.media, wait)?.probe(&self.location);
+        let info = probed
+            .inspect_err(|e| {
+                tracing::warn!(video = self.asset.0, "the theme's video is not probed: {e}");
+            })
+            .ok();
+        Some(Probed {
+            serial: self.serial,
+            info,
+        })
+    }
+}
+
+/// What probing the theme's video said ([`Studio::probed`]).
+pub struct Probed {
+    serial: u64,
+    info: Option<MediaInfo>,
+}
+
+/// Taking the video background's poster again, handed out of the session
+/// so that ffmpeg runs outside the session's lock ([`Studio::poster_to_take`]).
+pub struct PosterRetake {
+    /// Which of the session's videos it is ([`ThemeVideo::serial`]).
+    serial: u64,
+    asset: AssetRef,
+    poster: AssetRef,
+    spec: PosterSpec,
+    location: MediaLocation,
+    media: SharedMedia,
+}
+
+impl PosterRetake {
+    /// Takes the poster, as a PNG; `None` without ffmpeg or while a storage
+    /// job holds the converter (the poster stays as it is), or when it fails
+    /// (said in the log).
+    pub fn run(self) -> Option<TakenPoster> {
+        let mut media = converter(&self.media, Wait::No)?;
+        if let MediaTools::Missing { .. } = media.tools() {
+            return None;
+        }
+        let taken = media.poster(&self.location, self.spec);
+        drop(media);
+        let frame = taken
+            .inspect_err(|e| {
+                tracing::warn!(video = self.asset.0, "the poster is not taken again: {e}");
+            })
+            .ok()?;
+        Some(TakenPoster {
+            serial: self.serial,
+            poster: self.poster,
+            spec: self.spec,
+            png: png_of(&frame)?,
+        })
+    }
+}
+
+/// A poster taken again ([`Studio::poster_taken`]).
+pub struct TakenPoster {
+    serial: u64,
+    poster: AssetRef,
+    spec: PosterSpec,
+    png: Vec<u8>,
+}
+
+/// Whether the preview may move (D-2026-10-01-video-background-framing-5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Motion {
+    /// The window is shown and motion is not reduced: a video background
+    /// plays.
+    Allowed,
+    /// Motion is reduced or the window is hidden: the poster, and no
+    /// decoder.
+    Reduced,
+}
+
+/// The preview's decoder of the theme's video.
+struct PreviewDecoder {
+    frames: Box<dyn VideoFrames>,
+    /// When a picture was last asked of it ([`PREVIEW_IDLE`]).
+    asked: Instant,
+}
+
+/// What a preview of a video background can show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Playing {
+    /// The decoder's pictures.
+    Video,
+    /// The poster: no video background, no motion, no ffmpeg, no decoder.
+    Poster,
+    /// The poster for now: a storage job holds the converter, or the video
+    /// is not probed yet.
+    Busy,
+    /// The poster until another decoder is tried, this soon: the last one
+    /// failed.
+    Again(Duration),
+}
+
+/// The theme's video background as the session handles it on this computer:
+/// a copy for the converter (probed once, read by the preview's decoder, the
+/// source of a new poster) and the preview's decoder.
+struct ThemeVideo {
+    /// Tells this video from any other the session had, even one of the
+    /// same name in another theme: work handed out for it comes back to it
+    /// only.
+    serial: u64,
+    asset: AssetRef,
+    /// The preview's decoder: at most one, for this video. Declared before
+    /// `copy`, so it stops before its file goes.
+    decoder: Option<PreviewDecoder>,
+    /// The copy the converter reads, written when first needed.
+    copy: Option<VideoCopy>,
+    /// Whether the copy was probed (the runtime has what it said).
+    probed: bool,
+    /// When the preview started playing it: its pictures follow the clock
+    /// from then on, whichever decoder shows them.
+    epoch: Option<Instant>,
+    /// No decoder starts before then (the last attempt failed).
+    retry: Option<Instant>,
+    /// Decoders that failed in a row ([`PREVIEW_ATTEMPTS`]).
+    failures: u32,
+}
+
+impl ThemeVideo {
+    fn new(asset: AssetRef, serial: u64) -> Self {
+        Self {
+            serial,
+            asset,
+            decoder: None,
+            copy: None,
+            probed: false,
+            epoch: None,
+            retry: None,
+            failures: 0,
+        }
+    }
+
+    /// The preview's decoder could not start, or stopped, at `now`: the
+    /// next one waits [`PREVIEW_RETRY`].
+    fn failed(&mut self, now: Instant) {
+        self.decoder = None;
+        self.failures = self.failures.saturating_add(1);
+        self.retry = Some(now + PREVIEW_RETRY);
+    }
+
+    /// What the preview shows at `now` while no decoder may start: the
+    /// poster, asked again when the next one is due after a failure (up to
+    /// [`PREVIEW_ATTEMPTS`] failures in a row).
+    fn waiting(&self, now: Instant) -> Playing {
+        match self.retry {
+            Some(at) if (1..PREVIEW_ATTEMPTS).contains(&self.failures) => {
+                Playing::Again(at.saturating_duration_since(now))
+            }
+            _ => Playing::Poster,
+        }
+    }
+
+    /// Where the converter reads the video: its copy in `dir`, written from
+    /// `assets` the first time.
+    fn file(&mut self, dir: &Path, assets: &BTreeMap<AssetRef, Vec<u8>>) -> Result<MediaLocation> {
+        let copy = match self.copy.take() {
+            Some(copy) => copy,
+            None => {
+                let bytes = assets.get(&self.asset).ok_or_else(|| {
+                    BezelError::InvalidInput(format!("{} is not in the theme", self.asset.0))
+                })?;
+                let dir = dir.join(PREVIEW_DIR);
+                VideoCopy::write(&dir, &self.asset, bytes)
+                    .map_err(|e| BezelError::Transport(format!("{}: {e}", dir.display())))?
+            }
+        };
+        let location = MediaLocation(copy.0.display().to_string());
+        self.copy = Some(copy);
+        Ok(location)
+    }
+
+    /// The time into the video its preview shows at `now`: since it started
+    /// playing, within one pass when its length (`info`) is known, so a
+    /// decoder started again seeks no further than one pass.
+    fn elapsed(&mut self, now: Instant, info: Option<&MediaInfo>) -> Duration {
+        let epoch = *self.epoch.get_or_insert(now);
+        let elapsed = now.saturating_duration_since(epoch);
+        let length = info
+            .and_then(|info| info.video.as_ref())
+            .and_then(|track| track.duration)
+            .filter(|length| !length.is_zero());
+        length.map_or(elapsed, |length| {
+            let into = elapsed.as_nanos() % length.as_nanos();
+            Duration::from_nanos(u64::try_from(into).unwrap_or(u64::MAX))
+        })
+    }
+}
+
+/// How long after the picture due `elapsed` into a video the next one is
+/// due, on the [`PREVIEW_FPS`] grid: whole milliseconds, rounded up so the
+/// next render meets the new picture.
+fn next_picture(elapsed: Duration) -> Duration {
+    let period = Duration::from_secs(1).as_nanos() / u128::from(PREVIEW_FPS);
+    let left = period - elapsed.as_nanos() % period;
+    let millis = left.div_ceil(1_000_000);
+    Duration::from_millis(u64::try_from(millis).unwrap_or(u64::MAX))
+}
+
+/// The sooner of two times, either unknown.
+fn sooner(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 /// A live screen whose link failed, being connected again.
@@ -236,6 +535,15 @@ pub struct Studio {
     host: Option<HostDecoding>,
     /// What the session learnt about the videos added to it.
     videos: BTreeMap<AssetRef, AddedVideo>,
+    /// The theme's video background on this computer (`None`: the theme
+    /// has none).
+    video: Option<ThemeVideo>,
+    /// The framing each poster of the session shows (as loaded, added or
+    /// last taken): a poster is taken again on save when the theme frames
+    /// its video otherwise.
+    posters: BTreeMap<AssetRef, VideoFraming>,
+    /// The last [`ThemeVideo::serial`] given.
+    serials: u64,
     /// The session's clock starts here: the runtime's cadence and the
     /// animations run on it.
     origin: Instant,
@@ -260,9 +568,10 @@ impl Studio {
         language: Language,
         theme: Theme,
     ) -> Self {
+        let posters = posters_of(&theme);
         let mut runtime = ThemeRuntime::new(theme, BTreeMap::new(), language);
         runtime.limit_refresh(MAX_REFRESH);
-        Self {
+        let mut studio = Self {
             sensors,
             renderer,
             language,
@@ -276,8 +585,13 @@ impl Studio {
             live_error: None,
             host: None,
             videos: BTreeMap::new(),
+            video: None,
+            posters,
+            serials: 0,
             origin: Instant::now(),
-        }
+        };
+        studio.follow_video();
+        studio
     }
 
     /// `now` on the session's clock.
@@ -303,11 +617,13 @@ impl Studio {
         self.language = language;
         let theme = self.runtime.theme().clone();
         let assets = self.runtime.assets().clone();
+        let info = self.runtime.video_info().cloned();
         // The old runtime, and a video it decodes here, stop first.
         self.runtime = ThemeRuntime::new(theme, assets, language);
         self.runtime.limit_refresh(MAX_REFRESH);
         self.runtime.use_catalog(&self.catalog);
         self.runtime.want_also(self.listed.clone());
+        self.runtime.set_video_info(info);
         if let Some(live) = self.live.as_mut() {
             live.host = None;
             live.restart_video = true;
@@ -397,6 +713,7 @@ impl Studio {
         let before = self.runtime.video().clone();
         self.runtime.replace_theme(theme);
         self.video_changed(&before);
+        self.follow_video();
     }
 
     /// Starts a new document.
@@ -407,10 +724,33 @@ impl Studio {
         location: Option<ThemeLocation>,
     ) {
         let before = self.runtime.video().clone();
+        self.posters = posters_of(&theme);
         self.runtime.replace(theme, assets);
         self.video_changed(&before);
+        // The same name may hold other bytes now: probed and copied afresh.
+        self.video = None;
+        self.follow_video();
         self.location = location;
         self.videos.clear();
+    }
+
+    /// Follows the theme's video background: another video (or none) drops
+    /// what the session held for the last one, its decoder first.
+    fn follow_video(&mut self) {
+        let asset = match &self.runtime.theme().background {
+            Background::Video { asset, .. } => Some(asset),
+            _ => None,
+        };
+        if self.video.as_ref().map(|v| &v.asset) == asset {
+            return;
+        }
+        let asset = asset.cloned();
+        // The old copy goes before a new one of the same name is written.
+        self.video = None;
+        self.video = asset.map(|asset| {
+            self.serials += 1;
+            ThemeVideo::new(asset, self.serials)
+        });
     }
 
     /// After a new theme: another video starts again on the live screen.
@@ -430,7 +770,9 @@ impl Studio {
         Ok(())
     }
 
-    /// Saves the theme (with only the assets it uses) at `location`.
+    /// Saves the theme (with only the assets it uses) at `location`. A video
+    /// background's poster that does not show the theme's framing is taken
+    /// again before, outside the session's lock ([`Self::poster_to_take`]).
     pub fn save(&mut self, store: &dyn ThemeStore, location: ThemeLocation) -> Result<()> {
         let used: BTreeSet<AssetRef> = self.theme().assets().into_iter().collect();
         let assets: BTreeMap<AssetRef, Vec<u8>> = self
@@ -470,8 +812,9 @@ impl Studio {
     }
 
     /// Adds a video (or an animated GIF) for a background, named after
-    /// `file_name`, with its poster (a PNG named after the video) when one
-    /// was taken. Returns the video's reference and the poster's.
+    /// `file_name`, with its poster (a PNG named after the video, taken with
+    /// the default framing: a video is added without one) when one was
+    /// taken. Returns the video's reference and the poster's.
     pub fn add_video(
         &mut self,
         file_name: &str,
@@ -485,6 +828,9 @@ impl Studio {
             let stem = stem.rsplit_once('.').map_or(stem, |(stem, _)| stem);
             self.add_asset(&format!("{stem}-poster.png"), png)
         });
+        if let Some(poster) = &poster {
+            self.posters.insert(poster.clone(), VideoFraming::default());
+        }
         let known = self.videos.entry(video.clone()).or_default();
         known.poster = poster.clone().or(known.poster.take());
         known.duration = duration.or(known.duration);
@@ -496,21 +842,313 @@ impl Studio {
         self.videos.get(asset)
     }
 
-    // ------------------------------------------------------------- frames --
+    // ----------------------------------------------------- video framing --
 
-    /// Renders the edited theme with the latest readings, as the preview
-    /// shows it (a video background shows its poster).
-    pub fn render(&mut self, time: LocalTime) -> Result<Frame> {
-        self.preview(time, Instant::now()).map(|(frame, _)| frame)
+    /// The panel Auto frames the theme's video for: the live screen's, else
+    /// the one the canvas is drawn for (`None`: neither is known).
+    pub fn video_panel(&self) -> Option<PanelLayout> {
+        self.runtime.video_panel()
     }
 
-    /// The preview at `now` ([`Self::render`]) with its animated GIFs as
-    /// they are then, and how long until they change (`None`: nothing
-    /// animates): when the UI draws the next frame of the preview.
-    pub fn preview(&mut self, time: LocalTime, now: Instant) -> Result<(Frame, Option<Duration>)> {
+    /// Probing the theme's video while it still has to be probed: the
+    /// caller runs it outside the session's lock ([`VideoProbe::run`]; a
+    /// storage job may hold the converter for minutes) and hands the
+    /// outcome to [`Self::probed`]. `None` once probed, without a video
+    /// background or without a converter to probe with. A copy that cannot
+    /// be written leaves the video unknown.
+    pub fn video_to_probe(&mut self) -> Option<VideoProbe> {
+        let host = self.host.as_ref()?;
+        let video = self.video.as_mut().filter(|v| !v.probed)?;
+        let (serial, asset) = (video.serial, video.asset.clone());
+        match video.file(&host.dir, self.runtime.assets()) {
+            Ok(location) => Some(VideoProbe {
+                serial,
+                asset,
+                location,
+                media: Arc::clone(&host.media),
+            }),
+            Err(e) => {
+                tracing::warn!(video = asset.0, "the theme's video is not probed: {e}");
+                self.record_probe(None);
+                None
+            }
+        }
+    }
+
+    /// [`Self::video_to_probe`] when the live screen is to start the video
+    /// next (it waits for the probe); `None` otherwise.
+    pub fn live_video_to_probe(&mut self) -> Option<VideoProbe> {
+        self.live.as_ref().filter(|l| l.restart_video)?;
+        self.video_to_probe()
+    }
+
+    /// What probing the theme's video said ([`VideoProbe::run`]); nothing
+    /// when the theme has another video by then (even under the same name),
+    /// or it was probed meanwhile.
+    pub fn probed(&mut self, probed: Probed) {
+        let current = self
+            .video
+            .as_ref()
+            .is_some_and(|v| v.serial == probed.serial && !v.probed);
+        if current {
+            self.record_probe(probed.info);
+        }
+    }
+
+    /// Whether the theme's video is probed, or cannot be (no video, no
+    /// converter to probe with): Auto, the live screen's start and the
+    /// preview's decoder wait for it.
+    fn video_known(&self) -> bool {
+        self.host.is_none() || self.video.as_ref().is_none_or(|v| v.probed)
+    }
+
+    /// What Auto turns the theme's video, clockwise quarter turns, and the
+    /// video's own size as probed (`None` when the probe gave none, or it
+    /// was not probed); `None` without a video background. Auto turns a
+    /// video of the panel's native size in a theme a quarter turn from the
+    /// panel ([`auto_turns`]).
+    pub fn video_auto(&self) -> Option<(u8, Option<Size>)> {
+        self.video.as_ref()?;
+        let size = self.runtime.video_info().and_then(|info| info.dimensions);
+        let orientation = self.runtime.theme().orientation;
+        Some((auto_turns(size, orientation, self.video_panel()), size))
+    }
+
+    /// The theme's video was probed: the runtime frames it from `info`, and
+    /// a live screen whose copy to look for changed starts it again.
+    fn record_probe(&mut self, info: Option<MediaInfo>) {
+        if let Some(video) = self.video.as_mut() {
+            video.probed = true;
+        }
+        let before = self.runtime.video().clone();
+        self.runtime.set_video_info(info);
+        self.video_changed(&before);
+    }
+
+    /// The poster of the theme's video as `framing` frames it now (Auto
+    /// resolved for the probed size and the panel); `None` while the video
+    /// is unknown.
+    fn poster_spec(&self, framing: VideoFraming) -> Option<PosterSpec> {
+        let info = self.runtime.video_info()?;
+        let theme = self.runtime.theme();
+        let resolved = framing.resolve(info.dimensions, theme.orientation, self.video_panel());
+        Some(PosterSpec::framed(theme.canvas, info, &resolved))
+    }
+
+    /// Taking the video background's poster again, when the theme frames
+    /// the video otherwise than the poster shows
+    /// (D-2026-10-01-video-background-framing-3): the caller takes it
+    /// outside the session's lock ([`PosterRetake::run`]) and hands it to
+    /// [`Self::poster_taken`] before saving. `None` when the poster shows
+    /// the framing, without a poster or a converter, or while the video is
+    /// not probed.
+    pub fn poster_to_take(&mut self) -> Option<PosterRetake> {
+        let Background::Video {
+            poster: Some(poster),
+            framing,
+            ..
+        } = &self.runtime.theme().background
+        else {
+            return None;
+        };
+        let (poster, framing) = (poster.clone(), framing.unwrap_or_default());
+        let shown = *self.posters.get(&poster)?;
+        let spec = self.poster_spec(framing)?;
+        if self.poster_spec(shown) == Some(spec) {
+            return None;
+        }
+        let (video, host) = (self.video.as_mut()?, self.host.as_ref()?);
+        let location = video
+            .file(&host.dir, self.runtime.assets())
+            .inspect_err(|e| {
+                tracing::warn!(video = video.asset.0, "the poster is not taken again: {e}");
+            })
+            .ok()?;
+        Some(PosterRetake {
+            serial: video.serial,
+            asset: video.asset.clone(),
+            poster,
+            spec,
+            location,
+            media: Arc::clone(&host.media),
+        })
+    }
+
+    /// Puts a poster taken again ([`PosterRetake::run`]) in the theme under
+    /// its own name, so the theme stays as it is, when the theme still has
+    /// that video and that poster and frames it as the poster shows;
+    /// otherwise (another video, poster or framing meanwhile) it is dropped.
+    /// Whether it was put.
+    pub fn poster_taken(&mut self, taken: TakenPoster) -> bool {
+        let Background::Video {
+            poster: Some(poster),
+            framing,
+            ..
+        } = &self.runtime.theme().background
+        else {
+            return false;
+        };
+        let framing = framing.unwrap_or_default();
+        let current = *poster == taken.poster
+            && self
+                .video
+                .as_ref()
+                .is_some_and(|v| v.serial == taken.serial)
+            && self.poster_spec(framing) == Some(taken.spec);
+        if current {
+            self.runtime.add_asset(taken.poster.clone(), taken.png);
+            self.posters.insert(taken.poster, framing);
+        }
+        current
+    }
+
+    // ------------------------------------------------------------- frames --
+
+    /// Renders the edited theme with the latest readings over the video
+    /// background's poster.
+    pub fn render(&mut self, time: LocalTime) -> Result<Frame> {
+        let clock = self.clock(Instant::now());
+        let (frame, _) = self.runtime.preview(self.renderer.as_mut(), time, clock)?;
+        Ok(frame)
+    }
+
+    /// The preview at `now`, and how long until it changes by itself
+    /// (`None`: nothing moves): when the UI draws its next frame. Its
+    /// animated GIFs show as they are then; a video background plays with
+    /// [`Motion::Allowed`] (the decoder's picture of `now`, framed as the
+    /// theme says now; its next picture is due on the [`PREVIEW_FPS`] grid)
+    /// and shows its poster otherwise, without ffmpeg, while the video is
+    /// not probed or a storage job holds the converter (asked again soon),
+    /// and after a decoder failed (asked again when the next one may start,
+    /// [`PREVIEW_ATTEMPTS`] in a row at most).
+    pub fn preview(
+        &mut self,
+        time: LocalTime,
+        now: Instant,
+        motion: Motion,
+    ) -> Result<(Frame, Option<Duration>)> {
+        let mut playing = match motion {
+            Motion::Allowed if !self.video_known() => Playing::Busy,
+            Motion::Allowed => self.start_preview(now),
+            Motion::Reduced => {
+                self.stop_preview();
+                Playing::Poster
+            }
+        };
+        if playing == Playing::Video {
+            if let Some(shown) = self.preview_picture(time, now)? {
+                return Ok(shown);
+            }
+            // The decoder just failed.
+            playing = self
+                .video
+                .as_ref()
+                .map_or(Playing::Poster, |v| v.waiting(now));
+        }
         let clock = self.clock(now);
         let (frame, change) = self.runtime.preview(self.renderer.as_mut(), time, clock)?;
-        Ok((frame, change.map(|at| at.saturating_sub(clock))))
+        let gifs = change.map(|at| at.saturating_sub(clock));
+        let again = match playing {
+            Playing::Busy => Some(CONVERTER_BUSY),
+            Playing::Again(wait) => Some(wait),
+            Playing::Video | Playing::Poster => None,
+        };
+        Ok((frame, sooner(gifs, again)))
+    }
+
+    /// Starts the preview's decoder of the theme's video when none runs:
+    /// the raw source at most [`PREVIEW_FPS`] pictures a second
+    /// ([`ThemeRuntime::video_stream`]).
+    fn start_preview(&mut self, now: Instant) -> Playing {
+        let (Some(video), Some(host)) = (self.video.as_mut(), self.host.as_ref()) else {
+            return Playing::Poster;
+        };
+        if video.decoder.is_some() {
+            return Playing::Video;
+        }
+        if video.retry.is_some_and(|at| now < at) {
+            return video.waiting(now);
+        }
+        let Some(mut media) = converter(&host.media, Wait::No) else {
+            return Playing::Busy;
+        };
+        if let MediaTools::Missing { .. } = media.tools() {
+            video.retry = Some(now + PREVIEW_RETRY);
+            return Playing::Poster;
+        }
+        let spec = self.runtime.video_stream(PREVIEW_FPS);
+        let started = video
+            .file(&host.dir, self.runtime.assets())
+            .and_then(|location| media.stream(&location, spec));
+        match started {
+            Ok(frames) => {
+                video.decoder = Some(PreviewDecoder { frames, asked: now });
+                Playing::Video
+            }
+            Err(e) => {
+                tracing::warn!(video = video.asset.0, "the preview does not play it: {e}");
+                video.failed(now);
+                video.waiting(now)
+            }
+        }
+    }
+
+    /// The preview over the decoder's picture of `now`, and when the next
+    /// picture (or a GIF's) is due; `None` when the decoder failed (it is
+    /// dropped and the poster shows).
+    fn preview_picture(
+        &mut self,
+        time: LocalTime,
+        now: Instant,
+    ) -> Result<Option<(Frame, Option<Duration>)>> {
+        let clock = self.clock(now);
+        let Some(video) = self.video.as_mut() else {
+            return Ok(None);
+        };
+        let elapsed = video.elapsed(now, self.runtime.video_info());
+        let Some(decoder) = video.decoder.as_mut() else {
+            return Ok(None);
+        };
+        decoder.asked = now;
+        let picture = match decoder.frames.frame_at(elapsed) {
+            Ok(picture) => picture,
+            Err(e) => {
+                tracing::warn!(video = video.asset.0, "the preview stops playing it: {e}");
+                video.failed(now);
+                return Ok(None);
+            }
+        };
+        video.failures = 0;
+        let renderer = self.renderer.as_mut();
+        let (frame, change) = self.runtime.preview_video(renderer, time, clock, picture)?;
+        let gifs = change.map(|at| at.saturating_sub(clock));
+        Ok(Some((frame, sooner(gifs, Some(next_picture(elapsed))))))
+    }
+
+    /// Ends the preview's decoder (the next picture asked for starts
+    /// another, from the clock).
+    fn stop_preview(&mut self) {
+        if let Some(video) = self.video.as_mut() {
+            video.decoder = None;
+        }
+    }
+
+    /// Ends the preview's decoder when no picture was asked of it during
+    /// [`PREVIEW_IDLE`] before `now`.
+    fn stop_idle_preview(&mut self, now: Instant) {
+        let idle = self
+            .video
+            .as_ref()
+            .and_then(|v| v.decoder.as_ref())
+            .is_some_and(|d| now.saturating_duration_since(d.asked) >= PREVIEW_IDLE);
+        if idle {
+            self.stop_preview();
+        }
+    }
+
+    /// Whether the preview's decoder runs.
+    pub fn previewing(&self) -> bool {
+        self.video.as_ref().is_some_and(|v| v.decoder.is_some())
     }
 
     /// Key of the screen showing the theme, if any.
@@ -654,10 +1292,20 @@ impl Studio {
     }
 
     /// Starts the theme's video on the live screen when it has to (a failure
-    /// keeps the poster). A screen that cannot play videos gets it decoded
-    /// here; while the converter is busy with a storage job the poster stays
-    /// and the start is tried again at the next frame.
+    /// keeps the poster), once the video is probed
+    /// ([`Self::live_video_to_probe`]): its size decides Auto and the copy
+    /// the screen looks for; until then the poster stays and the start is
+    /// tried again at the next frame. A screen that cannot play videos gets
+    /// it decoded here; while the converter is busy with a storage job the
+    /// poster stays likewise.
     fn start_live_video(&mut self) {
+        let due = self
+            .live
+            .as_ref()
+            .is_some_and(|l| l.restart_video && matches!(l.slot, Slot::Here(_)));
+        if !due || !self.video_known() {
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -678,10 +1326,8 @@ impl Studio {
         let started = match here {
             None => self.runtime.start_video(link.as_mut(), None).map(|_| None),
             Some((asset, host)) => {
-                let mut media = match host.media.try_lock() {
-                    Ok(media) => media,
-                    Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-                    Err(TryLockError::WouldBlock) => return,
+                let Some(mut media) = converter(&host.media, Wait::No) else {
+                    return;
                 };
                 let media: &mut dyn MediaTranscoder = media.as_mut();
                 decode_here(&mut self.runtime, link.as_mut(), media, &host.dir, &asset)
@@ -919,10 +1565,12 @@ impl Studio {
             .unwrap_or(sample)
     }
 
-    /// One refresh at `now`: a sample when one is due (once per refresh,
-    /// never per animation frame), then the live screen's frame when it is
-    /// due ([`Self::frame_for_screen`]).
+    /// One refresh at `now`: the preview's decoder ends when no picture was
+    /// asked of it during [`PREVIEW_IDLE`], a sample when one is due (once
+    /// per refresh, never per animation frame), then the live screen's frame
+    /// when it is due ([`Self::frame_for_screen`]).
     pub fn tick(&mut self, time: LocalTime, now: Instant) -> Result<Option<Delivery>> {
+        self.stop_idle_preview(now);
         // Before the sample moves the cadence on.
         let due = self.frame_due();
         let (clock, started) = (self.clock(now), Instant::now());
@@ -935,6 +1583,19 @@ impl Studio {
             return Ok(None);
         }
         self.frame_for_screen(time, now)
+    }
+}
+
+/// The framing the poster of `theme`'s video background shows, as loaded:
+/// the theme's own.
+fn posters_of(theme: &Theme) -> BTreeMap<AssetRef, VideoFraming> {
+    match &theme.background {
+        Background::Video {
+            poster: Some(poster),
+            framing,
+            ..
+        } => BTreeMap::from([(poster.clone(), framing.unwrap_or_default())]),
+        _ => BTreeMap::new(),
     }
 }
 
@@ -1020,13 +1681,14 @@ fn clean(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::tests::{FakeMedia, STREAMED};
+    use crate::storage::tests::{FakeMedia, STREAMED, STREAMED_END};
     use bezel_core::app::open_screen;
     use bezel_core::app::{choose_screen, discover_screens, reopen_screen};
     use bezel_core::domain::device::{Transport, UsbId};
     use bezel_core::domain::discovery::Screen;
     use bezel_core::domain::discovery::{DeviceAddress, Endpoint};
     use bezel_core::domain::frame::Rgba;
+    use bezel_core::domain::framing::{FramingPosition, Permille, VideoFit, Zoom};
     use bezel_core::domain::geometry::Size;
     use bezel_core::domain::sensor::SensorKey;
     use bezel_core::domain::storage::RemotePath;
@@ -1038,6 +1700,7 @@ mod tests {
     use bezel_devices::{FakeBus, FakeConnector};
     use bezel_render::{SkiaRenderer, SystemFonts};
     use bezel_sensors::FakeSensors;
+    use std::sync::atomic::Ordering;
 
     const TIME: LocalTime = LocalTime {
         year: 2026,
@@ -1082,8 +1745,26 @@ mod tests {
         outcome
     }
 
+    /// Probes the theme's video as the backend does before a preview, a
+    /// save or Auto, outside the session (here, in its place), without
+    /// waiting for a storage job that holds the converter.
+    fn learn(s: &mut Studio) {
+        if let Some(probed) = s.video_to_probe().and_then(|p| p.run(Wait::No)) {
+            s.probed(probed);
+        }
+    }
+
+    /// [`learn`], as the backend does before a live frame: only when the
+    /// live screen is to start the video.
+    fn learn_live(s: &mut Studio) {
+        if let Some(probed) = s.live_video_to_probe().and_then(|p| p.run(Wait::No)) {
+            s.probed(probed);
+        }
+    }
+
     /// A frame for the live screen at the session's start.
     fn present(s: &mut Studio) -> Result<()> {
+        learn_live(s);
         let now = at(s, 0);
         let delivered = s.frame_for_screen(TIME, now);
         show(s, delivered, now)
@@ -1091,6 +1772,7 @@ mod tests {
 
     /// The refresh `ms` milliseconds into the session.
     fn tick(s: &mut Studio, ms: u64) -> Result<()> {
+        learn_live(s);
         let now = at(s, ms);
         let delivered = s.tick(TIME, now);
         show(s, delivered, now)
@@ -1396,6 +2078,7 @@ mod tests {
         theme.background = Background::Video {
             asset: AssetRef(asset.into()),
             poster: None,
+            framing: None,
         };
         theme
     }
@@ -1493,7 +2176,9 @@ mod tests {
         assert_eq!(std::fs::read(&copy).unwrap(), [1, 2, 3]);
         let (source, spec) = streamed.lock().unwrap()[0].clone();
         assert_eq!(source.0, copy.display().to_string());
-        assert_eq!((spec.size, spec.fps), (Size::new(80, 160), HOST_VIDEO_FPS));
+        // The raw 1920x1080 source as probed, its longer side twice the
+        // canvas's at most; the runtime frames each picture.
+        assert_eq!((spec.size, spec.fps), (Size::new(320, 180), HOST_VIDEO_FPS));
         assert_eq!(s.period(), Duration::from_millis(100));
         let shown = connector.log().frames.last().cloned().unwrap();
         assert_eq!(shown.pixel(40, 80), Some(STREAMED));
@@ -1831,5 +2516,371 @@ mod tests {
         assert!(s.reconnected(attempt, outcome, at(&s, 5_100)).is_some());
         assert_eq!((s.live_key(), s.live_error()), (None, None));
         assert!(s.reconnect_due(at(&s, 60_000)).is_none());
+    }
+
+    /// What the theme's own poster shows (before a new one is taken).
+    const OLD_POSTER: Rgba = Rgba::opaque(9, 9, 9);
+    /// What [`Backdrops`] draws for the poster.
+    const POSTER_SHOWN: Rgba = Rgba::opaque(200, 0, 100);
+
+    /// Draws only what is under the elements: the video's framed picture,
+    /// [`POSTER_SHOWN`] for the poster.
+    struct Backdrops;
+
+    impl FrameRenderer for Backdrops {
+        fn render(
+            &mut self,
+            theme: &Theme,
+            _: &BTreeMap<AssetRef, Vec<u8>>,
+            context: RenderContext<'_>,
+        ) -> Result<Frame> {
+            Ok(match context.backdrop {
+                Backdrop::Frame(picture) => picture.clone(),
+                Backdrop::Poster => Frame::filled(theme.canvas, POSTER_SHOWN),
+                Backdrop::OnDevice => Frame::filled(theme.canvas, Rgba::BLACK),
+            })
+        }
+    }
+
+    const DRAGON: &str = "assets/dragon.mp4";
+    const DRAGON_POSTER: &str = "assets/poster-195.png";
+
+    /// The Dragon Ball case: a 1920x480 theme for the 8.8" whose video is
+    /// the vendor's pre-turned 480x1920 `dragon.mp4`, with its poster; the
+    /// session probes (done) and decodes with `media`, copies in a fresh
+    /// folder.
+    fn dragon_ball(name: &str, media: FakeMedia) -> (Studio, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("bezel-studio-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shared: SharedMedia = Arc::new(Mutex::new(Box::new(media)));
+        let mut theme = Theme::blank("Dragon Ball", Size::new(480, 1920), Orientation::Landscape);
+        theme.background = Background::Video {
+            asset: AssetRef(DRAGON.into()),
+            poster: Some(AssetRef(DRAGON_POSTER.into())),
+            framing: None,
+        };
+        let poster = png_of(&Frame::filled(Size::new(1920, 480), OLD_POSTER)).unwrap();
+        let assets = BTreeMap::from([
+            (AssetRef(DRAGON.into()), vec![9; 4096]),
+            (AssetRef(DRAGON_POSTER.into()), poster),
+        ]);
+        let mut s = Studio::new(
+            Box::new(FakeSensors::demo()),
+            Box::new(Backdrops),
+            Language::English,
+            theme.clone(),
+        )
+        .with_host_decoding(shared, dir.clone());
+        s.start(theme, assets, None);
+        learn(&mut s);
+        (s, dir)
+    }
+
+    /// Saves at `place` as the backend does: the poster taken again first,
+    /// outside the session (here, in its place).
+    fn save(s: &mut Studio, store: &dyn ThemeStore, place: &ThemeLocation) {
+        learn(s);
+        if let Some(taken) = s.poster_to_take().and_then(PosterRetake::run) {
+            assert!(s.poster_taken(taken), "the theme did not change meanwhile");
+        }
+        s.save(store, place.clone()).unwrap();
+    }
+
+    /// The edited theme with its video framed by `framing`.
+    fn framed(s: &Studio, framing: Option<VideoFraming>) -> Theme {
+        let mut theme = s.theme().clone();
+        if let Background::Video { framing: f, .. } = &mut theme.background {
+            *f = framing;
+        }
+        theme
+    }
+
+    /// Fit at 125 %, a little above the middle.
+    fn fit_125() -> VideoFraming {
+        VideoFraming {
+            fit: VideoFit::Contain,
+            zoom: Zoom::from_percent(125),
+            position: FramingPosition {
+                x: Permille::CENTER,
+                y: Permille::from_permille(400),
+            },
+            ..VideoFraming::default()
+        }
+    }
+
+    /// D-2026-10-01-video-background-framing-5: the preview decodes the raw
+    /// source at most 15 pictures a second and the runtime turns each one
+    /// upright; a framing edit shows at the next picture, same decoder.
+    #[test]
+    fn the_preview_plays_the_framed_video_at_most_15_fps() {
+        let media = FakeMedia::ready().two_tone();
+        let (streamed, asked) = (Arc::clone(&media.streamed), Arc::clone(&media.asked));
+        let (mut s, dir) = dragon_ball("plays", media);
+        assert_eq!(s.video_auto(), Some((3, Some(Size::new(480, 1920)))));
+
+        let (frame, next) = s.preview(TIME, at(&s, 0), Motion::Allowed).unwrap();
+        assert_eq!(frame.size(), Size::new(1920, 480));
+        // The top of the pre-turned video is the theme's left: upright.
+        assert_eq!(frame.pixel(100, 240), Some(STREAMED));
+        assert_eq!(frame.pixel(1800, 240), Some(STREAMED_END));
+        assert_eq!(next, Some(Duration::from_millis(67)), "1/15 s, rounded up");
+        let (source, spec) = streamed.lock().unwrap()[0].clone();
+        assert!(source.0.ends_with("dragon.mp4"), "{}", source.0);
+        assert_eq!(
+            (spec.size, spec.fps),
+            (Size::new(480, 1920), PREVIEW_FPS),
+            "the raw source, unturned"
+        );
+
+        // The UI asks for the next picture when it is due: 15 in a second,
+        // each a new picture of the video.
+        asked.lock().unwrap().clear();
+        let mut now = 0;
+        let mut shown = 0;
+        while now < 1_000 {
+            let (_, next) = s.preview(TIME, at(&s, now), Motion::Allowed).unwrap();
+            let next = next.unwrap();
+            assert!(next <= Duration::from_millis(67), "{next:?}");
+            now += u64::try_from(next.as_millis()).unwrap();
+            shown += 1;
+        }
+        assert_eq!(shown, 15);
+        let pictures: Vec<u128> = asked
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|t| t.as_nanos() * u128::from(PREVIEW_FPS) / 1_000_000_000)
+            .collect();
+        assert_eq!(pictures, (0..15).collect::<Vec<u128>>());
+
+        // Zoomed to 200 % on the left edge: the video's top half fills the
+        // canvas at the next picture, from the same decoder.
+        let zoomed = VideoFraming {
+            zoom: Zoom::from_percent(200),
+            position: FramingPosition {
+                x: Permille::START,
+                y: Permille::CENTER,
+            },
+            ..VideoFraming::default()
+        };
+        s.set_theme(framed(&s, Some(zoomed)));
+        let (frame, _) = s.preview(TIME, at(&s, now), Motion::Allowed).unwrap();
+        assert_eq!(frame.pixel(1800, 240), Some(STREAMED));
+        assert_eq!(streamed.lock().unwrap().len(), 1, "never restarted");
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D-2026-10-01-video-background-framing-5: no picture asked for during
+    /// 2 s ends the decoder (on the injected clock), the next one starts it
+    /// again where the clock says; motion reduced ends it at once, another
+    /// video starts over.
+    #[test]
+    fn the_preview_decoder_stops_when_no_frame_is_asked() {
+        let media = FakeMedia::ready();
+        let streamed = Arc::clone(&media.streamed);
+        let (asked, decoding) = (Arc::clone(&media.asked), Arc::clone(&media.decoding));
+        let (mut s, dir) = dragon_ball("idle", media);
+        let running = || decoding.load(Ordering::SeqCst);
+        // A storage job holds the converter: the poster, asked again soon.
+        let converter = Arc::clone(&s.host.as_ref().unwrap().media);
+        {
+            let _job = converter.lock().unwrap();
+            let (frame, next) = s.preview(TIME, at(&s, 0), Motion::Allowed).unwrap();
+            assert_eq!(frame.pixel(960, 240), Some(POSTER_SHOWN));
+            assert_eq!(next, Some(CONVERTER_BUSY));
+            assert_eq!(running(), 0);
+        }
+        s.preview(TIME, at(&s, 0), Motion::Allowed).unwrap();
+        assert!(s.previewing());
+        assert_eq!(running(), 1);
+        tick(&mut s, 1_999).unwrap();
+        assert!(s.previewing(), "asked less than 2 s ago");
+        tick(&mut s, 2_000).unwrap();
+        assert!(!s.previewing());
+        assert_eq!(running(), 0, "its ffmpeg ends");
+
+        let (frame, _) = s.preview(TIME, at(&s, 5_000), Motion::Allowed).unwrap();
+        assert_eq!(frame.pixel(960, 240), Some(STREAMED));
+        assert_eq!((streamed.lock().unwrap().len(), running()), (2, 1));
+        assert_eq!(
+            asked.lock().unwrap().last(),
+            Some(&Duration::from_secs(1)),
+            "5 s on the clock, into a 2 s video"
+        );
+
+        let (frame, next) = s.preview(TIME, at(&s, 5_100), Motion::Reduced).unwrap();
+        assert_eq!((frame.pixel(960, 240), next), (Some(POSTER_SHOWN), None));
+        assert_eq!(running(), 0, "motion reduced: no decoder");
+        assert_eq!(streamed.lock().unwrap().len(), 2);
+
+        // A framing edit keeps the decoder; another video starts over.
+        s.preview(TIME, at(&s, 5_200), Motion::Allowed).unwrap();
+        s.set_theme(framed(&s, Some(fit_125())));
+        s.preview(TIME, at(&s, 5_300), Motion::Allowed).unwrap();
+        assert_eq!((streamed.lock().unwrap().len(), running()), (3, 1));
+        let other = s.add_asset("dragon.mp4", vec![7; 2048]);
+        let mut theme = s.theme().clone();
+        theme.background = Background::Video {
+            asset: other.clone(),
+            poster: None,
+            framing: None,
+        };
+        s.set_theme(theme);
+        // Not probed yet: the poster, asked again soon.
+        let (_, next) = s.preview(TIME, at(&s, 5_400), Motion::Allowed).unwrap();
+        assert_eq!(next, Some(CONVERTER_BUSY));
+        learn(&mut s);
+        s.preview(TIME, at(&s, 5_400), Motion::Allowed).unwrap();
+        assert_eq!((streamed.lock().unwrap().len(), running()), (4, 1));
+        assert!(streamed.lock().unwrap()[3].0.0.ends_with("dragon-2.mp4"));
+        assert_eq!(asked.lock().unwrap().last(), Some(&Duration::ZERO));
+        drop(s);
+        assert_eq!(running(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D-2026-10-01-video-background-framing-5: without ffmpeg the preview
+    /// shows the poster and nothing moves; Auto still knows the video (an
+    /// MP4's header needs no ffmpeg).
+    #[test]
+    fn without_ffmpeg_the_preview_shows_the_poster() {
+        let media = FakeMedia::missing();
+        let streamed = Arc::clone(&media.streamed);
+        let (mut s, dir) = dragon_ball("no-ffmpeg-preview", media);
+        let (frame, next) = s.preview(TIME, at(&s, 0), Motion::Allowed).unwrap();
+        assert_eq!((frame.pixel(960, 240), next), (Some(POSTER_SHOWN), None));
+        assert!(!s.previewing());
+        assert!(streamed.lock().unwrap().is_empty());
+        assert_eq!(s.video_auto(), Some((3, Some(Size::new(480, 1920)))));
+        // A theme without a video has no Auto.
+        s.start(theme_88(), BTreeMap::new(), None);
+        assert_eq!(s.video_auto(), None);
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D-2026-10-01-video-background-framing-3: saving a theme whose framing
+    /// is not the one its poster shows takes the poster again, framed, under
+    /// the same name; without ffmpeg the poster stays.
+    #[test]
+    fn saving_retakes_the_poster_with_the_framing() {
+        let media = FakeMedia::ready();
+        let posters = Arc::clone(&media.posters);
+        let (mut s, dir) = dragon_ball("retake", media);
+        let store = MemoryStore::default();
+        let place = ThemeLocation("mem://dragon".into());
+        let poster = AssetRef(DRAGON_POSTER.into());
+        let before = s.assets()[&poster].clone();
+        save(&mut s, &store, &place);
+        assert!(posters.lock().unwrap().is_empty(), "it shows the framing");
+
+        s.set_theme(framed(&s, Some(fit_125())));
+        save(&mut s, &store, &place);
+        let taken = posters.lock().unwrap().clone();
+        assert_eq!(taken.len(), 1);
+        assert!(taken[0].0.0.ends_with("dragon.mp4"), "{}", taken[0].0.0);
+        let info = s.runtime.video_info().cloned().unwrap();
+        let wanted = fit_125().resolve(info.dimensions, Orientation::Landscape, s.video_panel());
+        assert_eq!(wanted.turns, 3, "Auto stands the video upright");
+        let spec = PosterSpec::framed(Size::new(1920, 480), &info, &wanted);
+        assert_eq!(taken[0].1, spec);
+        assert_eq!(spec.quarter_turns, 3);
+        assert!(spec.crop.is_some(), "zoomed in: part of the picture");
+        let (saved, assets) = store.load(&place).unwrap();
+        assert_eq!(saved, *s.theme(), "the theme names the same poster");
+        assert_ne!(assets[&poster], before, "a new picture");
+        let picture = image::load_from_memory(&assets[&poster])
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(picture.dimensions(), (1920, 480));
+
+        // Saved again: the poster already shows that framing.
+        save(&mut s, &store, &place);
+        assert_eq!(posters.lock().unwrap().len(), 1);
+        // Back to Auto: taken again.
+        s.set_theme(framed(&s, None));
+        save(&mut s, &store, &place);
+        assert_eq!(posters.lock().unwrap().len(), 2);
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Without ffmpeg the poster stays as it is, and the theme is saved.
+        let (mut s, dir) = dragon_ball("retake-no-ffmpeg", FakeMedia::missing());
+        s.set_theme(framed(&s, Some(fit_125())));
+        let place = ThemeLocation("mem://dragon-2".into());
+        save(&mut s, &store, &place);
+        let (saved, assets) = store.load(&place).unwrap();
+        assert_eq!(saved, *s.theme());
+        assert_eq!(assets[&poster], before);
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A decoder that fails (ffmpeg stopped) is tried again after
+    /// [`PREVIEW_RETRY`] by itself, [`PREVIEW_ATTEMPTS`] in a row at most;
+    /// then the poster stays until a render asks again (an edit). A decoder
+    /// that shows a picture counts the failures from one again.
+    #[test]
+    fn a_failed_preview_decoder_is_tried_again_a_few_times() {
+        let media = FakeMedia::ready().failing(3);
+        let (streamed, failing) = (Arc::clone(&media.streamed), Arc::clone(&media.failing));
+        let (mut s, dir) = dragon_ball("retry", media);
+        let preview = |s: &mut Studio, ms, motion| {
+            let (frame, next) = s.preview(TIME, at(s, ms), motion).unwrap();
+            (frame.pixel(960, 240), next)
+        };
+        let retry = Some(PREVIEW_RETRY);
+        assert_eq!(
+            preview(&mut s, 0, Motion::Allowed),
+            (Some(POSTER_SHOWN), retry)
+        );
+        assert!(!s.previewing());
+        let (_, next) = preview(&mut s, 500, Motion::Allowed);
+        assert_eq!(next, Some(Duration::from_millis(1_500)), "none before then");
+        assert_eq!(preview(&mut s, 2_000, Motion::Allowed).1, retry);
+        let (shown, next) = preview(&mut s, 4_000, Motion::Allowed);
+        assert_eq!((shown, next), (Some(POSTER_SHOWN), None), "3 in a row");
+        assert_eq!(streamed.lock().unwrap().len(), 3);
+
+        // The next render (an edit) still tries one: it plays.
+        let (shown, next) = preview(&mut s, 6_000, Motion::Allowed);
+        assert_eq!(
+            (shown, next),
+            (Some(STREAMED), Some(Duration::from_millis(67)))
+        );
+        failing.store(1, Ordering::SeqCst);
+        preview(&mut s, 6_100, Motion::Reduced);
+        assert_eq!(preview(&mut s, 6_200, Motion::Allowed).1, retry, "one");
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Work handed out of the session to run outside its lock (a probe, a
+    /// poster) comes back only to the video, poster and framing it was for.
+    #[test]
+    fn a_probe_or_a_poster_comes_back_only_to_what_it_was_for() {
+        let (mut s, dir) = dragon_ball("recheck", FakeMedia::ready());
+        let (theme, assets) = (s.theme().clone(), s.assets().clone());
+        // Another theme opened meanwhile, its video of the same name.
+        s.start(theme.clone(), assets.clone(), None);
+        let probe = s.video_to_probe().expect("not probed");
+        s.start(theme, assets, None);
+        s.probed(probe.run(Wait::Yes).unwrap());
+        assert!(!s.video_known(), "the probe was for the other one");
+        learn(&mut s);
+        assert_eq!(s.video_auto(), Some((3, Some(Size::new(480, 1920)))));
+
+        // The framing changed again while the poster was taken.
+        let poster = AssetRef(DRAGON_POSTER.into());
+        let before = s.assets()[&poster].clone();
+        s.set_theme(framed(&s, Some(fit_125())));
+        let taken = s.poster_to_take().and_then(PosterRetake::run).unwrap();
+        s.set_theme(framed(&s, None));
+        assert!(!s.poster_taken(taken));
+        assert_eq!(s.assets()[&poster], before);
+        assert!(s.poster_to_take().is_none(), "the poster shows Auto");
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -74,7 +74,7 @@ Gerenciar os arquivos da memória interna e do cartão SD da tela no studio e na
   - Resultados e erros por código com args (sem parsing de texto); fixture e traduções em dia.
 - **Dependencies:** T-2, T-3, T-4
 - **Test:** `storage::tests::uploads_deletes_and_the_boot_media_are_recorded`, `manager::tests::a_move_reports_by_code`; teste do fixture em `messages.rs`; `npm test`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4
 

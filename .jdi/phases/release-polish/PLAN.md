@@ -108,7 +108,9 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 - **Files modified:** core (perfil, pré-voo, porta de conexão), `bezel-media`, `connector.rs`, CLI (`bezel restart`), studio (aba Tela), docs, `CHANGELOG.md`
 - **Acceptance:** envio rev C > 25 MiB recusado antes de enviar e conversão com bitrate limitado; `00 00 00 00 00 c9` no MCU por 8 s e espera o SoC voltar; automático uma vez quando o SoC não responde; `bezel restart` e ação no studio.
 - **Dependencies:** T-7.3
-- **Status:** in progress
+- **Test:** `domain::storage::tests::each_file_is_capped_at_the_profiles_limit`, `transcode::tests::the_bitrate_is_capped_so_the_output_fits_the_screen`, `a_converted_video_over_the_limit_is_refused_before_a_byte_is_sent` (core), `connector::tests::the_mcu_restart_sends_six_bytes_holds_8_s_and_waits_for_the_soc`, `connector::tests::a_soc_on_the_bus_without_hello_is_restarted_once_then_connected`, `connector::tests::a_screen_that_answers_is_never_restarted`, e2e `a hung screen offers the restart…`
+- **Status:** completed (`d207730` D-12, `b6a2f7b` D-13; validação no hardware com o orquestrador)
+- **Nota:** fora do escopo natural, sinalizados: `wire.rs` (`Stalled` tipado → `BezelError::Hung`, e a porta serial descarta ao fechar a saída que um dispositivo travado não leu, para o fechamento não esperar até 30 s), `driver/mod.rs` (`io_err`), `README.md` (`bezel restart` no início rápido), `demo-data.js` (`chuva.mp4` de 64 MiB → 22 MiB, coerente com o limite; cenário `noffmpeg` com 32 MB internos para o `noSpace` continuar testável).
 
 ### Wave 4
 

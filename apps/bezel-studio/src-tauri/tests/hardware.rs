@@ -23,6 +23,7 @@ use bezel_studio::library::ThemeLibrary;
 use bezel_studio::settings::SettingsFile;
 use bezel_studio::storage::StorageState;
 use bezel_studio::studio::Studio;
+use bezel_studio::thumbnails::Thumbnails;
 use bezel_themes::FsThemeStore;
 
 /// How long each orientation stays live.
@@ -55,6 +56,11 @@ fn backend(scratch: &Path) -> Backend {
             blank,
         )),
         storage: StorageState::new(Box::new(FfmpegTranscoder::new(None)), scratch.join("media")),
+        thumbnails: Thumbnails::new(
+            scratch.join("thumbnails"),
+            Box::new(|| Box::new(SkiaRenderer::new())),
+            Box::new(|| Box::new(bezel_sensors::FakeSensors::demo())),
+        ),
     }
 }
 

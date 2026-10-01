@@ -35,6 +35,24 @@ pub struct Settings {
     /// The folder of MangoHud's logs read for `gpu.fps`; without one,
     /// MangoHud's own `output_folder`.
     pub mangohud_dir: Option<String>,
+    /// Which themes the Themes tab lists ([`THEME_SCOPES`]); without one,
+    /// those for the screen in use when one is known.
+    pub themes_shown: Option<String>,
+    /// The orientation of the themes the Themes tab lists ([`THEME_AXES`]);
+    /// without one, both.
+    pub themes_axis: Option<String>,
+}
+
+/// What the Themes tab can list: the themes that fit the screen in use, or
+/// all of them.
+pub const THEME_SCOPES: [&str; 2] = ["screen", "all"];
+
+/// The orientations the Themes tab can list: both, or one of them.
+pub const THEME_AXES: [&str; 3] = ["all", "vertical", "horizontal"];
+
+/// `text` when it is one of `known`.
+fn known(known: &[&'static str], text: Option<&str>) -> Option<&'static str> {
+    text.and_then(|t| known.iter().copied().find(|k| *k == t))
 }
 
 impl Settings {
@@ -45,6 +63,17 @@ impl Settings {
             ping_host: self.ping_host.clone().unwrap_or(defaults.ping_host),
             mangohud_dir: self.mangohud_dir.as_ref().map(PathBuf::from),
         }
+    }
+
+    /// Which themes the Themes tab lists, if a valid choice was stored.
+    pub fn themes_shown(&self) -> Option<&'static str> {
+        known(&THEME_SCOPES, self.themes_shown.as_deref())
+    }
+
+    /// The orientation of the themes the Themes tab lists (`all` unless a
+    /// valid one was stored).
+    pub fn themes_axis(&self) -> &'static str {
+        known(&THEME_AXES, self.themes_axis.as_deref()).unwrap_or(THEME_AXES[0])
     }
 
     /// The language the user chose, if a valid one was stored.
@@ -167,5 +196,21 @@ mod tests {
         assert_eq!(old.last_theme.as_deref(), Some("/t.bezeltheme"));
         assert_eq!(old.orientation_for("k"), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remembers_which_themes_the_gallery_lists() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.themes_shown(), None, "not chosen yet");
+        assert_eq!(settings.themes_axis(), "all");
+        settings.themes_shown = Some("all".into());
+        settings.themes_axis = Some("vertical".into());
+        assert_eq!(settings.themes_shown(), Some("all"));
+        assert_eq!(settings.themes_axis(), "vertical");
+        // Edited by hand: ignored, never an error.
+        settings.themes_shown = Some("mine".into());
+        settings.themes_axis = Some("diagonal".into());
+        assert_eq!(settings.themes_shown(), None);
+        assert_eq!(settings.themes_axis(), "all");
     }
 }

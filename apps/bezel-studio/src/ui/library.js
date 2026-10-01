@@ -5,10 +5,12 @@ import { ICONS } from './icons.js';
 import { makeDraggable } from './dragdrop.js';
 import { checkField } from './fields.js';
 import { WIDGETS, widgetOf } from '../editor/widgets.js';
-import { isHorizontal } from '../editor/geometry.js';
 import { backgroundOf, fileNameOf, mediaItems, moves, videoFacts } from '../editor/background.js';
 import { warningText } from '../messages.js';
 import { formatBytes } from './storage.js';
+import { SHOW_ALL, axisOf, countText, emptyState, filterThemes, rememberedFilter, scopeIn, screenLabel, thumbnailKey } from '../theme-filter.js';
+
+export { axisOf };
 
 const CATEGORY_ORDER = ['cpu', 'gpu', 'memory', 'disk', 'network', 'board', 'system'];
 
@@ -47,16 +49,11 @@ export function thumbScreen(canvas) {
   return { width: pct((canvas.width * scale) / 4), height: pct((canvas.height * scale) / 3) };
 }
 
-/** `vertical` or `horizontal` for a theme entry (by orientation, else by shape). */
-export function axisOf(entry) {
-  if (entry.orientation) return isHorizontal(entry.orientation) ? 'horizontal' : 'vertical';
-  return entry.canvas.width > entry.canvas.height ? 'horizontal' : 'vertical';
-}
-
 /**
  * @param {object} deps
+ * @param {{scope?: string|null, axis?: string}|null} [deps.themeFilter] the Themes tab's filter as remembered
  */
-export function createLibrary({ store, canvas, stage, t, locale = () => 'en', actions }) {
+export function createLibrary({ store, canvas, stage, t, locale = () => 'en', themeFilter = null, actions }) {
   const $ = (id) => document.getElementById(id);
   let catalog = [];
   let readings = {};
@@ -77,6 +74,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', ac
       $(t2.getAttribute('aria-controls')).hidden = !on;
     }
     reportShown();
+    fetchThumbnails();
   }
   tabs.forEach((tab, i) => {
     tab.addEventListener('click', () => selectTab(tab));
@@ -209,31 +207,141 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', ac
   }
 
   // -------------------------------------------------------------- themes --
+  // Which themes the gallery lists (remembered), the thumbnails it got (by
+  // location and revision; `null`: the theme cannot be drawn) and the mini
+  // screens of the cards shown, to fill in as thumbnails arrive.
+  let filter = rememberedFilter(themeFilter);
+  const thumbnails = new Map();
+  const cardScreens = new Map();
+  const waiting = [];
+  let fetching = false;
+  // The screen the gallery filtered for (once listed), to list again when it changes.
+  let filteredFor = null;
+
+  /** The screen in use (the one chosen at the top), or `null`. */
+  function screenInUse() {
+    const [screens, current] = screenArgs;
+    return screens.find((s) => s.key === current) ?? null;
+  }
+
+  /** What the gallery's filter depends on of `screen`: its key and models. */
+  const signature = (screen) => (screen ? `${screen.key} ${screen.models.map((m) => m.id).join(' ')}` : '');
+
+  /** Fills a card's mini screen with its thumbnail, or marks it without one. */
+  function paintThumbnail(screen, url) {
+    screen.dataset.state = url ? 'ready' : url === null ? 'none' : 'loading';
+    screen.style.backgroundImage = url ? `url("${url}")` : '';
+    const thumb = screen.parentElement;
+    thumb?.querySelector('.no-preview')?.remove();
+    if (url === null) thumb?.append(el('span', { class: 'no-preview' }, [icon(ICONS.eyeOff, 14), el('span', { text: t('themes.noPreview') })]));
+  }
+
+  /** Asks for the missing thumbnails of the cards shown, one at a time, while the tab is open. */
+  async function fetchThumbnails() {
+    if (fetching) return;
+    fetching = true;
+    while (waiting.length && !$('panel-themes').hidden) {
+      const entry = waiting.shift();
+      const key = thumbnailKey(entry);
+      if (thumbnails.has(key)) continue;
+      const url = await Promise.resolve(actions.themeThumbnail?.(entry.location)).catch(() => null);
+      thumbnails.set(key, url ?? null);
+      const screen = cardScreens.get(key);
+      if (screen) paintThumbnail(screen, url ?? null);
+    }
+    fetching = false;
+  }
+
   function themeCard(th) {
     const axis = axisOf(th);
     const mini = thumbScreen(th.canvas);
-    const screen = { width: `${mini.width}%`, height: `${mini.height}%` };
-    if (th.thumbnail) screen.backgroundImage = `url(${th.thumbnail})`;
+    const key = thumbnailKey(th);
+    const screen = el('span', { class: 'thumb-screen', style: { width: `${mini.width}%`, height: `${mini.height}%` } });
+    cardScreens.set(key, screen);
+    const thumb = el('span', { class: 'thumb', 'aria-hidden': 'true' }, [screen]);
+    paintThumbnail(screen, thumbnails.has(key) ? thumbnails.get(key) : th.thumbnail);
     return el('li', {}, [
-      el('button', { type: 'button', class: 'theme-card', onclick: () => actions.openTheme(th.location) }, [
-        el('span', { class: 'thumb', 'aria-hidden': 'true' }, [el('span', { class: 'thumb-screen', style: screen })]),
+      el('button', { type: 'button', class: 'theme-card', dataset: { location: th.location }, onclick: () => actions.openTheme(th.location) }, [
+        thumb,
         el('strong', { text: th.name }),
         el('span', { class: 'card-meta' }, [
           el('span', { class: `badge ${axis}` }, [icon(ICONS[axis], 14), t(`axis.${axis}`)]),
-          el('small', { text: `${th.canvas.width}×${th.canvas.height}${th.bundled ? ` · ${t('themes.bundled')}` : ''}` }),
+          el('small', { text: `${screenLabel(th, locale())}${th.bundled ? ` · ${t('themes.bundled')}` : ''}` }),
         ]),
       ]),
     ]);
   }
 
+  /** What the gallery shows when the filter keeps no theme: why, new themes, and "Show all". */
+  function emptyItem({ key, showAll }) {
+    const newButton = (axis) => el('button', { type: 'button', class: 'text-button', onclick: () => actions.newTheme(axis) }, [
+      icon(ICONS[axis], 14),
+      el('span', { text: t(axis === 'vertical' ? 'themes.newVertical' : 'themes.newHorizontal') }),
+    ]);
+    return el('li', { class: 'empty-state' }, [
+      el('p', { class: 'empty-note', text: t(key) }),
+      el('div', { class: 'button-row' }, [
+        newButton('vertical'),
+        newButton('horizontal'),
+        showAll && el('button', { type: 'button', class: 'text-button show-all', text: t('themes.showAll'), onclick: () => {
+          chooseFilter(SHOW_ALL);
+          document.querySelector('#theme-scope [data-scope="all"]')?.focus();
+        } }),
+      ]),
+    ]);
+  }
+
+  /** The filter buttons say what is chosen; "For this screen" needs a screen. */
+  function syncFilterButtons(screen) {
+    const scope = scopeIn(filter, screen);
+    for (const button of document.querySelectorAll('#theme-scope [data-scope]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
+      if (button.dataset.scope !== 'screen') continue;
+      button.disabled = !screen;
+      const model = screen?.models.length === 1 ? screen.models[0].name : screen?.key;
+      button.title = screen ? t('themes.forScreenHint', { name: model }) : t('themes.forScreenNone');
+    }
+    for (const button of document.querySelectorAll('#theme-axis [data-axis]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.axis === filter.axis));
+    }
+  }
+
   function renderThemes(list) {
     themes = list;
+    const screen = screenInUse();
+    filteredFor = signature(screen);
+    syncFilterButtons(screen);
+    const shown = filterThemes(list, filter, screen);
+    const count = countText(shown.length, list.length);
+    $('theme-count').textContent = count ? t(count.key, count.params) : '';
     const grid = $('theme-grid');
-    if (!list.length) {
-      grid.replaceChildren(el('li', { class: 'empty-note', text: t('themes.empty') }));
+    cardScreens.clear();
+    if (!shown.length) {
+      grid.replaceChildren(emptyItem(emptyState(list, filter, screen)));
       return;
     }
-    grid.replaceChildren(...list.map(themeCard));
+    grid.replaceChildren(...shown.map(themeCard));
+    waiting.splice(0, waiting.length, ...shown.filter((entry) => !thumbnails.has(thumbnailKey(entry))));
+    fetchThumbnails();
+  }
+
+  /** Changes the filter (what is not given stays), remembers it and lists again. */
+  function chooseFilter(next) {
+    filter = { ...filter, ...next };
+    actions.rememberThemeFilter?.(filter);
+    renderThemes(themes);
+  }
+
+  /** Lists again when the screen in use changed (another model, or none). */
+  function screenChanged() {
+    if (filteredFor !== null && signature(screenInUse()) !== filteredFor) renderThemes(themes);
+  }
+
+  for (const button of document.querySelectorAll('#theme-scope [data-scope]')) {
+    button.addEventListener('click', () => chooseFilter({ scope: button.dataset.scope }));
+  }
+  for (const button of document.querySelectorAll('#theme-axis [data-axis]')) {
+    button.addEventListener('click', () => chooseFilter({ axis: button.dataset.axis }));
   }
 
   /** Lists what an import could not map exactly, until dismissed; `null` clears it. */
@@ -368,6 +476,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', ac
    */
   function renderScreen(screens, current, live, brightness = {}, desktopMode = [], restart = {}) {
     screenArgs = [screens, current, live, brightness, desktopMode, restart];
+    screenChanged();
     const root = $('screen-panel');
     if (!screens.length) {
       root.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }), autostartField(), ...[desktopSection(desktopMode)].filter(Boolean));

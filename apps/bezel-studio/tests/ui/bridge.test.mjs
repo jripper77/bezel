@@ -95,6 +95,8 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.restartScreen('k');
   await bridge.addMedia();
   await bridge.addMedia('/home/me/Ondas.gif');
+  await bridge.themeThumbnail('/home/me/t.bezeltheme');
+  await bridge.setThemeFilter(null, 'vertical');
   assert.deepEqual(calls.map((c) => c[0]), [
     'list_devices', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
@@ -103,7 +105,10 @@ test('tauri mode maps every call to its command', async () => {
     'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media', 'set_boot_media',
     'set_unsaved', 'close_window', 'preferences', 'set_language', 'set_sensor_options', 'pick_folder',
     'leave_desktop_mode', 'quit_app', 'show_sensors', 'restart_screen', 'add_media', 'add_media',
+    'theme_thumbnail', 'set_theme_filter',
   ]);
+  assert.deepEqual(calls[44][1], { location: '/home/me/t.bezeltheme' });
+  assert.deepEqual(calls[45][1], { scope: null, axis: 'vertical' });
   assert.deepEqual(calls[42][1], { path: null }, 'the native dialog asks');
   assert.deepEqual(calls[43][1], { path: '/home/me/Ondas.gif' }, 'a dropped file');
   assert.deepEqual(calls[41][1], { screen: 'k' });

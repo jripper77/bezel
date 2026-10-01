@@ -48,6 +48,8 @@
     "allow-set-sensor-options",
     "allow-pick-folder",
     "allow-show-sensors",
-    "allow-restart-screen"
+    "allow-restart-screen",
+    "allow-theme-thumbnail",
+    "allow-set-theme-filter"
   ]
 }

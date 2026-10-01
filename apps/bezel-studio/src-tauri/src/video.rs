@@ -215,6 +215,7 @@ mod tests {
             fonts: Vec::new(),
             studio: Session::new(studio),
             storage: StorageState::new(Box::new(media), root.join("scratch")),
+            thumbnails: crate::thumbnails::tests::thumbnails(root.join("thumbnails")),
         };
         Fixture {
             backend,

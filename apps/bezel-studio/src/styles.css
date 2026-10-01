@@ -144,6 +144,25 @@ button, input, select { font: inherit; color: inherit; }
 .card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 5px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 0.75rem; font-weight: 600; }
 .badge svg { width: 14px; height: 14px; color: var(--accent); }
+.theme-filter { display: grid; gap: 6px; margin-top: 10px; }
+.theme-filter .segmented { display: flex; }
+.theme-filter .segmented button { flex: 1 1 0; min-height: 30px; padding: 4px 6px; color: var(--muted); font-weight: 600; }
+.theme-filter .segmented button + button { border-left: 1px solid var(--border); }
+.theme-filter .segmented button[aria-pressed="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.theme-filter .segmented button:disabled { cursor: not-allowed; opacity: 0.55; }
+.theme-filter .segmented button:focus-visible { outline-offset: -3px; }
+.theme-count { margin: 8px 0 0; }
+.theme-count:empty { display: none; }
+.theme-grid > .empty-note, .theme-grid > .empty-state { grid-column: 1 / -1; }
+.empty-state { display: grid; gap: 8px; }
+.empty-state .empty-note { margin: 0; }
+.empty-state .button-row { display: grid; grid-template-columns: 1fr 1fr; }
+.empty-state .text-button { justify-content: center; padding: 0 8px; gap: 4px; font-size: 0.9rem; white-space: nowrap; }
+.empty-state .text-button svg { width: 14px; height: 14px; }
+.empty-state .show-all { grid-column: 1 / -1; }
+.theme-card .thumb { position: relative; overflow: hidden; }
+.theme-card .no-preview { position: absolute; right: 6px; bottom: 6px; display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px 1px 5px; border-radius: 999px; background: rgb(15 23 42 / 88%); color: #e2e8f0; font-size: 0.72rem; font-weight: 600; }
+.theme-card .no-preview svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 .notice { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--border); border-left: 4px solid var(--warn); background: var(--surface-2); }
 .notice-head { display: flex; align-items: center; gap: 8px; }
@@ -341,4 +360,7 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
 @media (prefers-reduced-motion: no-preference) {
   .icon-button, .text-button, .widget-tile, .sensor-row, .theme-card, .switch .thumb, .orientation-tools .segmented button, .subtabs [role="tab"], .drop-zone { transition: border-color 120ms ease, background 120ms ease, color 120ms ease, left 120ms ease; }
   .usage > span { transition: width 200ms ease; }
+  .theme-card .thumb-screen[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
 }
+
+@keyframes thumb-wait { from { opacity: 0.55; } to { opacity: 1; } }

@@ -113,6 +113,9 @@ function tauriBridge(invoke, tauri = {}) {
     setSensorOptions: (pingHost, mangohudDir) => invoke('set_sensor_options', { pingHost, mangohudDir }),
     pickFolder: () => invoke('pick_folder'),
     showSensors: (keys) => invoke('show_sensors', { keys }),
+    // A library theme's thumbnail (a `data:` URL), or `null` when it cannot be drawn.
+    themeThumbnail: (location) => invoke('theme_thumbnail', { location }),
+    setThemeFilter: (scope, axis) => invoke('set_theme_filter', { scope, axis }),
     onJobProgress: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(PROGRESS_EVENT, (e) => cb(e.payload)) : Promise.resolve(() => {})),
     onCloseRequested: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(CLOSE_EVENT, () => cb()) : Promise.resolve(() => {})),
     onQuitRequested: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(QUIT_EVENT, () => cb()) : Promise.resolve(() => {})),

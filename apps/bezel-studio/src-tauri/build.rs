@@ -47,6 +47,8 @@ const COMMANDS: &[&str] = &[
     "pick_folder",
     "show_sensors",
     "restart_screen",
+    "theme_thumbnail",
+    "set_theme_filter",
 ];
 
 fn main() -> ExitCode {

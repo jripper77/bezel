@@ -29,16 +29,18 @@ use bezel_themes::native::{is_native, native_location};
 use crate::dto::{
     AddedDto, AssetDto, DevicesDto, ImportedDto, LiveVideoDto, MonitorModeDto, PreferencesDto,
     ReconnectingDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
+    ThemeFilterDto,
 };
 use crate::library::ThemeLibrary;
 use crate::media::{extension_of, is_animated_gif, kind_of, thumbnail_data_url};
 pub use crate::messages::UiResult;
 use crate::messages::{ErrorCode, UiError};
-use crate::settings::SettingsFile;
+use crate::settings::{SettingsFile, THEME_AXES, THEME_SCOPES};
 use crate::storage::StorageState;
 pub use crate::studio::MAX_REFRESH;
 use crate::studio::{Delivery, Studio};
 use crate::texts::{Texts, language_slug, parse_language, texts};
+use crate::thumbnails::Thumbnails;
 use crate::udev_help::UdevHelp;
 
 /// Largest file accepted as an image or theme, bytes.
@@ -75,6 +77,8 @@ pub struct Backend {
     pub studio: Session,
     /// The screen's files: the media converter and the running operation.
     pub storage: StorageState,
+    /// The library's thumbnails, drawn off the session's lock.
+    pub thumbnails: Thumbnails,
 }
 
 /// The editing session behind its lock, and the signal that the live
@@ -257,6 +261,10 @@ impl Backend {
     pub fn preferences(&self) -> PreferencesDto {
         let settings = self.settings.load();
         PreferencesDto {
+            theme_filter: ThemeFilterDto {
+                scope: settings.themes_shown(),
+                axis: settings.themes_axis(),
+            },
             language: settings.language().map(language_slug),
             system_language: language_slug(self.system_language),
             ping_host: settings.sensor_options().ping_host,
@@ -288,6 +296,26 @@ impl Backend {
         });
         let sensors = (self.make_sensors)(self.settings.load().sensor_options());
         self.studio().replace_sensors(sensors)?;
+        Ok(())
+    }
+
+    /// Remembers which themes the Themes tab lists: `scope` (`screen`,
+    /// `all`, or `None` for the screen's when one is known) and `axis`
+    /// (`all`, `vertical` or `horizontal`).
+    pub fn set_theme_filter(&self, scope: Option<&str>, axis: &str) -> UiResult<()> {
+        let unknown = |text: &str| {
+            UiError::new(ErrorCode::InvalidInput).arg("detail", format!("theme filter \"{text}\""))
+        };
+        if let Some(scope) = scope.filter(|s| !THEME_SCOPES.contains(s)) {
+            return Err(unknown(scope));
+        }
+        if !THEME_AXES.contains(&axis) {
+            return Err(unknown(axis));
+        }
+        self.settings.update(|s| {
+            s.themes_shown = scope.map(str::to_string);
+            s.themes_axis = Some(axis.to_string());
+        });
         Ok(())
     }
 
@@ -526,6 +554,20 @@ impl Backend {
             .collect()
     }
 
+    /// The thumbnail of a library theme as a PNG `data:` URL, drawn at
+    /// `time` when it is not kept yet, outside the session's lock. `None`
+    /// when the theme cannot be drawn: the gallery shows its placeholder.
+    pub fn thumbnail(&self, location: &str, time: LocalTime) -> UiResult<Option<String>> {
+        let location = ThemeLocation(location.to_string());
+        if !self.library.allows(&location) {
+            return Err(UiError::new(ErrorCode::NotInLibrary).arg("location", location.0));
+        }
+        let language = self.language();
+        Ok(self
+            .thumbnails
+            .get(self.store.as_ref(), &location, language, time))
+    }
+
     /// Opens a theme of the library, or a theme file the user picked in a
     /// dialog during this session.
     pub fn open(&self, location: &str) -> UiResult<ThemeDto> {
@@ -559,6 +601,9 @@ impl Backend {
             target.unwrap_or_else(|| self.library.save_location(studio.location(), &theme.name));
         studio.set_theme(theme);
         studio.save(self.store.as_ref(), location.clone())?;
+        drop(studio);
+        // Its gallery card shows it as saved.
+        self.thumbnails.forget(&location);
         self.settings
             .update(|s| s.last_theme = Some(location.0.clone()));
         Ok(SavedDto {
@@ -860,6 +905,7 @@ mod tests {
                 Box::new(crate::storage::tests::FakeMedia::ready()),
                 root.join("scratch"),
             ),
+            thumbnails: crate::thumbnails::tests::thumbnails(root.join("thumbnails")),
         };
         Fixture {
             backend,
@@ -928,6 +974,74 @@ mod tests {
         assert_eq!(f.backend.set_language(None).unwrap(), Language::English);
         assert_eq!(f.backend.preferences().language, None);
         assert_eq!(f.backend.studio().language(), Language::English);
+    }
+
+    #[test]
+    fn the_gallery_filter_is_checked_and_remembered() {
+        let f = fixture("theme-filter");
+        let prefs = f.backend.preferences();
+        assert_eq!(
+            prefs.theme_filter,
+            ThemeFilterDto {
+                scope: None,
+                axis: "all"
+            }
+        );
+        f.backend
+            .set_theme_filter(Some("all"), "horizontal")
+            .unwrap();
+        let filter = f.backend.preferences().theme_filter;
+        assert_eq!((filter.scope, filter.axis), (Some("all"), "horizontal"));
+        for (scope, axis) in [(Some("mine"), "all"), (None, "diagonal")] {
+            let error = f.backend.set_theme_filter(scope, axis).unwrap_err();
+            assert_eq!(error.code(), "invalidInput", "{scope:?} {axis}");
+        }
+        assert_eq!(f.backend.preferences().theme_filter, filter, "unchanged");
+        f.backend.set_theme_filter(None, "vertical").unwrap();
+        let filter = f.backend.preferences().theme_filter;
+        assert_eq!((filter.scope, filter.axis), (None, "vertical"));
+    }
+
+    #[test]
+    fn library_themes_get_thumbnails_and_name_their_screens() {
+        let f = fixture("thumbnails");
+        let theme = Theme::blank("Mine", Size::new(480, 1920), Orientation::Landscape);
+        let saved = f.backend.save(&ThemeDto::from(&theme), None).unwrap();
+        let listed = f.backend.themes();
+        let entry = listed
+            .iter()
+            .find(|e| e.location == saved.location)
+            .unwrap();
+        assert_eq!(entry.models, vec!["turing-8.8", "turing-usb-8.8"]);
+        assert_eq!(entry.diagonal_hundredths, Some(880));
+        let first = f.backend.thumbnail(&saved.location, TIME).unwrap();
+        assert!(first.unwrap().starts_with("data:image/png;base64,"));
+        let kept = || std::fs::read_dir(f.backend.thumbnails.dir()).map_or(0, Iterator::count);
+        assert_eq!(kept(), 1);
+        // Saving it again through the studio forgets the old thumbnail, and
+        // the list says it changed.
+        let mut renamed = theme.clone();
+        renamed.name = "Mine again".into();
+        f.backend.save(&ThemeDto::from(&renamed), None).unwrap();
+        assert_eq!(kept(), 0, "forgotten on save");
+        let again = f.backend.themes();
+        let after = again.iter().find(|e| e.location == saved.location).unwrap();
+        assert_ne!(after.revision, entry.revision);
+        assert!(
+            f.backend
+                .thumbnail(&saved.location, TIME)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(kept(), 1);
+        // Only the library's themes.
+        let error = f.backend.thumbnail("/etc/passwd", TIME).unwrap_err();
+        assert_eq!(error.code(), "notInLibrary");
+        // A broken file of the library: no thumbnail, no error.
+        let broken = f.root.join("themes").join("broken.bezeltheme");
+        std::fs::write(&broken, b"not a zip").unwrap();
+        let none = f.backend.thumbnail(&broken.display().to_string(), TIME);
+        assert_eq!(none.unwrap(), None);
     }
 
     #[test]

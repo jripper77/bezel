@@ -379,7 +379,8 @@ test('new vertical and horizontal themes', async ({ page, t }) => {
 
   await page.getByRole('button', { name: t('themes.newHorizontal') }).click();
   await expect(page.locator('#theme-name')).toHaveValue(t('themes.untitled'));
-  await expect(page.getByRole('button', { name: t('axis.horizontal'), exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const topBar = page.getByRole('group', { name: t('top.orientation') });
+  await expect(topBar.getByRole('button', { name: t('axis.horizontal'), exact: true })).toHaveAttribute('aria-pressed', 'true');
   const box = await page.locator('#canvas-box').boundingBox();
   expect(box.width).toBeGreaterThan(box.height);
   await page.keyboard.press('Control+s');
@@ -388,7 +389,7 @@ test('new vertical and horizontal themes', async ({ page, t }) => {
   await expect(cards.nth(1)).toContainText('1920×480');
 
   await page.getByRole('button', { name: t('themes.newVertical') }).click();
-  await expect(page.getByRole('button', { name: t('axis.vertical'), exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(topBar.getByRole('button', { name: t('axis.vertical'), exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#inspector')).toContainText(t('inspector.canvas', { width: 480, height: 1920 }));
   await expectAccessible(page);
   expect(errors).toEqual([]);

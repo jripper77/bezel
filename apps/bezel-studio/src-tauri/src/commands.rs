@@ -205,6 +205,17 @@ pub async fn list_themes(state: State<'_, Shared>) -> UiResult<Vec<ThemeEntryDto
     blocking(&state, |b| Ok(b.themes())).await
 }
 
+/// The thumbnail of a library theme as a PNG `data:` URL, drawn off the
+/// session's lock when it is not kept yet; `None` when the theme cannot be
+/// drawn (the gallery shows its placeholder).
+#[tauri::command]
+pub async fn theme_thumbnail(
+    state: State<'_, Shared>,
+    location: String,
+) -> UiResult<Option<String>> {
+    blocking(&state, move |b| b.thumbnail(&location, now())).await
+}
+
 /// Opens a theme of the library (or one picked in a dialog this session).
 #[tauri::command]
 pub async fn open_theme(state: State<'_, Shared>, location: String) -> UiResult<ThemeDto> {
@@ -375,6 +386,18 @@ pub fn set_language(
         tray.relabel(&state.texts());
     }
     Ok(())
+}
+
+/// Remembers which themes the Themes tab lists: `scope` (`screen`, `all`,
+/// or `None`: the screen's when one is known) and `axis` (`all`,
+/// `vertical`, `horizontal`).
+#[tauri::command]
+pub fn set_theme_filter(
+    state: State<'_, Shared>,
+    scope: Option<String>,
+    axis: String,
+) -> UiResult<()> {
+    state.set_theme_filter(scope.as_deref(), &axis)
 }
 
 /// Measures `net.ping` against `ping_host` and reads MangoHud's logs from

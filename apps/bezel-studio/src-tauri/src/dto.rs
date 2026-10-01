@@ -17,7 +17,7 @@ use bezel_core::domain::storage::{Capacity, FileEntry, NameError, Refusal, Remot
 use bezel_themes::dto::{SizeDto, ThemeDto};
 use serde::Serialize;
 
-use crate::library::ThemeEntry;
+use crate::library::{ThemeEntry, fitting_models, made_for};
 use crate::messages::{UiError, WarningDto};
 
 /// One screen as the UI sees it.
@@ -354,10 +354,19 @@ pub struct ThemeEntryDto {
     pub orientation: &'static str,
     /// Ships with the app.
     pub bundled: bool,
+    /// Ids of the catalog models whose panel it fits (the core's rule): the
+    /// screens the Themes tab lists it for.
+    pub models: Vec<&'static str>,
+    /// The diagonal of the screen it was made for, hundredths of an inch,
+    /// when every model it fits has the same one.
+    pub diagonal_hundredths: Option<u16>,
+    /// Changes whenever its files do: the UI asks for its thumbnail again.
+    pub revision: String,
 }
 
 impl From<&ThemeEntry> for ThemeEntryDto {
     fn from(e: &ThemeEntry) -> Self {
+        let models = fitting_models(&e.theme);
         Self {
             name: e.theme.name.clone(),
             location: e.location.0.clone(),
@@ -367,6 +376,9 @@ impl From<&ThemeEntry> for ThemeEntryDto {
             },
             orientation: orientation_slug(e.theme.orientation),
             bundled: e.bundled,
+            diagonal_hundredths: made_for(&models),
+            models: models.iter().map(|m| m.id.0).collect(),
+            revision: format!("{:016x}", e.revision),
         }
     }
 }
@@ -434,6 +446,19 @@ pub struct PreferencesDto {
     pub mangohud_dir: Option<String>,
     /// Whether `gpu.fps` reads MangoHud's logs on this system (Linux).
     pub mangohud: bool,
+    /// Which themes the Themes tab lists.
+    pub theme_filter: ThemeFilterDto,
+}
+
+/// Which themes the Themes tab lists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeFilterDto {
+    /// `screen` (those that fit the screen in use) or `all`; `None` until
+    /// the user chooses: the screen's when one is known.
+    pub scope: Option<&'static str>,
+    /// `all`, `vertical` or `horizontal`.
+    pub axis: &'static str,
 }
 
 /// A theme imported from another app.

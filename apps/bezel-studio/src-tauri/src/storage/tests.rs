@@ -321,6 +321,7 @@ fn fixture_with(name: &str, storage: FakeStorage, media: FakeMedia) -> Fixture {
         fonts: Vec::new(),
         studio: crate::backend::Session::new(studio),
         storage: StorageState::new(Box::new(media), root.join("scratch")),
+        thumbnails: crate::thumbnails::tests::thumbnails(root.join("thumbnails")),
     };
     Fixture {
         backend,

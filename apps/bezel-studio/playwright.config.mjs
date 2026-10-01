@@ -5,7 +5,7 @@
 // server so a leftover one cannot serve another checkout.
 import { defineConfig } from '@playwright/test';
 
-const PORT = 1430;
+const PORT = Number(process.env.BEZEL_E2E_PORT) || 1430;
 
 export default defineConfig({
   testDir: 'tests/e2e',

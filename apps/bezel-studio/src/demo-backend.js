@@ -1,11 +1,12 @@
 // An in-memory backend for demo mode: a simulated screen, sensors that move,
 // themes, media and an approximate renderer. Nothing here reaches hardware.
-import { DEMO_BACK_FROM_DESKTOP, DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
+import { DEMO_BACK_FROM_DESKTOP, DEMO_LIBRARY, DEMO_LOCAL_FILES, DEMO_PANELS, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
 import { DEMO_THEME } from './demo-theme.js';
 import { DEMO_GIF_FRAME_MS, renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
 import { IMAGE_EXTENSIONS as PICTURES, droppable, extensionOf, fileNameOf } from './editor/background.js';
 import { pickLocale } from './i18n/index.js';
+import { AXES, SCOPES } from './theme-filter.js';
 
 /** Well-known demo sensors: key, category, label, quantity, base value, swing. */
 export const DEMO_SENSORS = Object.freeze([
@@ -108,6 +109,48 @@ export function demoHung() {
 export function demoNextChange(theme, ms) {
   const gif = (theme?.elements ?? []).some((e) => e.visible !== false && e.kind?.type === 'image' && String(e.kind.asset).toLowerCase().endsWith('.gif'));
   return gif ? DEMO_GIF_FRAME_MS - (Math.floor(ms) % DEMO_GIF_FRAME_MS) : null;
+}
+
+/**
+ * The demo models a theme fits (its canvas is the panel turned the theme's
+ * way up, like the core's rule) and the diagonal of the screen it was made
+ * for, when they all have the same.
+ */
+export function demoFits(theme) {
+  const turned = isHorizontal(theme.orientation);
+  const models = DEMO_PANELS.filter((p) => {
+    const [width, height] = turned ? [p.height, p.width] : [p.width, p.height];
+    return width === theme.canvas.width && height === theme.canvas.height;
+  });
+  const sizes = new Set(models.map((m) => m.diagonalHundredths));
+  return { models: models.map((m) => m.id), diagonalHundredths: sizes.size === 1 ? models[0].diagonalHundredths : null };
+}
+
+/** `color` when it is a `#rgb[a]`/`#rrggbb[aa]` color, else `fallback`. */
+const svgColor = (color, fallback) => (typeof color === 'string' && /^#[0-9a-f]{3,8}$/i.test(color) ? color : fallback);
+
+/** One element of a demo thumbnail: shapes as they are, rings as rings, text and the rest as bars. */
+function thumbnailPart(e) {
+  const { x, y, width, height } = e.frame;
+  const kind = e.kind ?? {};
+  if (kind.type === 'shape') return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${kind.radius ?? 0}" fill="${svgColor(kind.fill, '#1e293b')}"/>`;
+  if (kind.type === 'ring') {
+    const r = Math.max(1, Math.min(width, height) / 2 - (kind.thickness ?? 8) / 2);
+    const arc = 2 * Math.PI * r;
+    return `<circle cx="${x + width / 2}" cy="${y + height / 2}" r="${r}" fill="none" stroke="${svgColor(kind.track, '#ffffff26')}" stroke-width="${kind.thickness ?? 8}"/>`
+      + `<circle cx="${x + width / 2}" cy="${y + height / 2}" r="${r}" fill="none" stroke="${svgColor(kind.fill, '#38bdf8')}" stroke-width="${kind.thickness ?? 8}" stroke-dasharray="${arc * 0.45} ${arc}"/>`;
+  }
+  const fill = kind.type === 'text' ? svgColor(kind.style?.paint, '#e2e8f0') : svgColor(kind.fill, '#94a3b8');
+  return `<rect x="${x}" y="${y + height * 0.25}" width="${width * 0.8}" height="${height * 0.5}" rx="${height * 0.12}" fill="${fill}"/>`;
+}
+
+/** A demo theme's thumbnail: its background and elements as an SVG `data:` URL. */
+export function demoThumbnail(theme) {
+  const { width, height } = theme.canvas;
+  const background = theme.background?.type === 'color' ? svgColor(theme.background.color, '#0c0e16') : '#10111a';
+  const parts = (theme.elements ?? []).filter((e) => e.visible !== false && e.frame).map(thumbnailPart).join('');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${background}"/>${parts}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
 }
 
 /** Samples a live screen that dropped (the `flaky` scenario) reports it away. */
@@ -465,7 +508,14 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const devices = { screens: [...(chosen.screens ?? [])], desktopMode: [...(chosen.desktopMode ?? [])] };
   let live = false;
   let autostart = false;
-  const saved = [{ location: 'demo://Demo', theme: structuredClone(DEMO_THEME) }];
+  // The library: `Demo` first (the session's), the other screens' themes,
+  // then what the user saves; each with the revision of its "files".
+  const saved = [
+    { location: 'demo://Demo', theme: structuredClone(DEMO_THEME), bundled: true, revision: 1 },
+    ...DEMO_LIBRARY.map((entry) => ({ location: `demo://${entry.theme.name}`, theme: structuredClone(entry.theme), bundled: entry.bundled, drawable: entry.drawable !== false, revision: 1 })),
+  ];
+  // Which themes the Themes tab lists, as remembered.
+  let themeFilter = { scope: null, axis: 'all' };
   const images = [];
   // Videos and animated GIFs added for a background (with their posters),
   // and the sizes of files dropped on the window, by demo source.
@@ -614,13 +664,19 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       theme = structuredClone(next);
       const location = `demo://${next.name}`;
       const at = saved.findIndex((s) => s.location === location);
-      if (saveAs || at < 0) saved.push({ location, theme: structuredClone(next) });
-      else saved[at].theme = structuredClone(next);
+      if (saveAs || at < 0) saved.push({ location, theme: structuredClone(next), bundled: false, revision: 1 });
+      else Object.assign(saved[at], { theme: structuredClone(next), drawable: true, revision: saved[at].revision + 1 });
       return Promise.resolve({ location });
     },
-    listThemes: () => Promise.resolve(saved.map((s, i) => ({
-      name: s.theme.name, location: s.location, canvas: { ...s.theme.canvas }, orientation: s.theme.orientation, bundled: i === 0,
+    listThemes: () => Promise.resolve(saved.map((s) => ({
+      name: s.theme.name, location: s.location, canvas: { ...s.theme.canvas }, orientation: s.theme.orientation, bundled: s.bundled, ...demoFits(s.theme), revision: String(s.revision),
     }))),
+    /** A library theme's thumbnail; `null` for one that cannot be drawn. */
+    themeThumbnail: (location) => {
+      const found = saved.find((s) => s.location === location);
+      if (!found) return Promise.reject(Object.assign(new Error(`${location} is not in the theme library; import it instead`), { code: 'notInLibrary', args: { location } }));
+      return Promise.resolve(found.drawable === false ? null : demoThumbnail(found.theme));
+    },
     openTheme: (location) => {
       const found = saved.find((s) => s.location === location);
       if (found) return Promise.resolve(structuredClone(found.theme));
@@ -703,7 +759,20 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       defaultPingHost: DEMO_PING_HOST,
       mangohudDir: sensorOptions.mangohudDir,
       mangohud: true,
+      themeFilter: { ...themeFilter },
     }),
+    setThemeFilter: (scope, axis) => {
+      const chosen = scope ?? null;
+      let unknown = null;
+      if (chosen !== null && !SCOPES.includes(chosen)) unknown = chosen;
+      else if (!AXES.includes(axis)) unknown = String(axis);
+      if (unknown !== null) {
+        const detail = `theme filter "${unknown}"`;
+        return Promise.reject(Object.assign(new Error(`invalid input: ${detail}`), { code: 'invalidInput', args: { detail } }));
+      }
+      themeFilter = { scope: chosen, axis };
+      return Promise.resolve();
+    },
     setSensorOptions: (pingHost, mangohudDir) => {
       const host = pingHost.trim();
       if (host && !demoIsHost(host)) {

@@ -5,11 +5,19 @@
 //! for a webview that asks for any path): the library's folders, and the
 //! files the user picked in a native dialog during this session
 //! ([`ThemeLibrary::grant`]).
+//!
+//! Each theme also tells the screens it fits (the core's rule against the
+//! device catalog) and the [`revision`] of its files, which changes whenever
+//! they do.
 
 use std::collections::BTreeSet;
+use std::fs::Metadata;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::UNIX_EPOCH;
 
+use bezel_core::domain::catalog::MODELS;
+use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::theme::Theme;
 use bezel_core::ports::ThemeLocation;
 use bezel_themes::native::{EXTENSION, is_native, load_manifest};
@@ -23,6 +31,116 @@ pub struct ThemeEntry {
     pub theme: Theme,
     /// Ships with the app (read-only).
     pub bundled: bool,
+    /// What its files are now ([`revision`]).
+    pub revision: u64,
+}
+
+/// The catalog models whose panel `theme` fits: its canvas is the panel
+/// turned the theme's way up (the core's rule, [`Theme::misfit`]).
+pub fn fitting_models(theme: &Theme) -> Vec<&'static DeviceModel> {
+    MODELS
+        .iter()
+        .filter(|m| theme.misfit(m.panel).is_none())
+        .collect()
+}
+
+/// The diagonal of the screen a theme fitting `models` was made for, in
+/// hundredths of an inch: the one they all share. `None` without a model,
+/// or when the panel comes in several sizes (480x480 is 2.1" to 3.4").
+pub fn made_for(models: &[&DeviceModel]) -> Option<u16> {
+    let (first, rest) = models.split_first()?;
+    rest.iter()
+        .all(|m| m.diagonal_hundredths == first.diagonal_hundredths)
+        .then_some(first.diagonal_hundredths)
+}
+
+/// Files of up to this size count by their content in a [`revision`];
+/// larger ones by their size and modification time.
+const READ_WHOLE_BYTES: u64 = 1024 * 1024;
+
+/// Most files of a theme folder a [`revision`] looks at.
+const MAX_REVISION_FILES: usize = 512;
+
+/// Deepest folder of a theme folder a [`revision`] looks into.
+const MAX_REVISION_DEPTH: usize = 4;
+
+/// FNV-1a, 64 bits: a hash that stays the same between runs and builds.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Fnv(u64);
+
+impl Fnv {
+    pub(crate) const fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+
+    /// Adds `bytes`, preceded by their length (so fields never run together).
+    pub(crate) fn field(&mut self, bytes: &[u8]) -> &mut Self {
+        for b in (bytes.len() as u64).to_le_bytes().iter().chain(bytes) {
+            self.0 ^= u64::from(*b);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        self
+    }
+
+    pub(crate) const fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+fn modified_nanos(meta: &Metadata) -> u128 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos())
+}
+
+/// The regular files of the folder `dir`, at most [`MAX_REVISION_DEPTH`]
+/// folders down (links are not followed).
+fn files_in(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() && depth < MAX_REVISION_DEPTH {
+            files_in(&entry.path(), depth + 1, out);
+        } else if kind.is_file() {
+            out.push(entry.path());
+        }
+    }
+}
+
+/// What the files of the theme at `location` are now: a hash of their
+/// names, sizes and contents (modification times for files over 1 MiB). It
+/// changes whenever the theme is saved; `None` when nothing is there.
+pub fn revision(location: &ThemeLocation) -> Option<u64> {
+    let root = Path::new(&location.0);
+    let mut files = Vec::new();
+    if std::fs::metadata(root).ok()?.is_dir() {
+        files_in(root, 0, &mut files);
+        files.sort();
+    } else {
+        files.push(root.to_path_buf());
+    }
+    let mut hash = Fnv::new();
+    for path in files.iter().take(MAX_REVISION_FILES) {
+        let Ok(meta) = std::fs::metadata(path) else {
+            continue;
+        };
+        let name = path.strip_prefix(root).unwrap_or(path);
+        hash.field(name.to_string_lossy().as_bytes())
+            .field(&meta.len().to_le_bytes());
+        match (meta.len() <= READ_WHOLE_BYTES)
+            .then(|| std::fs::read(path).ok())
+            .flatten()
+        {
+            Some(bytes) => hash.field(&bytes),
+            None => hash.field(&modified_nanos(&meta).to_le_bytes()),
+        };
+    }
+    Some(hash.finish())
 }
 
 /// The folders themes are read from.
@@ -164,6 +282,7 @@ fn scan(dir: &Path, bundled: bool) -> Vec<ThemeEntry> {
             let location = ThemeLocation(path.display().to_string());
             match load_manifest(&location) {
                 Ok(theme) => Some(ThemeEntry {
+                    revision: revision(&location).unwrap_or_default(),
                     location,
                     theme,
                     bundled,
@@ -296,6 +415,57 @@ mod tests {
             at(&outside)
         );
         assert!(!library.allows(&at(Path::new("dir/../x"))));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_theme_names_the_screen_it_was_made_for_from_the_catalog() {
+        let ids =
+            |theme: &Theme| -> Vec<&str> { fitting_models(theme).iter().map(|m| m.id.0).collect() };
+        let wide = Theme::blank("w", Size::new(480, 1920), Orientation::Landscape);
+        assert_eq!(wide.canvas, Size::new(1920, 480));
+        assert_eq!(ids(&wide), vec!["turing-8.8", "turing-usb-8.8"]);
+        assert_eq!(made_for(&fitting_models(&wide)), Some(880));
+        // One panel size shared by several diagonals: only the pixels tell.
+        let square = Theme::blank("s", Size::new(480, 480), Orientation::Portrait);
+        assert!(ids(&square).contains(&"turing-2.1"));
+        assert!(ids(&square).contains(&"turing-3.4"));
+        assert_eq!(made_for(&fitting_models(&square)), None);
+        let small = Theme::blank("3.5", Size::new(320, 480), Orientation::Landscape);
+        assert_eq!(made_for(&fitting_models(&small)), Some(350));
+        // A canvas no panel has fits nothing.
+        let odd = Theme::blank("odd", Size::new(333, 777), Orientation::Portrait);
+        assert!(fitting_models(&odd).is_empty());
+        assert_eq!(made_for(&[]), None);
+    }
+
+    #[test]
+    fn the_revision_changes_when_the_theme_is_saved_again() {
+        let root = scratch("revision");
+        let folder = save(root.join("folder"), "Folder");
+        let file = save(root.join("file.bezeltheme"), "File");
+        let (first_folder, first_file) = (revision(&folder).unwrap(), revision(&file).unwrap());
+        assert_eq!(
+            revision(&folder),
+            Some(first_folder),
+            "stable while untouched"
+        );
+        assert_ne!(first_folder, first_file);
+        for (location, first) in [(&folder, first_folder), (&file, first_file)] {
+            let theme = Theme::blank("Renamed", Size::new(480, 1920), Orientation::Landscape);
+            FsThemeStore
+                .save(location, &theme, &BTreeMap::new())
+                .unwrap();
+            assert_ne!(revision(location), Some(first), "{}", location.0);
+        }
+        let missing = ThemeLocation(root.join("missing").display().to_string());
+        assert_eq!(revision(&missing), None);
+        let listed = ThemeLibrary::new(root.clone(), vec![]).list();
+        assert!(
+            listed
+                .iter()
+                .all(|e| Some(e.revision) == revision(&e.location))
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

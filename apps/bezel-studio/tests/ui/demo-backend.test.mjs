@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_AWAY_SAMPLES, DEMO_IMPORT_WARNINGS, DEMO_SENSORS, createDemoBackend, demoFormat, demoNextChange, demoOrientation, demoValue } from '../../src/demo-backend.js';
-import { DEMO_GIF_THEME } from '../../src/demo-data.js';
+import { DEMO_AWAY_SAMPLES, DEMO_IMPORT_WARNINGS, DEMO_SENSORS, createDemoBackend, demoFits, demoFormat, demoNextChange, demoOrientation, demoThumbnail, demoValue } from '../../src/demo-backend.js';
+import { DEMO_GIF_THEME, DEMO_LIBRARY } from '../../src/demo-data.js';
 
 const fixed = { now: () => 1000 };
 
@@ -37,18 +37,80 @@ test('saving, listing and opening themes', async () => {
   const { theme } = await demo.session();
   const { location } = await demo.saveTheme({ ...theme, name: 'Mine' }, false);
   assert.equal(location, 'demo://Mine');
-  const names = (await demo.listThemes()).map((x) => x.name);
-  assert.deepEqual(names, ['Demo', 'Mine']);
-  assert.deepEqual((await demo.listThemes()).map((x) => x.bundled), [true, false]);
-  assert.deepEqual((await demo.listThemes()).map((x) => x.orientation), ['reverse-portrait', 'reverse-portrait']);
+  const library = DEMO_LIBRARY.length;
+  const listed = await demo.listThemes();
+  assert.deepEqual(listed.map((x) => x.name), ['Demo', ...DEMO_LIBRARY.map((e) => e.theme.name), 'Mine']);
+  assert.deepEqual(listed.map((x) => x.bundled), [true, ...DEMO_LIBRARY.map((e) => e.bundled), false]);
+  assert.deepEqual([listed[0].orientation, listed.at(-1).orientation], ['reverse-portrait', 'reverse-portrait']);
   assert.equal((await demo.openTheme('demo://Mine')).name, 'Mine');
   await assert.rejects(demo.openTheme('demo://nope'), (e) => e.code === 'notInLibrary' && e.args.location === 'demo://nope');
   await demo.saveTheme({ ...theme, name: 'Mine', orientation: 'landscape', canvas: { width: 1920, height: 480 } }, false);
-  assert.equal((await demo.listThemes()).length, 2);
-  assert.equal((await demo.listThemes())[1].orientation, 'landscape', 'saving again updates the entry');
+  assert.equal((await demo.listThemes()).length, library + 2);
+  const mine = (await demo.listThemes()).at(-1);
+  assert.equal(mine.orientation, 'landscape', 'saving again updates the entry');
+  assert.equal(mine.revision, '2', 'and its revision');
   assert.equal((await demo.openTheme('demo://Mine')).orientation, 'landscape');
   assert.equal((await demo.newTheme()).elements.length, 0);
   assert.equal((await demo.newTheme('k', 'Novo')).name, 'Novo');
+});
+
+test('library themes name their screens and have thumbnails, but one', async () => {
+  const demo = createDemoBackend('turing88', fixed);
+  const listed = await demo.listThemes();
+  const byName = Object.fromEntries(listed.map((e) => [e.name, e]));
+  assert.deepEqual(byName.Demo.models, ['turing-8.8', 'turing-usb-8.8']);
+  assert.equal(byName.Demo.diagonalHundredths, 880);
+  assert.equal(byName['Midnight 2.1" round'].diagonalHundredths, null, '480×480 comes in several sizes');
+  for (const entry of listed) {
+    const url = await demo.themeThumbnail(entry.location);
+    if (entry.name === 'TURZX 3.5"') assert.equal(url, null, 'cannot be drawn');
+    else assert.match(url, /^data:image\/svg\+xml,%3Csvg/, entry.name);
+  }
+  await assert.rejects(demo.themeThumbnail('demo://nope'), (e) => e.code === 'notInLibrary');
+  // Saved again, a theme that could not be drawn has its thumbnail.
+  const broken = await demo.openTheme('demo://TURZX 3.5"');
+  await demo.saveTheme(broken, false);
+  assert.match(await demo.themeThumbnail('demo://TURZX 3.5"'), /^data:image\/svg\+xml,/);
+});
+
+test('demo thumbnails draw the background and each kind of element', () => {
+  const theme = {
+    canvas: { width: 100, height: 50 },
+    background: { type: 'color', color: '#112233ff' },
+    elements: [
+      { frame: { x: 0, y: 0, width: 10, height: 10 }, kind: { type: 'shape', fill: '#ff0000ff', radius: 2 } },
+      { frame: { x: 10, y: 0, width: 20, height: 20 }, kind: { type: 'ring', fill: 'url(x)', thickness: 4 } },
+      { frame: { x: 30, y: 0, width: 20, height: 10 }, kind: { type: 'text', style: { paint: '#00ff00' } } },
+      { frame: { x: 50, y: 0, width: 20, height: 10 }, kind: { type: 'bar' } },
+      { frame: { x: 70, y: 0, width: 20, height: 10 }, visible: false, kind: { type: 'shape', fill: '#0000ffff' } },
+    ],
+  };
+  const svg = decodeURIComponent(demoThumbnail(theme).slice('data:image/svg+xml,'.length));
+  assert.match(svg, /fill="#112233ff"/);
+  assert.match(svg, /fill="#ff0000ff"/);
+  assert.match(svg, /stroke="#38bdf8"/, 'an unknown paint falls back');
+  assert.match(svg, /fill="#00ff00"/);
+  assert.doesNotMatch(svg, /#0000ffff/, 'hidden elements are left out');
+  assert.doesNotMatch(demoThumbnail(theme), /[()]/, 'safe in a CSS url()');
+  const video = decodeURIComponent(demoThumbnail({ canvas: { width: 4, height: 4 }, background: { type: 'video' } }));
+  assert.match(video, /fill="#10111a"/);
+});
+
+test('a theme fits the demo models whose panel it is, turned its way', () => {
+  assert.deepEqual(demoFits({ canvas: { width: 1920, height: 480 }, orientation: 'landscape' }), { models: ['turing-8.8', 'turing-usb-8.8'], diagonalHundredths: 880 });
+  assert.deepEqual(demoFits({ canvas: { width: 1920, height: 480 }, orientation: 'portrait' }), { models: [], diagonalHundredths: null });
+  assert.deepEqual(demoFits({ canvas: { width: 480, height: 320 }, orientation: 'reverse-landscape' }).models, ['turing-3.5']);
+});
+
+test('the gallery filter is remembered and checked', async () => {
+  const demo = createDemoBackend('turing88', fixed);
+  assert.deepEqual((await demo.preferences()).themeFilter, { scope: null, axis: 'all' });
+  await demo.setThemeFilter('all', 'horizontal');
+  assert.deepEqual((await demo.preferences()).themeFilter, { scope: 'all', axis: 'horizontal' });
+  await assert.rejects(demo.setThemeFilter('mine', 'all'), (e) => e.code === 'invalidInput' && e.args.detail.includes('mine'));
+  await assert.rejects(demo.setThemeFilter(null, 'diagonal'), (e) => e.code === 'invalidInput');
+  await demo.setThemeFilter(null, 'vertical');
+  assert.deepEqual((await demo.preferences()).themeFilter, { scope: null, axis: 'vertical' });
 });
 
 test('new themes: the orientation asked for, else the last one used with the screen, else by shape', async () => {

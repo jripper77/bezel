@@ -19,6 +19,7 @@ pub mod settings;
 pub mod storage;
 pub mod studio;
 pub mod texts;
+pub mod thumbnails;
 mod tray;
 pub mod udev_help;
 pub mod video;
@@ -48,6 +49,7 @@ use crate::library::ThemeLibrary;
 use crate::settings::SettingsFile;
 use crate::storage::{MediaSetup, StorageState};
 use crate::studio::Studio;
+use crate::thumbnails::Thumbnails;
 use crate::udev_help::UdevHelp;
 
 /// Label of the main window in `tauri.conf.json`.
@@ -216,6 +218,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::pick_folder,
             commands::show_sensors,
             commands::restart_screen,
+            commands::theme_thumbnail,
+            commands::set_theme_filter,
         ])
         .run(tauri::generate_context!())
 }
@@ -294,7 +298,8 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         sensors,
     } = adapters(simulate);
     // The bundled themes' fonts first, so previews match every machine.
-    let bundled_fonts = bundled_theme_dirs(app)
+    let bundled_dirs = bundled_theme_dirs(app);
+    let bundled_fonts = bundled_dirs
         .iter()
         .flat_map(|dir| font_files(&dir.join("fonts")))
         .collect();
@@ -330,7 +335,23 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         fonts,
         studio: Session::new(studio),
         storage,
+        thumbnails: thumbnails(&bundled_dirs, cache.join("thumbnails")),
     })
+}
+
+/// The library's thumbnails, kept in `dir`: drawn with the bundled themes'
+/// fonts and the installed ones (loaded on the first thumbnail drawn) and the
+/// demo sensor values.
+fn thumbnails(bundled_dirs: &[PathBuf], dir: PathBuf) -> Thumbnails {
+    let font_dirs: Vec<PathBuf> = bundled_dirs.iter().map(|d| d.join("fonts")).collect();
+    Thumbnails::new(
+        dir,
+        Box::new(move || {
+            let fonts = font_dirs.iter().flat_map(|d| font_files(d)).collect();
+            Box::new(SkiaRenderer::with_fonts(fonts, SystemFonts::Load))
+        }),
+        Box::new(|| Box::new(FakeSensors::demo())),
+    )
 }
 
 /// The storage tab's Locate button moves the ffmpeg the adapter looks for.

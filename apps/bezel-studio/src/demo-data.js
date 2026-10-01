@@ -172,6 +172,59 @@ export const DEMO_GIF_THEME = Object.freeze({
   ],
 });
 
+/**
+ * The catalog models the demo's screens and themes use: id, diagonal in
+ * hundredths of an inch, and panel in portrait form (the core's catalog).
+ */
+export const DEMO_PANELS = Object.freeze([
+  { id: 'turing-8.8', diagonalHundredths: 880, width: 480, height: 1920 },
+  { id: 'turing-usb-8.8', diagonalHundredths: 880, width: 480, height: 1920 },
+  { id: 'turing-3.5', diagonalHundredths: 350, width: 320, height: 480 },
+  { id: 'turing-5', diagonalHundredths: 500, width: 480, height: 800 },
+  { id: 'turing-2.1', diagonalHundredths: 210, width: 480, height: 480 },
+  { id: 'turing-2.8', diagonalHundredths: 280, width: 480, height: 480 },
+  { id: 'turing-usb-2.1-round', diagonalHundredths: 210, width: 480, height: 480 },
+  { id: 'turing-usb-5.2', diagonalHundredths: 520, width: 720, height: 1280 },
+]);
+
+/** A small dark theme of `canvas` for the demo's library: a clock, a CPU ring, a card and a bar. */
+function libraryTheme(name, canvas, orientation) {
+  const { width: w, height: h } = canvas;
+  const unit = Math.min(w, h);
+  const at = (x, y, width, height) => ({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) });
+  const element = (id, label, frame, kind) => ({ id, name: label, frame, opacity: 1, visible: true, locked: false, kind });
+  return Object.freeze({
+    schema: 1,
+    name,
+    canvas: { ...canvas },
+    orientation,
+    refreshSeconds: 1,
+    background: { type: 'color', color: '#05070cff' },
+    elements: [
+      element(1, 'Card', at(w * 0.04, h * 0.04, w * 0.92, h * 0.92), { type: 'shape', shape: 'rect', radius: Math.round(unit * 0.04), fill: '#111827ff', strokeWidth: 0 }),
+      element(2, 'Clock', at(w * 0.08, h * 0.08, w * 0.5, unit * 0.22), {
+        type: 'text',
+        content: { type: 'clock', pattern: '%H:%M' },
+        style: { font: { family: 'Inter', weight: 700, italic: false }, size: Math.round(unit * 0.18), paint: '#e2e8f0ff', align: 'left', valign: 'middle', letterSpacing: 0 },
+      }),
+      element(3, 'CPU', at(w * 0.1, h * 0.5, unit * 0.36, unit * 0.36), { type: 'ring', binding: { key: 'cpu.usage', min: 0, max: 100 }, startAngle: -135, sweep: 270, thickness: Math.round(unit * 0.05), clockwise: true, fill: '#38bdf8ff', track: '#ffffff26', roundCaps: true }),
+      element(4, 'GPU', at(w * 0.55, h * 0.62, w * 0.36, unit * 0.06), { type: 'bar', binding: { key: 'gpu.usage', min: 0, max: 100 }, direction: 'leftToRight', fill: '#a78bfaff', track: '#ffffff1a', radius: 4 }),
+    ],
+  });
+}
+
+/**
+ * The themes the demo's library has besides `Demo`, for other screens than
+ * the 8.8": built in, and a theme of the user's that cannot be drawn
+ * (`drawable: false`: no thumbnail).
+ */
+export const DEMO_LIBRARY = Object.freeze([
+  { theme: libraryTheme('Midnight 3.5" vertical', { width: 320, height: 480 }, 'portrait'), bundled: true },
+  { theme: libraryTheme('Midnight 5" horizontal', { width: 800, height: 480 }, 'landscape'), bundled: true },
+  { theme: libraryTheme('Midnight 2.1" round', { width: 480, height: 480 }, 'portrait'), bundled: true },
+  { theme: libraryTheme('TURZX 3.5"', { width: 480, height: 320 }, 'landscape'), bundled: false, drawable: false },
+]);
+
 /** The command the app shows to install its udev rule (Linux). */
 export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules && sudo udevadm control --reload && sudo udevadm trigger';
 

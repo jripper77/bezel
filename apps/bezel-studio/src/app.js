@@ -107,6 +107,7 @@ const library = createLibrary({
   stage: $('stage'),
   t,
   locale: () => locale,
+  themeFilter: prefs?.themeFilter ?? null,
   actions: {
     openTheme: (location) => openTheme(location),
     newTheme: (axis) => newTheme(axis),
@@ -121,6 +122,8 @@ const library = createLibrary({
     leaveDesktopMode: (panel) => leaveDesktopMode(panel),
     showSensors: (keys) => bridge.showSensors(keys).catch((e) => fail(e)),
     restart: (screen) => restartScreen(screen),
+    themeThumbnail: (location) => bridge.themeThumbnail(location),
+    rememberThemeFilter: ({ scope, axis }) => bridge.setThemeFilter(scope, axis).catch(() => {}),
   },
 });
 

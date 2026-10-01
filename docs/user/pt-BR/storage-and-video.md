@@ -121,3 +121,5 @@ tema por cima.
   `bezel storage put` exato.
 - Telas que não tocam vídeo recebem o vídeo decodificado no computador, o que
   precisa do ffmpeg (`bezel run --ffmpeg CAMINHO` se ele não estiver no `PATH`).
+- Para dar a um tema um vídeo de fundo pelo aplicativo (um vídeo ou um GIF
+  animado), veja [Um vídeo no fundo](first-theme.md#um-vídeo-no-fundo).

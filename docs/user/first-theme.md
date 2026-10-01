@@ -21,8 +21,9 @@ In the library on the left, open the **Themes** tab:
 - Click an element to change it in the **Properties** panel on the right: sensor,
   font, colors, size, and how often it refreshes.
 - **Layers** tab: order, hide and lock elements.
-- **Media** tab: **Add image…** to use a picture in the theme, or **Use as
-  background**.
+- **Media** tab: **Add image…** to use a picture in the theme, **Add video…**
+  for a video background ([A video in the background](#a-video-in-the-background)),
+  and **Use as background**.
 - Undo (Ctrl+Z) and redo (Ctrl+Shift+Z) are in the top bar, next to the zoom.
 
 The canvas shows exactly what the screen will get: it is drawn by the same
@@ -45,6 +46,39 @@ The **Screen** tab has two parts:
   or stored media) and the start-at-login option.
 - **Storage**: pictures and videos kept on the screen
   ([Screen storage and video](storage-and-video.md)).
+
+## A video in the background
+
+1. In the **Media** tab, click **Add video…** and pick an MP4, MOV, M4V, MKV,
+   WebM or AVI file, or an animated GIF. You can also drop the file on the
+   Media tab, or straight on the editing area: there it becomes the background
+   at once.
+2. Bezel copies the video into the theme and takes a still picture from it, the
+   *poster*: one second in, or the first picture of a short clip or a GIF,
+   cropped to the theme's shape. The editor shows the poster under your
+   elements. Taking it needs ffmpeg ([Installing ffmpeg](ffmpeg.md)); without
+   it the video is still added, without a poster, and **Properties** says how
+   to install ffmpeg. The Media tab shows the video's length and size.
+3. Click **Use as background** on the video. **Properties** shows the video and
+   its poster, with **Replace video…**, **Use image…** and **Use a solid
+   color**. Undo (Ctrl+Z) brings the previous background back.
+
+What the screen does with it:
+
+- Screens that play videos themselves (Turing rev C, such as the 8.8", and the
+  Turing USB generation) loop a copy stored on them, and Bezel draws the theme
+  over it. With **Live** on, **Properties** says whether the screen already
+  stores it; if not, **Open Storage** leads to **Send to the screen**, which
+  converts the video for the screen (an animated GIF becomes an MP4) and sends
+  it.
+- Turing rev C screens take at most **25 MiB per file**. The conversion lowers
+  the bitrate from the video's length so that it fits, so a long clip loses
+  some quality; if it still does not fit, Bezel says so before sending
+  anything ([How large a file can be](storage-and-video.md#how-large-a-file-can-be)).
+- Screens that cannot play videos get the video decoded on the computer while
+  **Live** is on, which also needs ffmpeg.
+
+Saving the theme keeps the video and its poster inside the `.bezeltheme` file.
 
 ## Themes from other apps
 

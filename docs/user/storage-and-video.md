@@ -115,3 +115,5 @@ draws the theme over it.
   `bezel storage put` command.
 - Screens that cannot play videos get them decoded on the computer, which needs
   ffmpeg (`bezel run --ffmpeg PATH` if it is not on the `PATH`).
+- To give a theme a video background in the app (a video or an animated GIF),
+  see [A video in the background](first-theme.md#a-video-in-the-background).

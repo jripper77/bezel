@@ -65,6 +65,12 @@ the Conventional Commits.
   video under the theme, shows the poster with the `bezel storage put` command
   when the video is missing, and decodes it on the computer for screens that
   cannot play videos (`--ffmpeg PATH`).
+- Bezel Studio gives a theme a video background: **Add video…** in the Media
+  tab, or a video or animated GIF dropped on the tab or on the editing area,
+  copies it into the theme with a poster taken by ffmpeg (shown under the
+  elements; without ffmpeg the video comes without one), and **Properties**
+  shows it with whether the screen stores it. An animated GIF sent to a screen
+  is converted to a video at a constant frame rate.
 - A cancelled upload reports the incomplete file it left and the command that
   deletes it; an upload whose stored size differs from the file says to delete
   it and send it again.

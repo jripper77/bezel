@@ -1208,6 +1208,26 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn the_host_ports_name_this_process_for_a_port_it_holds() {
+        // The host's ports look at the real `/proc`: a path this process
+        // keeps open is held by this process and nobody else; closed, or
+        // never opened, nobody holds it.
+        let path = std::env::temp_dir().join(format!("bezel-ports-held-{}", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        let held = endpoint(path.to_str().unwrap());
+        let me = format!("(PID {})", std::process::id());
+        let holders = SystemPorts.holders(&held);
+        assert!(holders.this.is_some_and(|h| h.ends_with(&me)), "{me}");
+        assert!(holders.others.is_empty());
+        drop(file);
+        assert_eq!(SystemPorts.holders(&held), Holders::default());
+        std::fs::remove_file(&path).unwrap();
+        let nobody = endpoint("/dev/bezel-no-such-port");
+        assert_eq!(SystemPorts.holders(&nobody), Holders::default());
+    }
+
     #[test]
     fn a_rev_c_screen_without_endpoints_cannot_wake() {
         let screen = Screen {

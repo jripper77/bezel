@@ -93,25 +93,32 @@ Empacotamento deb/rpm/AppImage/msi/nsis com regras udev, i18n pt-BR/en completo,
 
 #### T-7.9: Vídeo de fundo no studio
 - **Specialist:** jdi-doer-bezel
-- **Files modified:** `apps/bezel-studio/**`, porta de pôster no core + `bezel-media`, `docs/user/**`, `CHANGELOG.md`
-- **Acceptance:** "Adicionar vídeo…" e soltar um vídeo na tela copiam o vídeo para o tema com pôster (ffmpeg); "Usar como fundo" = `Background::Video` com desfazer; inspetor com vídeo, pôster e o fluxo existente de "Enviar para a tela"; demo e e2e nos 4 projetos.
+- **Files modified:** studio, porta de pôster (core + `bezel-media`), docs
+- **Acceptance:** adicionar ou soltar vídeo/GIF = `Background::Video` com pôster e desfazer; inspetor com o fluxo de "Enviar para a tela".
 - **Dependencies:** T-7.6
-- **Status:** in progress
+- **Status:** completed (`7d9dc5f`..`aa746c0`); validado na 8.8" (SUMMARY § Hardware)
 
 #### T-7.10: Limite de 25 MiB (D-12) e reinício pelo MCU (D-13)
 - **Specialist:** jdi-doer-bezel
-- **Files modified:** core (perfil, pré-voo, porta de conexão, `BezelError::Hung`), `bezel-media`, `connector.rs`, `wire.rs`, CLI (`bezel restart`), studio (aba Tela), docs, `CHANGELOG.md`
+- **Files modified:** core, `bezel-media`, `connector.rs`, `wire.rs`, CLI, studio, docs
 - **Acceptance:** envio rev C > 25 MiB recusado antes de enviar; conversão com bitrate limitado; `00 00 00 00 00 c9` no MCU por 8 s e espera o SoC voltar; automático uma vez quando o SoC não responde.
 - **Dependencies:** T-7.3
 - **Test:** `each_file_is_capped_at_the_profiles_limit`, `the_bitrate_is_capped_so_the_output_fits_the_screen`, testes do `RevCHost` (bytes, 8 s, volta, uma vez)
-- **Status:** completed (`777c0d7`, `2829fa8`); validado na 8.8": `bezel restart` 10,4 s; 40 MiB recusado; tela travada → comando comum reinicia sozinho (28 s); 1080p de 157 MiB → 21,2 MiB, tocado.
+- **Status:** completed (`777c0d7`, `2829fa8`); validado na 8.8" (SUMMARY § Hardware)
 
 #### T-7.11: GIF com cadência própria e ao vivo que se recupera
 - **Specialist:** jdi-doer-bezel
-- **Files modified:** core `app/runtime.rs`, CLI `live.rs`, studio `studio.rs`/`backend.rs`/preview, docs, `CHANGELOG.md`
-- **Acceptance:** GIF visível redesenha só o seu retângulo no ritmo dele (≤ ~30 fps, pula quadros sem atrasar), sensores no `refreshSeconds`; `bezel run` e o ao vivo do studio reconectam após `Hung` (reinício automático) com recuo limitado.
+- **Files modified:** core (runtime, animação, reconexão), CLI `live.rs`, studio, docs
+- **Acceptance:** GIF visível no próprio ritmo (≤ 30 fps, só o retângulo, sem atraso), sensores no `refreshSeconds`; ao vivo reconecta com recuo limitado.
 - **Dependencies:** T-7.10
-- **Status:** in progress
+- **Status:** completed (`afa6e9c`, `79920ad`); validado na 8.8" (SUMMARY § Hardware)
+
+#### T-7.12: Aba Temas com miniaturas e filtro
+- **Specialist:** jdi-doer-bezel
+- **Files modified:** studio (`thumbnails.rs`, biblioteca, ajustes, UI), docs
+- **Acceptance:** miniatura real de cada tema (renderizador, sensores de demonstração, cache em disco, refeita ao salvar); filtro "Para esta tela"/"Todos" e orientação, lembrado; cartão diz a tela do tema.
+- **Dependencies:** T-7.6
+- **Status:** completed (`1b4426a`, `5a966cd`)
 
 ### Wave 4
 

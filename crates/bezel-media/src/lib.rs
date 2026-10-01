@@ -24,9 +24,13 @@
 //!
 //! The adapter decides nothing: whether a file is in a screen's profile is
 //! the core's `UploadProfile::mismatches`.
+//!
+//! [`archive`] holds the local copies of what Bezel sends to screens, behind
+//! the core's [`ArchiveStore`](bezel_core::ports::ArchiveStore) port.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod archive;
 mod gif;
 mod mp4;
 mod poster;

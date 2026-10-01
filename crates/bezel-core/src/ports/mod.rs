@@ -2,6 +2,7 @@
 
 use crate::Result;
 use crate::domain::animation::Timeline;
+use crate::domain::archive::{Catalog, ContentId};
 use crate::domain::clock::{Language, LocalTime};
 use crate::domain::discovery::{DesktopModePanel, Endpoint, MonitorModeConfirmed, Screen};
 use crate::domain::frame::Frame;
@@ -171,6 +172,32 @@ pub trait ScreenStorage {
     /// (rev C: OPTIONS 0x7D, rewritten with the brightness and sleep delay
     /// this link last sent so that only the start mode changes).
     fn set_start_mode(&mut self, mode: StartMode, confirmed: Confirmed) -> Result<()>;
+}
+
+/// Driven port: the local copies of what Bezel sends to screens, and their
+/// catalog (D-2026-09-30-storage-manager-2, -5), kept in the user's data
+/// folder by the disk adapter. Copies are addressed by content: the same
+/// bytes are kept once, whatever screens and media hold them. The use cases
+/// keep [`Catalog::copies`] in step with what the store holds.
+pub trait ArchiveStore: Send {
+    /// The catalog as last saved; an empty one with the default limit when
+    /// none was saved yet. A catalog that cannot be read is an error naming
+    /// it, never an empty catalog.
+    fn load(&mut self) -> Result<Catalog>;
+
+    /// Saves `catalog` atomically: if it fails, the previous one stays whole.
+    fn save(&mut self, catalog: &Catalog) -> Result<()>;
+
+    /// Keeps `bytes` as a local copy and returns their id, their SHA-256.
+    /// Bytes already kept are stored once and give the same id.
+    fn keep(&mut self, bytes: &[u8]) -> Result<ContentId>;
+
+    /// The bytes kept as `content`; `None` when no copy is kept.
+    fn read(&mut self, content: &ContentId) -> Result<Option<Vec<u8>>>;
+
+    /// Removes the copy kept as `content` (a thumbnail of it stays).
+    /// Removing a copy that is not kept is not an error.
+    fn discard(&mut self, content: &ContentId) -> Result<()>;
 }
 
 /// Where a local media file lives for a [`MediaTranscoder`] (a path on the

@@ -41,7 +41,9 @@ use crate::domain::clock::{Language, LocalTime};
 use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
 use crate::domain::history::Histories;
-use crate::domain::media::{ConvertOptions, MediaKind, MediaTools, StreamSpec, UploadProfile};
+use crate::domain::media::{
+    ConvertOptions, MediaKind, MediaTools, StreamSpec, UploadProfile, device_video_name,
+};
 use crate::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use crate::domain::storage::{FileName, Medium, RemotePath, Repeat, StorageLocation};
 use crate::domain::theme::{AssetRef, Background, Theme, refresh_interval};
@@ -130,24 +132,6 @@ impl fmt::Debug for HostVideo<'_> {
             .field("fps", &self.fps)
             .finish_non_exhaustive()
     }
-}
-
-/// The name a theme's video has on a screen: the asset's file name, the
-/// vendor's suffix for a copy turned to the panel (`_90`, `_180`, `_270`
-/// clockwise) and the screen's video extension, as an upload name
-/// (`assets/AMD.mp4` turned once for an MP4 screen: `amd_90.mp4`).
-pub fn device_video_name(asset: &AssetRef, quarter_turns: u8, profile: &UploadProfile) -> FileName {
-    let file = asset.0.rsplit(['/', '\\']).next().unwrap_or_default();
-    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
-    let turned = match quarter_turns % 4 {
-        1 => "_90",
-        2 => "_180",
-        3 => "_270",
-        _ => "",
-    };
-    let extension = profile.video_format.extensions().first().copied();
-    let extension = extension.unwrap_or_default();
-    FileName::suggest(&format!("{stem}{turned}.{extension}"), extension)
 }
 
 /// What a frame is drawn from: the theme with its assets and the readings.

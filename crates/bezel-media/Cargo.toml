@@ -17,6 +17,8 @@ tracing = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
 # The folder that holds conversion outputs, removed with the transcoder.
 tempfile = "3.27.0"
+# Content ids of the local copies of what Bezel sends (SHA-256).
+sha2 = "0.10.9"
 
 [lints]
 workspace = true

@@ -378,6 +378,7 @@ name = "bezel-core"
 version = "0.0.0"
 dependencies = [
  "bezel-devices",
+ "bezel-media",
  "bezel-sensors",
  "thiserror 2.0.21",
 ]
@@ -407,6 +408,7 @@ dependencies = [
  "image",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tracing",
 ]

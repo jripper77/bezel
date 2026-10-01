@@ -13,6 +13,7 @@ use super::device::{DeviceModel, Family};
 use super::frame::Rect;
 use super::geometry::{Orientation, Size};
 use super::storage::{FileName, MAX_UPLOAD_BYTES, REV_C_MAX_UPLOAD_BYTES};
+use super::theme::AssetRef;
 
 /// Still picture or moving picture. Also names the two folders every storage
 /// medium of a screen has.
@@ -599,6 +600,26 @@ impl UploadProfile {
         self.extension_for(media)
             .map(|ext| FileName::suggest(host_name, ext))
     }
+}
+
+/// The name a theme's video has on a screen: the asset's file name, the
+/// vendor's suffix for a copy turned to the panel (`_90`, `_180`, `_270`
+/// clockwise) and the screen's video extension, as an upload name
+/// (`assets/AMD.mp4` turned once for an MP4 screen: `amd_90.mp4`). The
+/// runtime looks for it on a screen; the cleanup assistant never suggests
+/// it (D-2026-09-30-storage-manager-9).
+pub fn device_video_name(asset: &AssetRef, quarter_turns: u8, profile: &UploadProfile) -> FileName {
+    let file = asset.0.rsplit(['/', '\\']).next().unwrap_or_default();
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    let turned = match quarter_turns % 4 {
+        1 => "_90",
+        2 => "_180",
+        3 => "_270",
+        _ => "",
+    };
+    let extension = profile.video_format.extensions().first().copied();
+    let extension = extension.unwrap_or_default();
+    FileName::suggest(&format!("{stem}{turned}.{extension}"), extension)
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ use bezel_core::domain::discovery::{Endpoint, Screen, UsbLocation, group_screens
 use bezel_core::ports::{DeviceBus, ScreenConnector, ScreenLink};
 use bezel_core::{BezelError, Result};
 
+use crate::busy::Holders;
 use crate::discovery::SystemBus;
 use crate::driver::kipye_rev_d::KipyeRevD;
 use crate::driver::turing_rev_a::TuringRevA;
@@ -94,18 +95,44 @@ impl ScreenConnector for SystemConnector {
     }
 }
 
-/// The serial ports the rev C path opens: the display to talk to it, the
-/// MCU to wake it. The host's are [`SystemPorts`]; tests script their own.
+/// The serial ports a screen is opened through: every serial family's
+/// display, and the rev C MCU that wakes and restarts it. The host's are
+/// [`SystemPorts`]; tests script their own.
 trait SerialPorts {
-    /// What an opened display port talks through.
+    /// What an opened port talks through.
     type Wire: Wire + 'static;
-    /// Opens `endpoint` to talk to it; `InUse` when another program holds it.
-    fn open(&self, endpoint: &Endpoint, flow: Flow) -> Result<Self::Wire>;
+    /// One try at opening `endpoint`, nothing looked at first: the
+    /// system's refusal when it does not open.
+    fn try_open(&self, endpoint: &Endpoint, flow: Flow) -> Result<Self::Wire>;
     /// Opens and closes `endpoint` without writing a byte: the rev C MCU
     /// wake. A port that does not open is skipped (the next attempt retries).
     fn poke(&self, endpoint: &Endpoint);
-    /// The other programs holding `endpoint` open (this one excluded).
-    fn holders(&self, endpoint: &Endpoint) -> Vec<String>;
+    /// The processes holding `endpoint` open, in one look: this one (as
+    /// `"<command> (PID <pid>)"`, like the others) told apart from the
+    /// other programs.
+    fn holders(&self, endpoint: &Endpoint) -> Holders;
+
+    /// Opens `endpoint` to talk to it ([`Self::try_open`]), after one look
+    /// at who holds it ([`Self::holders`]). While other programs hold it,
+    /// `InUse` before the port is touched (D-2026-09-30-device-protocols-3).
+    /// Ports open exclusively, so one this process already holds is refused
+    /// as busy: that refusal is `InUse` naming this process, at once, never
+    /// a display shutting down, so no wait, wake or restart follows
+    /// (D-2026-10-01-live-screen-controls-4). Other refusals stand.
+    fn open(&self, endpoint: &Endpoint, flow: Flow) -> Result<Self::Wire> {
+        let Holders { this, others } = self.holders(endpoint);
+        let in_use = |holders| BezelError::InUse {
+            address: endpoint.address.0.clone(),
+            holders,
+        };
+        if !others.is_empty() {
+            return Err(in_use(others));
+        }
+        match (self.try_open(endpoint, flow), this) {
+            (Err(BezelError::Transport(_)), Some(this)) => Err(in_use(vec![this])),
+            (opened, _) => opened,
+        }
+    }
 }
 
 /// The host's serial ports.
@@ -115,8 +142,9 @@ struct SystemPorts;
 impl SerialPorts for SystemPorts {
     type Wire = SerialWire;
 
-    fn open(&self, endpoint: &Endpoint, flow: Flow) -> Result<SerialWire> {
-        open_serial(endpoint, flow)
+    fn try_open(&self, endpoint: &Endpoint, flow: Flow) -> Result<SerialWire> {
+        let address = &endpoint.address.0;
+        SerialWire::open(address, flow).map_err(|e| access_error(address, &e))
     }
 
     fn poke(&self, endpoint: &Endpoint) {
@@ -125,8 +153,9 @@ impl SerialPorts for SystemPorts {
         }
     }
 
-    fn holders(&self, endpoint: &Endpoint) -> Vec<String> {
-        crate::busy::holders(&endpoint.address.0)
+    /// One scan of `/proc` (nobody where it does not exist).
+    fn holders(&self, endpoint: &Endpoint) -> Holders {
+        crate::busy::on_this_machine(&endpoint.address.0)
     }
 }
 
@@ -282,7 +311,7 @@ where
     /// would pull the screen from under it.
     fn restart_rev_c(&self, wake: &Endpoint, display: Option<&Endpoint>) -> Result<Endpoint> {
         if let Some(display) = display {
-            let holders = self.ports.holders(display);
+            let holders = self.ports.holders(display).others;
             if !holders.is_empty() {
                 return Err(BezelError::InUse {
                     address: display.address.0.clone(),
@@ -378,16 +407,10 @@ fn display(screen: &Screen) -> Result<&Endpoint> {
         .ok_or_else(|| BezelError::ScreenNotFound("screen without a display endpoint".into()))
 }
 
+/// Opens the display port of a serial family on this host
+/// ([`SerialPorts::open`]).
 fn open_serial(endpoint: &Endpoint, flow: Flow) -> Result<SerialWire> {
-    let address = &endpoint.address.0;
-    let holders = crate::busy::holders(address);
-    if !holders.is_empty() {
-        return Err(BezelError::InUse {
-            address: address.clone(),
-            holders,
-        });
-    }
-    SerialWire::open(address, flow).map_err(|e| access_error(address, &e))
+    SystemPorts.open(endpoint, flow)
 }
 
 /// Maps an open failure: permission problems get their own variant so the
@@ -553,6 +576,8 @@ mod tests {
         journal: Journal,
         /// Other programs holding every port.
         held_by: Vec<String>,
+        /// This process, holding every port itself.
+        held_here: Option<String>,
     }
 
     impl ScriptedPorts {
@@ -571,7 +596,7 @@ mod tests {
     impl SerialPorts for ScriptedPorts {
         type Wire = Noted;
 
-        fn open(&self, endpoint: &Endpoint, flow: Flow) -> Result<Noted> {
+        fn try_open(&self, endpoint: &Endpoint, flow: Flow) -> Result<Noted> {
             assert_eq!(flow, Flow::None, "rev C ports open without flow control");
             let address = &endpoint.address.0;
             self.log.borrow_mut().push(format!("open {address}"));
@@ -592,8 +617,11 @@ mod tests {
             self.log.borrow_mut().push(format!("poke {address}"));
         }
 
-        fn holders(&self, _endpoint: &Endpoint) -> Vec<String> {
-            self.held_by.clone()
+        fn holders(&self, _endpoint: &Endpoint) -> Holders {
+            Holders {
+                this: self.held_here.clone(),
+                others: self.held_by.clone(),
+            }
         }
     }
 
@@ -1065,6 +1093,72 @@ mod tests {
     }
 
     #[test]
+    fn a_port_this_app_holds_fails_at_once_without_a_wake() {
+        // D-2026-10-01-live-screen-controls-4: the studio holds the SoC's
+        // port (live) and a reopen fails as busy. That is this app, not a
+        // display shutting down: no wait for it to leave, no poke, no MCU,
+        // no restart, no pause.
+        let display = soc(SOC, &[1, 2]);
+        let busy = BezelError::Transport(format!("{SOC}: Device or resource busy"));
+        let ports = ScriptedPorts {
+            held_here: Some("bezel-studio (PID 7)".into()),
+            ..ScriptedPorts::new([Err(busy.clone()), answering()])
+        };
+        let bus = ScriptedBus::new([Ok(vec![mcu(), display.clone()])]);
+        let host = fake_host(bus, ports);
+        let screen = rev_c(Some(display.clone()), Some(mcu()));
+        let err = host
+            .connect_rev_c(&screen, &screen.candidates)
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            BezelError::InUse {
+                address: SOC.into(),
+                holders: vec!["bezel-studio (PID 7)".into()],
+            }
+        );
+        assert_eq!(entries(&host.ports.journal), ["open /dev/ttyACM1"]);
+        assert_eq!(host.ports.log(), ["open /dev/ttyACM1"], "no poke");
+        assert!(host.pause.taken().is_empty(), "no pause");
+
+        // The same refusal of a port nobody here holds is still a display
+        // shutting down: it is waited for and woken (device-protocols-3).
+        let gone = ScriptedBus::new([Ok(vec![mcu()]), Ok(vec![mcu(), display.clone()])]);
+        let host = fake_host(gone, ScriptedPorts::new([Err(busy), answering()]));
+        assert!(host.connect_rev_c(&screen, &screen.candidates).is_ok());
+        assert_eq!(
+            host.ports.log(),
+            [
+                "open /dev/ttyACM1",
+                "poke /dev/ttyACM0",
+                "open /dev/ttyACM1"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_port_other_programs_hold_is_refused_before_it_is_opened() {
+        // D-2026-09-30-device-protocols-3, decided by the one look `open`
+        // takes: other programs win over this one, and the port is not
+        // touched.
+        let ports = ScriptedPorts {
+            held_by: vec!["turing-smart-screen (pid 42)".into()],
+            held_here: Some("bezel-studio (PID 7)".into()),
+            ..ScriptedPorts::new([answering()])
+        };
+        let err = ports.open(&soc(SOC, &[1, 2]), Flow::None).err().unwrap();
+        assert_eq!(
+            err,
+            BezelError::InUse {
+                address: SOC.into(),
+                holders: vec!["turing-smart-screen (pid 42)".into()],
+            }
+        );
+        assert!(ports.log().is_empty(), "the port is not opened");
+    }
+
+    #[test]
     fn every_family_is_routed_and_missing_devices_fail_cleanly() {
         for (family, model) in [
             (Family::TuringRevA, "turing-3.5"),
@@ -1112,6 +1206,77 @@ mod tests {
             access_error("COM3", &other),
             BezelError::AccessDenied { .. }
         ));
+    }
+
+    /// A rev C connection through the host's own serial ports, from a bus
+    /// that lists `display` and `mcu` behind one hub and pauses recorded
+    /// instead of slept: what it ends with, and the pauses it took.
+    #[cfg(unix)]
+    fn through_the_host_ports(display: &str, mcu: &str) -> (Option<BezelError>, Vec<Duration>) {
+        let mcu = at(mcu, UsbId::new(0x1a86, 0xca88), Some("CT88INCH"), &[1, 1]);
+        let display = soc(display, &[1, 2]);
+        let host = RevCHost {
+            bus: ScriptedBus::new([Ok(vec![mcu.clone(), display.clone()])]),
+            ports: SystemPorts,
+            pause: Pauses::default(),
+        };
+        let screen = rev_c(Some(display), Some(mcu));
+        let ended = host.connect_rev_c(&screen, &screen.candidates).err();
+        (ended, host.pause.taken())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_host_ports_name_this_process_for_a_port_it_holds() {
+        // The host's ports look at the real `/proc`: a path this process
+        // keeps open is held by this process and nobody else; closed, or
+        // never opened, nobody holds it.
+        let path = std::env::temp_dir().join(format!("bezel-ports-held-{}", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        let address = path.to_str().unwrap();
+        let held = endpoint(address);
+        let me = format!("(PID {})", std::process::id());
+        let Holders { this, others } = SystemPorts.holders(&held);
+        let this = this.expect("this process holds it");
+        assert!(this.ends_with(&me), "{this} is not {me}");
+        assert!(others.is_empty());
+        // D-2026-10-01-live-screen-controls-4 through the host's `open`, the
+        // entry of `open_serial` (every serial family without an MCU) and
+        // `open_rev_c`: the open fails (a plain file is no tty, so
+        // serialport's `TIOCEXCL` fails with ENOTTY, "Not a typewriter"; a
+        // real tty this process holds refuses with EBUSY, see
+        // `wire::tests::a_port_the_wire_holds_refuses_a_second_open`), and a
+        // `Transport` refusal of a port this process holds is `InUse` naming
+        // it. The rev C connection stops there, with no pause: no wait for
+        // the display to leave and no wake of its MCU (a path that does not
+        // exist; each poke is followed by a pause).
+        let in_use = BezelError::InUse {
+            address: address.into(),
+            holders: vec![this],
+        };
+        assert_eq!(
+            SystemPorts.open(&held, Flow::None).err(),
+            Some(in_use.clone())
+        );
+        assert_eq!(
+            open_serial(&held, Flow::Hardware).err(),
+            Some(in_use.clone())
+        );
+        let no_mcu =
+            std::env::temp_dir().join(format!("bezel-ports-no-mcu-{}", std::process::id()));
+        let (ended, pauses) = through_the_host_ports(address, no_mcu.to_str().unwrap());
+        assert_eq!(ended, Some(in_use));
+        assert!(pauses.is_empty(), "{pauses:?}");
+        drop(file);
+        // Closed, the same refusal is the system's own again.
+        assert!(matches!(
+            SystemPorts.open(&held, Flow::None).err(),
+            Some(BezelError::Transport(_))
+        ));
+        assert_eq!(SystemPorts.holders(&held), Holders::default());
+        std::fs::remove_file(&path).unwrap();
+        let nobody = endpoint("/dev/bezel-no-such-port");
+        assert_eq!(SystemPorts.holders(&nobody), Holders::default());
     }
 
     #[test]

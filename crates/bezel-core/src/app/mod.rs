@@ -10,6 +10,6 @@ pub use runtime::{
     DEFAULT_SLOWEST_REFRESH, HOST_VIDEO_FPS, HostVideo, MissingVideo, ThemeRuntime, VideoState,
 };
 pub use screens::{
-    choose_screen, discover_devices, discover_screens, leave_desktop_mode, open_screen,
-    reopen_screen, restart_screen,
+    choose_screen, connect_screen, discover_devices, discover_screens, leave_desktop_mode,
+    open_screen, reopen_screen, restart_screen,
 };

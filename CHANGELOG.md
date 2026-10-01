@@ -203,3 +203,10 @@ the Conventional Commits.
   `dragon_90.mp4`) and used without sending it again when its size matches;
   framed by default, such a video is sent as it is, without ffmpeg. The
   studio's preview plays a video background instead of showing its poster.
+- With a screen live in Bezel Studio, its controls work again. An 8.8" that
+  went live through its wake micro-controller's port (from the tray, or when
+  the studio resumed after a restart) failed brightness changes with "Device or
+  resource busy", hid its SD card and made the Themes tab's **For this screen**
+  filter flicker. Now the brightness changes on the live screen, the **Storage**
+  tab shows the internal memory and the SD card and manages them, and
+  **For this screen** stays enabled and steady.

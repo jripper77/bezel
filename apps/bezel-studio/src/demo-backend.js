@@ -8,6 +8,7 @@ import { isHorizontal } from './editor/geometry.js';
 import { IMAGE_EXTENSIONS as PICTURES, droppable, extensionOf, fileNameOf } from './editor/background.js';
 import { framingOf, isPlainFraming, pictureBox, resolvedRotation } from './editor/video-framing.js';
 import { pickLocale } from './i18n/index.js';
+import { liveScreenIn } from './live-screen.js';
 import { AXES, SCOPES } from './theme-filter.js';
 
 /** Well-known demo sensors: key, category, label, quantity, base value, swing. */
@@ -418,7 +419,7 @@ export function demoFileThumbnail(name, kind) {
  * With `hold`, every phase of a job waits after its first step until
  * `letGo` (tests only).
  */
-function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, hold = false, hung = () => false, videoInfo = () => null, autoOf = () => null }) {
+function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, screens, hold = false, hung = () => false, videoInfo = () => null, autoOf = () => null }) {
   const layout = chosen.storage ?? DEMO_STORAGE;
   const card = chosen.card !== false;
   const files = new Map(layout.files.filter(([p]) => card || !p.startsWith('sd/')));
@@ -947,7 +948,7 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
     },
     prepareThemeVideo: (key) => {
       const video = videoOfTheme();
-      if (live() !== key || video?.state !== 'missing') return refuse('noVideo', 'the live screen is not missing the theme video');
+      if (!isLive(key) || video?.state !== 'missing') return refuse('noVideo', 'the live screen is not missing the theme video');
       const [medium, , name] = video.path.split('/');
       const asset = theme().background.asset;
       const info = videoInfo(asset);
@@ -981,13 +982,13 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       return Promise.resolve();
     },
     playStored: (key, path) => {
-      if (live() === key) return refuse('live', 'turn live mode off to play files');
+      if (isLive(key)) return refuse('live', 'turn live mode off to play files');
       if (!(files.get(path) > 0)) return refuse('invalidInput', `invalid input: ${path} is not stored on the screen`, { detail: `${path} is not stored on the screen` });
       state.playback = path;
       return Promise.resolve();
     },
     stopPlayback: (key) => {
-      if (live() === key) return refuse('live', 'turn live mode off to stop files');
+      if (isLive(key)) return refuse('live', 'turn live mode off to stop files');
       state.playback = null;
       return Promise.resolve();
     },
@@ -1056,13 +1057,26 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   }
   /** Screen key → last orientation shown on it or chosen for it. */
   const remembered = new Map();
-  const modelOf = (key) => devices.screens.find((s) => s.key === key)?.models[0];
+  const screenOf = (key) => devices.screens.find((s) => s.key === key);
+  const modelOf = (key) => screenOf(key)?.models[0];
+  /** The listed screen live now, whichever of its ports names it, else `null`. */
+  const liveScreen = () => liveScreenIn(devices.screens, live);
+  /** Whether the screen listed as `key` is the live one, by any of its ports (like `Studio::is_live`). */
+  const isLiveScreen = (key) => Boolean(live) && (live === key || liveScreen()?.key === key);
+  /** The key live mode records for the screen listed as `key`: its MCU port in `mcuLive` (0.1.0-dev.287). */
+  const liveKeyOf = (key) => {
+    if (!chosen.mcuLive) return key;
+    return screenOf(key)?.wake?.address ?? key;
+  };
+  /** Remembers the theme's orientation for the live screen, under its listed key. */
+  const rememberLive = () => {
+    if (live) remembered.set(liveScreen()?.key ?? live, theme.orientation);
+  };
   /** What Auto is for a theme, told against the live screen's panel (`video_auto`). */
   const autoOf = (t) => {
     const info = videoFiles.get(t?.background?.asset) ?? null;
     if (!t?.canvas) return demoVideoAuto(t, info, null);
-    const model = live ? modelOf(live) : null;
-    return demoVideoAuto(t, info, demoPanelFor(t, model));
+    return demoVideoAuto(t, info, demoPanelFor(t, liveScreen()?.models[0]));
   };
   // The `hung` scenario: the screen stops reading until it is restarted. The
   // `flaky` one: it drops once after going live and comes back by itself.
@@ -1071,6 +1085,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     delay,
     now,
     live: () => live,
+    isLive: isLiveScreen,
     theme: () => theme,
     // Every theme whose video is protected: the edited one and the library's.
     themes: () => [theme, ...saved.map((s) => s.theme)],
@@ -1219,13 +1234,13 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     decoding: () => decoder.playing(),
     pushTheme: (next) => {
       theme = structuredClone(next);
-      if (live) remembered.set(live, theme.orientation);
+      rememberLive();
       return Promise.resolve();
     },
     setLive: (on, screen) => {
       if (on && chosen.denied) return Promise.reject(demoDenied(screen));
-      live = on ? screen : null;
-      if (live) remembered.set(live, theme.orientation);
+      live = on ? liveKeyOf(screen) : null;
+      rememberLive();
       return Promise.resolve({ live });
     },
     setBrightness: (screen) => (chosen.denied ? Promise.reject(demoDenied(screen)) : Promise.resolve()),
@@ -1233,13 +1248,14 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     /** Restarts a screen through its wake chip (about 10 s on the real one). */
     restartScreen: async (key) => {
       if (chosen.denied) throw demoDenied(key);
-      const screen = devices.screens.find((s) => s.key === key);
+      const screen = screenOf(key);
       if (!screen) throw Object.assign(new Error(`screen not found: ${key}`), { code: 'screenNotFound', args: { screen: key } });
       if (!screen.restartable) {
         const detail = `restarting ${screen.models[0]?.name ?? key}: only Turing rev C screens restart, through their wake chip (MCU); unplug the screen and plug it back in`;
         throw Object.assign(new Error(`not supported: ${detail}`), { code: 'unsupported', args: { detail } });
       }
-      const wasLive = live === key;
+      // Live by any of its ports, it comes back live under the key it is listed by.
+      const wasLive = isLiveScreen(key);
       live = null;
       await delay(DEMO_STEP_MS * 4);
       screenState.hung = false;

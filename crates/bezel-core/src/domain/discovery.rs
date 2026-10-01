@@ -125,6 +125,16 @@ impl Screen {
             .or(self.wake.as_ref())
             .map(|e| &e.address)
     }
+
+    /// Whether `address` reaches this screen: its display or its wake
+    /// endpoint is there. A rev C screen answers to its SoC's port and to its
+    /// MCU's (D-2026-10-01-live-screen-controls-3).
+    pub fn answers_to(&self, address: &str) -> bool {
+        [&self.display, &self.wake]
+            .into_iter()
+            .flatten()
+            .any(|e| e.address.0 == address)
+    }
 }
 
 /// Whether `a` and `b` are on the bus through the same wake chip: a rev C
@@ -593,6 +603,34 @@ mod tests {
         assert!(find_again(at("/dev/ttyUSB0"), &no_wake(plain("/dev/ttyUSB0"))).is_some());
         assert!(find_again(at("/dev/ttyUSB1"), &no_wake(plain("/dev/ttyUSB0"))).is_none());
         assert!(find_again(Vec::new(), &known).is_none());
+    }
+
+    #[test]
+    fn a_screen_answers_to_its_display_and_its_mcu_port() {
+        let mcu = || {
+            ep(
+                "/dev/ttyACM0",
+                0x1a86,
+                0xca88,
+                Some("CT88INCH"),
+                Some(("3", &[1, 1])),
+            )
+        };
+        let soc = || ep("/dev/ttyACM1", 0x0525, 0xa4a7, None, Some(("3", &[1, 2])));
+        let awake = group_screens(vec![mcu(), soc()]).remove(0);
+        assert!(awake.answers_to("/dev/ttyACM1"), "its display");
+        assert!(awake.answers_to("/dev/ttyACM0"), "its MCU");
+        assert!(!awake.answers_to("/dev/ttyACM2"));
+        assert!(!awake.answers_to(""));
+        // Asleep, only the MCU is listed: the screen answers to it alone.
+        let asleep = group_screens(vec![mcu()]).remove(0);
+        assert_eq!(asleep.state(), ScreenState::Asleep);
+        assert!(asleep.answers_to("/dev/ttyACM0"));
+        assert!(!asleep.answers_to("/dev/ttyACM1"));
+        // A display without its MCU answers to the display alone.
+        let lone = group_screens(vec![soc()]).remove(0);
+        assert!(lone.answers_to("/dev/ttyACM1"));
+        assert!(!lone.answers_to("/dev/ttyACM0"));
     }
 
     #[test]

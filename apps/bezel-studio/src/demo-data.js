@@ -403,4 +403,8 @@ export const SCENARIOS = Object.freeze({
   // A live screen that drops once and is connected again by itself (T-7.11).
   flaky: { screens: [turing88], flaky: true },
   desktop: { screens: [turing88], desktopMode: [desktopPanel] },
+  // The 8.8" put live and named by its MCU port, not its listed key, like
+  // 0.1.0-dev.287 (D-2026-10-01-live-screen-controls-1): the UI keeps the
+  // listed screen chosen.
+  mcuLive: { screens: [turing88], mcuLive: true },
 });

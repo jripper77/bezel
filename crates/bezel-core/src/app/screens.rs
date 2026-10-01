@@ -24,16 +24,10 @@ pub fn discover_devices<B: DeviceBus + ?Sized>(bus: &B) -> Result<Discovery> {
 /// Picks a screen: the one whose display or wake endpoint has `address`, or
 /// else the first awake screen, or else the first one.
 pub fn choose_screen(screens: Vec<Screen>, address: Option<&str>) -> Result<Screen> {
-    let matches = |s: &Screen| {
-        [&s.display, &s.wake]
-            .into_iter()
-            .flatten()
-            .any(|e| Some(e.address.0.as_str()) == address)
-    };
     match address {
         Some(a) => screens
             .into_iter()
-            .find(matches)
+            .find(|s| s.answers_to(a))
             .ok_or_else(|| BezelError::ScreenNotFound(a.to_string())),
         None => {
             let awake = screens.iter().position(|s| s.state() == ScreenState::Awake);
@@ -60,6 +54,35 @@ where
     connector.connect(&screen)
 }
 
+/// Discovers, chooses and connects a screen like [`open_screen`] (`address`
+/// is its display or wake address), and returns it as the bus lists it once
+/// connected, with the link (D-2026-10-01-live-screen-controls-2):
+/// connecting may have woken a rev C SoC, so a screen chosen by its MCU's
+/// port comes back with its display, whose address ([`Screen::address`]) is
+/// the screen's one key. When it cannot be listed again, the screen chosen.
+pub fn connect_screen<B, C>(
+    bus: &B,
+    connector: &C,
+    address: Option<&str>,
+) -> Result<(Screen, Box<dyn ScreenLink>)>
+where
+    B: DeviceBus + ?Sized,
+    C: ScreenConnector + ?Sized,
+{
+    let screen = choose_screen(discover_screens(bus)?, address)?;
+    let link = connector.connect(&screen)?;
+    Ok((listed_again(bus, screen), link))
+}
+
+/// `screen` as `bus` lists it now, found by identity ([`find_again`]);
+/// `screen` itself when the bus cannot list it.
+fn listed_again<B: DeviceBus + ?Sized>(bus: &B, screen: Screen) -> Screen {
+    discover_screens(bus)
+        .ok()
+        .and_then(|screens| find_again(screens, &screen))
+        .unwrap_or(screen)
+}
+
 /// Opens `known` again after its live link failed (T-7.11): finds it on
 /// the bus by identity ([`find_again`]: a rev C SoC comes back under a new
 /// device name) and connects it, which restarts a hung rev C screen through
@@ -82,11 +105,7 @@ where
     // Connecting may have woken it, or restarted it under a new device
     // name: the bus lists its display now (on the 8.8" the live log named
     // the MCU's port when the screen was found while its SoC was away).
-    let now = discover_screens(bus)
-        .ok()
-        .and_then(|screens| find_again(screens, &screen))
-        .unwrap_or(screen);
-    Ok((now, link))
+    Ok((listed_again(bus, screen), link))
 }
 
 /// Restarts a hung screen without a USB replug

@@ -18,6 +18,7 @@ import { createPreviewAnimation } from './preview-animation.js';
 import { errorText, sensorLabel } from './messages.js';
 import { backgroundOf, droppable, fileNameOf, videoFacts } from './editor/background.js';
 import { framingOf, framingPercents } from './editor/video-framing.js';
+import { liveScreenIn } from './live-screen.js';
 
 const bridge = createBridge(window);
 const $ = (id) => document.getElementById(id);
@@ -420,30 +421,46 @@ async function refreshScreens() {
   if (bg.type === 'video' && !bg.poster) refreshTools();
 }
 
+/** The backend connects the live screen again, or it is back (T-7.11): the status says so. */
+function syncReconnecting(s, live) {
+  const reconnecting = live ? (s.reconnecting ?? null) : null;
+  if (reconnecting?.attempt === state.reconnecting?.attempt) return;
+  if (state.reconnecting && !reconnecting && live) toast(t('restart.doneLive'));
+  state.reconnecting = reconnecting;
+  renderScreenSelect();
+}
+
+/** How the theme's video reaches the live screen changed. */
+function syncLiveVideo(s) {
+  const video = s.video ?? null;
+  if ((video?.state ?? null) === (state.liveVideo?.state ?? null)) return;
+  state.liveVideo = video;
+  renderScreenSelect();
+}
+
+/** Live mode stopped with an error: a toast says why; a hung screen's card offers the restart. */
+function announceStop(error) {
+  toast(t('toast.liveStopped', { message: errorText(t, error) }));
+  if (error.code === 'hung') state.hung = state.screen;
+}
+
 // The backend owns live mode: it restores it at start, connects a screen
 // whose link failed again (T-7.11) and stops it when the screen does not come
-// back; the switch and the status follow what each sample reports.
+// back; the switch and the status follow what each sample reports. The
+// backend may name the live screen by any of its ports (its MCU, like
+// 0.1.0-dev.287): the selection only ever takes the key the screen is listed
+// by, and stays when no listed screen answers to it
+// (D-2026-10-01-live-screen-controls-5).
 function syncLive(s) {
   const live = Boolean(s.live);
-  const video = s.video ?? null;
-  const reconnecting = live ? (s.reconnecting ?? null) : null;
-  if (reconnecting?.attempt !== state.reconnecting?.attempt) {
-    if (state.reconnecting && !reconnecting && live) toast(t('restart.doneLive'));
-    state.reconnecting = reconnecting;
-    renderScreenSelect();
-  }
-  if ((video?.state ?? null) !== (state.liveVideo?.state ?? null)) {
-    state.liveVideo = video;
-    renderScreenSelect();
-  }
-  if (live === state.live && (!live || s.live === state.screen)) return;
-  if (!live && state.live && s.liveError) {
-    toast(t('toast.liveStopped', { message: errorText(t, s.liveError) }));
-    // A screen that hung: its card offers the restart.
-    if (s.liveError.code === 'hung') state.hung = state.screen;
-  }
+  syncReconnecting(s, live);
+  syncLiveVideo(s);
+  const listed = live ? liveScreenIn(state.screens, s.live) : null;
+  const screen = listed?.key ?? state.screen;
+  if (live === state.live && screen === state.screen) return;
+  if (!live && state.live && s.liveError) announceStop(s.liveError);
   state.live = live;
-  if (live) state.screen = s.live;
+  state.screen = screen;
   $('live').checked = live;
   renderScreenSelect();
 }

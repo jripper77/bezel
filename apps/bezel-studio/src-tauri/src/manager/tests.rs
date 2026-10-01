@@ -130,6 +130,24 @@ fn milestones(seen: &[ProgressDto]) -> Vec<(usize, &'static str, u64, u64)> {
         .collect()
 }
 
+/// D-2026-10-01-live-screen-controls-3: live on the 8.8", the Storage tab's
+/// overview by either of its ports borrows the live link, so both media
+/// show (the card included); opening the screen again would answer busy.
+#[test]
+fn the_overview_of_the_live_screen_borrows_its_link() {
+    let f = card("live-overview");
+    f.backend.set_live(true, Some(KEY), TIME).unwrap();
+    let busy = BezelError::Transport(format!("{KEY}: Device or resource busy"));
+    let _held = f.connector.clone().refusing_after(1, vec![busy]);
+    for port in ["/dev/ttyACM0", KEY] {
+        let dto = f.backend.manager_overview(port, TIME).unwrap();
+        assert!(dto.internal.total > 0, "{port}");
+        assert_eq!(dto.card.map(|c| c.total), Some(CARD), "{port}");
+    }
+    assert_eq!(f.connector.log().connects, 1);
+    assert_eq!(f.backend.sample().live.as_deref(), Some(KEY), "still live");
+}
+
 #[test]
 fn the_overview_shows_entries_findings_and_protected_files() {
     let file = |path: &str, byte: u8, size: usize| (remote_path(path), vec![byte; size]);

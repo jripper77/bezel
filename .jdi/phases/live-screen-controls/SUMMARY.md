@@ -27,6 +27,11 @@ piscava.
   `mcuLive` reproduz o 0.1.0-dev.287 e reconhece a tela ao vivo pelas duas portas como o backend;
   `live-screen-controls.spec.mjs` com o relógio do Playwright (6 s sem espera real).
 - T-5 `a2a449f`: CHANGELOG (`### Fixed`) e `check-docs.sh` exige "For this screen".
+- Step 6 (avisos da iter 1 e suspeitas do crítico): `4482f13` (W1: o e2e diz que prova só a metade da UI; a do
+  backend fica com os testes Rust do DoD 3), `9f8fb1a` (W2: uma varredura do `/proc` por abertura, `Holders` com
+  este processo e os outros; outros programas seguem recusados antes de tocar a porta), `9311ba4` (a cola
+  `SystemPorts::holders` → `/proc` real com teste), `43921ff` (`check-docs.sh` exige "Device or resource busy", só
+  da entrada desta fase).
 
 ## Blocked tasks
 - nenhuma
@@ -40,8 +45,9 @@ piscava.
 - `CHANGELOG.md`, `scripts/ci/check-docs.sh`
 
 ## Tests
-- `cargo test --workspace --locked`: 876 passando, 0 falhando, 11 ignorados (hardware e ffmpeg real)
-- DoD 1–5: OK no branch combinado; DoD 6 (Windows no CI) depois do push
+- `cargo test --workspace --locked`: 878 passando, 0 falhando, 11 ignorados (hardware e ffmpeg real)
+- DoD 1–5: OK no branch combinado e de novo após o Step 6; DoD 6: run 36900540628 (`483c842`) verde, Windows
+  811/0/11
 - UI: 186 unitários (99,93% de linhas); Playwright 184/184 (claro/escuro × pt-BR/en, axe), 8 novos
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc`), `check-docs.sh`, `check-packaging.sh`
 - Cobertura (T-3, `cargo llvm-cov -p bezel-studio`): `backend.rs` 98,14%, `studio.rs` 97,00%, `storage.rs`

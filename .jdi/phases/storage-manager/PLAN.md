@@ -96,7 +96,7 @@ Gerenciar os arquivos da memória interna e do cartão SD da tela no studio e na
   - M1: `bezel_test_*` interna → cartão → interna, `rename`, `rm --yes` no cartão e `restore sd --yes`, tamanhos conferidos. M2: studio e `cleanup --dry-run` listam `demon_open`, `demon`, `NVI`, `Rani`, `m04`; confirmação cancelada; nada apagado.
 - **Dependencies:** T-7
 - **Test:** DoD Manual M1 e M2 (`/jdi-confirm-dod`)
-- **Status:** pending
+- **Status:** in progress (CLI ok; studio: usuário)
 
 ## Execution
 - 8 tasks em 5 waves (1 → 3 → 2 → 1 → 1)

@@ -79,7 +79,14 @@ where
         BezelError::ScreenNotFound(format!("{address} is not back on the bus"))
     })?;
     let link = connector.connect(&screen)?;
-    Ok((screen, link))
+    // Connecting may have woken it, or restarted it under a new device
+    // name: the bus lists its display now (on the 8.8" the live log named
+    // the MCU's port when the screen was found while its SoC was away).
+    let now = discover_screens(bus)
+        .ok()
+        .and_then(|screens| find_again(screens, &screen))
+        .unwrap_or(screen);
+    Ok((now, link))
 }
 
 /// Restarts a hung screen without a USB replug

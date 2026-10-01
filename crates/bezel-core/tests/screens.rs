@@ -136,6 +136,21 @@ fn screens_without_an_mcu_are_not_restarted() {
 /// T-7.11: a live screen whose link failed is opened again by identity: a
 /// rev C SoC that came back under another device name is found behind its
 /// MCU; one still away is not found yet.
+/// A screen found while its SoC is away (only the MCU listed) is woken by
+/// the connect: the screen returned is the one the bus lists afterwards,
+/// with the display's address, not the MCU's.
+#[test]
+fn a_screen_reopened_while_its_soc_is_away_comes_back_with_its_display() {
+    let mcu = behind_hub("/dev/ttyACM0", 0x1a86, 0xca88, Some("CT88INCH"), 1);
+    let old = behind_hub("/dev/ttyACM1", 0x0525, 0xa4a7, None, 2);
+    let woken = behind_hub("/dev/ttyACM1", 0x0525, 0xa4a7, None, 2);
+    let known = group_screens(vec![mcu.clone(), old]).remove(0);
+    let bus = ScriptedBus(RefCell::new(vec![vec![mcu.clone()], vec![woken, mcu]]));
+    let (screen, _link) = reopen_screen(&bus, &FakeConnector::default(), &known).expect("back");
+    assert_eq!(screen.address().map(|a| a.0.as_str()), Some("/dev/ttyACM1"));
+    assert!(screen.display.is_some(), "the display is listed again");
+}
+
 #[test]
 fn a_failed_screen_is_reopened_by_identity() {
     let mcu = behind_hub("/dev/ttyACM0", 0x1a86, 0xca88, Some("CT88INCH"), 1);

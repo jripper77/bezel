@@ -13,6 +13,7 @@ use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::screen::{Brightness, Confirm};
+use bezel_core::domain::sensor::{SensorKey, Wanted};
 use bezel_core::domain::theme::{MIN_REFRESH_SECONDS, Theme};
 use bezel_core::ports::{
     DesktopModeHid, DeviceBus, ScreenConnector, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
@@ -417,6 +418,18 @@ impl Backend {
             .iter()
             .map(SensorDto::from)
             .collect())
+    }
+
+    /// The sensors the library's list shows now (none while it is hidden):
+    /// the refresh loop measures them with the theme's
+    /// (D-2026-09-30-release-polish-11). Keys that are not sensor keys are
+    /// left out.
+    pub fn show_sensors(&self, keys: &[String]) {
+        let listed: Wanted = keys
+            .iter()
+            .filter_map(|k| SensorKey::new(k.as_str()))
+            .collect();
+        self.studio().show_sensors(listed);
     }
 
     /// The latest readings (sampled by the refresh loop).
@@ -1056,6 +1069,21 @@ mod tests {
         let sample = f.backend.sample();
         assert!(sample.readings.contains_key("cpu.usage"));
         assert_eq!(sample.live_error, None);
+    }
+
+    #[test]
+    fn the_sensor_list_says_what_it_shows() {
+        let f = fixture("sensor-list");
+        f.backend.restore_theme();
+        let theme = f.backend.studio().wanted().clone();
+        assert!(!theme.contains("net.ping"), "nothing shows the ping");
+        f.backend
+            .show_sensors(&["net.ping".to_string(), "not a key".to_string()]);
+        let listed = f.backend.studio().wanted().clone();
+        let ping: Wanted = SensorKey::new("net.ping").into_iter().collect();
+        assert_eq!(listed, theme.union(&ping));
+        f.backend.show_sensors(&[]);
+        assert_eq!(f.backend.studio().wanted(), &theme, "the list is hidden");
     }
 
     #[test]

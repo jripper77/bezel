@@ -10,8 +10,10 @@
 //! runs) the temperatures, fans and power. On both, `gpu.fps` comes from a
 //! frame-rate overlay already running (MangoHud's logs on Linux, RivaTuner
 //! Statistics Server's shared memory on Windows) and `net.ping` from a probe
-//! thread of its own ([`SensorOptions`] chooses the host and the MangoHud
-//! folder). [`FakeSensors`] replays scripted snapshots for tests and demos.
+//! thread of its own, which sends packets only while a shown value uses the
+//! ping (`SensorSource::want`, D-2026-09-30-release-polish-11;
+//! [`SensorOptions`] chooses the host and the MangoHud folder).
+//! [`FakeSensors`] replays scripted snapshots for tests and demos.
 //!
 //! What every provider guarantees (D-2026-09-30-sensors-1 and -4):
 //! - a value that cannot be measured is `Reading::Unavailable(reason)`,

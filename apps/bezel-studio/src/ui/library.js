@@ -24,6 +24,17 @@ export function groupSensors(catalog, filter = '') {
 }
 
 /**
+ * The keys of the sensors the list shows: those the filter keeps while the
+ * list is open (its tab selected, the window visible), none otherwise. The
+ * app measures them with the theme's; `net.ping` sends packets only while
+ * something shown uses it (D-2026-09-30-release-polish-11).
+ */
+export function shownSensorKeys(catalog, filter, open) {
+  if (!open) return [];
+  return groupSensors(catalog, filter).flatMap(([, items]) => items.map((s) => s.key));
+}
+
+/**
  * The miniature screen drawn in a theme card's 4:3 thumbnail: the canvas
  * shape scaled into 80% of the box, as percentages of its width and height.
  * @param {{width:number, height:number}} canvas
@@ -63,6 +74,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
       t2.tabIndex = on ? 0 : -1;
       $(t2.getAttribute('aria-controls')).hidden = !on;
     }
+    reportShown();
   }
   tabs.forEach((tab, i) => {
     tab.addEventListener('click', () => selectTab(tab));
@@ -119,7 +131,19 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
     return row;
   }
 
+  // What the list shows, told to the app when it changes.
+  let reported = null;
+  function reportShown() {
+    const open = !$('panel-sensors').hidden && document.visibilityState !== 'hidden';
+    const keys = shownSensorKeys(catalog, $('sensor-search').value, open);
+    if (keys.join(' ') === reported) return;
+    reported = keys.join(' ');
+    actions.showSensors(keys);
+  }
+  document.addEventListener('visibilitychange', reportShown);
+
   function renderSensors() {
+    reportShown();
     const list = $('sensor-list');
     const groups = groupSensors(catalog, $('sensor-search').value);
     if (groups.length === 0) {

@@ -101,6 +101,7 @@ function tauriBridge(invoke, tauri = {}) {
     setLanguage: (language) => invoke('set_language', { language }),
     setSensorOptions: (pingHost, mangohudDir) => invoke('set_sensor_options', { pingHost, mangohudDir }),
     pickFolder: () => invoke('pick_folder'),
+    showSensors: (keys) => invoke('show_sensors', { keys }),
     onJobProgress: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(PROGRESS_EVENT, (e) => cb(e.payload)) : Promise.resolve(() => {})),
     onCloseRequested: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(CLOSE_EVENT, () => cb()) : Promise.resolve(() => {})),
     onQuitRequested: (cb) => (typeof tauri.event?.listen === 'function' ? tauri.event.listen(QUIT_EVENT, () => cb()) : Promise.resolve(() => {})),
@@ -125,10 +126,12 @@ export function createBridge(win) {
   const params = new URLSearchParams(win.location.search);
   const scenario = params.get('demo') ?? 'turing88';
   // What the window does is shown on the page (`data-demo-window`), and the
-  // close button is a window event: Playwright drives and checks both.
+  // close button is a window event: Playwright drives and checks both. So
+  // are the sensors the list shows (`data-demo-sensors`).
   const root = win.document?.documentElement;
   const demo = createDemoBackend(scenario, {}, {
     onWindow: (state) => root?.setAttribute('data-demo-window', state),
+    onSensorsShown: (keys) => root?.setAttribute('data-demo-sensors', keys.join(' ')),
     languages: win.navigator?.languages ?? [],
     hold: params.has('hold'),
   });

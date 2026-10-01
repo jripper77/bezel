@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use bezel_core::Result;
-use bezel_core::domain::sensor::{SensorInfo, Snapshot};
+use bezel_core::domain::sensor::{SensorInfo, Snapshot, Wanted};
 use bezel_core::ports::SensorSource;
 
 use crate::gpu::{Alias, FoundGpu, number};
@@ -15,7 +15,8 @@ use crate::provider::Provider;
 /// CLI's flags fill them in).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SensorOptions {
-    /// Host `net.ping` measures the round trip to.
+    /// Host `net.ping` measures the round trip to, only while a shown
+    /// value uses it ([`SensorSource::want`]).
     pub ping_host: String,
     /// Folder of MangoHud's CSV logs read for `gpu.fps` on Linux; `None`
     /// means MangoHud's own `output_folder`.
@@ -39,6 +40,8 @@ impl Default for SensorOptions {
 /// Measures this machine by composing the platform's providers. Discovery
 /// happens once, when it is built; the catalog is then fixed and every
 /// `sample` returns a reading (possibly unavailable) for each entry.
+/// `net.ping` sends packets only while [`SensorSource::want`] says it is
+/// shown; until the first `want`, nothing is.
 pub struct SystemSensors {
     providers: Vec<Box<dyn Provider>>,
     aliases: Vec<Alias>,
@@ -58,15 +61,19 @@ impl SystemSensors {
     pub fn with_options(options: SensorOptions) -> Self {
         let (mut providers, gpus) = platform();
         providers.push(Box::new(crate::fps::provider(&options)));
-        providers.push(Box::new(crate::ping::Ping::start(&options.ping_host)));
+        providers.push(Box::new(crate::ping::Ping::new(&options.ping_host)));
         Self::assemble(providers, gpus)
     }
 
     /// Linux sensors read from fake `/sys` and `/proc` trees, game FPS from
-    /// MangoHud logs in `sys/../mangohud` and a ping that answers in 12 ms.
-    /// NVIDIA GPUs, which come from NVML rather than sysfs, are not included.
+    /// MangoHud logs in `sys/../mangohud` and `ping`. NVIDIA GPUs, which
+    /// come from NVML rather than sysfs, are not included.
     #[cfg(all(test, target_os = "linux"))]
-    fn with_roots(sys: impl Into<PathBuf>, proc: impl Into<PathBuf>) -> Self {
+    fn with_roots(
+        sys: impl Into<PathBuf>,
+        proc: impl Into<PathBuf>,
+        ping: crate::ping::Ping,
+    ) -> Self {
         let sys = sys.into();
         let logs = sys.with_file_name("mangohud");
         let roots = crate::linux::Roots::new(sys, proc);
@@ -74,7 +81,7 @@ impl SystemSensors {
         providers.push(Box::new(crate::fps::Fps::new(
             crate::fps::mangohud::MangoHud::new(Some(logs)),
         )));
-        providers.push(Box::new(tests::answering_ping()));
+        providers.push(Box::new(ping));
         Self::assemble(providers, crate::amdgpu::discover(&roots))
     }
 
@@ -179,27 +186,65 @@ impl SensorSource for SystemSensors {
         }
         Ok(out)
     }
+
+    /// Passes what is shown to every provider: the ping starts or stops
+    /// its probes (D-2026-09-30-release-polish-11).
+    fn want(&mut self, wanted: &Wanted) {
+        for provider in &mut self.providers {
+            provider.want(wanted);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A ping whose probe answers in 12 ms at once.
+    /// A ping whose probe answers in 12 ms at once, every `every`, and the
+    /// count of its probes.
     #[cfg(target_os = "linux")]
-    pub(super) fn answering_ping() -> crate::ping::Ping {
-        struct Answers;
+    fn answering_ping(
+        every: std::time::Duration,
+    ) -> (
+        crate::ping::Ping,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Answers(Arc<AtomicUsize>);
         impl crate::ping::Probe for Answers {
             fn round_trip(&mut self) -> std::result::Result<std::time::Duration, String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
                 Ok(std::time::Duration::from_millis(12))
             }
         }
-        crate::ping::Ping::with_probe(
+        let probes = Arc::new(AtomicUsize::new(0));
+        let ping = crate::ping::Ping::with_probe(
             "192.0.2.7",
-            Answers,
+            Answers(Arc::clone(&probes)),
+            every,
             std::time::Duration::from_secs(1),
-            std::time::Duration::from_secs(1),
-        )
+        );
+        (ping, probes)
+    }
+
+    /// Samples until `net.ping` is past "measuring" (at most 3 s).
+    #[cfg(target_os = "linux")]
+    fn settled(sensors: &mut SystemSensors) -> Snapshot {
+        use bezel_core::domain::sensor::{Reading, SensorKey, keys};
+        let ping = SensorKey::new(keys::NET_PING).unwrap();
+        let start = Instant::now();
+        loop {
+            let snapshot = sensors.sample().unwrap();
+            let measuring = matches!(
+                snapshot.get(&ping),
+                Reading::Unavailable(why) if why.starts_with("measuring")
+            );
+            if !measuring || start.elapsed() > std::time::Duration::from_secs(3) {
+                return snapshot;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 
     #[test]
@@ -235,7 +280,8 @@ mod tests {
             .dir("sys/drivers/amdgpu")
             .link("sys/devices/card/driver", "sys/drivers/amdgpu")
             .link("sys/class/drm/card0/device", "sys/devices/card");
-        let mut sensors = SystemSensors::with_roots(t.path("sys"), t.path("proc"));
+        let (ping, _) = answering_ping(std::time::Duration::from_secs(1));
+        let mut sensors = SystemSensors::with_roots(t.path("sys"), t.path("proc"), ping);
         let catalog = sensors.catalog().unwrap();
         assert_eq!(catalog[0].key.as_str(), keys::CPU_USAGE);
         let categories: Vec<Category> = catalog.iter().map(|i| i.category).collect();
@@ -274,25 +320,16 @@ mod tests {
                 include_str!("fps/fixtures/mangohud/witcher3_2026-09-30_21-05-00.csv"),
             )
             .dir("sys");
-        let mut sensors = SystemSensors::with_roots(t.path("sys"), t.path("proc"));
+        let (ping, _) = answering_ping(Duration::from_secs(1));
+        let mut sensors = SystemSensors::with_roots(t.path("sys"), t.path("proc"), ping);
         let catalog = sensors.catalog().unwrap();
         let listed: Vec<&str> = catalog.iter().map(|i| i.key.as_str()).collect();
         for key in keys::IMPORTED {
             assert!(listed.contains(&key), "{key} not listed");
         }
-        let ping = SensorKey::new(keys::NET_PING).unwrap();
-        let start = Instant::now();
-        let snapshot = loop {
-            let snapshot = sensors.sample().unwrap();
-            let measuring = matches!(
-                snapshot.get(&ping),
-                Reading::Unavailable(why) if why.starts_with("measuring")
-            );
-            if !measuring || start.elapsed() > Duration::from_secs(3) {
-                break snapshot;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        };
+        // Listed like `bezel sensors` does: every sensor shown.
+        sensors.want(&bezel_core::domain::sensor::Wanted::All);
+        let snapshot = settled(&mut sensors);
         for key in keys::IMPORTED {
             assert!(
                 snapshot.iter().any(|(k, _)| k.as_str() == key),
@@ -304,6 +341,87 @@ mod tests {
         assert_eq!(get(keys::NET_PING), Reading::Value(12.0));
         assert_eq!(get(keys::MEMORY_AVAILABLE_PERCENT), Reading::Value(25.0));
         assert!(matches!(get(keys::SYSTEM_VOLUME), Reading::Unavailable(_)));
+    }
+
+    /// A theme showing `shown` as text values.
+    #[cfg(target_os = "linux")]
+    fn theme_showing(shown: &[&str]) -> bezel_core::domain::theme::Theme {
+        use bezel_core::domain::geometry::{Orientation, Size};
+        use bezel_core::domain::sensor::{DisplayFormat, SensorKey};
+        use bezel_core::domain::theme::{
+            BoxF, Element, ElementId, ElementKind, TextContent, TextStyle, Theme,
+        };
+        let mut theme = Theme::blank("t", Size::new(480, 1920), Orientation::Portrait);
+        for (id, key) in (1..).zip(shown) {
+            theme.elements.push(Element {
+                id: ElementId(id),
+                name: (*key).to_string(),
+                frame: BoxF::new(0.0, 0.0, 100.0, 40.0),
+                opacity: 1.0,
+                visible: true,
+                locked: false,
+                kind: ElementKind::Text {
+                    content: TextContent::Sensor {
+                        key: SensorKey::new(*key).unwrap(),
+                        format: DisplayFormat::default(),
+                        prefix: String::new(),
+                        suffix: String::new(),
+                    },
+                    style: TextStyle::default(),
+                },
+            });
+        }
+        theme
+    }
+
+    /// The whole way from a theme to the probe (D-2026-09-30-release-polish-11):
+    /// the core's runtime says what its theme shows, and only a theme with a
+    /// `net.ping` value makes the probe run.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_theme_pings_only_while_it_shows_net_ping() {
+        use bezel_core::app::ThemeRuntime;
+        use bezel_core::domain::clock::Language;
+        use bezel_core::domain::sensor::{Reading, SensorKey, keys};
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        let t = crate::testing::FakeTree::new("on-demand");
+        t.file("proc/stat", "cpu  1 0 1 8 0 0 0 0\n")
+            .file("proc/meminfo", "MemTotal: 1024 kB\nMemAvailable: 256 kB\n")
+            .dir("sys");
+        let (ping, probes) = answering_ping(Duration::from_millis(5));
+        let mut sensors = SystemSensors::with_roots(t.path("sys"), t.path("proc"), ping);
+        let without = theme_showing(&[keys::CPU_USAGE, keys::MEMORY_PERCENT]);
+        let mut runtime = ThemeRuntime::new(without.clone(), Default::default(), Language::English);
+        let net_ping = SensorKey::new(keys::NET_PING).unwrap();
+        let not_shown = Reading::Unavailable(crate::ping::NOT_SHOWN.into());
+        for _ in 0..5 {
+            runtime.sample(&mut sensors).unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(probes.load(Ordering::SeqCst), 0, "no probe at all");
+        assert_eq!(runtime.snapshot().get(&net_ping), not_shown);
+
+        // Another theme shows the ping: it is measured.
+        runtime.replace_theme(theme_showing(&[keys::CPU_USAGE, keys::NET_PING]));
+        let start = std::time::Instant::now();
+        while runtime.snapshot().get(&net_ping) != Reading::Value(12.0)
+            && start.elapsed() < Duration::from_secs(3)
+        {
+            runtime.sample(&mut sensors).unwrap();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(runtime.snapshot().get(&net_ping), Reading::Value(12.0));
+        assert!(probes.load(Ordering::SeqCst) > 0);
+
+        // Back to a theme without it: the probes stop.
+        runtime.replace_theme(without);
+        runtime.sample(&mut sensors).unwrap();
+        assert_eq!(runtime.snapshot().get(&net_ping), not_shown);
+        std::thread::sleep(Duration::from_millis(50));
+        let idle = probes.load(Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(probes.load(Ordering::SeqCst), idle, "no probe while hidden");
     }
 
     /// The real machine, read-only: whatever it has, every catalog entry is

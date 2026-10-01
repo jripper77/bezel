@@ -210,6 +210,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::set_language,
             commands::set_sensor_options,
             commands::pick_folder,
+            commands::show_sensors,
         ])
         .run(tauri::generate_context!())
 }

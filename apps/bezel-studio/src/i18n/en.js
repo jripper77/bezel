@@ -261,7 +261,7 @@ export default {
   'prefs.mangohudDefault': 'MangoHud’s own folder (output_folder in MangoHud.conf)',
   'prefs.mangohudHint': 'Bezel reads the newest MangoHud CSV log in this folder to show a game’s FPS.',
   'prefs.mangohudReset': 'Use MangoHud’s own',
-  'prefs.pingHint': 'An IP address or a host name. Leave it empty to use {host}.',
+  'prefs.pingHint': 'An IP address or a host name, pinged only while a theme or the sensor list shows the ping. Leave it empty to use {host}.',
   'prefs.pingHost': 'Ping target (net.ping)',
   'prefs.sensorsSaved': 'Sensor settings saved.',
   'prefs.sensorsTitle': 'Sensors',

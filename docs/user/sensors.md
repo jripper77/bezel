@@ -59,6 +59,19 @@ install drivers of its own.
 
 ## Ping
 
-`net.ping` measures the round trip to `8.8.8.8` by default. Change the target in
-**Preferences → Sensors** in the app, or with `--ping-host` on the command line
-(`bezel run --ping-host 1.1.1.1 ...`).
+`net.ping` measures the round trip to `8.8.8.8` by default: an ICMP echo or,
+where the system does not let a program send one (always on Windows), a TCP
+connection to port 53 or 443. Bezel sends these packets once a second, and only
+while something you see uses the ping:
+
+- a theme with a `net.ping` element, shown by `bezel run`, the `bezel-run@`
+  service or the app (live on the screen, or in the editor);
+- the app's sensor list, while it shows the ping (its tab open, the ping not
+  filtered out by the search);
+- `bezel sensors`, which lists every sensor.
+
+Otherwise nothing is sent to the ping target, and `net.ping` reads unavailable
+(*"measured only while shown"*).
+
+Change the target in **Preferences → Sensors** in the app, or with
+`--ping-host` on the command line (`bezel run --ping-host 1.1.1.1 ...`).

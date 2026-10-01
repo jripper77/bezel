@@ -61,6 +61,19 @@ instala drivers próprios.
 
 ## Ping
 
-O `net.ping` mede o tempo de ida e volta até `8.8.8.8`, por padrão. Troque o
-destino em **Preferências → Sensores** no aplicativo, ou com `--ping-host` na
-linha de comando (`bezel run --ping-host 1.1.1.1 ...`).
+O `net.ping` mede o tempo de ida e volta até `8.8.8.8`, por padrão: um eco ICMP
+ou, onde o sistema não deixa um programa enviá-lo (sempre no Windows), uma
+conexão TCP na porta 53 ou 443. O Bezel envia esses pacotes uma vez por segundo,
+e só enquanto algo que você vê usa o ping:
+
+- um tema com um elemento de `net.ping`, mostrado pelo `bezel run`, pelo serviço
+  `bezel-run@` ou pelo aplicativo (ao vivo na tela, ou no editor);
+- a lista de sensores do aplicativo, enquanto ela mostra o ping (aba aberta e o
+  ping não escondido pela busca);
+- o `bezel sensors`, que lista todos os sensores.
+
+Fora disso, nada é enviado ao destino do ping, e o `net.ping` aparece
+indisponível (*"measured only while shown"*).
+
+Troque o destino em **Preferências → Sensores** no aplicativo, ou com
+`--ping-host` na linha de comando (`bezel run --ping-host 1.1.1.1 ...`).

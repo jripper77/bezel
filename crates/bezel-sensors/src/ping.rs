@@ -2,6 +2,11 @@
 //! (D-2026-09-30-release-polish-5) so that a slow or mute host never delays
 //! a sample (D-2026-09-30-sensors-4): `sample` only reads the last result.
 //!
+//! Nothing is sent while nothing shown uses `net.ping`
+//! (D-2026-09-30-release-polish-11): the thread starts the first time the
+//! key is wanted, idles without a packet while it is not, and reads as
+//! unavailable meanwhile.
+//!
 //! A probe sends an ICMP echo through an unprivileged datagram socket
 //! (Linux allows one to the groups in `net.ipv4.ping_group_range`), else
 //! times a TCP connect to port 53, then 443 (one SYN, SYN-ACK round trip).
@@ -16,7 +21,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapshot, keys};
+use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapshot, Wanted, keys};
 use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::provider::{Provider, describe, put};
@@ -29,6 +34,9 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 const GRACE: Duration = Duration::from_secs(2);
 /// TCP ports tried, in order, when ICMP is not allowed.
 const TCP_PORTS: [u16; 2] = [53, 443];
+
+/// Reason `net.ping` reads while nothing shown uses it.
+pub(crate) const NOT_SHOWN: &str = "measured only while shown";
 
 /// ICMP message types (RFC 792, RFC 4443).
 const ECHO_REQUEST_V4: u8 = 8;
@@ -47,49 +55,103 @@ pub(crate) trait Probe: Send + 'static {
 /// The last probe's result and when it ended.
 type Latest = Arc<Mutex<Option<(Instant, Result<Duration, String>)>>>;
 
-/// The `net.ping` provider: shows what its probe thread measured last.
+/// The probe thread, from the provider's side.
+enum ProbeThread {
+    /// Never wanted yet: no thread, the probe waits here.
+    NotStarted(Box<dyn Probe>),
+    /// Running: probes while told `true`, idles on `false`; ends when the
+    /// sender drops with the provider.
+    Running(Sender<bool>),
+    /// The thread could not start, and why.
+    Failed(String),
+}
+
+/// The `net.ping` provider: shows what its probe thread measured last,
+/// while `net.ping` is wanted.
 pub(crate) struct Ping {
     host: String,
     latest: Latest,
+    every: Duration,
     /// A result older than this is not shown.
     stale_after: Duration,
-    /// Dropped with the provider, which ends the probe thread.
-    _stop: Sender<()>,
+    /// Whether something shown uses `net.ping`.
+    wanted: bool,
+    thread: ProbeThread,
 }
 
 impl Ping {
-    /// Pings `host` every second, on a thread of its own.
-    pub(crate) fn start(host: &str) -> Self {
+    /// Pings `host` every second, on a thread of its own, while `net.ping`
+    /// is wanted.
+    pub(crate) fn new(host: &str) -> Self {
         Self::with_probe(host, NetProbe::new(host, TIMEOUT), EVERY, TIMEOUT)
     }
 
-    /// Runs `probe` on a thread, `every` apart; one probe takes at most
-    /// `timeout`.
+    /// Runs `probe` `every` apart, on a thread started the first time
+    /// `net.ping` is wanted; one probe takes at most `timeout`.
     pub(crate) fn with_probe(
         host: &str,
         probe: impl Probe,
         every: Duration,
         timeout: Duration,
     ) -> Self {
-        let latest: Latest = Arc::default();
-        let (stop, stopped) = mpsc::channel();
-        let shared = Arc::clone(&latest);
-        let spawned = thread::Builder::new()
-            .name("bezel-ping".to_string())
-            .spawn(move || run(probe, every, &shared, &stopped));
-        if let Err(e) = spawned {
-            store(&latest, Err(format!("cannot start the ping task: {e}")));
-        }
         Self {
             host: host.to_string(),
-            latest,
+            latest: Latest::default(),
+            every,
             stale_after: every + timeout + GRACE,
-            _stop: stop,
+            wanted: false,
+            thread: ProbeThread::NotStarted(Box::new(probe)),
         }
+    }
+
+    /// Probes while `on`, sends nothing otherwise; the first `on` starts
+    /// the thread.
+    fn set_wanted(&mut self, on: bool) {
+        if on == self.wanted {
+            return;
+        }
+        self.wanted = on;
+        if on {
+            // A result from before is not this measurement's.
+            *self.latest.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        }
+        match &self.thread {
+            ProbeThread::Running(orders) => {
+                if orders.send(on).is_err() {
+                    self.thread = ProbeThread::Failed("the ping task ended".to_string());
+                }
+            }
+            ProbeThread::NotStarted(_) if on => self.start_thread(),
+            ProbeThread::NotStarted(_) | ProbeThread::Failed(_) => {}
+        }
+    }
+
+    /// Starts the probe thread, measuring at once.
+    fn start_thread(&mut self) {
+        let failed = ProbeThread::Failed(String::new());
+        let ProbeThread::NotStarted(probe) = std::mem::replace(&mut self.thread, failed) else {
+            return;
+        };
+        let (orders, received) = mpsc::channel();
+        let shared = Arc::clone(&self.latest);
+        let every = self.every;
+        let spawned = thread::Builder::new()
+            .name("bezel-ping".to_string())
+            .spawn(move || run(probe, every, &shared, &received));
+        self.thread = match spawned {
+            Ok(_) => ProbeThread::Running(orders),
+            Err(e) => ProbeThread::Failed(format!("cannot start the ping task: {e}")),
+        };
     }
 
     /// What `net.ping` reads at `now`: milliseconds, or why not.
     fn reading(&self, now: Instant) -> Reading {
+        if !self.wanted {
+            return Reading::Unavailable(NOT_SHOWN.to_string());
+        }
+        if let ProbeThread::Failed(why) = &self.thread {
+            return Reading::Unavailable(why.clone());
+        }
         let latest = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
         match latest.as_ref() {
             None => Reading::Unavailable(format!("measuring: no answer from {} yet", self.host)),
@@ -114,7 +176,8 @@ impl Provider for Ping {
             "Ping",
             Quantity::Number,
             format!(
-                "round trip to {}, ms: ICMP echo, else TCP connect to port 53 or 443",
+                "round trip to {}, ms: ICMP echo, else TCP connect to port 53 or 443; \
+                 measured only while shown",
                 self.host
             ),
         )
@@ -125,6 +188,10 @@ impl Provider for Ping {
     fn sample(&mut self, now: Instant, out: &mut Snapshot) {
         put(out, keys::NET_PING, self.reading(now));
     }
+
+    fn want(&mut self, wanted: &Wanted) {
+        self.set_wanted(wanted.contains(keys::NET_PING));
+    }
 }
 
 /// `duration` in milliseconds, to the microsecond (no binary noise such
@@ -133,13 +200,27 @@ fn milliseconds(duration: Duration) -> f64 {
     f64::from(u32::try_from(duration.as_micros()).unwrap_or(u32::MAX)) / 1000.0
 }
 
-/// The probe thread: probes, stores, waits; ends when the provider drops.
-fn run(mut probe: impl Probe, every: Duration, latest: &Latest, stop: &Receiver<()>) {
+/// The probe thread: while measuring, probes, stores and waits `every`;
+/// told `false`, waits for the next order without sending anything. Ends
+/// when the provider drops.
+fn run(mut probe: Box<dyn Probe>, every: Duration, latest: &Latest, orders: &Receiver<bool>) {
+    let mut measuring = true;
     loop {
-        let result = probe.round_trip();
-        store(latest, result);
-        if !matches!(stop.recv_timeout(every), Err(RecvTimeoutError::Timeout)) {
-            return;
+        let order = if measuring {
+            store(latest, probe.round_trip());
+            match orders.recv_timeout(every) {
+                Ok(on) => Some(on),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+        } else {
+            match orders.recv() {
+                Ok(on) => Some(on),
+                Err(_) => return,
+            }
+        };
+        if let Some(on) = order {
+            measuring = on;
         }
     }
 }
@@ -372,6 +453,21 @@ mod tests {
         out.get(&SensorKey::new(keys::NET_PING).unwrap())
     }
 
+    /// A ping of `host` with `net.ping` shown.
+    fn shown(host: &str, probe: impl Probe, every: Duration) -> Ping {
+        let mut ping = Ping::with_probe(host, probe, every, TIMEOUT);
+        ping.want(&Wanted::All);
+        ping
+    }
+
+    /// Waits up to 3 s for `calls` to pass `count`.
+    fn wait_for(calls: &AtomicUsize, count: usize) {
+        let start = Instant::now();
+        while calls.load(Ordering::SeqCst) <= count && start.elapsed() < Duration::from_secs(3) {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     /// Samples until the probe thread stored a result (at most 3 s).
     fn first_result(ping: &mut Ping) -> Reading {
         let start = Instant::now();
@@ -401,7 +497,7 @@ mod tests {
     #[test]
     fn a_mute_host_never_slows_sampling() {
         let (release, blocked) = mpsc::channel();
-        let mut ping = Ping::with_probe("192.0.2.1", Mute(blocked), EVERY, TIMEOUT);
+        let mut ping = shown("192.0.2.1", Mute(blocked), EVERY);
         for _ in 0..20 {
             let start = Instant::now();
             let reading = sample(&mut ping);
@@ -417,7 +513,7 @@ mod tests {
     #[test]
     fn a_reply_reads_in_milliseconds() {
         let (probe, _) = scripted(Ok(Duration::from_micros(12_345)));
-        let mut ping = Ping::with_probe("h", probe, EVERY, TIMEOUT);
+        let mut ping = shown("h", probe, EVERY);
         let reading = first_result(&mut ping);
         assert_eq!(reading, Reading::Value(12.345));
         assert_eq!(milliseconds(Duration::from_nanos(3_608_945)), 3.608);
@@ -427,14 +523,14 @@ mod tests {
     fn a_timeout_reads_unavailable() {
         let why = "no answer from h within 2000 ms (ICMP echo)".to_string();
         let (probe, _) = scripted(Err(why.clone()));
-        let mut ping = Ping::with_probe("h", probe, EVERY, TIMEOUT);
+        let mut ping = shown("h", probe, EVERY);
         assert_eq!(first_result(&mut ping), Reading::Unavailable(why));
     }
 
     #[test]
     fn an_old_result_is_not_shown() {
         let (probe, _) = scripted(Ok(Duration::from_millis(9)));
-        let mut ping = Ping::with_probe("h", probe, EVERY, TIMEOUT);
+        let mut ping = shown("h", probe, EVERY);
         assert_eq!(first_result(&mut ping), Reading::Value(9.0));
         let later = Instant::now() + Duration::from_secs(8);
         let Reading::Unavailable(why) = ping.reading(later) else {
@@ -444,13 +540,54 @@ mod tests {
     }
 
     #[test]
+    fn nothing_is_sent_while_net_ping_is_not_shown() {
+        let (probe, calls) = scripted(Ok(Duration::from_millis(9)));
+        let mut ping = Ping::with_probe("h", probe, Duration::from_millis(5), TIMEOUT);
+        let not_shown = Reading::Unavailable(NOT_SHOWN.into());
+        assert_eq!(sample(&mut ping), not_shown);
+        let theme: Wanted = [keys::CPU_USAGE, keys::GPU_USAGE]
+            .into_iter()
+            .filter_map(SensorKey::new)
+            .collect();
+        ping.want(&theme);
+        for _ in 0..10 {
+            thread::sleep(Duration::from_millis(10));
+            assert_eq!(sample(&mut ping), not_shown);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no probe at all");
+        assert!(
+            matches!(ping.thread, ProbeThread::NotStarted(_)),
+            "no thread"
+        );
+    }
+
+    #[test]
+    fn showing_net_ping_starts_the_probes_and_hiding_it_stops_them() {
+        let (probe, calls) = scripted(Ok(Duration::from_millis(9)));
+        let mut ping = Ping::with_probe("h", probe, Duration::from_millis(5), TIMEOUT);
+        ping.want(&Wanted::All);
+        assert_eq!(first_result(&mut ping), Reading::Value(9.0));
+        wait_for(&calls, 2);
+
+        ping.want(&Wanted::nothing());
+        assert_eq!(sample(&mut ping), Reading::Unavailable(NOT_SHOWN.into()));
+        thread::sleep(Duration::from_millis(50));
+        let idle = calls.load(Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(calls.load(Ordering::SeqCst), idle, "idle: no probe");
+
+        let ping_only: Wanted = SensorKey::new(keys::NET_PING).into_iter().collect();
+        ping.want(&ping_only);
+        wait_for(&calls, idle);
+        assert!(calls.load(Ordering::SeqCst) > idle, "measuring again");
+        assert_eq!(first_result(&mut ping), Reading::Value(9.0));
+    }
+
+    #[test]
     fn the_probe_thread_ends_with_the_sensor() {
         let (probe, calls) = scripted(Ok(Duration::ZERO));
-        let ping = Ping::with_probe("h", probe, Duration::from_millis(5), TIMEOUT);
-        let start = Instant::now();
-        while calls.load(Ordering::SeqCst) < 2 && start.elapsed() < Duration::from_secs(3) {
-            thread::sleep(Duration::from_millis(5));
-        }
+        let ping = shown("h", probe, Duration::from_millis(5));
+        wait_for(&calls, 1);
         drop(ping);
         thread::sleep(Duration::from_millis(100));
         let after_drop = calls.load(Ordering::SeqCst);
@@ -557,7 +694,7 @@ mod tests {
     fn a_mute_address_is_unavailable_without_blocking_samples() {
         let host = "192.0.2.1";
         let probe = NetProbe::new(host, Duration::from_millis(300));
-        let mut ping = Ping::with_probe(host, probe, Duration::from_millis(50), TIMEOUT);
+        let mut ping = shown(host, probe, Duration::from_millis(50));
         let start = Instant::now();
         let first = sample(&mut ping);
         assert!(start.elapsed() < Duration::from_millis(50));

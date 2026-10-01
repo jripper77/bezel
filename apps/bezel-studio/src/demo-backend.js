@@ -405,9 +405,9 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }
 /**
  * @param {string} scenario key of SCENARIOS
  * @param {{now?: () => number, delay?: (ms: number) => Promise<void>}} [clock]
- * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, languages?: readonly string[], hold?: boolean}} [hooks]
- *   what the window does, the system's languages, and whether job phases
- *   wait in the middle until `letGo` (tests)
+ * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, onSensorsShown?: (keys: string[]) => void, languages?: readonly string[], hold?: boolean}} [hooks]
+ *   what the window does, the sensors the list shows, the system's
+ *   languages, and whether job phases wait in the middle until `letGo` (tests)
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const now = clock.now ?? (() => Date.now() / 1000);
@@ -579,6 +579,11 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       return Promise.resolve();
     },
     pickFolder: () => Promise.resolve(DEMO_FOLDER),
+    /** The sensors the list shows: the app measures them (`net.ping` only then). */
+    showSensors: (keys) => {
+      hooks.onSensorsShown?.([...keys]);
+      return Promise.resolve();
+    },
     setLanguage: (next) => {
       if (next !== null && !['pt-BR', 'en'].includes(next)) {
         return Promise.reject(Object.assign(new Error(`unknown language "${next}"`), { code: 'unknownLanguage', args: { language: next } }));

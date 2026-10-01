@@ -15,6 +15,12 @@
 //! the last sample ([`ThemeRuntime::snapshot`]) and previews frames over the
 //! poster ([`ThemeRuntime::render_with`]) while the screen gets what
 //! [`ThemeRuntime::render`] draws for it.
+//!
+//! Every sample first tells the sensors what is shown
+//! ([`ThemeRuntime::wanted`]): the theme's visible elements, plus what the
+//! caller shows beside it ([`ThemeRuntime::want_also`], an editor's sensor
+//! list). A sensor whose measuring reaches outside the machine (`net.ping`)
+//! is measured only while wanted (D-2026-09-30-release-polish-11).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -27,7 +33,7 @@ use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
 use crate::domain::history::Histories;
 use crate::domain::media::{ConvertOptions, MediaKind, MediaTools, StreamSpec, UploadProfile};
-use crate::domain::sensor::{Quantities, SensorInfo, Snapshot};
+use crate::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use crate::domain::storage::{FileName, Medium, RemotePath, Repeat, StorageLocation};
 use crate::domain::theme::{AssetRef, Background, Theme};
 use crate::ports::{
@@ -168,6 +174,10 @@ impl Scene {
 /// A theme being shown.
 pub struct ThemeRuntime {
     scene: Scene,
+    /// What the caller shows besides the theme ([`ThemeRuntime::want_also`]).
+    also: Wanted,
+    /// The theme's sensors and `also`, declared at every sample.
+    wanted: Wanted,
     video: VideoState,
     /// Pictures of the host-decoded video ([`VideoState::Host`]).
     host: Option<Box<dyn VideoFrames>>,
@@ -235,7 +245,10 @@ impl ThemeRuntime {
     pub fn new(theme: Theme, assets: BTreeMap<AssetRef, Vec<u8>>, language: Language) -> Self {
         let histories = Histories::new(&theme.history_lengths());
         let video = unstarted(&theme);
+        let wanted = Wanted::Keys(theme.sensor_keys());
         Self {
+            also: Wanted::nothing(),
+            wanted,
             scene: Scene {
                 theme,
                 assets,
@@ -269,6 +282,25 @@ impl ThemeRuntime {
     /// How the theme's video background is shown.
     pub fn video(&self) -> &VideoState {
         &self.video
+    }
+
+    /// The sensors each [`Self::sample`] asks the source to measure: those
+    /// the theme's visible elements show and those of [`Self::want_also`].
+    pub fn wanted(&self) -> &Wanted {
+        &self.wanted
+    }
+
+    /// Sensors the caller shows besides the theme (an editor's sensor list),
+    /// replacing what it said before: wanted from the next sample on, with
+    /// the theme's.
+    pub fn want_also(&mut self, also: Wanted) {
+        self.also = also;
+        self.update_wanted();
+    }
+
+    /// The theme's sensors and the caller's.
+    fn update_wanted(&mut self) {
+        self.wanted = Wanted::Keys(self.scene.theme.sensor_keys()).union(&self.also);
     }
 
     /// The readings of the last [`Self::sample`] (empty before the first).
@@ -307,6 +339,7 @@ impl ThemeRuntime {
         }
         self.scene.theme = theme;
         self.scene.histories = histories;
+        self.update_wanted();
     }
 
     /// Forgets the screen the video was started on (closed, handed back or
@@ -416,9 +449,10 @@ impl ThemeRuntime {
         Ok(())
     }
 
-    /// Samples the sensors and records the graph histories (once per
-    /// `refresh_seconds`).
+    /// Tells the sensors what is shown ([`Self::wanted`]), samples them and
+    /// records the graph histories (once per `refresh_seconds`).
     pub fn sample(&mut self, sensors: &mut dyn SensorSource) -> Result<()> {
+        sensors.want(&self.wanted);
         if self.scene.quantities.is_empty() {
             // Units of sensor text; a catalog failure only costs the units.
             if let Ok(catalog) = sensors.catalog() {

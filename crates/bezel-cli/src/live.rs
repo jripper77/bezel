@@ -23,7 +23,7 @@ use bezel_core::ports::{DeviceBus, MediaLocation, MediaTranscoder, ScreenConnect
 use bezel_themes::native::{MANIFEST, safe_asset_path};
 
 use crate::messages::Messages;
-use crate::theme::{Loaded, describe, load, warning_lines};
+use crate::theme::{Loaded, describe, load, shown_by, warning_lines};
 use crate::{OrientationArg, Rendering, Target};
 
 /// Slowest refresh, seconds (the fastest is the core's
@@ -358,7 +358,9 @@ where
     let loaded = load(kit.store, request.theme)?;
     write!(log, "{}", warning_lines(&loaded.warnings));
     log.check()?;
-    // Rates and usages need a first sample; take it while the screen wakes.
+    // Rates and usages need a first sample; take it while the screen wakes,
+    // and start what the theme shows (`net.ping` only when it shows it).
+    kit.sensors.want(&shown_by(&loaded.theme));
     kit.sensors.sample().context("cannot read the sensors")?;
     let mut link = open_for(bus, connector, request.target, &loaded.theme)?;
     let screen = link.identity().model.name;
@@ -408,8 +410,13 @@ mod tests {
 
     use bezel_core::domain::clock::{Language, LocalTime};
     use bezel_core::domain::geometry::{Orientation, Size};
-    use bezel_core::domain::sensor::{SensorInfo, Snapshot};
+    use bezel_core::domain::sensor::{
+        DisplayFormat, SensorInfo, SensorKey, Snapshot, Wanted, keys,
+    };
     use bezel_core::domain::storage::{RemotePath, Repeat};
+    use bezel_core::domain::theme::{
+        BoxF, Element, ElementId, ElementKind, TextContent, TextStyle,
+    };
     use bezel_devices::fake::{FakeStorage, Playback};
 
     use crate::storage::doubles::{STREAMED, StubMedia, weact_bus};
@@ -474,6 +481,53 @@ mod tests {
             self.ok -= 1;
             Ok(Snapshot::default())
         }
+    }
+
+    /// Demo sensors that log their calls: each sample, and whether each
+    /// `want` asked for the ping.
+    #[derive(Default)]
+    struct Logged(FakeSensors, Vec<&'static str>);
+
+    impl SensorSource for Logged {
+        fn catalog(&mut self) -> Result<Vec<SensorInfo>> {
+            self.0.catalog()
+        }
+
+        fn sample(&mut self) -> Result<Snapshot> {
+            self.1.push("sample");
+            self.0.sample()
+        }
+
+        fn want(&mut self, wanted: &Wanted) {
+            let ping = wanted.contains(keys::NET_PING);
+            self.1.push(if ping { "want ping" } else { "want no ping" });
+        }
+    }
+
+    /// Saves a theme for the 8.8" that prints `net.ping`.
+    fn ping_theme_file(name: &str) -> PathBuf {
+        let path = theme_file(name, Size::new(480, 1920), Orientation::Portrait, 1.0);
+        let location = ThemeLocation(path.display().to_string());
+        let (mut theme, assets) = FsThemeStore.load(&location).unwrap();
+        theme.elements.push(Element {
+            id: ElementId(1),
+            name: "ping".into(),
+            frame: BoxF::new(0.0, 0.0, 200.0, 40.0),
+            opacity: 1.0,
+            visible: true,
+            locked: false,
+            kind: ElementKind::Text {
+                content: TextContent::Sensor {
+                    key: SensorKey::new(keys::NET_PING).unwrap(),
+                    format: DisplayFormat::default(),
+                    prefix: String::new(),
+                    suffix: String::new(),
+                },
+                style: TextStyle::default(),
+            },
+        });
+        FsThemeStore.save(&location, &theme, &assets).unwrap();
+        path
     }
 
     /// Saves a blank theme for a panel of `size` (portrait) in `orientation`.
@@ -585,6 +639,25 @@ mod tests {
         assert!(pace.waits.iter().all(|w| *w <= Duration::from_millis(500)));
         // A warm-up sample, then one per frame.
         assert_eq!(sensors.samples_taken(), 4);
+    }
+
+    /// D-2026-09-30-release-polish-11: the theme says what it shows before
+    /// the warm-up sample and at every frame; the ping is asked for only by
+    /// a theme that prints it.
+    #[test]
+    fn the_sensors_hear_what_the_theme_shows_before_each_sample() {
+        let mut sensors = Logged::default();
+        let path = ping_theme_file("ping");
+        let (out, _, _) = run_with(&path, &mut sensors, &mut scripted(usize::MAX), Some(2));
+        out.unwrap();
+        let shown = ["want ping", "sample"];
+        assert_eq!(sensors.1, shown.repeat(3), "warm-up, then two frames");
+
+        let mut sensors = Logged::default();
+        let plain = theme_file("plain", Size::new(480, 1920), Orientation::Portrait, 1.0);
+        let (out, _, _) = run_with(&plain, &mut sensors, &mut scripted(usize::MAX), Some(1));
+        out.unwrap();
+        assert_eq!(sensors.1, ["want no ping", "sample"].repeat(2));
     }
 
     #[test]

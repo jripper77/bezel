@@ -12,6 +12,7 @@ use anyhow::Context;
 use bezel_core::app::ThemeRuntime;
 use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::Orientation;
+use bezel_core::domain::sensor::Wanted;
 use bezel_core::domain::theme::{AssetRef, Theme};
 use bezel_core::ports::{ThemeLocation, ThemeStore};
 use bezel_themes::import::import_path;
@@ -184,8 +185,8 @@ fn write_png(frame: &Frame, output: &Path) -> anyhow::Result<()> {
 
 /// `bezel render`: one frame of the theme at `path`, with the sensors of
 /// `kit`, written to `output` as a PNG of the canvas size. The sensors are
-/// sampled once and, after `pause(WARM_UP)`, again for the frame.
-/// Conversion warnings go to `log`.
+/// told what the theme shows ([`shown_by`]), sampled once and, after
+/// `pause(WARM_UP)`, again for the frame. Conversion warnings go to `log`.
 pub fn render(
     kit: &mut Rendering<'_>,
     path: &Path,
@@ -197,6 +198,7 @@ pub fn render(
     let mut log = Messages::new(log);
     write!(log, "{}", warning_lines(&loaded.warnings));
     log.check()?;
+    kit.sensors.want(&shown_by(&loaded.theme));
     kit.sensors.sample().context("cannot read the sensors")?;
     pause(WARM_UP);
     let line = describe(&loaded.theme);
@@ -204,6 +206,14 @@ pub fn render(
     let frame = runtime.frame(kit.sensors, kit.renderer, (kit.clock)())?;
     write_png(&frame, output)?;
     Ok(format!("{}: {line}\n", output.display()))
+}
+
+/// What showing `theme` wants measured: the sensors of its visible
+/// elements, told to the sensors before the warm-up sample so that a
+/// sensor measured on demand (`net.ping`) has started by the first frame
+/// (the runtime tells them again at every sample).
+pub fn shown_by(theme: &Theme) -> Wanted {
+    Wanted::Keys(theme.sensor_keys())
 }
 
 /// `bezel import`: converts the theme at `source` into a native theme at
@@ -457,6 +467,7 @@ mod tests {
         let image = image::open(&png).unwrap();
         assert_eq!((image.width(), image.height()), (480, 320));
         assert_eq!(sensors.samples_taken(), 2);
+        assert_eq!(sensors.wanted(), Some(&shown_by(&small_theme())));
         assert_eq!(
             describe(&Theme::blank(
                 "x",

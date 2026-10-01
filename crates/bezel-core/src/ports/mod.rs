@@ -9,7 +9,7 @@ use crate::domain::history::Histories;
 use crate::domain::job::Job;
 use crate::domain::media::{MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
 use crate::domain::screen::{Brightness, ScreenIdentity};
-use crate::domain::sensor::{Quantities, SensorInfo, Snapshot};
+use crate::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use crate::domain::storage::{
     Confirmed, FileName, RemotePath, Repeat, StartMode, StorageInfo, StorageLocation,
 };
@@ -216,6 +216,15 @@ pub trait SensorSource: Send {
     fn catalog(&mut self) -> Result<Vec<SensorInfo>>;
     /// Current readings of every sensor in the catalog.
     fn sample(&mut self) -> Result<Snapshot>;
+    /// Which sensors the caller shows from now on, replacing what it said
+    /// before (D-2026-09-30-release-polish-11). A source whose measuring
+    /// reaches outside this machine (`net.ping` sends packets) measures that
+    /// sensor only while it is wanted, and reads it as unavailable otherwise;
+    /// until the first call nothing is wanted. Sources that measure
+    /// everything anyway ignore it (the default).
+    fn want(&mut self, wanted: &Wanted) {
+        let _ = wanted;
+    }
 }
 
 /// What a frame shows under the theme's elements when its background is a

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { axisOf, groupSensors, thumbScreen } from '../../src/ui/library.js';
+import { axisOf, groupSensors, shownSensorKeys, thumbScreen } from '../../src/ui/library.js';
 import { joinColor, splitColor } from '../../src/ui/fields.js';
 
 const catalog = [
@@ -19,6 +19,14 @@ test('the filter matches label or key, ignoring case', () => {
   assert.deepEqual(groupSensors(catalog, ' USAGE ').map(([c, items]) => [c, items.length]), [['cpu', 1], ['gpu', 1]]);
   assert.deepEqual(groupSensors(catalog, 'net.').map(([c]) => c), ['network']);
   assert.deepEqual(groupSensors(catalog, 'nothing'), []);
+});
+
+test('the list shows the filtered sensors while open, and none while closed', () => {
+  const withPing = [...catalog, { key: 'net.ping', category: 'network', label: 'Ping' }];
+  assert.deepEqual(shownSensorKeys(withPing, '', true), ['cpu.usage', 'gpu.usage', 'net.down', 'net.ping', 'x.z', 'x.y']);
+  assert.deepEqual(shownSensorKeys(withPing, 'usage', true), ['cpu.usage', 'gpu.usage'], 'the ping filtered out');
+  assert.deepEqual(shownSensorKeys(withPing, 'ping', true), ['net.ping']);
+  assert.deepEqual(shownSensorKeys(withPing, '', false), [], 'another tab, or the window hidden');
 });
 
 test('colors split into rgb and alpha percent and join back', () => {

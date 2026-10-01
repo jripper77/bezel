@@ -45,6 +45,7 @@
     "allow-preferences",
     "allow-set-language",
     "allow-set-sensor-options",
-    "allow-pick-folder"
+    "allow-pick-folder",
+    "allow-show-sensors"
   ]
 }

@@ -14,6 +14,11 @@
 //! tab shares), or the poster ([`VideoState::VideoMissing`] carries what
 //! sending it takes).
 //!
+//! The sensors measure what is shown (D-2026-09-30-release-polish-11): the
+//! theme, which the preview always shows, and the sensors the library's
+//! list shows ([`Studio::show_sensors`]); `net.ping` sends packets only
+//! while one of them uses it.
+//!
 //! The screen's I/O happens outside the session: a frame is rendered in the
 //! session, then the live link leaves it with the frame ([`Delivery`]) and
 //! comes back once the screen showed it ([`Studio::presented`]). Previews
@@ -30,7 +35,7 @@ use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::screen::Brightness;
-use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot};
+use bezel_core::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use bezel_core::domain::theme::{AssetRef, Background, Theme, refresh_interval};
 use bezel_core::ports::{
     Backdrop, FrameRenderer, MediaLocation, MediaTranscoder, ScreenLink, SensorSource,
@@ -164,6 +169,8 @@ pub struct Studio {
     language: Language,
     runtime: ThemeRuntime,
     catalog: Vec<SensorInfo>,
+    /// The sensors the library's list shows ([`Self::show_sensors`]).
+    listed: Wanted,
     sample_millis: f64,
     /// Refreshes since the last sample (a video decoded here refreshes more
     /// often than the theme samples).
@@ -189,6 +196,7 @@ impl Studio {
             language,
             runtime: ThemeRuntime::new(theme, BTreeMap::new(), language),
             catalog: Vec::new(),
+            listed: Wanted::nothing(),
             sample_millis: 0.0,
             unsampled: 0,
             location: None,
@@ -219,6 +227,7 @@ impl Studio {
         // The old runtime, and a video it decodes here, stop first.
         self.runtime = ThemeRuntime::new(theme, assets, language);
         self.runtime.use_catalog(&self.catalog);
+        self.runtime.want_also(self.listed.clone());
         if let Some(live) = self.live.as_mut() {
             live.host = None;
             live.restart_video = true;
@@ -254,6 +263,19 @@ impl Studio {
     /// What each sensor of the last catalog measures.
     pub fn quantities(&self) -> &Quantities {
         self.runtime.quantities()
+    }
+
+    /// The sensors the library's list shows from now on (none while it is
+    /// hidden): measured with the theme's from the next sample on.
+    pub fn show_sensors(&mut self, listed: Wanted) {
+        self.listed = listed.clone();
+        self.runtime.want_also(listed);
+    }
+
+    /// What each sample asks the sensors to measure: the theme's and the
+    /// list's.
+    pub fn wanted(&self) -> &Wanted {
+        self.runtime.wanted()
     }
 
     /// Takes a sample and records it in the graph histories.
@@ -1190,6 +1212,73 @@ mod tests {
         assert_eq!(s.live_video(), Some(&VideoState::NoPlayback));
         assert_eq!(connector.log().frames.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Demo sensors that keep what they were told last where the test sees
+    /// it.
+    struct Told(FakeSensors, Arc<Mutex<Option<Wanted>>>);
+
+    impl SensorSource for Told {
+        fn catalog(&mut self) -> Result<Vec<SensorInfo>> {
+            self.0.catalog()
+        }
+
+        fn sample(&mut self) -> Result<Snapshot> {
+            self.0.sample()
+        }
+
+        fn want(&mut self, wanted: &Wanted) {
+            *self.1.lock().unwrap() = Some(wanted.clone());
+        }
+    }
+
+    /// D-2026-09-30-release-polish-11: the preview's theme and the sensor
+    /// list say what they show; the ping is wanted only while one shows it.
+    #[test]
+    fn the_theme_and_the_sensor_list_say_what_they_show() {
+        let told = Arc::new(Mutex::new(None));
+        let mut s = studio();
+        s.sensors = Box::new(Told(FakeSensors::demo(), Arc::clone(&told)));
+        let last = |s: &mut Studio| {
+            s.sample().unwrap();
+            told.lock().unwrap().clone().unwrap()
+        };
+        let key = |k: &str| SensorKey::new(k).unwrap();
+        let ping = || -> Wanted { [key("net.ping")].into_iter().collect() };
+        assert_eq!(last(&mut s), Wanted::nothing(), "a blank theme, no list");
+
+        s.show_sensors([key("net.ping"), key("cpu.usage")].into_iter().collect());
+        assert!(last(&mut s).contains("net.ping"));
+        s.set_language(Language::PortugueseBr);
+        assert!(last(&mut s).contains("net.ping"), "kept by the new runtime");
+        s.show_sensors(Wanted::nothing());
+        assert_eq!(last(&mut s), Wanted::nothing(), "the list is hidden");
+
+        // The preview shows a theme that prints the ping.
+        let mut theme = s.theme().clone();
+        theme.elements.push(Element {
+            id: ElementId(1),
+            name: "ping".into(),
+            frame: BoxF::new(0.0, 0.0, 100.0, 40.0),
+            opacity: 1.0,
+            visible: true,
+            locked: false,
+            kind: ElementKind::Bar {
+                binding: Binding {
+                    key: key("net.ping"),
+                    min: 0.0,
+                    max: 100.0,
+                },
+                direction: Default::default(),
+                fill: bezel_core::domain::theme::Paint::solid(Rgba::WHITE),
+                track: None,
+                radius: 0.0,
+                segments: None,
+            },
+        });
+        s.set_theme(theme);
+        assert_eq!(last(&mut s), ping());
+        assert_eq!(s.wanted(), &ping());
     }
 
     /// Counts the samples of the demo sensors.

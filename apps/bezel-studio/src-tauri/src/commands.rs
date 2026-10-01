@@ -89,6 +89,17 @@ pub async fn sample_sensors(state: State<'_, Shared>) -> UiResult<SampleDto> {
     blocking(&state, |b| Ok(b.sample())).await
 }
 
+/// The sensors the library's list shows now (empty while it is hidden):
+/// measured with the theme's, `net.ping` only while one shows it.
+#[tauri::command]
+pub async fn show_sensors(state: State<'_, Shared>, keys: Vec<String>) -> UiResult<()> {
+    blocking(&state, move |b| {
+        b.show_sensors(&keys);
+        Ok(())
+    })
+    .await
+}
+
 /// The theme being edited.
 #[tauri::command]
 pub async fn editor_session(state: State<'_, Shared>) -> UiResult<SessionDto> {

@@ -4,8 +4,9 @@
 // tabs), unsaved edits are asked about before they could be lost (closing
 // the window, quitting from the tray), the screen turns between vertical and
 // horizontal, imports list what had no equivalent, the preferences switch
-// the language and set the sensors, a denied port shows the udev command,
-// and a panel in desktop mode goes back only after a dialog.
+// the language and set the sensors, the sensor list tells the app what it
+// shows, a denied port shows the udev command, and a panel in desktop mode
+// goes back only after a dialog.
 import { test, expect, watchErrors, expectAccessible, dragTo, literally, prefixOf } from './helpers.mjs';
 import { translator } from '../../src/i18n/index.js';
 
@@ -479,6 +480,23 @@ test('the ping target and the MangoHud folder are set in the preferences', async
   await expect(folder).toContainText(t('prefs.mangohudDefault'));
   await expect(host).toHaveValue('1.1.1.1');
   await expectAccessible(page);
+  expect(errors).toEqual([]);
+});
+
+// The app measures what is shown: `net.ping` sends packets only while the
+// theme or this list shows it (D-2026-09-30-release-polish-11).
+test('the sensor list tells the app which sensors it shows', async ({ page, t }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  const html = page.locator('html');
+  await expect(html).toHaveAttribute('data-demo-sensors', '');
+  await page.getByRole('tab', { name: t('library.sensors') }).click();
+  await expect(html).toHaveAttribute('data-demo-sensors', /^cpu\.usage .*net\.down net\.up/);
+  await page.getByRole('searchbox', { name: t('library.searchSensors') }).fill('net.');
+  await expect(html).toHaveAttribute('data-demo-sensors', 'net.down net.up');
+  await page.getByRole('tab', { name: t('library.layers') }).click();
+  await expect(html).toHaveAttribute('data-demo-sensors', '');
   expect(errors).toEqual([]);
 });
 

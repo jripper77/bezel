@@ -6,7 +6,8 @@
 //! `memory.used`, `net.down`, …) plus open-ended ones for whatever a machine
 //! exposes (`hwmon.<chip>.<label>`, `disk.<mount>.used`, `net.<iface>.up`).
 
-use std::collections::BTreeMap;
+use std::borrow::Borrow;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::time::Duration;
 
@@ -30,6 +31,56 @@ impl SensorKey {
 impl fmt::Display for SensorKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad(&self.0)
+    }
+}
+
+/// Keys order and compare as their text, so sets of keys are looked up by
+/// `&str`.
+impl Borrow<str> for SensorKey {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The sensors a caller shows the user, declared to the source
+/// ([`crate::ports::SensorSource::want`]) so that a sensor whose measuring
+/// reaches outside this machine (`net.ping` sends packets) is measured only
+/// while something shown uses it (D-2026-09-30-release-polish-11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Wanted {
+    /// Every sensor: a listing of all of them (`bezel sensors`).
+    All,
+    /// Only these: a theme's elements, the sensors a list shows.
+    Keys(BTreeSet<SensorKey>),
+}
+
+impl Wanted {
+    /// No sensor.
+    pub fn nothing() -> Self {
+        Self::Keys(BTreeSet::new())
+    }
+
+    /// Whether `key` is wanted.
+    pub fn contains(&self, key: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Keys(keys) => keys.contains(key),
+        }
+    }
+
+    /// What either wants.
+    #[must_use]
+    pub fn union(&self, other: &Wanted) -> Wanted {
+        match (self, other) {
+            (Self::Keys(a), Self::Keys(b)) => Self::Keys(a.union(b).cloned().collect()),
+            _ => Self::All,
+        }
+    }
+}
+
+impl FromIterator<SensorKey> for Wanted {
+    fn from_iter<I: IntoIterator<Item = SensorKey>>(keys: I) -> Self {
+        Self::Keys(keys.into_iter().collect())
     }
 }
 
@@ -574,6 +625,27 @@ mod tests {
 
     fn q(k: &str) -> Quantity {
         quantity_of(&SensorKey::new(k).expect("key"))
+    }
+
+    fn wanted(list: &[&str]) -> Wanted {
+        list.iter().filter_map(|k| SensorKey::new(*k)).collect()
+    }
+
+    #[test]
+    fn wanted_sensors_combine() {
+        let theme = wanted(&[keys::CPU_USAGE, keys::NET_PING]);
+        assert!(theme.contains(keys::NET_PING));
+        assert!(!theme.contains(keys::GPU_USAGE));
+        assert!(!Wanted::nothing().contains(keys::NET_PING));
+        assert!(Wanted::All.contains("anything.at.all"));
+        let list = wanted(&[keys::GPU_USAGE, keys::CPU_USAGE]);
+        assert_eq!(
+            theme.union(&list),
+            wanted(&[keys::CPU_USAGE, keys::GPU_USAGE, keys::NET_PING])
+        );
+        assert_eq!(theme.union(&Wanted::nothing()), theme);
+        assert_eq!(Wanted::All.union(&list), Wanted::All);
+        assert_eq!(list.union(&Wanted::All), Wanted::All);
     }
 
     #[test]

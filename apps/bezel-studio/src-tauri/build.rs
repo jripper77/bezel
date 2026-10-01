@@ -44,6 +44,7 @@ const COMMANDS: &[&str] = &[
     "set_language",
     "set_sensor_options",
     "pick_folder",
+    "show_sensors",
 ];
 
 fn main() -> ExitCode {

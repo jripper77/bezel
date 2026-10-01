@@ -6,6 +6,7 @@
 //! The model is plain data so the editor can change it freely and every
 //! adapter (renderer, file formats, importers) reads the same thing.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use super::frame::Rgba;
@@ -480,6 +481,26 @@ impl Theme {
         out
     }
 
+    /// The sensors the visible elements show: what running this theme
+    /// wants measured (hidden elements are not drawn).
+    pub fn sensor_keys(&self) -> BTreeSet<SensorKey> {
+        self.elements
+            .iter()
+            .filter(|e| e.visible)
+            .filter_map(|e| match &e.kind {
+                ElementKind::Text {
+                    content: TextContent::Sensor { key, .. },
+                    ..
+                } => Some(key.clone()),
+                ElementKind::Bar { binding, .. }
+                | ElementKind::Ring { binding, .. }
+                | ElementKind::Needle { binding, .. }
+                | ElementKind::Graph { binding, .. } => Some(binding.key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The graph history length wanted for each bound sensor.
     pub fn history_lengths(&self) -> Vec<(SensorKey, usize)> {
         self.elements
@@ -609,6 +630,11 @@ mod tests {
             ]
         );
         assert_eq!(t.history_lengths(), vec![(key(keys::CPU_USAGE), 60)]);
+        assert_eq!(
+            t.sensor_keys(),
+            BTreeSet::from([key(keys::CPU_TEMPERATURE), key(keys::CPU_USAGE)]),
+            "the hidden bar's sensor is not wanted"
+        );
         assert!(t.element(ElementId(3)).is_some());
     }
 

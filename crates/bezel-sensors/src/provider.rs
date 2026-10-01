@@ -3,7 +3,9 @@
 
 use std::time::Instant;
 
-use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, SensorKey, Snapshot};
+use bezel_core::domain::sensor::{
+    Category, Quantity, Reading, SensorInfo, SensorKey, Snapshot, Wanted,
+};
 
 /// Reason shown for a rate or usage before its second sample.
 pub(crate) const WARMING_UP: &str = "warming up: needs a second sample";
@@ -26,6 +28,12 @@ pub(crate) trait Provider: Send {
     /// this sample: rates divide counter deltas by the real time between two
     /// calls (D-2026-09-30-sensors-4).
     fn sample(&mut self, now: Instant, out: &mut Snapshot);
+    /// Which sensors are shown from now on
+    /// ([`bezel_core::ports::SensorSource::want`]). Only a provider whose
+    /// measuring reaches outside this machine cares (the default ignores it).
+    fn want(&mut self, wanted: &Wanted) {
+        let _ = wanted;
+    }
 }
 
 /// Describes a sensor. `None` only for an invalid key, which the slugged keys

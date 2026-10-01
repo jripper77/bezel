@@ -1,5 +1,7 @@
 //! `bezel sensors`: every sensor of the machine as a table grouped by
-//! category, or as JSON.
+//! category, or as JSON. It shows every sensor, so it asks for all of them
+//! (`net.ping` included, which sends packets only when asked:
+//! D-2026-09-30-release-polish-11).
 //!
 //! Rates (network, disk) and usages (CPU) are deltas between two samples, so
 //! the command samples once, waits [`WARM_UP`], and prints the second
@@ -10,7 +12,7 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use bezel_core::domain::sensor::{
-    Category, DisplayFormat, Reading, SensorInfo, Snapshot, format_reading,
+    Category, DisplayFormat, Reading, SensorInfo, Snapshot, Wanted, format_reading,
 };
 use bezel_core::domain::theme::MIN_REFRESH_SECONDS;
 use bezel_core::ports::SensorSource;
@@ -199,6 +201,7 @@ pub fn run(
     out: &mut dyn Write,
     style: WatchStyle,
 ) -> anyhow::Result<()> {
+    source.want(&Wanted::All);
     let catalog = source.catalog()?;
     source.sample()?;
     std::thread::sleep(WARM_UP);
@@ -244,6 +247,19 @@ mod tests {
         let mut out = Vec::new();
         run(a, &mut FakeSensors::demo(), &mut out, style).unwrap();
         String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn every_sensor_is_wanted_net_ping_included() {
+        let mut sensors = FakeSensors::demo();
+        run(
+            &args(true, None, None, false),
+            &mut sensors,
+            &mut Vec::new(),
+            WatchStyle::Append,
+        )
+        .unwrap();
+        assert_eq!(sensors.wanted(), Some(&Wanted::All));
     }
 
     #[test]

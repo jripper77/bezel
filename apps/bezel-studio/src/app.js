@@ -104,6 +104,7 @@ const library = createLibrary({
     setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => fail(e)),
     autostart: () => state.autostart,
     leaveDesktopMode: (panel) => leaveDesktopMode(panel),
+    showSensors: (keys) => bridge.showSensors(keys).catch((e) => fail(e)),
   },
 });
 

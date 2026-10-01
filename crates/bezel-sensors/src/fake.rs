@@ -1,18 +1,21 @@
 //! A scripted [`SensorSource`] for tests and demo mode.
 
 use bezel_core::Result;
-use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapshot, keys};
+use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapshot, Wanted, keys};
 use bezel_core::ports::SensorSource;
 
 use crate::provider::{NOT_SUPPORTED_YET, WARMING_UP, describe};
 
 /// Replays a fixed catalog and a script of snapshots: each `sample` returns
 /// the next snapshot, and the last one repeats once the script runs out.
+/// It records what its callers say they show ([`Self::wanted`]) and
+/// measures every sensor anyway.
 #[derive(Debug, Clone, Default)]
 pub struct FakeSensors {
     catalog: Vec<SensorInfo>,
     script: Vec<Snapshot>,
     taken: usize,
+    wanted: Option<Wanted>,
 }
 
 impl FakeSensors {
@@ -22,7 +25,13 @@ impl FakeSensors {
             catalog,
             script,
             taken: 0,
+            wanted: None,
         }
+    }
+
+    /// What the last `want` said is shown (`None` before any).
+    pub fn wanted(&self) -> Option<&Wanted> {
+        self.wanted.as_ref()
     }
 
     /// A plausible desktop: two samples, the first still warming up its
@@ -73,6 +82,10 @@ impl SensorSource for FakeSensors {
         let snapshot = self.next_snapshot();
         self.taken += 1;
         Ok(snapshot)
+    }
+
+    fn want(&mut self, wanted: &Wanted) {
+        self.wanted = Some(wanted.clone());
     }
 }
 
@@ -414,5 +427,18 @@ mod tests {
         let mut fake = FakeSensors::default();
         assert!(fake.catalog().unwrap().is_empty());
         assert!(fake.sample().unwrap().is_empty());
+    }
+
+    #[test]
+    fn what_is_wanted_is_recorded_and_everything_still_measured() {
+        let mut fake = FakeSensors::demo();
+        assert_eq!(fake.wanted(), None);
+        fake.want(&Wanted::nothing());
+        assert_eq!(fake.wanted(), Some(&Wanted::nothing()));
+        fake.sample().unwrap();
+        let all = fake.sample().unwrap();
+        assert_eq!(all.get(&key(keys::NET_PING)), Reading::Value(12.0));
+        fake.want(&Wanted::All);
+        assert_eq!(fake.wanted(), Some(&Wanted::All));
     }
 }

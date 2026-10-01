@@ -84,6 +84,7 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.pickFolder();
   await bridge.leaveDesktopMode('hid:/dev/hidraw7', true);
   await bridge.quitApp();
+  await bridge.showSensors(['net.ping', 'cpu.usage']);
   assert.deepEqual(calls.map((c) => c[0]), [
     'list_devices', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
@@ -91,8 +92,9 @@ test('tauri mode maps every call to its command', async () => {
     'storage_overview', 'media_tools', 'locate_ffmpeg', 'pick_media', 'prepare_upload', 'prepare_theme_video',
     'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media', 'set_boot_media',
     'set_unsaved', 'close_window', 'preferences', 'set_language', 'set_sensor_options', 'pick_folder',
-    'leave_desktop_mode', 'quit_app',
+    'leave_desktop_mode', 'quit_app', 'show_sensors',
   ]);
+  assert.deepEqual(calls[40][1], { keys: ['net.ping', 'cpu.usage'] });
   assert.deepEqual(calls[35][1], { language: 'en' });
   assert.deepEqual(calls[36][1], { pingHost: '1.1.1.1', mangohudDir: null });
   assert.deepEqual(calls[38][1], { key: 'hid:/dev/hidraw7', confirmed: true });
@@ -165,6 +167,15 @@ test('demo mode shows what the window does and takes the close button as an even
   assert.equal(quitting, 1, 'the tray Quit asks too');
   await bridge.quitApp();
   assert.equal(attributes['data-demo-window'], 'quit');
+});
+
+test('demo mode shows on the page which sensors the list shows', async () => {
+  const attributes = {};
+  const bridge = createBridge({ ...page(), document: { documentElement: { setAttribute: (k, v) => { attributes[k] = v; } } } });
+  await bridge.showSensors(['net.ping', 'cpu.usage']);
+  assert.equal(attributes['data-demo-sensors'], 'net.ping cpu.usage');
+  await bridge.showSensors([]);
+  assert.equal(attributes['data-demo-sensors'], '');
 });
 
 test('demo mode with hold lets each upload phase go on a window event', async () => {

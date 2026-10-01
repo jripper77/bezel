@@ -22,7 +22,8 @@ pub fn storage_of(link: &mut dyn ScreenLink) -> Result<&mut dyn ScreenStorage> {
         .ok_or_else(|| BezelError::Unsupported(format!("{name} has no storage")))
 }
 
-fn profile_of(link: &dyn ScreenLink) -> Result<UploadProfile> {
+/// The upload profile of the screen behind `link`, or `Unsupported`.
+pub(crate) fn profile_of(link: &dyn ScreenLink) -> Result<UploadProfile> {
     let model = link.identity().model;
     UploadProfile::for_model(model)
         .ok_or_else(|| BezelError::Unsupported(format!("{} stores no media", model.name)))
@@ -172,6 +173,30 @@ pub fn upload(
     confirm: Confirm,
     job: &mut Job<'_>,
 ) -> Result<Uploaded> {
+    upload_with(link, media, prepared, confirm, job, &mut |_| Ok(()))
+}
+
+/// What an upload is about to send, handed to the caller of [`upload_with`]
+/// right before the first byte.
+pub(crate) struct Sending<'a> {
+    /// Where it goes.
+    pub path: &'a RemotePath,
+    /// The exact bytes sent (a converted video's output).
+    pub data: &'a [u8],
+    /// Those bytes as probed.
+    pub media: &'a MediaInfo,
+}
+
+/// [`upload`], calling `before_send` once everything is ready and right
+/// before the first byte goes out; an error there sends nothing.
+pub(crate) fn upload_with(
+    link: &mut dyn ScreenLink,
+    media: &mut dyn MediaTranscoder,
+    prepared: &PreparedUpload,
+    confirm: Confirm,
+    job: &mut Job<'_>,
+    before_send: &mut dyn FnMut(Sending<'_>) -> Result<()>,
+) -> Result<Uploaded> {
     let path = &prepared.plan.path;
     let overwrite = Operation::Overwrite(path.clone());
     if prepared.plan.replaces.is_some() {
@@ -182,30 +207,48 @@ pub fn upload(
     if confirm == Confirm::No && presence(storage, path)? != Presence::Absent {
         Confirmed::require(confirm, &overwrite)?;
     }
-    let (source, bytes) = match &prepared.plan.action {
-        UploadAction::AsIs { bytes } => (prepared.source.clone(), *bytes),
+    let (data, sent) = bytes_to_send(storage, media, &profile, prepared, job)?;
+    job.checkpoint()?;
+    before_send(Sending {
+        path,
+        data: &data,
+        media: &sent,
+    })?;
+    storage.upload(path, &data, job)?;
+    verify(storage, path, sent.bytes, job)?;
+    Ok(Uploaded {
+        path: path.clone(),
+        bytes: sent.bytes,
+        converted: matches!(prepared.plan.action, UploadAction::Convert(_)),
+    })
+}
+
+/// The bytes an upload sends and what they are: the file as it is, or its
+/// conversion (checked again against the profile, the limits and the space).
+fn bytes_to_send(
+    storage: &mut dyn ScreenStorage,
+    media: &mut dyn MediaTranscoder,
+    profile: &UploadProfile,
+    prepared: &PreparedUpload,
+    job: &mut Job<'_>,
+) -> Result<(Vec<u8>, MediaInfo)> {
+    let (source, sent) = match &prepared.plan.action {
+        UploadAction::AsIs { .. } => (prepared.source.clone(), prepared.media.clone()),
         UploadAction::Convert(target) => {
             job.checkpoint()?;
             let output = media.transcode(&prepared.source, target, job)?;
-            let bytes = recheck(storage, media, &profile, path, &output)?;
-            (output, bytes)
+            let converted = recheck(storage, media, profile, &prepared.plan.path, &output)?;
+            (output, converted)
         }
     };
     let data = media.load(&source)?;
-    if data.len() as u64 != bytes {
+    if data.len() as u64 != sent.bytes {
         return Err(BezelError::InvalidInput(format!(
             "{} changed while its upload was prepared",
             source.0
         )));
     }
-    job.checkpoint()?;
-    storage.upload(path, &data, job)?;
-    verify(storage, path, bytes, job)?;
-    Ok(Uploaded {
-        path: path.clone(),
-        bytes,
-        converted: matches!(prepared.plan.action, UploadAction::Convert(_)),
-    })
+    Ok((data, sent))
 }
 
 /// The preflight against the screen's current storage.
@@ -238,7 +281,7 @@ fn checked(
 }
 
 /// Names on both folders of `medium`, without sizes; nothing for a missing card.
-fn stored_on(
+pub(crate) fn stored_on(
     storage: &mut dyn ScreenStorage,
     info: &StorageInfo,
     medium: Medium,
@@ -257,7 +300,11 @@ fn stored_on(
     Ok(out)
 }
 
-fn with_sizes(storage: &mut dyn ScreenStorage, entries: Vec<FileEntry>) -> Result<Vec<FileEntry>> {
+/// `entries` with the sizes the screen reports now.
+pub(crate) fn with_sizes(
+    storage: &mut dyn ScreenStorage,
+    entries: Vec<FileEntry>,
+) -> Result<Vec<FileEntry>> {
     entries
         .into_iter()
         .map(|entry| {
@@ -269,14 +316,15 @@ fn with_sizes(storage: &mut dyn ScreenStorage, entries: Vec<FileEntry>) -> Resul
 
 /// The conversion output must now fit the profile, the limits and the space:
 /// an output over the per-file limit is refused as
-/// [`Refusal::ConvertedTooLarge`] before a byte is sent.
+/// [`Refusal::ConvertedTooLarge`] before a byte is sent. Returns the output
+/// as probed.
 fn recheck(
     storage: &mut dyn ScreenStorage,
     media: &mut dyn MediaTranscoder,
     profile: &UploadProfile,
     path: &RemotePath,
     output: &MediaLocation,
-) -> Result<u64> {
+) -> Result<MediaInfo> {
     let converted = media.probe(output)?;
     let check = UploadCheck {
         name: path.name.as_str(),
@@ -295,12 +343,14 @@ fn recheck(
         other => other,
     })?;
     match plan.action {
-        UploadAction::AsIs { bytes } => Ok(bytes),
+        UploadAction::AsIs { .. } => Ok(converted),
         UploadAction::Convert(_) => Err(BezelError::Refused(Refusal::WrongProfile(Vec::new()))),
     }
 }
 
-fn verify(
+/// Checks that the screen stores exactly `bytes` at `path` (an upload's
+/// verification), reporting [`JobPhase::Verify`].
+pub(crate) fn verify(
     storage: &mut dyn ScreenStorage,
     path: &RemotePath,
     bytes: u64,

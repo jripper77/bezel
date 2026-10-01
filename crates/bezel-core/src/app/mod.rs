@@ -1,5 +1,6 @@
 //! Use cases, generic over the driven ports.
 
+pub mod manager;
 mod runtime;
 mod screens;
 pub mod storage;

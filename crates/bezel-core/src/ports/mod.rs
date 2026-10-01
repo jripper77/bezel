@@ -240,7 +240,8 @@ pub trait MediaTranscoder: Send {
     fn load(&mut self, source: &MediaLocation) -> Result<Vec<u8>>;
 
     /// Decodes `source` (a video or an animated GIF) on the host into RGBA
-    /// frames of exactly `spec.size` at `spec.fps`: the whole picture, never
+    /// frames of exactly `spec.size` at `spec.fps` (adapters may cap it; the
+    /// ffmpeg one at [`crate::domain::media::PREVIEW_FPS`]): the whole picture, never
     /// turned or cropped, scaled to that size ([`StreamSpec::raw`] keeps its
     /// shape). The caller frames each picture
     /// (D-2026-10-01-video-background-framing-3). Without the converter:

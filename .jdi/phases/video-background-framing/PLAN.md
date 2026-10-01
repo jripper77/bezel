@@ -30,7 +30,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - Contrato da T-6 (JSDoc no `bridge.js`): `background.framing` = JSON da D-2; `render(theme, {motion})` → `render_preview {theme, motion}` (`false` = pôster sem decodificador); `nextMs` = próxima imagem (≤ 15 fps); `videoAuto(theme)` → `video_auto` = `{rotation, size}`. Demo: tema paisagem, vídeo 480x1920 já girado, decodificador simulado; sem ffmpeg = pôster + dica com link do guia.
 - **Dependencies:** none
 - **Test:** `node --test tests/ui/i18n.test.mjs tests/ui/video-framing.test.mjs`; `video-framing.spec.mjs` com `expectAccessible`: ≥ 3 testes "video framing …"/"video background plays …" (Auto, controles, canvas, desfazer/refazer, toca e para com movimento reduzido) × 4 projetos; `npm test`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2 (paralela)
 

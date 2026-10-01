@@ -99,8 +99,11 @@ export const DEMO_STORAGE = Object.freeze({
  * video is already in the 8.8"'s profile (else it is converted).
  */
 export const DEMO_LOCAL_FILES = Object.freeze({
-  'ferias.mp4': { size: 24_117_248, format: 'MP4', width: 1920, height: 1080, native: false },
-  'relogio.mp4': { size: 6_291_456, format: 'MP4', width: 480, height: 1920, native: true },
+  'ferias.mp4': { size: 24_117_248, format: 'MP4', width: 1920, height: 1080, native: false, durationMs: 12_400 },
+  'relogio.mp4': { size: 6_291_456, format: 'MP4', width: 480, height: 1920, native: true, durationMs: 8_000 },
+  // An animated GIF (a video background) and a GIF of one picture (an image).
+  'ondas.gif': { size: 3_145_728, format: 'GIF', width: 1920, height: 480, durationMs: 2_400 },
+  'parado.gif': { size: 98_304, format: 'GIF', width: 480, height: 480, still: true },
   'foto.png': { size: 512_000, format: 'PNG', width: 1080, height: 1080 },
   // Stored with the wrong size, like a file bytes of a cancelled upload landed in.
   'torto.png': { size: 256_000, format: 'PNG', width: 480, height: 480, storedShort: true },
@@ -112,6 +115,18 @@ export const DEMO_LOCAL_FILES = Object.freeze({
 
 /** The file the demo's picker returns. */
 export const DEMO_PICKED = 'demo://ferias.mp4';
+
+/** The video the demo's "Add video…" dialog returns. */
+export const DEMO_PICKED_VIDEO = 'demo://ferias.mp4';
+
+/** A poster the demo shows for every video it adds: a dusk gradient. */
+const POSTER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="192" height="48" viewBox="0 0 192 48">'
+  + '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e1b4b"/>'
+  + '<stop offset="0.55" stop-color="#7c3aed"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>'
+  + '<rect width="192" height="48" fill="url(#g)"/><path d="M0 36 Q48 20 96 34 T192 30 V48 H0Z" fill="#0f172a" opacity="0.6"/></svg>';
+
+/** The demo poster as a data URL (parentheses escaped for CSS `url()`). */
+export const DEMO_POSTER_URL = `data:image/svg+xml,${encodeURIComponent(POSTER_SVG).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
 
 /** A theme with a video background (the TURZX kind), for `?demo=video`. */
 export const DEMO_VIDEO_THEME = Object.freeze({

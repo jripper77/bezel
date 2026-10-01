@@ -14,6 +14,7 @@ use bezel_core::domain::media::{
     FrameRate, MediaFormat, MediaInfo, MediaTools, StreamSpec, TranscodeTarget, VideoCodec,
     VideoPixelFormat, VideoTrack, cover_crop,
 };
+use bezel_core::domain::poster::PosterSpec;
 use bezel_core::domain::storage::{Repeat, StartMode};
 use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::{MediaLocation, MediaTranscoder, VideoFrames};
@@ -47,9 +48,11 @@ const WIDE: Size = Size::new(1920, 1080);
 const CONVERTED_BYTES: usize = 5000;
 
 /// A media converter over real files on disk, scripted by name: `native*.mp4`
-/// is already in the 8.8"'s profile, other videos (`.mp4`, `.mov`) are
-/// 1920x1080 with sound, `.png` is an image, anything else is unknown. A
-/// conversion writes a `native-converted-N.mp4` next to the source.
+/// is already in the 8.8"'s profile, other videos (`.mp4`, `.mov`, and `.mkv`
+/// with ffmpeg) are 1920x1080 with sound, `.png` is an image, `.gif` an
+/// animated 1920x480 GIF (`still*.gif`: one picture), anything else is
+/// unknown. A conversion writes a `native-converted-N.mp4` next to the
+/// source; a poster is a picture of [`POSTER`].
 pub(crate) struct FakeMedia {
     ready: bool,
     tool: Option<PathBuf>,
@@ -60,7 +63,12 @@ pub(crate) struct FakeMedia {
     /// Bytes of every conversion's output (a sparse file past
     /// [`CONVERTED_BYTES`]).
     output_bytes: u64,
+    /// The posters taken, and how.
+    pub(crate) posters: Arc<Mutex<Vec<(MediaLocation, PosterSpec)>>>,
 }
+
+/// The color of every poster [`FakeMedia`] takes.
+pub(crate) const POSTER: Rgba = Rgba::opaque(200, 0, 100);
 
 /// The color of every picture of a video [`FakeMedia`] decodes.
 pub(crate) const STREAMED: Rgba = Rgba::opaque(0, 200, 0);
@@ -83,6 +91,7 @@ impl FakeMedia {
             converted: Arc::default(),
             streamed: Arc::default(),
             output_bytes: CONVERTED_BYTES as u64,
+            posters: Arc::default(),
         }
     }
 
@@ -94,6 +103,7 @@ impl FakeMedia {
             converted: Arc::default(),
             streamed: Arc::default(),
             output_bytes: CONVERTED_BYTES as u64,
+            posters: Arc::default(),
         }
     }
 }
@@ -131,6 +141,19 @@ impl MediaTranscoder for FakeMedia {
         let extension = name.rsplit_once('.').map(|(_, e)| e).unwrap_or_default();
         let (format, dimensions, video, has_audio) = match extension {
             "png" => (MediaFormat::Png, Some(Size::new(64, 64)), None, false),
+            "gif" if name.starts_with("still") => {
+                (MediaFormat::Gif, Some(Size::new(64, 64)), None, false)
+            }
+            "gif" => (
+                MediaFormat::Gif,
+                Some(Size::new(1920, 480)),
+                Some(gif_track()),
+                false,
+            ),
+            "mkv" if !self.ready => {
+                return Err(BezelError::Unsupported("reading it needs ffmpeg".into()));
+            }
+            "mkv" => video(WIDE, true),
             "mp4" if name.starts_with("native") => video(NATIVE, false),
             "mp4" | "mov" => video(WIDE, true),
             _ => (MediaFormat::Other, None, None, false),
@@ -180,6 +203,26 @@ impl MediaTranscoder for FakeMedia {
         }
         self.streamed.lock().unwrap().push((source.clone(), spec));
         Ok(Box::new(Solid(Frame::filled(spec.size, STREAMED))))
+    }
+
+    fn poster(&mut self, source: &MediaLocation, spec: PosterSpec) -> Result<Frame> {
+        if !self.ready {
+            return Err(BezelError::Unsupported("no ffmpeg".into()));
+        }
+        self.posters.lock().unwrap().push((source.clone(), spec));
+        Ok(Frame::filled(spec.size, POSTER))
+    }
+}
+
+/// The moving picture of the animated GIF [`FakeMedia`] knows: 10 cs
+/// delays, 2 s.
+fn gif_track() -> VideoTrack {
+    VideoTrack {
+        codec: VideoCodec::Other,
+        pixel_format: Some(VideoPixelFormat::Other),
+        b_frames: Some(false),
+        frame_rate: FrameRate::new(100, 10),
+        duration: Some(Duration::from_secs(2)),
     }
 }
 
@@ -856,6 +899,44 @@ fn sending_the_theme_video_lets_the_live_screen_play_it() {
     f.backend.push(&plain, TIME).unwrap();
     assert_eq!(f.storage().playback, Playback::Idle);
     assert_eq!(f.backend.sample().video, None);
+}
+
+#[test]
+fn an_animated_gif_background_is_sent_as_a_video_at_a_constant_rate() {
+    let f = fixture("theme-gif");
+    let mut theme = Theme::blank("Waves", NATIVE, Orientation::Landscape);
+    let asset = AssetRef("assets/waves.gif".into());
+    theme.background = Background::Video {
+        asset: asset.clone(),
+        poster: None,
+    };
+    let assets = BTreeMap::from([(asset, vec![5; 3000])]);
+    f.backend.studio().start(theme, assets, None);
+    f.backend.set_live(true, Some(KEY), TIME).unwrap();
+    let video = f.backend.sample().video.unwrap();
+    assert_eq!(
+        (video.state, video.path.as_deref()),
+        ("missing", Some("internal/video/waves_90.mp4")),
+        "where an MP4 of it belongs"
+    );
+    let ready = match f.backend.prepare_theme_video(KEY, TIME).unwrap() {
+        PrepareDto::Ready(ready) => ready,
+        PrepareDto::Refused(r) => panic!("refused: {r:?}"),
+    };
+    let convert = ready.convert.unwrap();
+    assert_eq!((convert.quarter_turns, convert.cropped), (1, false));
+    let (result, _) = f.run(ready.ticket, Confirm::No);
+    assert!(matches!(
+        result,
+        Ok(JobDto::Done {
+            converted: true,
+            ..
+        })
+    ));
+    let target = f.converted.lock().unwrap()[0];
+    assert_eq!(target.format, MediaFormat::Mp4);
+    assert_eq!(target.frame_rate, Some(10), "its 10 cs delays");
+    assert_eq!(f.backend.sample().video.unwrap().state, "onDevice");
 }
 
 #[test]

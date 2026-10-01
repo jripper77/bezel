@@ -16,7 +16,7 @@ use bezel_core::domain::discovery::Screen;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::screen::{Brightness, Confirm};
 use bezel_core::domain::sensor::{SensorKey, Wanted};
-use bezel_core::domain::theme::{MIN_REFRESH_SECONDS, Theme};
+use bezel_core::domain::theme::{Background, MIN_REFRESH_SECONDS, Theme};
 use bezel_core::ports::{
     DesktopModeHid, DeviceBus, ScreenConnector, ScreenLink, SensorSource, ThemeLocation, ThemeStore,
 };
@@ -30,7 +30,7 @@ use crate::dto::{
     RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
 };
 use crate::library::ThemeLibrary;
-use crate::media::{kind_of, thumbnail_data_url};
+use crate::media::{extension_of, is_animated_gif, kind_of, thumbnail_data_url};
 pub use crate::messages::UiResult;
 use crate::messages::{ErrorCode, UiError};
 use crate::settings::SettingsFile;
@@ -175,13 +175,18 @@ fn is_host(text: &str) -> bool {
 }
 
 fn read_file(path: &Path) -> UiResult<Vec<u8>> {
+    read_limited(path, MAX_FILE_BYTES)
+}
+
+/// The content of the file at `path`, refused over `limit` bytes.
+pub(crate) fn read_limited(path: &Path, limit: u64) -> UiResult<Vec<u8>> {
     let unreadable = |e| UiError::file(path.display(), e);
     let size = std::fs::metadata(path).map_err(unreadable)?.len();
-    if size > MAX_FILE_BYTES {
+    if size > limit {
         return Err(UiError::new(ErrorCode::FileTooLarge)
             .arg("file", path.display())
             .arg("size", size / (1024 * 1024))
-            .arg("limit", MAX_FILE_BYTES / (1024 * 1024)));
+            .arg("limit", limit / (1024 * 1024)));
     }
     std::fs::read(path).map_err(unreadable)
 }
@@ -623,9 +628,21 @@ impl Backend {
 
     // -------------------------------------------------------------- media --
 
-    /// Adds the image at `path` to the theme.
+    /// Adds the image at `path` to the theme. An animated GIF also gets its
+    /// poster, ready to be a video background.
     pub fn add_image(&self, path: &Path) -> UiResult<AddedDto> {
         let bytes = read_file(path)?;
+        if is_animated_gif(&bytes) {
+            let added = self.add_moving(path, bytes)?;
+            return Ok(AddedDto {
+                reference: added.reference,
+            });
+        }
+        self.add_image_bytes(path, bytes)
+    }
+
+    /// Adds the image file at `path`, whose content is `bytes`.
+    pub(crate) fn add_image_bytes(&self, path: &Path, bytes: Vec<u8>) -> UiResult<AddedDto> {
         if image::guess_format(&bytes).is_err() {
             return Err(UiError::new(ErrorCode::NotAnImage).arg("file", path.display()));
         }
@@ -637,24 +654,50 @@ impl Backend {
         Ok(AddedDto { reference: asset.0 })
     }
 
-    /// The theme's assets with previews.
+    /// The theme's assets with previews (images only: videos are not
+    /// decoded nor copied for the list), the poster of each video and what
+    /// the session learnt of it.
     pub fn assets(&self) -> Vec<AssetDto> {
-        let assets: Vec<(String, &'static str, Vec<u8>)> = {
+        let listed: Vec<(AssetDto, Option<Vec<u8>>)> = {
             let studio = self.studio();
+            let background = match &studio.theme().background {
+                Background::Video { asset, poster } => Some((asset.clone(), poster.clone())),
+                _ => None,
+            };
             studio
                 .assets()
                 .iter()
-                .map(|(k, v)| (k.0.clone(), kind_of(k), v.clone()))
+                .map(|(asset, bytes)| {
+                    let kind = kind_of(asset);
+                    let known = studio.added_video(asset);
+                    let named = background
+                        .as_ref()
+                        .filter(|(video, _)| video == asset)
+                        .and_then(|(_, poster)| poster.clone());
+                    let dto = AssetDto {
+                        reference: asset.0.clone(),
+                        kind,
+                        data_url: None,
+                        bytes: bytes.len() as u64,
+                        animated: false,
+                        poster: known.and_then(|k| k.poster.clone()).or(named).map(|p| p.0),
+                        duration_ms: known
+                            .and_then(|k| k.duration)
+                            .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+                    };
+                    (dto, (kind == "image").then(|| bytes.clone()))
+                })
                 .collect()
         };
-        assets
+        listed
             .into_iter()
-            .map(|(reference, kind, bytes)| AssetDto {
-                data_url: (kind == "image")
-                    .then(|| thumbnail_data_url(&bytes))
-                    .flatten(),
-                reference,
-                kind,
+            .map(|(dto, image)| match image {
+                Some(bytes) => AssetDto {
+                    data_url: thumbnail_data_url(&bytes),
+                    animated: extension_of(&dto.reference) == "gif" && is_animated_gif(&bytes),
+                    ..dto
+                },
+                None => dto,
             })
             .collect()
     }
@@ -1514,5 +1557,16 @@ static_text:
                 .starts_with("data:image/png;base64,")
         );
         assert_eq!(f.backend.fonts, vec!["Inter".to_string()]);
+        // An animated GIF is an image that can be a video background: it
+        // comes with its poster.
+        let gif = f.root.join("Ondas.gif");
+        std::fs::write(&gif, crate::media::tests::gif(3)).unwrap();
+        let added = f.backend.add_image(&gif).unwrap();
+        assert_eq!(added.reference, "assets/ondas.gif");
+        let listed = f.backend.assets();
+        let ondas = listed.iter().find(|a| a.reference == "assets/ondas.gif");
+        let ondas = ondas.unwrap();
+        assert!(ondas.animated && ondas.data_url.is_some());
+        assert_eq!(ondas.poster.as_deref(), Some("assets/ondas-poster.png"));
     }
 }

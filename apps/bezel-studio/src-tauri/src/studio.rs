@@ -179,6 +179,18 @@ pub struct Studio {
     live: Option<Live>,
     live_error: Option<UiError>,
     host: Option<HostDecoding>,
+    /// What the session learnt about the videos added to it.
+    videos: BTreeMap<AssetRef, AddedVideo>,
+}
+
+/// A video (or an animated GIF) added to the session for a background: its
+/// poster and how long it plays, as learnt when it was added.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AddedVideo {
+    /// The poster taken from it (none without ffmpeg).
+    pub poster: Option<AssetRef>,
+    /// How long it plays, when known.
+    pub duration: Option<Duration>,
 }
 
 impl Studio {
@@ -203,6 +215,7 @@ impl Studio {
             live: None,
             live_error: None,
             host: None,
+            videos: BTreeMap::new(),
         }
     }
 
@@ -330,6 +343,7 @@ impl Studio {
         self.runtime.replace(theme, assets);
         self.video_changed(&before);
         self.location = location;
+        self.videos.clear();
     }
 
     /// After a new theme: another video starts again on the live screen.
@@ -386,6 +400,33 @@ impl Studio {
         };
         self.runtime.add_asset(asset.clone(), bytes);
         asset
+    }
+
+    /// Adds a video (or an animated GIF) for a background, named after
+    /// `file_name`, with its poster (a PNG named after the video) when one
+    /// was taken. Returns the video's reference and the poster's.
+    pub fn add_video(
+        &mut self,
+        file_name: &str,
+        bytes: Vec<u8>,
+        poster_png: Option<Vec<u8>>,
+        duration: Option<Duration>,
+    ) -> (AssetRef, Option<AssetRef>) {
+        let video = self.add_asset(file_name, bytes);
+        let poster = poster_png.map(|png| {
+            let stem = video.0.rsplit('/').next().unwrap_or_default();
+            let stem = stem.rsplit_once('.').map_or(stem, |(stem, _)| stem);
+            self.add_asset(&format!("{stem}-poster.png"), png)
+        });
+        let known = self.videos.entry(video.clone()).or_default();
+        known.poster = poster.clone().or(known.poster.take());
+        known.duration = duration.or(known.duration);
+        (video, known.poster.clone())
+    }
+
+    /// What the session learnt about `asset` when it was added as a video.
+    pub fn added_video(&self, asset: &AssetRef) -> Option<&AddedVideo> {
+        self.videos.get(asset)
     }
 
     // ------------------------------------------------------------- frames --
@@ -899,6 +940,35 @@ mod tests {
         assert_eq!(s.add_asset("../../.hidden", vec![3]).0, "assets/hidden");
         assert_eq!(s.add_asset("noext", vec![4]).0, "assets/noext");
         assert_eq!(s.assets().len(), 4);
+    }
+
+    #[test]
+    fn videos_keep_their_poster_and_play_time_for_the_session() {
+        let mut s = studio();
+        let second = Duration::from_secs(1);
+        let (video, poster) = s.add_video(
+            "C:\\Clips\\Ondas Mar.MOV",
+            vec![9],
+            Some(vec![1]),
+            Some(second),
+        );
+        assert_eq!(video.0, "assets/ondas-mar.mov");
+        assert_eq!(poster.as_ref().unwrap().0, "assets/ondas-mar-poster.png");
+        let known = s.added_video(&video).unwrap();
+        assert_eq!(
+            (known.poster.as_ref(), known.duration),
+            (poster.as_ref(), Some(second))
+        );
+        // The same file again (now without ffmpeg) keeps what was learnt.
+        let again = s.add_video("ondas mar.mov", vec![9], None, None);
+        assert_eq!(again, (video.clone(), poster.clone()));
+        // Without a poster, none.
+        let (gif, none) = s.add_video("loop.gif", vec![7], None, None);
+        assert_eq!((gif.0.as_str(), none), ("assets/loop.gif", None));
+        assert_eq!(s.assets().len(), 3);
+        // Another document forgets them.
+        s.start(theme_88(), BTreeMap::new(), None);
+        assert_eq!(s.added_video(&video), None);
     }
 
     type Stored = (Theme, BTreeMap<AssetRef, Vec<u8>>);

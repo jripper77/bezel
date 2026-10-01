@@ -86,6 +86,8 @@ test('tauri mode maps every call to its command', async () => {
   await bridge.quitApp();
   await bridge.showSensors(['net.ping', 'cpu.usage']);
   await bridge.restartScreen('k');
+  await bridge.addMedia();
+  await bridge.addMedia('/home/me/Ondas.gif');
   assert.deepEqual(calls.map((c) => c[0]), [
     'list_devices', 'sensor_catalog', 'sample_sensors', 'editor_session', 'render_preview', 'push_theme', 'set_live',
     'set_brightness', 'release_screen', 'save_theme', 'list_themes', 'open_theme', 'new_theme', 'import_theme',
@@ -93,8 +95,10 @@ test('tauri mode maps every call to its command', async () => {
     'storage_overview', 'media_tools', 'locate_ffmpeg', 'pick_media', 'prepare_upload', 'prepare_theme_video',
     'run_upload', 'cancel_job', 'delete_stored', 'play_stored', 'stop_playback', 'set_boot_media', 'set_boot_media',
     'set_unsaved', 'close_window', 'preferences', 'set_language', 'set_sensor_options', 'pick_folder',
-    'leave_desktop_mode', 'quit_app', 'show_sensors', 'restart_screen',
+    'leave_desktop_mode', 'quit_app', 'show_sensors', 'restart_screen', 'add_media', 'add_media',
   ]);
+  assert.deepEqual(calls[42][1], { path: null }, 'the native dialog asks');
+  assert.deepEqual(calls[43][1], { path: '/home/me/Ondas.gif' }, 'a dropped file');
   assert.deepEqual(calls[41][1], { screen: 'k' });
   assert.deepEqual(calls[40][1], { keys: ['net.ping', 'cpu.usage'] });
   assert.deepEqual(calls[35][1], { language: 'en' });

@@ -22,6 +22,8 @@ pub struct Texts {
     pub images: &'static str,
     /// File dialogs: images and videos for a screen.
     pub media: &'static str,
+    /// File dialogs: a theme's video background (videos and animated GIFs).
+    pub videos: &'static str,
     /// Name of a theme started without one.
     pub untitled: &'static str,
 }
@@ -37,6 +39,7 @@ pub fn texts(language: Language) -> Texts {
             themes: "Temas",
             images: "Imagens",
             media: "Imagens e vídeos",
+            videos: "Vídeos e GIFs animados",
             untitled: "Sem título",
         },
         Language::English => Texts {
@@ -47,6 +50,7 @@ pub fn texts(language: Language) -> Texts {
             themes: "Themes",
             images: "Images",
             media: "Images and videos",
+            videos: "Videos and animated GIFs",
             untitled: "Untitled",
         },
     }
@@ -88,6 +92,8 @@ mod tests {
             )
         );
         assert_eq!((en.images, en.media), ("Images", "Images and videos"));
+        assert_eq!(en.videos, "Videos and animated GIFs");
+        assert_eq!(pt.videos, "Vídeos e GIFs animados");
     }
 
     #[test]

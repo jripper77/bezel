@@ -1,11 +1,14 @@
-//! What the media panel shows of an asset: its kind and a small preview.
+//! What the media panel shows of an asset: its kind and a small preview;
+//! which files make a video background; and a poster as a PNG.
 
 use std::io::Cursor;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use bezel_core::domain::frame::Frame;
 use bezel_core::domain::theme::AssetRef;
-use image::ImageFormat;
+use image::codecs::gif::GifDecoder;
+use image::{AnimationDecoder as _, ImageFormat, RgbaImage};
 
 /// Longest side of a media thumbnail, pixels.
 pub const THUMBNAIL_SIDE: u32 = 96;
@@ -19,19 +22,49 @@ pub const MEDIA_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "bmp", "gif", "mp4", "mov", "m4v", "mkv", "webm", "avi",
 ];
 
+/// Extensions of the videos a theme's background takes (those ffmpeg
+/// converts for a screen).
+pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "m4v", "mkv", "webm", "avi"];
+
+/// Extensions the picker of a video background offers: the videos, and GIFs
+/// (an animated one is a video background).
+pub const BACKGROUND_EXTENSIONS: &[&str] = &["mp4", "mov", "m4v", "mkv", "webm", "avi", "gif"];
+
+/// The lowercase extension of a file name or asset reference.
+pub fn extension_of(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or_default();
+    base.rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
 /// `image`, `font`, `video` or `other`, from the file extension.
 pub fn kind_of(asset: &AssetRef) -> &'static str {
-    let extension = asset
-        .0
-        .rsplit_once('.')
-        .map(|(_, e)| e.to_ascii_lowercase())
-        .unwrap_or_default();
+    let extension = extension_of(&asset.0);
     match extension.as_str() {
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" => "image",
         "ttf" | "otf" | "ttc" => "font",
-        "mp4" | "webm" | "mkv" | "avi" | "mov" => "video",
+        e if VIDEO_EXTENSIONS.contains(&e) => "video",
         _ => "other",
     }
+}
+
+/// Whether `bytes` are a GIF of more than one picture: a moving picture,
+/// which a theme can use as its video background.
+pub fn is_animated_gif(bytes: &[u8]) -> bool {
+    let Ok(decoder) = GifDecoder::new(Cursor::new(bytes)) else {
+        return false;
+    };
+    decoder.into_frames().take(2).filter(Result::is_ok).count() > 1
+}
+
+/// `frame` as a PNG file (a poster asset).
+pub fn png_of(frame: &Frame) -> Option<Vec<u8>> {
+    let size = frame.size();
+    let image = RgbaImage::from_raw(size.width, size.height, frame.as_rgba().to_vec())?;
+    let mut png = Cursor::new(Vec::new());
+    image.write_to(&mut png, ImageFormat::Png).ok()?;
+    Some(png.into_inner())
 }
 
 /// A PNG data URL of the image scaled to fit [`THUMBNAIL_SIDE`], or `None`
@@ -48,7 +81,7 @@ pub fn thumbnail_data_url(bytes: &[u8]) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use image::{Rgba, RgbaImage};
 
@@ -58,7 +91,53 @@ mod tests {
         assert_eq!(kind("assets/a.PNG"), "image");
         assert_eq!(kind("assets/f.otf"), "font");
         assert_eq!(kind("assets/v.mp4"), "video");
+        assert_eq!(kind("assets/v.M4V"), "video");
         assert_eq!(kind("assets/readme"), "other");
+        assert_eq!(extension_of("C:\\Clips\\a.b\\Ondas.MOV"), "mov");
+        assert_eq!(extension_of("dir.d/noext"), "");
+        for video in VIDEO_EXTENSIONS {
+            assert!(BACKGROUND_EXTENSIONS.contains(video), "{video}");
+            assert!(
+                MEDIA_EXTENSIONS.contains(video),
+                "sent like any video: {video}"
+            );
+        }
+        assert!(BACKGROUND_EXTENSIONS.contains(&"gif"));
+    }
+
+    /// A GIF of `count` 2x2 pictures.
+    pub(crate) fn gif(count: u8) -> Vec<u8> {
+        use image::codecs::gif::GifEncoder;
+        use image::{Delay, Frame as Picture};
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut bytes);
+            let pictures = (0..count).map(|i| {
+                let picture = RgbaImage::from_pixel(2, 2, Rgba([i * 60, 0, 0, 255]));
+                Picture::from_parts(picture, 0, 0, Delay::from_numer_denom_ms(100, 1))
+            });
+            encoder.encode_frames(pictures).unwrap();
+        }
+        bytes
+    }
+
+    #[test]
+    fn only_gifs_of_several_pictures_move() {
+        assert!(is_animated_gif(&gif(3)));
+        assert!(!is_animated_gif(&gif(1)));
+        assert!(!is_animated_gif(b"GIF89a but not really"));
+        assert!(!is_animated_gif(b"\x89PNG"));
+    }
+
+    #[test]
+    fn posters_are_pngs_of_the_frame() {
+        use bezel_core::domain::frame::Rgba as Color;
+        use bezel_core::domain::geometry::Size;
+        let frame = Frame::filled(Size::new(3, 2), Color::opaque(10, 20, 30));
+        let png = png_of(&frame).unwrap();
+        let back = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!((back.width(), back.height()), (3, 2));
+        assert_eq!(back.get_pixel(2, 1).0, [10, 20, 30, 255]);
     }
 
     #[test]

@@ -1,9 +1,10 @@
 // An in-memory backend for demo mode: a simulated screen, sensors that move,
 // themes, media and an approximate renderer. Nothing here reaches hardware.
-import { DEMO_BACK_FROM_DESKTOP, DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
+import { DEMO_BACK_FROM_DESKTOP, DEMO_LOCAL_FILES, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
 import { DEMO_THEME } from './demo-theme.js';
 import { renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
+import { IMAGE_EXTENSIONS as PICTURES, droppable, extensionOf, fileNameOf } from './editor/background.js';
 import { pickLocale } from './i18n/index.js';
 
 /** Well-known demo sensors: key, category, label, quantity, base value, swing. */
@@ -139,6 +140,22 @@ export function demoSuggestName(name, extension) {
 }
 
 const QUARTERS = Object.freeze({ portrait: 0, landscape: 1, 'reverse-portrait': 2, 'reverse-landscape': 3 });
+
+/** An asset name like the backend makes it: `Férias Praia.MP4` → `f-rias-praia.mp4`. */
+export function demoAssetName(fileName) {
+  const base = fileNameOf(fileName);
+  const dot = base.lastIndexOf('.');
+  const clean = (text) => text.toLowerCase().replace(/[^a-z0-9_]+/g, '-').replace(/^-+|-+$/g, '');
+  const stem = clean(dot > 0 ? base.slice(0, dot) : base) || 'file';
+  return dot > 0 ? `${stem}.${clean(base.slice(dot + 1))}` : stem;
+}
+
+/** Why a video the demo adds without ffmpeg has no poster (the backend's error). */
+const NO_POSTER = Object.freeze({
+  code: 'unsupported',
+  args: { detail: 'Taking a poster from a video needs ffmpeg with libx264' },
+  message: 'not supported: Taking a poster from a video needs ffmpeg with libx264',
+});
 
 /** Clockwise quarter turns from a theme orientation to the 8.8"'s panel. */
 export function demoTurns(orientation) {
@@ -438,6 +455,11 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   let autostart = false;
   const saved = [{ location: 'demo://Demo', theme: structuredClone(DEMO_THEME) }];
   const images = [];
+  // Videos and animated GIFs added for a background (with their posters),
+  // and the sizes of files dropped on the window, by demo source.
+  const videos = new Map();
+  const posters = [];
+  const dropped = new Map();
   /** Screen key → last orientation shown on it or chosen for it. */
   const remembered = new Map();
   const modelOf = (key) => devices.screens.find((s) => s.key === key)?.models[0];
@@ -447,6 +469,45 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     delay, live: () => live, theme: () => theme, screens: () => devices.screens, hold: Boolean(hooks.hold), hung: () => screenState.hung,
   });
   const { videoOfTheme, ...storageApi } = storage;
+  const taken = () => new Set([...images, ...posters, ...videos.keys()]);
+  /** A free asset reference for `fileName`, like the backend's. */
+  const freeRef = (fileName) => {
+    const name = demoAssetName(fileName);
+    const dot = name.lastIndexOf('.');
+    const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+    const used = taken();
+    for (let n = 1; ; n += 1) {
+      const ref = `assets/${stem}${n === 1 ? '' : `-${n}`}${extension}`;
+      if (!used.has(ref)) return ref;
+    }
+  };
+
+  /**
+   * Adds a file like the backend's `add_media`: a video or an animated GIF
+   * becomes a video with a poster (none without ffmpeg), a picture an image.
+   */
+  async function addMedia(source) {
+    const name = source.startsWith('demo://') ? source.slice('demo://'.length) : fileNameOf(source);
+    const known = DEMO_LOCAL_FILES[name];
+    const bytes = known?.size ?? dropped.get(source) ?? 0;
+    const extension = extensionOf(name);
+    if (!droppable(name)) {
+      return Promise.reject(Object.assign(new Error(`${name} is not a video, an animated GIF or a picture Bezel can use`), { code: 'notMedia', args: { file: name } }));
+    }
+    const still = extension === 'gif' ? Boolean(known?.still) : PICTURES.includes(extension);
+    const ref = freeRef(name);
+    if (still) {
+      images.push(ref);
+      return { ref, kind: 'image', poster: null, bytes, durationMs: null, posterError: null };
+    }
+    const tools = await storageApi.mediaTools();
+    const poster = tools.ready ? freeRef(`${ref.slice('assets/'.length, ref.lastIndexOf('.'))}-poster.png`) : null;
+    if (poster) posters.push(poster);
+    const animated = extension === 'gif';
+    const durationMs = known?.durationMs ?? (animated ? 2_400 : 12_400);
+    videos.set(ref, { ref, kind: animated ? 'image' : 'video', animated, dataUrl: animated ? DEMO_POSTER_URL : null, poster, bytes, durationMs });
+    return { ref, kind: 'video', poster, bytes, durationMs, posterError: poster ? null : { ...NO_POSTER } };
+  }
   // The window, like the app: the close button hides it while a screen is
   // live, asks the UI when edits are unsaved, and closes it otherwise.
   let unsaved = false;
@@ -560,7 +621,19 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       images.push(ref);
       return Promise.resolve({ ref });
     },
-    assets: () => Promise.resolve(images.map((ref) => ({ ref, kind: 'image' }))),
+    assets: () => Promise.resolve([
+      ...images.map((ref) => ({ ref, kind: 'image' })),
+      ...posters.map((ref) => ({ ref, kind: 'image', dataUrl: DEMO_POSTER_URL, bytes: 184_320 })),
+      ...[...videos.values()].map((v) => ({ ...v })),
+    ]),
+    /** A video, GIF or picture: dropped (`source`), else picked in the dialog. */
+    addMedia: (source = null) => addMedia(source ?? DEMO_PICKED_VIDEO),
+    /** A dropped file as a source the demo can add or send, its size kept. */
+    fileSource: (file) => {
+      const source = storageApi.fileSource(file);
+      if (source) dropped.set(source, file.size);
+      return source;
+    },
     fonts: () => Promise.resolve(['Inter', 'JetBrains Mono']),
     getAutostart: () => Promise.resolve(autostart),
     setAutostart: (on) => {

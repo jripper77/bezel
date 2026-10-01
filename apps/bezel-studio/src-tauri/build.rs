@@ -22,6 +22,7 @@ const COMMANDS: &[&str] = &[
     "new_theme",
     "import_theme",
     "add_image",
+    "add_media",
     "list_assets",
     "list_fonts",
     "get_autostart",

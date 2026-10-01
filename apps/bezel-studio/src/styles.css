@@ -161,6 +161,14 @@ button, input, select { font: inherit; color: inherit; }
 .media-item { display: grid; grid-template-columns: 48px 1fr; gap: 8px; align-items: center; padding: 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
 .media-item .thumb { width: 48px; height: 48px; border-radius: 6px; background: #000 center / contain no-repeat; }
 .media-item .actions { grid-column: 1 / -1; display: flex; gap: 6px; }
+.media-item .thumb, .bg-video .thumb { display: grid; place-items: center; color: var(--muted); }
+.media-item .thumb[style*="background-image"], .bg-video .thumb[style*="background-image"] { background-size: cover; }
+.media-name { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.media-name small { color: var(--muted); font-size: 0.8rem; }
+.panel.drop-target { outline: 3px dashed var(--accent); outline-offset: -3px; border-radius: 8px; }
+.bg-video { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: center; margin: 4px 0 8px; }
+.bg-video .thumb { width: 96px; height: 54px; border-radius: 6px; background: #000 center / contain no-repeat; border: 1px solid var(--border); }
+.video-status { margin: 0 0 8px; }
 
 /* ---------------------------------------------------------------- stage -- */
 .stage { min-width: 0; min-height: 0; position: relative; background: radial-gradient(circle at 50% 40%, var(--surface-3), var(--bg) 70%); }

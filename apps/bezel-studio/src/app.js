@@ -6,7 +6,7 @@ import { isHorizontal, isTurned, orientationOf } from './editor/geometry.js';
 import { createCanvasView } from './ui/canvas.js';
 import { createLibrary } from './ui/library.js';
 import { createInspector } from './ui/inspector.js';
-import { createConfirm, createStoragePanel, wireSubtabs } from './ui/storage.js';
+import { createConfirm, createStoragePanel, formatBytes, wireSubtabs } from './ui/storage.js';
 import { el, icon } from './ui/dom.js';
 import { ICONS } from './ui/icons.js';
 import { askChoice } from './ui/dialog.js';
@@ -15,6 +15,7 @@ import { showAccessHelp } from './ui/udev.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
 import { errorText, sensorLabel } from './messages.js';
+import { backgroundOf, droppable, fileNameOf, videoFacts } from './editor/background.js';
 
 const bridge = createBridge(window);
 const $ = (id) => document.getElementById(id);
@@ -51,6 +52,10 @@ const state = {
   // card offers the restart; D-2026-09-30-release-polish-13), by key.
   restarting: null,
   hung: null,
+  // Whether ffmpeg can take posters and convert videos (`media_tools`).
+  mediaTools: null,
+  // A file being added from the Media panel or a drop.
+  addingMedia: false,
 };
 
 function toast(message) {
@@ -97,12 +102,14 @@ const library = createLibrary({
   canvas: canvasView,
   stage: $('stage'),
   t,
+  locale: () => locale,
   actions: {
     openTheme: (location) => openTheme(location),
     newTheme: (axis) => newTheme(axis),
     refreshThemes: () => refreshThemes(),
     importTheme: () => importTheme(),
     addImage: () => addImage(),
+    addVideo: () => addMedia(),
     setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).then(() => { state.brightness[screen] = percent; }).catch((e) => fail(e)),
     release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => fail(e)),
     setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => fail(e)),
@@ -135,6 +142,12 @@ const inspector = createInspector({
   t,
   sensors: { catalog: () => labelledCatalog(), fonts: () => state.fonts },
   minRefresh,
+  video: {
+    context: () => ({ screen: currentScreen(), live: state.live, liveVideo: state.liveVideo, tools: state.mediaTools, locale }),
+    useVideo: () => addMedia(null, { asBackground: true }),
+    useImage: () => useImage(),
+    openStorage: () => openStorage(),
+  },
 });
 
 // ----------------------------------------------------------- render ----
@@ -242,6 +255,8 @@ async function sampleLoop() {
 }
 
 // ---------------------------------------------------------- screens ----
+const currentScreen = () => state.screens.find((s) => s.key === state.screen) ?? null;
+
 function renderScreenSelect() {
   const select = $('screen-select');
   const options = state.screens.map((s) => {
@@ -260,6 +275,7 @@ function renderScreenSelect() {
   $('status-device').textContent = device;
   library.renderScreen(state.screens, state.screen, state.live, state.brightness, state.desktopMode, { restarting: state.restarting, hung: state.hung });
   storage.update();
+  inspector.contextChanged();
 }
 
 async function refreshScreens() {
@@ -275,6 +291,9 @@ async function refreshScreens() {
   }
   if (!state.screens.some((s) => s.key === state.screen)) state.screen = state.screens[0]?.key ?? null;
   renderScreenSelect();
+  // ffmpeg may have been installed or located since the video was added.
+  const bg = store.getState().theme.background;
+  if (bg.type === 'video' && !bg.poster) refreshTools();
 }
 
 // The backend owns live mode: it restores it at start and stops it when the
@@ -391,9 +410,16 @@ async function refreshAssets() {
   try {
     state.assets = await bridge.assets();
     library.renderMedia(state.assets);
+    inspector.render(state.assets);
   } catch (e) {
     fail(e);
   }
+}
+
+/** Whether ffmpeg can take posters and convert videos, for the inspector. */
+async function refreshTools() {
+  state.mediaTools = await bridge.mediaTools().catch(() => null);
+  inspector.contextChanged();
 }
 
 /**
@@ -471,6 +497,121 @@ async function addImage() {
   } catch (e) {
     fail(e);
   }
+}
+
+/** What adding `added` (an `add_media` answer) tells: its play time and size, or why it has no poster. */
+function addedText(added) {
+  const name = fileNameOf(added.ref);
+  if (added.kind !== 'video') return t('toast.imageAdded', { name });
+  if (!added.poster && added.posterError && added.posterError.code !== 'unsupported') {
+    return t('toast.posterFailed', { name, message: errorText(t, added.posterError) });
+  }
+  const details = videoFacts(added, (n) => formatBytes(n, locale)).join(' · ');
+  return t(added.poster || !added.posterError ? 'toast.videoAdded' : 'toast.videoAddedNoFfmpeg', { name, details });
+}
+
+/**
+ * Adds a video, an animated GIF or a picture to the theme: the file dropped
+ * (`source`), else one picked in the native dialog. With `asBackground` it
+ * becomes the theme's background (one undo step); a poster may take a few
+ * seconds, meanwhile the Media panel says so.
+ */
+async function addMedia(source = null, { asBackground = false } = {}) {
+  if (state.addingMedia) return;
+  state.addingMedia = true;
+  library.setAdding(true);
+  try {
+    const added = await bridge.addMedia(source);
+    if (!added) return;
+    await refreshAssets();
+    if (asBackground) store.dispatch('setTheme', { patch: { background: backgroundOf(added) } });
+    if (added.kind === 'video' && !added.poster) await refreshTools();
+    toast(addedText(added));
+  } catch (e) {
+    fail(e);
+  } finally {
+    state.addingMedia = false;
+    library.setAdding(false);
+  }
+}
+
+/** Picks a picture in the native dialog and makes it the background. */
+async function useImage() {
+  try {
+    const added = await bridge.addImage();
+    if (!added) return;
+    await refreshAssets();
+    store.dispatch('setTheme', { patch: { background: { type: 'image', asset: added.ref, fit: 'cover' } } });
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/** Shows the storage tab, where a video missing on the screen is sent. */
+function openStorage() {
+  library.selectTab('screen');
+  $('subtab-storage').click();
+  $('subtab-storage').focus();
+}
+
+// ------------------------------------------------------------ drops ----
+/**
+ * Where a file dropped at (x, y) goes: `canvas` (the editing area: it
+ * becomes the background), `media` (the Media panel: it is added), or none.
+ */
+function dropTargetAt(x, y) {
+  const hit = document.elementFromPoint(x, y);
+  if (hit?.closest('#stage')) return 'canvas';
+  if (hit?.closest('#panel-media') && !$('panel-media').hidden) return 'media';
+  return null;
+}
+
+function markDropTarget(target) {
+  $('stage').classList.toggle('drop-target', target === 'canvas');
+  $('panel-media').classList.toggle('drop-target', target === 'media');
+}
+
+function dropFile(name, source, target) {
+  markDropTarget(null);
+  if (!target || !source) return;
+  if (!droppable(name)) {
+    toast(t('media.dropUnsupported'));
+    return;
+  }
+  addMedia(source, { asBackground: target === 'canvas' });
+}
+
+// Files dropped from the system: Tauri reports their paths and the pointer
+// (physical pixels).
+bridge.onFileDrop?.((evt) => {
+  const ratio = window.devicePixelRatio || 1;
+  const target = evt.position ? dropTargetAt(evt.position.x / ratio, evt.position.y / ratio) : null;
+  if (evt.type !== 'drop') {
+    markDropTarget(evt.type === 'leave' ? null : target);
+    return;
+  }
+  const path = evt.paths?.find(droppable) ?? evt.paths?.[0];
+  if (path) dropFile(path, path, target);
+  else markDropTarget(null);
+});
+
+// Files dropped in a browser (demo mode): the bridge turns them into sources.
+for (const [id, target] of [['stage', 'canvas'], ['panel-media', 'media']]) {
+  const zone = $(id);
+  zone.addEventListener('dragover', (evt) => {
+    if (!evt.dataTransfer?.types?.includes('Files')) return;
+    evt.preventDefault();
+    markDropTarget(target);
+  });
+  zone.addEventListener('dragleave', (evt) => {
+    if (!zone.contains(evt.relatedTarget)) markDropTarget(null);
+  });
+  zone.addEventListener('drop', (evt) => {
+    const file = evt.dataTransfer?.files?.[0];
+    if (!file) return;
+    evt.preventDefault();
+    dropFile(file.name, bridge.fileSource?.(file), target);
+  });
 }
 
 /** Saves the theme; `true` once it is saved. */
@@ -563,7 +704,7 @@ $('preferences').addEventListener('click', () => preferences.open());
 library.renderWidgets();
 refreshChrome('load');
 canvasView.fit();
-await Promise.all([loadCatalog(), refreshScreens(), refreshThemes(), refreshAssets()]);
+await Promise.all([loadCatalog(), refreshScreens(), refreshThemes(), refreshAssets(), refreshTools()]);
 bridge.getAutostart().then((on) => { state.autostart = on; renderScreenSelect(); }).catch(() => {});
 bridge.fonts().then((f) => { if (f?.length) state.fonts = f; }).catch(() => {});
 inspector.render(state.assets);

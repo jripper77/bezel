@@ -19,11 +19,11 @@ use tauri_plugin_dialog::DialogExt as _;
 use crate::backend::Backend;
 use crate::clock::now;
 use crate::dto::{
-    AddedDto, AssetDto, DevicesDto, ImportedDto, JobDto, MediaToolsDto, MonitorModeDto,
-    PreferencesDto, PrepareDto, ProgressDto, RestartedDto, SampleDto, SavedDto, SensorDto,
-    SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
+    AddedDto, AddedMediaDto, AssetDto, DevicesDto, ImportedDto, JobDto, MediaToolsDto,
+    MonitorModeDto, PreferencesDto, PrepareDto, ProgressDto, RestartedDto, SampleDto, SavedDto,
+    SensorDto, SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
 };
-use crate::media::{IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
+use crate::media::{BACKGROUND_EXTENSIONS, IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
 use crate::storage::ProgressThrottle;
 use crate::tray::{LiveItem, TrayMenu};
@@ -260,6 +260,25 @@ pub async fn add_image<R: Runtime>(
         return Ok(None);
     };
     blocking(&state, move |b| b.add_image(&path).map(Some)).await
+}
+
+/// Adds a video background or a dropped file: the file at `path` (a drop
+/// on the canvas or the Media panel), else one asked for in the native
+/// dialog (videos and GIFs). `None` when the dialog is cancelled.
+#[tauri::command]
+pub async fn add_media<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+    path: Option<String>,
+) -> UiResult<Option<AddedMediaDto>> {
+    let path = match path {
+        Some(path) => PathBuf::from(path),
+        None => match pick_file(&app, state.texts().videos, BACKGROUND_EXTENSIONS)? {
+            Some(path) => path,
+            None => return Ok(None),
+        },
+    };
+    blocking(&state, move |b| b.add_media(&path).map(Some)).await
 }
 
 /// The theme's assets with previews.

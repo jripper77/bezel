@@ -6,7 +6,9 @@ import { makeDraggable } from './dragdrop.js';
 import { checkField } from './fields.js';
 import { WIDGETS, widgetOf } from '../editor/widgets.js';
 import { isHorizontal } from '../editor/geometry.js';
+import { backgroundOf, fileNameOf, mediaItems, moves, videoFacts } from '../editor/background.js';
 import { warningText } from '../messages.js';
+import { formatBytes } from './storage.js';
 
 const CATEGORY_ORDER = ['cpu', 'gpu', 'memory', 'disk', 'network', 'board', 'system'];
 
@@ -54,7 +56,7 @@ export function axisOf(entry) {
 /**
  * @param {object} deps
  */
-export function createLibrary({ store, canvas, stage, t, actions }) {
+export function createLibrary({ store, canvas, stage, t, locale = () => 'en', actions }) {
   const $ = (id) => document.getElementById(id);
   let catalog = [];
   let readings = {};
@@ -260,29 +262,56 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   $('theme-import').addEventListener('click', () => actions.importTheme());
 
   // --------------------------------------------------------------- media --
-  function renderMedia(assets) {
-    media = assets;
-    const list = $('media-list');
-    const images = assets.filter((a) => a.kind === 'image');
-    if (!images.length) {
-      list.replaceChildren(el('li', { class: 'empty-note', text: t('media.empty') }));
-      return;
-    }
-    list.replaceChildren(...images.map((a) => el('li', { class: 'media-item' }, [
-      el('span', { class: 'thumb', style: a.dataUrl ? { backgroundImage: `url(${a.dataUrl})` } : {} }),
-      el('span', { text: a.ref.split('/').pop() }),
+  /**
+   * One picture or video of the theme. A video, or an animated GIF, shows
+   * its poster, its kind, play time and size, and becomes a video
+   * background; a picture becomes a picture background or an image element.
+   */
+  function mediaItem(a, assets) {
+    const moving = moves(a);
+    const poster = moving && a.poster ? assets.find((p) => p.ref === a.poster)?.dataUrl : null;
+    const preview = poster ?? a.dataUrl ?? null;
+    const label = a.kind === 'video' ? t('media.video') : t('media.animatedGif');
+    const details = moving ? [label, ...videoFacts(a, (n) => formatBytes(n, locale()))].join(' · ') : null;
+    return el('li', { class: 'media-item', dataset: { ref: a.ref } }, [
+      el('span', { class: 'thumb', style: preview ? { backgroundImage: `url(${preview})` } : {} }, preview ? [] : [icon(ICONS.film, 22)]),
+      el('span', { class: 'media-name' }, [
+        el('span', { text: fileNameOf(a.ref) }),
+        details ? el('small', { text: details }) : null,
+      ]),
       el('div', { class: 'actions' }, [
-        el('button', { type: 'button', class: 'text-button', text: t('media.useBackground'), onclick: () => store.dispatch('setTheme', { patch: { background: { type: 'image', asset: a.ref, fit: 'cover' } } }) }),
-        el('button', { type: 'button', class: 'text-button', text: t('media.addImage'), onclick: () => {
+        el('button', { type: 'button', class: 'text-button', text: t('media.useBackground'), onclick: () => store.dispatch('setTheme', { patch: { background: backgroundOf(a) } }) }),
+        a.kind === 'image' && el('button', { type: 'button', class: 'text-button', text: t('media.addImage'), onclick: () => {
           const { x, y } = center();
           store.dispatch('add', { widget: 'image', x, y });
           const id = store.getState().selection[0];
           store.dispatch('update', { id, patch: { kind: { asset: a.ref } } });
         } }),
       ]),
-    ])));
+    ]);
   }
+
+  function renderMedia(assets) {
+    media = assets;
+    const list = $('media-list');
+    const items = mediaItems(assets);
+    if (!items.length) {
+      list.replaceChildren(el('li', { class: 'empty-note', text: t('media.empty') }));
+      return;
+    }
+    list.replaceChildren(...items.map((a) => mediaItem(a, assets)));
+  }
+
+  /** While a file is added (a poster may take seconds), the add buttons wait. */
+  function setAdding(on) {
+    $('media-add').disabled = on;
+    $('media-add-video').disabled = on;
+    $('media-status').hidden = !on;
+    $('panel-media').setAttribute('aria-busy', String(on));
+  }
+
   $('media-add').addEventListener('click', () => actions.addImage());
+  $('media-add-video').addEventListener('click', () => actions.addVideo());
 
   // -------------------------------------------------------------- screen --
   const autostartField = () => checkField(t('screen.autostart'), actions.autostart(), (on) => actions.setAutostart(on));
@@ -373,6 +402,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
     renderThemes,
     showImportReport,
     renderMedia,
+    setAdding,
     renderScreen,
     selectTab: (name) => selectTab(tabs.find((x) => x.dataset.tab === name)),
     /** The UI's language changed: every panel is drawn again. */

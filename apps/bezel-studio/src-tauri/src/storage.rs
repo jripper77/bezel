@@ -146,7 +146,8 @@ impl StorageState {
         Ok(())
     }
 
-    fn media(&self) -> MutexGuard<'_, Box<dyn MediaSetup>> {
+    /// The media converter, waiting while a job uses it.
+    pub(crate) fn media(&self) -> MutexGuard<'_, Box<dyn MediaSetup>> {
         lock(&self.media)
     }
 

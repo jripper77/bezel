@@ -123,6 +123,21 @@ function drawElement(ctx, e, t) {
 }
 
 /**
+ * What the canvas shows under the elements: the color, a dusk gradient for
+ * a video's poster (every demo poster is one), black otherwise (a picture,
+ * or a video without a poster).
+ */
+function backdrop(ctx, background, width, height) {
+  if (background?.type === 'color') return color(background.color);
+  if (background?.type !== 'video' || !background.poster) return '#000';
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, '#1e1b4b');
+  gradient.addColorStop(0.55, '#7c3aed');
+  gradient.addColorStop(1, '#22d3ee');
+  return gradient;
+}
+
+/**
  * Renders a theme to RGBA pixels.
  * @returns {{width:number, height:number, rgba: Uint8ClampedArray}}
  */
@@ -130,7 +145,7 @@ export function renderApprox(theme, t) {
   const { width, height } = theme.canvas;
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = theme.background?.type === 'color' ? color(theme.background.color) : '#000';
+  ctx.fillStyle = backdrop(ctx, theme.background, width, height);
   ctx.fillRect(0, 0, width, height);
   for (const e of theme.elements) if (e.visible !== false) drawElement(ctx, e, t);
   return { width, height, rgba: ctx.getImageData(0, 0, width, height).data };

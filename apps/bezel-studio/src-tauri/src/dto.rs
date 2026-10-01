@@ -377,6 +377,15 @@ pub struct AssetDto {
     pub kind: &'static str,
     /// Small PNG preview of images.
     pub data_url: Option<String>,
+    /// Size of the file, bytes.
+    pub bytes: u64,
+    /// A GIF of several pictures: it can be a video background.
+    pub animated: bool,
+    /// The poster of a video (or animated GIF): the one taken when it was
+    /// added, or the one the theme's background names.
+    pub poster: Option<String>,
+    /// How long a video plays, ms, when known (learnt when it was added).
+    pub duration_ms: Option<u64>,
 }
 
 /// Where a theme was saved.
@@ -420,6 +429,26 @@ pub struct AddedDto {
     /// Its reference.
     #[serde(rename = "ref")]
     pub reference: String,
+}
+
+/// A file added from the Media panel or dropped on the window.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddedMediaDto {
+    /// Its reference.
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// `video` (a video or an animated GIF: a video background) or `image`.
+    pub kind: &'static str,
+    /// The poster taken from a video; `None` for an image, or when it could
+    /// not be taken ([`Self::poster_error`]).
+    pub poster: Option<String>,
+    /// Size of the file, bytes.
+    pub bytes: u64,
+    /// How long a video plays, ms, when known.
+    pub duration_ms: Option<u64>,
+    /// Why a video has no poster (`unsupported` without ffmpeg).
+    pub poster_error: Option<UiError>,
 }
 
 /// How the theme's video background reaches the live screen.
@@ -868,11 +897,23 @@ mod tests {
             (Some("disk"), Some("celsius"))
         );
         let asset = serde_json::to_value(AssetDto {
-            reference: "assets/a.png".into(),
-            kind: "image",
+            reference: "assets/a.mp4".into(),
+            kind: "video",
             data_url: None,
+            bytes: 2048,
+            animated: false,
+            poster: Some("assets/a-poster.png".into()),
+            duration_ms: Some(1500),
         })
         .unwrap();
-        assert_eq!(asset["ref"], "assets/a.png");
+        assert_eq!(asset["ref"], "assets/a.mp4");
+        assert_eq!(
+            (&asset["poster"], &asset["durationMs"], &asset["bytes"]),
+            (
+                &serde_json::json!("assets/a-poster.png"),
+                &serde_json::json!(1500),
+                &serde_json::json!(2048)
+            )
+        );
     }
 }

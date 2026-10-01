@@ -73,6 +73,7 @@ error_codes! {
     FileTooLarge = "fileTooLarge" => "{file} is {size} MiB; the limit is {limit} MiB",
     FileError = "fileError" => "{file}: {reason}",
     NotAnImage = "notAnImage" => "{file} is not an image",
+    NotMedia = "notMedia" => "{file} is not a video, an animated GIF or a picture Bezel can use",
     NoScreenChosen = "noScreenChosen" => "no screen chosen",
     NoScreenAddress = "noScreenAddress" => "the screen has no address",
     BrightnessRange = "brightnessRange" => "brightness is 0 to 100",

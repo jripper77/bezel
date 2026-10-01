@@ -6,16 +6,30 @@ import { ICONS } from './icons.js';
 import { checkField, colorField as colorInputs, numberField, rangeField, segmented, selectField, textField } from './fields.js';
 import { createWidget, widgetOf } from '../editor/widgets.js';
 import { ORIENTATIONS } from '../editor/geometry.js';
+import { fileNameOf, videoFacts, videoStatus } from '../editor/background.js';
+import { formatBytes } from './storage.js';
 
 const BOUND = ['value', 'bar', 'ring', 'needle', 'graph'];
 const CLOCK_PATTERNS = ['%H:%M', '%H:%M:%S', '%I:%M %p', '%d/%m/%Y', '%A', '%a %d %b', '%B %Y'];
+
+/** The video-background actions and what they depend on, when none are given. */
+const NO_VIDEO_ACTIONS = Object.freeze({
+  context: () => ({ screen: null, live: false, liveVideo: null, tools: null, locale: 'en' }),
+  useVideo: () => {},
+  useImage: () => {},
+  openStorage: () => {},
+});
 
 /**
  * @param {object} deps
  * @param {HTMLElement} deps.root
  * @param {() => number} deps.minRefresh the fastest refresh a theme may ask for, seconds (from the backend)
+ * @param {{context: () => {screen: object|null, live: boolean, liveVideo: object|null, tools: object|null, locale: string}, useVideo: () => void, useImage: () => void, openStorage: () => void}} [deps.video]
+ *   the screen and ffmpeg the video background is told against, and its
+ *   actions: pick a video (or GIF) for the background, pick a picture, and
+ *   show the storage tab (where the missing video is sent)
  */
-export function createInspector({ root, store, t, sensors, minRefresh }) {
+export function createInspector({ root, store, t, sensors, minRefresh, video = NO_VIDEO_ACTIONS }) {
   const update = (id, patch) => store.dispatch('update', { id, patch });
   const colorField = (label, hex, onChange) => colorInputs(label, hex, onChange, { alphaLabel: t('inspector.opacityOf', { name: label }) });
 
@@ -42,19 +56,72 @@ export function createInspector({ root, store, t, sensors, minRefresh }) {
     ]);
   }
 
+  // What the form was last drawn with: a video background is drawn again
+  // when the screen, live mode, its video or ffmpeg change.
+  let shown = { assets: [], signature: '' };
+
   // --------------------------------------------------------------- theme --
-  function themeForm(theme) {
-    const bg = theme.background;
+  const button = (text, onclick) => el('button', { type: 'button', class: 'text-button', text, onclick });
+  const useColor = () => button(t('inspector.useColor'), () => store.dispatch('setTheme', { patch: { background: { type: 'color', color: '#0c0e16ff' } } }));
+
+  /**
+   * A video background (a video or an animated GIF): its poster and name,
+   * what the connected screen does with it (the storage tab sends a missing
+   * one), what ffmpeg is for when there is no poster, and the other
+   * backgrounds.
+   */
+  function videoBackground(bg, assets) {
+    const context = video.context();
+    const asset = assets.find((a) => a.ref === bg.asset) ?? { ref: bg.asset };
+    const posterUrl = bg.poster ? assets.find((a) => a.ref === bg.poster)?.dataUrl : null;
+    const facts = videoFacts(asset, (n) => formatBytes(n, context.locale));
+    const status = videoStatus(context);
+    const nodes = [
+      el('div', { class: 'bg-video', role: 'group', 'aria-label': t('bg.video') }, [
+        el('span', { class: 'thumb', style: posterUrl ? { backgroundImage: `url(${posterUrl})` } : {} }, posterUrl ? [] : [icon(ICONS.film, 22)]),
+        el('span', { class: 'media-name' }, [
+          el('strong', { text: fileNameOf(bg.asset) }),
+          facts.length ? el('small', { text: facts.join(' · ') }) : null,
+        ]),
+      ]),
+      el('p', { class: 'hint video-status', dataset: { status }, text: t(`inspector.video.${status}`) }),
+    ];
+    if (status === 'missing') nodes.push(el('div', { class: 'button-row' }, [button(t('inspector.video.openStorage'), () => video.openStorage())]));
+    if (!bg.poster && context.tools && !context.tools.ready) {
+      nodes.push(el('p', { class: 'hint', text: t('inspector.video.noPoster') }));
+      nodes.push(el('ul', { class: 'hints' }, (context.tools.installHints ?? []).map((h) => el('li', {}, [el('code', { text: h })]))));
+    } else if (!bg.poster) {
+      nodes.push(el('p', { class: 'hint', text: t('inspector.video.noPosterReady') }));
+    }
+    nodes.push(el('div', { class: 'button-row' }, [
+      button(t('inspector.replaceVideo'), () => video.useVideo()),
+      button(t('inspector.useImage'), () => video.useImage()),
+      useColor(),
+    ]));
+    return nodes;
+  }
+
+  function backgroundFields(bg, assets) {
+    if (bg.type === 'video') return videoBackground(bg, assets);
+    return [
+      bg.type === 'color'
+        ? colorField(t('inspector.color'), bg.color, (c) => store.dispatch('setTheme', { patch: { background: { type: 'color', color: c } } }))
+        : el('p', { class: 'hint', text: t(`bg.${bg.type}`) }),
+      el('div', { class: 'button-row' }, [
+        bg.type !== 'color' && useColor(),
+        button(t('inspector.useVideo'), () => video.useVideo()),
+      ]),
+    ];
+  }
+
+  function themeForm(theme, assets) {
     return [
       el('h2', { text: t('inspector.theme') }),
       textField(t('inspector.name'), theme.name, (v) => store.dispatch('setTheme', { patch: { name: v } })),
       el('p', { class: 'hint', text: t('inspector.canvas', { width: theme.canvas.width, height: theme.canvas.height }) }),
       selectField(t('inspector.orientation'), theme.orientation, ORIENTATIONS.map((o) => [o, t(`orientation.${o}`)]), (o) => store.dispatch('setOrientation', { orientation: o })),
       el('h3', { text: t('inspector.background') }),
-      bg.type === 'color'
-        ? colorField(t('inspector.color'), bg.color, (c) => store.dispatch('setTheme', { patch: { background: { type: 'color', color: c } } }))
-        : el('p', { class: 'hint', text: t(`bg.${bg.type}`) }),
-      bg.type !== 'color' && el('button', { type: 'button', class: 'text-button', text: t('inspector.useColor'), onclick: () => store.dispatch('setTheme', { patch: { background: { type: 'color', color: '#0c0e16ff' } } }) }),
+      ...backgroundFields(theme.background, assets),
       el('h3', { text: t('inspector.refresh') }),
       rangeField(t('inspector.refreshSeconds'), theme.refreshSeconds, (v) => store.dispatch('setTheme', { patch: { refreshSeconds: v } }), { min: minRefresh(), max: 5, step: minRefresh(), format: (v) => t('unit.seconds', { value: v }) }),
     ];
@@ -272,7 +339,7 @@ export function createInspector({ root, store, t, sensors, minRefresh }) {
     const { theme, selection } = store.getState();
     const chosen = theme.elements.filter((e) => selection.includes(e.id));
     let nodes;
-    if (chosen.length === 0) nodes = themeForm(theme);
+    if (chosen.length === 0) nodes = themeForm(theme, assets);
     else if (chosen.length === 1) nodes = elementForm(chosen[0], theme, assets);
     else nodes = multiForm(chosen.map((e) => e.id));
     // Keep focus where the user was typing when the form re-renders.
@@ -280,7 +347,21 @@ export function createInspector({ root, store, t, sensors, minRefresh }) {
     const focusLabel = root.contains(active) ? active.getAttribute('aria-label') || active.id : null;
     root.replaceChildren(...nodes.filter(Boolean));
     if (focusLabel) root.querySelector(`[aria-label="${CSS.escape(focusLabel)}"]`)?.focus();
+    shown = { assets, signature: videoSignature() };
   }
 
-  return { render };
+  function videoSignature() {
+    const { theme, selection } = store.getState();
+    if (selection.length || theme.background.type !== 'video') return '';
+    const c = video.context();
+    return JSON.stringify([videoStatus(c), c.tools?.ready ?? null, c.tools?.installHints?.length ?? 0]);
+  }
+
+  /** The screen, live mode, the live video or ffmpeg changed. */
+  function contextChanged() {
+    const signature = videoSignature();
+    if (signature !== shown.signature) render(shown.assets);
+  }
+
+  return { render, contextChanged };
 }

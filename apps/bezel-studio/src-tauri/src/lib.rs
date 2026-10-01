@@ -21,6 +21,7 @@ pub mod studio;
 pub mod texts;
 mod tray;
 pub mod udev_help;
+pub mod video;
 
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -188,6 +189,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::new_theme,
             commands::import_theme,
             commands::add_image,
+            commands::add_media,
             commands::list_assets,
             commands::list_fonts,
             commands::get_autostart,

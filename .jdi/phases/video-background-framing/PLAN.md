@@ -42,7 +42,7 @@ O vídeo de fundo toca na prévia e na tela, vídeo já girado para o painel é 
   - `stream`: fonte crua `scale=W:H` sem recorte nem voltas, `fps` ≤ 15, `-threads 2`, rawvideo RGBA; testes de argumentos e `Path` (Windows ok).
 - **Dependencies:** T-1
 - **Test:** `framing::tests::filter_chains_follow_the_geometry`, `stream::tests::preview_decoding_is_raw_at_most_15_fps`, `transcode::tests::builds_the_vendor_argument_vector_for_rev_c`
-- **Status:** pending
+- **Status:** completed (46d32a7)
 
 #### T-4: `.bezeltheme` com `framing`; TURZX em Auto
 - **Specialist:** jdi-doer-bezel

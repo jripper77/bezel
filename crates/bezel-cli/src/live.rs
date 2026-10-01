@@ -743,9 +743,17 @@ mod tests {
         path
     }
 
+    /// A temp folder for one test's theme: unique per call, so tests that
+    /// run in parallel with the same theme name never share a `theme.json`.
+    fn scratch_dir(name: &str) -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("bezel-live-{}-{n}-{name}", std::process::id()))
+    }
+
     /// Saves a blank theme for a panel of `size` (portrait) in `orientation`.
     fn theme_file(name: &str, size: Size, orientation: Orientation, refresh: f32) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("bezel-live-{}-{name}", std::process::id()));
+        let dir = scratch_dir(name);
         let mut theme = Theme::blank(name, size, orientation);
         theme.refresh_seconds = refresh;
         FsThemeStore
@@ -809,7 +817,7 @@ mod tests {
     /// Saves a theme with a video background (`assets/clip.mp4`) for a panel
     /// of `size`, as a folder or (`zipped`) a `.bezeltheme` file.
     fn video_theme(name: &str, size: Size, orientation: Orientation, zipped: bool) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("bezel-live-{}-{name}", std::process::id()));
+        let dir = scratch_dir(name);
         let path = if zipped {
             dir.with_extension("bezeltheme")
         } else {

@@ -20,8 +20,8 @@ use crate::backend::Backend;
 use crate::clock::now;
 use crate::dto::{
     AddedDto, AssetDto, DevicesDto, ImportedDto, JobDto, MediaToolsDto, MonitorModeDto,
-    PreferencesDto, PrepareDto, ProgressDto, SampleDto, SavedDto, SensorDto, SessionDto,
-    StorageDto, ThemeEntryDto, parse_orientation,
+    PreferencesDto, PrepareDto, ProgressDto, RestartedDto, SampleDto, SavedDto, SensorDto,
+    SessionDto, StorageDto, ThemeEntryDto, parse_orientation,
 };
 use crate::media::{IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
@@ -75,6 +75,23 @@ pub async fn leave_desktop_mode(
         b.leave_desktop_mode(&key, confirm_of(confirmed))
     })
     .await
+}
+
+/// Restarts a hung screen without a USB replug (about 10 s); `screen` comes
+/// from the dialog that says what stops (D-2026-09-30-release-polish-13).
+/// The tray's live item follows.
+#[tauri::command]
+pub async fn restart_screen(
+    app: AppHandle,
+    state: State<'_, Shared>,
+    screen: String,
+) -> UiResult<RestartedDto> {
+    let result = blocking(&state, move |b| b.restart_screen(&screen, now())).await;
+    let live = state.studio().live_key().is_some();
+    if let Some(item) = app.try_state::<LiveItem>() {
+        item.sync(live);
+    }
+    result
 }
 
 /// The machine's sensors.

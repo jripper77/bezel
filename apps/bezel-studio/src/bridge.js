@@ -72,6 +72,7 @@ function tauriBridge(invoke, tauri = {}) {
     setLive: (on, screen) => invoke('set_live', { on, screen }),
     setBrightness: (screen, percent) => invoke('set_brightness', { screen, percent }),
     release: (screen) => invoke('release_screen', { screen }),
+    restartScreen: (screen) => invoke('restart_screen', { screen }),
     saveTheme: (theme, saveAs) => invoke('save_theme', { theme, saveAs }),
     listThemes: () => invoke('list_themes'),
     openTheme: (location) => invoke('open_theme', { location }),

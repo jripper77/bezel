@@ -51,6 +51,7 @@ error_codes! {
     AccessDenied = "accessDenied" => "access denied to {address}: {reason}",
     InUse = "inUse" => "{address} is in use by {holders}",
     Timeout = "timeout" => "timeout talking to {detail}",
+    Hung = "hung" => "the screen stopped responding: {detail}",
     InvalidInput = "invalidInput" => "invalid input: {detail}",
     Transport = "transport" => "transport error: {detail}",
     Unsupported = "unsupported" => "not supported: {detail}",
@@ -240,6 +241,8 @@ impl From<BezelError> for UiError {
                 .arg("address", address)
                 .arg("holders", holders.join(", ")),
             BezelError::Timeout(d) => detail(ErrorCode::Timeout, d),
+            // The UI offers the restart (D-2026-09-30-release-polish-13).
+            BezelError::Hung(d) => detail(ErrorCode::Hung, d),
             BezelError::InvalidInput(d) => detail(ErrorCode::InvalidInput, d),
             BezelError::Transport(d) => detail(ErrorCode::Transport, d),
             BezelError::Unsupported(d) => detail(ErrorCode::Unsupported, d),

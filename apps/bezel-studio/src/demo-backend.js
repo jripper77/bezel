@@ -94,6 +94,12 @@ export function demoDenied(address) {
   });
 }
 
+/** The screen stopped reading what was sent: its firmware hung (the `hung` scenario). */
+export function demoHung() {
+  const detail = 'it stopped reading what was sent (250 bytes still queued)';
+  return Object.assign(new Error(`the screen stopped responding: ${detail}`), { code: 'hung', args: { detail } });
+}
+
 /** The fastest refresh a theme may ask for, seconds (the core's `MIN_REFRESH_SECONDS`). */
 export const DEMO_MIN_REFRESH = 0.25;
 
@@ -186,7 +192,7 @@ export function createDemoGate(holding) {
  * confirmations and refusals as the app. With `hold`, every phase of a job
  * waits after its first step until `letGo` (tests only).
  */
-function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }) {
+function createDemoStorage(chosen, { delay, live, theme, screens, hold = false, hung = () => false }) {
   const card = chosen.card !== false;
   const files = new Map(DEMO_STORAGE.files.filter(([p]) => card || !p.startsWith('sd/')));
   const locals = new Map(Object.entries(DEMO_LOCAL_FILES).map(([name, f]) => [`demo://${name}`, { name, ...f }]));
@@ -287,6 +293,8 @@ function createDemoStorage(chosen, { delay, live, theme, screens, hold = false }
       // Still over the screen's limit once converted: refused before sending.
       if (size > p.cap) return refused('convertedTooLarge', { bytes: size, limit: p.cap });
     }
+    // A hung screen stops reading in the middle of the upload.
+    if (hung()) throw demoHung();
     const cancelled = await steps('upload', size, UPLOAD_STEPS, (done) => files.set(p.path, Math.round(done)));
     if (cancelled) {
       const partial = files.get(p.path) || null;
@@ -433,7 +441,11 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   /** Screen key → last orientation shown on it or chosen for it. */
   const remembered = new Map();
   const modelOf = (key) => devices.screens.find((s) => s.key === key)?.models[0];
-  const storage = createDemoStorage(chosen, { delay, live: () => live, theme: () => theme, screens: () => devices.screens, hold: Boolean(hooks.hold) });
+  // The `hung` scenario: the screen stops reading until it is restarted.
+  const screenState = { hung: Boolean(chosen.hung) };
+  const storage = createDemoStorage(chosen, {
+    delay, live: () => live, theme: () => theme, screens: () => devices.screens, hold: Boolean(hooks.hold), hung: () => screenState.hung,
+  });
   const { videoOfTheme, ...storageApi } = storage;
   // The window, like the app: the close button hides it while a screen is
   // live, asks the UI when edits are unsaved, and closes it otherwise.
@@ -473,7 +485,14 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
         readings[key] = { value, display: demoFormat(value, quantity) };
       });
       readings['gpu.1.fan'] = { unavailable: 'no fan sensor', display: '—' };
-      return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError: null, video: videoOfTheme() });
+      // A hung screen stops live mode, like a frame the screen stopped reading.
+      let liveError = null;
+      if (live && screenState.hung) {
+        const { code, args, message } = demoHung();
+        liveError = { code, args, message };
+        live = null;
+      }
+      return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError, video: videoOfTheme() });
     },
     session: () => Promise.resolve({ theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location, minRefreshSeconds: DEMO_MIN_REFRESH }),
     render: (next) => {
@@ -494,6 +513,22 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     },
     setBrightness: (screen) => (chosen.denied ? Promise.reject(demoDenied(screen)) : Promise.resolve()),
     release: (screen) => (chosen.denied ? Promise.reject(demoDenied(screen)) : Promise.resolve()),
+    /** Restarts a screen through its wake chip (about 10 s on the real one). */
+    restartScreen: async (key) => {
+      if (chosen.denied) throw demoDenied(key);
+      const screen = devices.screens.find((s) => s.key === key);
+      if (!screen) throw Object.assign(new Error(`screen not found: ${key}`), { code: 'screenNotFound', args: { screen: key } });
+      if (!screen.restartable) {
+        const detail = `restarting ${screen.models[0]?.name ?? key}: only Turing rev C screens restart, through their wake chip (MCU); unplug the screen and plug it back in`;
+        throw Object.assign(new Error(`not supported: ${detail}`), { code: 'unsupported', args: { detail } });
+      }
+      const wasLive = live === key;
+      live = null;
+      await delay(DEMO_STEP_MS * 4);
+      screenState.hung = false;
+      if (wasLive) live = key;
+      return { key, live: wasLive };
+    },
     saveTheme: (next, saveAs) => {
       theme = structuredClone(next);
       const location = `demo://${next.name}`;

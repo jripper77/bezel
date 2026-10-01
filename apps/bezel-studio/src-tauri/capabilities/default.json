@@ -46,6 +46,7 @@
     "allow-set-language",
     "allow-set-sensor-options",
     "allow-pick-folder",
-    "allow-show-sensors"
+    "allow-show-sensors",
+    "allow-restart-screen"
   ]
 }

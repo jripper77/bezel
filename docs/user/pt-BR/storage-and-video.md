@@ -98,7 +98,10 @@ terminal; um segundo Ctrl+C sai na hora). Parte do arquivo pode ficar na tela:
    envio cancelado chegaram até ele: apague esse arquivo e envie mais uma vez.
 
 Se a tela parar de responder de vez (o envio empaca, ou todo comando estoura o
-tempo), desconecte o cabo USB, espere alguns segundos e conecte de novo.
+tempo), ela travou: o próximo comando reinicia uma tela Turing rev C sozinho, ou
+use `bezel restart` ou **Reiniciar a tela…** no aplicativo; não precisa
+desconectar o cabo. Veja
+[A tela travou](troubleshooting.md#a-tela-travou--parou-de-responder).
 
 ## O que a tela mostra ao ligar
 

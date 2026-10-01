@@ -5,8 +5,8 @@
 // the window, quitting from the tray), the screen turns between vertical and
 // horizontal, imports list what had no equivalent, the preferences switch
 // the language and set the sensors, the sensor list tells the app what it
-// shows, a denied port shows the udev command, and a panel in desktop mode
-// goes back only after a dialog.
+// shows, a denied port shows the udev command, a panel in desktop mode goes
+// back only after a dialog, and a hung screen is restarted after one.
 import { test, expect, watchErrors, expectAccessible, dragTo, literally, prefixOf } from './helpers.mjs';
 import { translator } from '../../src/i18n/index.js';
 
@@ -36,7 +36,7 @@ test('every panel reads in one language, with no key or placeholder showing', as
   const errors = watchErrors(page);
   await page.goto('/index.html?demo=desktop');
   await expect(page.locator('#theme-name')).toHaveValue('Demo');
-  const leftovers = /\b(?:storage|error|importWarning|inspector|library|toast|top|status|screen|prefs|desktop|udev|sensor|widget|category|themes|media|layers|unsaved)\.[a-zA-Z]|\{[a-z]+\}|undefined|NaN/;
+  const leftovers = /\b(?:storage|error|importWarning|inspector|library|toast|top|status|screen|prefs|desktop|udev|sensor|widget|category|themes|media|layers|unsaved|restart)\.[a-zA-Z]|\{[a-z]+\}|undefined|NaN/;
   const tabs = ['widgets', 'sensors', 'layers', 'themes', 'media', 'screen'];
   for (const tab of tabs) {
     await page.getByRole('tab', { name: t(`library.${tab}`) }).click();
@@ -561,5 +561,63 @@ test('a panel in desktop mode is labelled and switched back only after a dialog'
   await expect(page.locator('#toast')).toHaveText(t('desktop.doneModel', { model: 'Turing 8.8" V1.x (USB)' }));
   await expect(panel).toHaveCount(0);
   await expect(page.locator('#screen-select option')).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
+test('a hung screen offers the restart, which asks first and brings it back', async ({ page, t }) => {
+  // D-2026-09-30-release-polish-13: the screen stopped reading what Bezel
+  // sent; live mode and uploads stop until it is restarted, no replug.
+  const errors = watchErrors(page);
+  const name = 'Turing Smart Screen 8.8"';
+  await page.goto('/index.html?demo=hung');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('switch').click({ force: true });
+  await expect(page.locator('#toast')).toHaveText(t('toast.liveStopped', { message: t('error.hung') }));
+  await expect(page.getByRole('switch')).not.toBeChecked();
+  await page.getByRole('tab', { name: t('library.screen') }).click();
+  const card = page.getByRole('region', { name });
+  await expect(card).toContainText(t('restart.hung'));
+  await expect(card.getByRole('button', { name: t('screen.restart') })).toBeVisible();
+  await expectAccessible(page);
+
+  // An upload stops too, and its error offers the restart.
+  await page.getByRole('tab', { name: t('screen.storageTab') }).click();
+  const internal = page.getByRole('region', { name: t('storage.medium.internal') });
+  await internal.getByRole('button', { name: t('storage.choose') }).click();
+  await page.getByRole('dialog').getByRole('button', { name: t('storage.confirmUploadAction'), exact: true }).click();
+  const failed = page.getByRole('region', { name: t('storage.errorTitle') });
+  await expect(failed).toContainText(t('error.hung'), { timeout: 15_000 });
+
+  // The restart asks first and says what stops; Esc keeps everything.
+  const restart = failed.getByRole('button', { name: t('screen.restart') });
+  await restart.click();
+  const dialog = page.getByRole('dialog', { name: t('restart.confirmTitle', { name }) });
+  await expect(dialog).toContainText(t('restart.confirmBody'));
+  await expectAccessible(page);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(restart).toBeFocused();
+
+  await restart.click();
+  await dialog.getByRole('button', { name: t('restart.confirmAction') }).click();
+  await expect(page.locator('#toast')).toHaveText(t('restart.done'));
+  await expect(failed).toHaveCount(0);
+  await page.getByRole('tab', { name: t('screen.settingsTab') }).click();
+  await expect(card).not.toContainText(t('restart.hung'));
+
+  // Back: live mode stays on.
+  await page.getByRole('switch').click({ force: true });
+  await expect(page.locator('#status-device')).toHaveText(t('status.live'));
+  await page.waitForTimeout(1500);
+  await expect(page.getByRole('switch')).toBeChecked();
+  expect(errors).toEqual([]);
+});
+
+test('screens without a wake chip offer no restart', async ({ page, t }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turzx');
+  await page.getByRole('tab', { name: t('library.screen') }).click();
+  await expect(page.getByRole('region', { name: 'Turing 2.1" Round (USB)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: t('screen.restart') })).toHaveCount(0);
   expect(errors).toEqual([]);
 });

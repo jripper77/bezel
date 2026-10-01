@@ -30,6 +30,12 @@ pub enum BezelError {
     /// A device did not answer in time.
     #[error("timeout talking to {0}")]
     Timeout(String),
+    /// The screen stopped taking what was sent: its firmware hung (a rev C
+    /// screen after an upload over its memory). A rev C screen is restarted
+    /// through its MCU by the next connection or on request, without a USB
+    /// replug (D-2026-09-30-release-polish-13). The text says what was seen.
+    #[error("the screen stopped responding: {0}")]
+    Hung(String),
     /// Something the caller passed that the device or format cannot take
     /// (a frame of the wrong size, a theme that does not fit).
     #[error("invalid input: {0}")]
@@ -119,6 +125,16 @@ mod tests {
             e.to_string(),
             "sd/video/clip.mp4 was stored with 1990 bytes, not the file's 2000: \
              the stored size differs; delete it and send it again"
+        );
+    }
+
+    #[test]
+    fn a_hung_screen_says_so() {
+        assert_eq!(
+            BezelError::Hung("it stopped reading what was sent (250 bytes still queued)".into())
+                .to_string(),
+            "the screen stopped responding: it stopped reading what was sent \
+             (250 bytes still queued)"
         );
     }
 

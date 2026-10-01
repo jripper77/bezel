@@ -93,7 +93,9 @@ a second Ctrl+C quits at once). Part of the file may stay on the screen:
    delete that file and send it once more.
 
 If the screen stops answering altogether (the upload stalls, or every command
-times out), unplug its USB cable, wait a few seconds and plug it back in.
+times out), it froze: the next command restarts a Turing rev C screen on its
+own, or use `bezel restart` or **Restart screen…** in the app; no replug is
+needed. See [The screen froze](troubleshooting.md#the-screen-froze--stopped-responding).
 
 ## What the screen shows at power-up
 

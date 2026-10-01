@@ -211,6 +211,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::set_sensor_options,
             commands::pick_folder,
             commands::show_sensors,
+            commands::restart_screen,
         ])
         .run(tauri::generate_context!())
 }

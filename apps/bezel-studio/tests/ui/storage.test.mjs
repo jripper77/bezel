@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { translator } from '../../src/i18n/index.js';
 import { baseName, bootKeepsText, formatBytes, formatMiB, progressParts, refusalText, storageFeatures, usedFraction } from '../../src/ui/storage.js';
-import { DEMO_REV_C_CAP, DEMO_USB_CAP, createDemoBackend, createDemoGate, demoKindOf, demoSuggestName, demoTurns, demoVideoName } from '../../src/demo-backend.js';
+import { DEMO_REV_C_CAP, DEMO_USB_CAP, createDemoBackend, createDemoGate, demoHung, demoKindOf, demoSuggestName, demoTurns, demoVideoName } from '../../src/demo-backend.js';
 import { DEMO_PICKED, DEMO_STORAGE, DEMO_VIDEO_THEME, SCENARIOS } from '../../src/demo-data.js';
 
 const pt = translator('pt-BR');
@@ -261,4 +261,39 @@ test('without the udev rule the demo denies the screen and names the fix', async
     await assert.rejects(call, (e) => e.code === 'accessDenied' && e.args.address === KEY && e.udevCommand.startsWith('sudo install -m 644 '));
   }
   await demo.setLive(false, null);
+});
+
+test('a hung demo screen stops live mode and uploads until it is restarted', async () => {
+  const demo = createDemoBackend('hung', instant);
+  const [screen] = (await demo.listDevices()).screens;
+  assert.equal(screen.restartable, true);
+  await demo.setLive(true, KEY);
+  const stopped = await demo.sample();
+  assert.equal(stopped.live, null);
+  assert.equal(stopped.liveError.code, 'hung');
+  assert.equal(stopped.liveError.args.detail, demoHung().args.detail);
+  const ready = await demo.prepareUpload(KEY, 'demo://foto.png', 'internal');
+  await assert.rejects(demo.runUpload(ready.ticket, false), (e) => e.code === 'hung');
+
+  // Restarted (not live any more, so it stays off), it works again.
+  assert.deepEqual(await demo.restartScreen(KEY), { key: KEY, live: false });
+  const again = await demo.prepareUpload(KEY, 'demo://foto.png', 'internal');
+  assert.equal((await demo.runUpload(again.ticket, false)).status, 'done');
+  await demo.setLive(true, KEY);
+  assert.equal((await demo.sample()).live, KEY);
+  // A live screen comes back live.
+  assert.deepEqual(await demo.restartScreen(KEY), { key: KEY, live: true });
+  assert.equal(demo.isLive(), true);
+});
+
+test('only screens with a wake chip restart in the demo', async () => {
+  const turzx = createDemoBackend('turzx', instant);
+  const [screen] = (await turzx.listDevices()).screens;
+  assert.equal(screen.restartable, false);
+  await assert.rejects(turzx.restartScreen(screen.key), (e) => e.code === 'unsupported' && /unplug the screen/.test(e.args.detail));
+  await assert.rejects(turzx.restartScreen('COM9'), (e) => e.code === 'screenNotFound');
+  const denied = createDemoBackend('denied', instant);
+  await assert.rejects(denied.restartScreen(KEY), (e) => e.code === 'accessDenied');
+  const two = createDemoBackend('two', instant);
+  assert.equal((await two.restartScreen('COM3')).live, false, 'an asleep rev C screen restarts too');
 });

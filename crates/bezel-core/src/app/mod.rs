@@ -9,4 +9,5 @@ pub use runtime::{
 };
 pub use screens::{
     choose_screen, discover_devices, discover_screens, leave_desktop_mode, open_screen,
+    restart_screen,
 };

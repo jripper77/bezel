@@ -895,6 +895,7 @@ fn core_errors_keep_a_code_the_ui_translates() {
             "inUse",
         ),
         (BezelError::Timeout(x()), "timeout"),
+        (BezelError::Hung(x()), "hung"),
         (BezelError::InvalidInput(x()), "invalidInput"),
         (BezelError::Transport(x()), "transport"),
         (BezelError::Unsupported(x()), "unsupported"),

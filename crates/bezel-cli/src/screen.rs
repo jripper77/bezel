@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use bezel_core::app::open_screen;
+use bezel_core::app::{choose_screen, discover_screens, open_screen, restart_screen};
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::history::Histories;
@@ -190,6 +190,38 @@ where
     let mut link = connect(bus, connector, target)?;
     link.screen_off()?;
     Ok(format!("{}: off\n", describe(link.as_ref())))
+}
+
+/// `bezel restart`: says it restarts the screen and how long that takes
+/// (only for a screen that can be restarted), then waits for it to be back
+/// on the bus (D-2026-09-30-release-polish-13).
+pub fn restart<B, C>(
+    bus: &B,
+    connector: &C,
+    target: &Target,
+    log: &mut dyn std::io::Write,
+) -> anyhow::Result<String>
+where
+    B: DeviceBus + ?Sized,
+    C: ScreenConnector + ?Sized,
+{
+    let mut log = crate::messages::Messages::new(log);
+    let key = target.screen.as_deref();
+    let screen = choose_screen(discover_screens(bus)?, key)?;
+    let names: Vec<&str> = screen.candidates.iter().map(|m| m.name).collect();
+    let name = names.join(" / ");
+    if screen.restartable() {
+        writeln!(
+            log,
+            "Restarting the {name} through its wake chip; it is back in about 10 s..."
+        );
+        log.check()?;
+    }
+    let back = restart_screen(bus, connector, key).context("could not restart the screen")?;
+    let address = back
+        .address()
+        .map_or_else(|| "?".to_string(), ToString::to_string);
+    Ok(format!("{name}: restarted; it is back at {address}\n"))
 }
 
 /// `bezel release`.

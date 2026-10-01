@@ -93,7 +93,7 @@ pub struct StorageState {
 }
 
 /// The claim on the screen of the running storage operation.
-struct Claim<'a>(&'a AtomicBool);
+pub(crate) struct Claim<'a>(&'a AtomicBool);
 
 impl Drop for Claim<'_> {
     fn drop(&mut self) {
@@ -124,7 +124,9 @@ impl StorageState {
         Arc::clone(&self.media)
     }
 
-    fn claim(&self) -> UiResult<Claim<'_>> {
+    /// Holds the screens for one operation (a storage job, or a restart):
+    /// the others answer `busy` until it is dropped.
+    pub(crate) fn claim(&self) -> UiResult<Claim<'_>> {
         self.busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map(|_| Claim(&self.busy))

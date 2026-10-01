@@ -197,6 +197,9 @@ pub struct FakeLog {
     pub offs: usize,
     /// `release` calls.
     pub releases: usize,
+    /// Screens restarted through the connector (`ScreenConnector::restart`),
+    /// by the address they had.
+    pub restarts: Vec<String>,
     /// The simulated storage, shared by every screen of the connector.
     pub storage: FakeStorage,
 }
@@ -424,6 +427,23 @@ impl FakeConnector {
 }
 
 impl ScreenConnector for FakeConnector {
+    /// Records the restart of a screen that can be restarted (a rev C screen
+    /// with its MCU listed); any other is `Unsupported`, like the real one.
+    fn restart(&self, screen: &Screen) -> Result<()> {
+        if !screen.restartable() {
+            return Err(BezelError::Unsupported(
+                "the simulated screen cannot be restarted".into(),
+            ));
+        }
+        let address = screen.address().map(|a| a.0.clone()).unwrap_or_default();
+        self.log
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .restarts
+            .push(address);
+        Ok(())
+    }
+
     fn connect(&self, screen: &Screen) -> Result<Box<dyn ScreenLink>> {
         let model = screen
             .model()

@@ -6,7 +6,9 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use bezel_core::app::{choose_screen, discover_devices, discover_screens, leave_desktop_mode};
+use bezel_core::app::{
+    choose_screen, discover_devices, discover_screens, leave_desktop_mode, restart_screen,
+};
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::device::DeviceModel;
@@ -25,7 +27,7 @@ use bezel_themes::native::{is_native, native_location};
 
 use crate::dto::{
     AddedDto, AssetDto, DevicesDto, ImportedDto, LiveVideoDto, MonitorModeDto, PreferencesDto,
-    SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
+    RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
 };
 use crate::library::ThemeLibrary;
 use crate::media::{kind_of, thumbnail_data_url};
@@ -322,6 +324,38 @@ impl Backend {
         let switched =
             leave_desktop_mode(self.bus.as_ref(), self.hid.as_ref(), Some(key), confirm)?;
         Ok(MonitorModeDto::from(&switched))
+    }
+
+    /// Restarts the hung screen `key` without a USB replug
+    /// (D-2026-09-30-release-polish-13): live mode on it stops first (its
+    /// port closes), its MCU restarts it and Bezel waits until it is back
+    /// (about 10 s); a screen that was live shows the theme live again, under
+    /// its new key. Storage operations, live mode and brightness answer
+    /// `busy` meanwhile.
+    pub fn restart_screen(&self, key: &str, time: LocalTime) -> UiResult<RestartedDto> {
+        let restarted = {
+            let _claim = self.storage.claim()?;
+            let was_live = {
+                let mut studio = self.idle_studio();
+                let live = studio.live_key() == Some(key);
+                if live {
+                    drop(studio.stop_live());
+                }
+                live
+            };
+            let screen = restart_screen(self.bus.as_ref(), self.connector.as_ref(), Some(key))?;
+            let back = screen
+                .address()
+                .map_or_else(|| key.to_string(), |a| a.0.clone());
+            (back, was_live)
+        };
+        let (key, was_live) = restarted;
+        let live = was_live
+            && self
+                .set_live(true, Some(&key), time)
+                .inspect_err(|e| tracing::warn!(screen = key, "live mode not resumed: {e}"))
+                .is_ok();
+        Ok(RestartedDto { key, live })
     }
 
     /// Starts (`screen` given) or stops showing the edited theme live.
@@ -956,6 +990,65 @@ mod tests {
         f.backend.set_live(false, None, TIME).unwrap();
         assert!(f.backend.set_live(true, None, TIME).is_err());
         assert!(f.backend.set_live(true, Some("COM9"), TIME).is_err());
+    }
+
+    #[test]
+    fn a_hung_screen_restarts_and_shows_the_theme_live_again() {
+        // D-2026-09-30-release-polish-13: live mode stops (the port closes),
+        // the MCU restarts the screen, live mode comes back on it.
+        let f = fixture("restart-live");
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        let frames = f.connector.log().frames.len();
+        let done = f.backend.restart_screen(KEY, TIME).unwrap();
+        assert_eq!(
+            done,
+            RestartedDto {
+                key: KEY.into(),
+                live: true
+            }
+        );
+        assert_eq!(f.connector.log().restarts, [KEY]);
+        assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
+        assert!(f.connector.log().frames.len() > frames, "a frame at once");
+        assert_eq!(f.backend.settings.load().live_screen.as_deref(), Some(KEY));
+
+        // Not live: it only restarts.
+        f.backend.set_live(false, None, TIME).unwrap();
+        let done = f.backend.restart_screen(KEY, TIME).unwrap();
+        assert!(!done.live);
+        assert_eq!(f.backend.sample().live, None);
+        assert_eq!(f.connector.log().restarts.len(), 2);
+        let err = f.backend.restart_screen("COM9", TIME).unwrap_err();
+        assert_eq!(err.code(), "screenNotFound");
+    }
+
+    #[test]
+    fn a_restart_waits_for_storage_and_needs_a_screen_with_an_mcu() {
+        let f = fixture("restart-busy");
+        let claim = f.backend.storage.claim().unwrap();
+        let err = f.backend.restart_screen(KEY, TIME).unwrap_err();
+        assert_eq!(err.code(), "busy");
+        drop(claim);
+        assert!(f.connector.log().restarts.is_empty());
+
+        let mut f = fixture("restart-weact");
+        f.backend.bus = Arc::new(FakeBus::new(vec![
+            bezel_core::domain::discovery::Endpoint {
+                address: bezel_core::domain::discovery::DeviceAddress("/dev/ttyACM0".into()),
+                transport: bezel_core::domain::device::Transport::Serial,
+                usb: bezel_core::domain::device::UsbId::new(0x1a86, 0xfe0c),
+                serial_number: Some("AD0001".into()),
+                manufacturer: None,
+                product: None,
+                location: None,
+            },
+        ]));
+        let err = f.backend.restart_screen("/dev/ttyACM0", TIME).unwrap_err();
+        assert_eq!(err.code(), "unsupported");
+        assert!(err.to_string().contains("unplug the screen"), "{err}");
+        assert!(f.connector.log().restarts.is_empty());
+        let screens = f.backend.devices().unwrap().screens;
+        assert!(!screens[0].restartable);
     }
 
     #[test]

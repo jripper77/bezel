@@ -38,11 +38,30 @@ and the vendor app do it when they quit) and after `bezel off`. Anything that
 draws wakes them: **Live** in the app, `bezel run`, `bezel show`,
 `bezel test-pattern`. Waking takes a few seconds.
 
-## The screen stops answering
+## The screen froze / stopped responding
 
-Symptoms: "timeout talking to …", "the screen did not wake up", an upload that
-stalls. Unplug the screen's USB cable, wait a few seconds, and plug it back in.
-Then try again.
+Symptoms: *"the screen stopped responding: it stopped reading what was sent"*,
+"timeout talking to …", an upload or the live theme that stalls. A Turing rev C
+screen (the 8.8" and the other serial models with a wake chip) can freeze, for
+example on an upload over its 25 MiB limit. **No replug is needed**: Bezel
+restarts it through its wake chip, and it comes back in about 10 seconds.
+
+- **On its own**: the next command, `bezel run` started again (the
+  `bezel-run@` service restarts it), or turning **Live** on again finds the
+  frozen screen and restarts it once before connecting. Nothing is restarted
+  while the screen answers.
+- **Command line**: `bezel restart` (or `bezel restart -s /dev/ttyACM1` for one
+  screen). It says that it restarts the screen, waits for it and prints where
+  it is back. The terminal also prints this hint after an error that means the
+  screen froze.
+- **App**: **Screen → Settings → Restart screen…**, after a short confirmation.
+  A storage error that means the screen froze has the same button, and so has
+  the screen's card when live mode stopped because of it.
+
+A restart stops what the screen shows or plays; the files it stores stay. If
+the screen still does not answer after a restart, or it has no wake chip
+(Bezel then says it cannot restart it), unplug its USB cable, wait a few
+seconds and plug it back in.
 
 ## After cancelling an upload
 

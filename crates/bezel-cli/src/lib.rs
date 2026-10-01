@@ -18,6 +18,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bezel_core::BezelError;
 use bezel_core::domain::clock::{Language, LocalTime};
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::theme::Fit;
@@ -252,6 +253,15 @@ pub enum Command {
         #[command(flatten)]
         target: Target,
     },
+    /// Restart a screen that stopped responding, without unplugging it
+    /// (Turing rev C screens, through their wake chip; about 10 s). What it
+    /// plays stops; its stored files stay. Bezel also does this on its own,
+    /// once, when a screen on the bus does not answer.
+    Restart {
+        /// Screen to use.
+        #[command(flatten)]
+        target: Target,
+    },
     /// Show the machine's sensors: CPU, GPU, memory, disks, network, board.
     /// Rates and usages are measured between two samples 250 ms apart, so
     /// the first output takes a quarter of a second.
@@ -452,8 +462,45 @@ where
         }
         // Writes the install command to stderr: see `udev_rules::run`.
         Command::UdevRules => anyhow::bail!("`udev-rules` runs through udev_rules::run"),
+        // Says what it does before the wait: see `run_restart`.
+        Command::Restart { .. } => anyhow::bail!("`restart` runs through run_restart"),
     }
 }
+
+/// Runs `restart` (anything else is an error): restarts a hung screen
+/// without a replug (D-2026-09-30-release-polish-13). Says on `log` that it
+/// restarts the screen and how long that takes; returns the outcome for
+/// stdout.
+pub fn run_restart<B, C>(
+    cli: &Cli,
+    bus: &B,
+    connector: &C,
+    log: &mut dyn Write,
+) -> anyhow::Result<String>
+where
+    B: DeviceBus + ?Sized,
+    C: ScreenConnector + ?Sized,
+{
+    match &cli.command {
+        Command::Restart { target } => screen::restart(bus, connector, target, log),
+        _ => anyhow::bail!("not the restart command"),
+    }
+}
+
+/// What to do after an error that means the screen hung: it stopped
+/// reading what Bezel sent (D-2026-09-30-release-polish-13). `None` for any
+/// other error.
+pub fn hang_hint(error: &anyhow::Error) -> Option<&'static str> {
+    let hung = error
+        .chain()
+        .any(|e| matches!(e.downcast_ref::<BezelError>(), Some(BezelError::Hung(_))));
+    hung.then_some(HANG_HINT)
+}
+
+/// [`hang_hint`]'s advice.
+pub const HANG_HINT: &str = "hint: the screen stopped responding (its firmware hung). The next \
+     command restarts a Turing rev C screen on its own, in about 10 s; or run `bezel restart` \
+     now. No need to unplug it.";
 
 /// Runs `monitor-mode` (anything else is an error): switches a panel in
 /// desktop mode back to USB monitor mode through `hid`, only with `--yes`.
@@ -505,6 +552,8 @@ mod tests {
         assert!(err.to_string().contains("run_monitor_mode"), "{err}");
         let err = run_args(&["bezel", "udev-rules"]).unwrap_err();
         assert!(err.to_string().contains("udev_rules::run"), "{err}");
+        let err = run_args(&["bezel", "--fake", "restart"]).unwrap_err();
+        assert!(err.to_string().contains("run_restart"), "{err}");
         assert!(
             run_args(&["bezel", "sensors", "--count", "2"]).is_err(),
             "--count needs --watch"
@@ -633,6 +682,62 @@ mod tests {
         assert_eq!(cli.command.ffmpeg(), None);
         let _ = std::fs::remove_dir_all(folder);
         let _ = std::fs::remove_file(png);
+    }
+
+    #[test]
+    fn restart_runs_through_run_restart_and_hangs_get_a_hint() {
+        let restart = |args: &[&str], bus: &FakeBus, connector: &FakeConnector| {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let mut log = Vec::new();
+            let out = run_restart(&cli, bus, connector, &mut log);
+            (out, String::from_utf8(log).unwrap())
+        };
+        let connector = FakeConnector::default();
+        let (out, log) = restart(&["bezel", "restart"], &FakeBus::turing_88(), &connector);
+        assert_eq!(
+            log,
+            "Restarting the Turing Smart Screen 8.8\" through its wake chip; it is back in \
+             about 10 s...\n"
+        );
+        assert_eq!(
+            out.unwrap(),
+            "Turing Smart Screen 8.8\": restarted; it is back at /dev/ttyACM1\n"
+        );
+        assert_eq!(connector.log().restarts, ["/dev/ttyACM1"]);
+        let (out, _) = restart(
+            &["bezel", "restart", "-s", "/dev/ttyACM0"],
+            &FakeBus::turing_88(),
+            &connector,
+        );
+        out.unwrap();
+        assert_eq!(
+            connector.log().restarts.len(),
+            2,
+            "by the MCU's address too"
+        );
+        let (out, _) = restart(&["bezel", "devices"], &FakeBus::turing_88(), &connector);
+        assert!(out.is_err());
+
+        // A screen without a wake chip: refused, nothing said or sent.
+        let weact = storage::doubles::weact_bus();
+        let (out, log) = restart(&["bezel", "restart"], &weact, &connector);
+        let err = format!("{:#}", out.unwrap_err());
+        assert_eq!(
+            err,
+            "could not restart the screen: not supported: restarting WeAct Studio Display FS \
+             0.96\": only Turing rev C screens restart, through their wake chip (MCU); unplug \
+             the screen and plug it back in"
+        );
+        assert!(log.is_empty());
+        assert_eq!(connector.log().restarts.len(), 2);
+
+        let hung = anyhow::Error::from(BezelError::Hung("it stopped reading".into()))
+            .context("stopped after 3 frames");
+        assert_eq!(hang_hint(&hung), Some(HANG_HINT));
+        assert!(HANG_HINT.contains("bezel restart"));
+        let other = anyhow::Error::from(BezelError::Timeout("the screen".into()));
+        assert_eq!(hang_hint(&other), None);
+        assert_eq!(hang_hint(&anyhow::anyhow!("plain")), None);
     }
 
     #[test]

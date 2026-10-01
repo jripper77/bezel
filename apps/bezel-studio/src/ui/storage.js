@@ -208,8 +208,9 @@ export function createConfirm(t) {
  * @param {object} deps.bridge
  * @param {(message: string) => void} deps.notify short confirmation (toast)
  * @param {() => {screen: object|null, live: boolean, liveVideo: {state: string, path?: string}|null}} deps.context
+ * @param {(key: string) => void} [deps.restart] restarts a screen that stopped responding
  */
-export function createStoragePanel({ root, t, locale, bridge, notify, context }) {
+export function createStoragePanel({ root, t, locale, bridge, notify, context, restart = () => {} }) {
   const confirm = createConfirm(t);
   const view = {
     key: null,
@@ -233,8 +234,11 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
   const busy = () => Boolean(view.job) || view.working;
   const bytes = (n) => formatBytes(n, locale());
 
-  /** A command's error as a notice (with the udev command when it fixes it). */
-  const errorNotice = (e) => ({ kind: 'error', text: errorText(t, e), command: e?.udevCommand ?? null });
+  /**
+   * A command's error as a notice (with the udev command when it fixes it,
+   * and the restart when the screen stopped responding).
+   */
+  const errorNotice = (e) => ({ kind: 'error', text: errorText(t, e), command: e?.udevCommand ?? null, hung: e?.code === 'hung' });
 
   // ------------------------------------------------------------- loading --
   async function load() {
@@ -478,6 +482,11 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
     // A file stored with the wrong size is deleted on request, never on its own.
     const children = [el('p', { text: n.text })];
     if (n.command) children.push(el('p', { text: t('udev.explain') }), udevCommand(t, n.command, notify));
+    if (n.hung && screen()?.restartable) {
+      children.push(el('div', { class: 'button-row' }, [
+        el('button', { type: 'button', class: 'primary-button', text: t('screen.restart'), disabled: busy(), onclick: () => restart(view.key) }),
+      ]));
+    }
     if (n.path && storageFeatures(screen()).remove) {
       const file = fileOf(n.path);
       children.push(el('div', { class: 'button-row' }, [
@@ -727,6 +736,12 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context })
       if (!view.job) renderBody();
     },
     refresh: load,
+    /** The screen was restarted: an error from before it no longer stands. */
+    afterRestart() {
+      view.notice = null;
+      if (view.shown && !busy()) load();
+      else renderAll();
+    },
     /** The UI's language changed: every text is drawn again. */
     retranslate() {
       jobBar.setAttribute('aria-label', t('storage.progressLabel'));

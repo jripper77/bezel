@@ -110,6 +110,13 @@ impl Screen {
         }
     }
 
+    /// Whether Bezel can restart the screen without a USB replug: a Turing
+    /// rev C screen whose wake MCU is listed, which restarts its SoC on
+    /// command (D-2026-09-30-release-polish-13).
+    pub fn restartable(&self) -> bool {
+        self.family == Family::TuringRevC && self.wake.is_some()
+    }
+
     /// A stable, human-readable identity: the display endpoint address, or the
     /// wake endpoint's when asleep.
     pub fn address(&self) -> Option<&DeviceAddress> {

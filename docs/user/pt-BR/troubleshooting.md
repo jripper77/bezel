@@ -42,11 +42,31 @@ de um `bezel off`. Qualquer coisa que desenhe as acorda: o **Ao vivo** no
 aplicativo, `bezel run`, `bezel show`, `bezel test-pattern`. Acordar leva alguns
 segundos.
 
-## A tela para de responder
+## A tela travou / parou de responder
 
-Sinais: "timeout talking to …", "the screen did not wake up", um envio que
-empaca. Desconecte o cabo USB da tela, espere alguns segundos e conecte de novo.
-Depois tente outra vez.
+Sinais: *"the screen stopped responding: it stopped reading what was sent"* (a
+tela parou de responder), "timeout talking to …", um envio ou o tema ao vivo
+que empaca. Uma tela Turing rev C (a 8,8" e os outros modelos seriais com chip
+de despertar) pode travar, por exemplo com um envio acima do limite de 25 MiB.
+**Não precisa desconectar o cabo**: o Bezel a reinicia pelo chip de despertar,
+e ela volta em cerca de 10 segundos.
+
+- **Sozinho**: o próximo comando, o `bezel run` iniciado de novo (o serviço
+  `bezel-run@` faz isso), ou ligar o **Ao vivo** de novo encontra a tela
+  travada e a reinicia uma vez antes de conectar. Nada é reiniciado enquanto a
+  tela responde.
+- **Linha de comando**: `bezel restart` (ou `bezel restart -s /dev/ttyACM1`
+  para uma tela). Ele diz que vai reiniciar a tela, espera por ela e mostra onde
+  ela voltou. O terminal também mostra essa dica depois de um erro que indica
+  que a tela travou.
+- **Aplicativo**: **Tela → Ajustes → Reiniciar a tela…**, depois de uma
+  confirmação curta. Um erro de armazenamento que indica que a tela travou tem o
+  mesmo botão, e o cartão da tela também, quando o ao vivo parou por isso.
+
+Reiniciar para o que a tela mostra ou toca; os arquivos guardados ficam. Se a
+tela continuar sem responder depois de reiniciar, ou não tiver chip de
+despertar (o Bezel então diz que não consegue reiniciá-la), desconecte o cabo
+USB, espere alguns segundos e conecte de novo.
 
 ## Depois de cancelar um envio
 

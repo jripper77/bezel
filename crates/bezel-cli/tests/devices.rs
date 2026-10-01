@@ -50,6 +50,28 @@ fn hid_desktop_requires_confirm_in_the_binary() {
 }
 
 #[test]
+fn restart_says_what_it_does_then_the_outcome() {
+    // D-2026-09-30-release-polish-13, on the simulated 8.8": no --yes.
+    let out = bezel(&["--fake", "restart"]);
+    assert!(out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.starts_with("Restarting the Turing Smart Screen 8.8\""),
+        "{said}"
+    );
+    assert!(said.contains("about 10 s"), "{said}");
+    let outcome = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        outcome,
+        "Turing Smart Screen 8.8\": restarted; it is back at /dev/ttyACM1\n"
+    );
+    let out = bezel(&["--fake", "restart", "-s", "COM9"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("screen not found: COM9"), "{err}");
+}
+
+#[test]
 fn udev_rules_prints_the_rule_and_only_shows_the_command() {
     let out = bezel(&["udev-rules"]);
     assert!(out.status.success());

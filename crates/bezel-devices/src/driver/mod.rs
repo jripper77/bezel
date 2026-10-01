@@ -36,8 +36,13 @@ impl Pause for RealTime {
     }
 }
 
-/// A transport failure, as the domain names it.
+/// A transport failure, as the domain names it: a device that stopped
+/// reading what was sent ([`crate::wire::Stalled`]) hung
+/// (D-2026-09-30-release-polish-13); anything else is a transport error.
 pub(crate) fn io_err(e: std::io::Error) -> BezelError {
+    if crate::wire::is_stall(&e) {
+        return BezelError::Hung(e.to_string());
+    }
     BezelError::Transport(e.to_string())
 }
 
@@ -202,6 +207,17 @@ mod tests {
         internal: "/mnt/UDISK/",
         card: "/mnt/SDCARD/",
     };
+
+    #[test]
+    fn a_device_that_stopped_reading_hung() {
+        let stalled = crate::wire::Stalled { queued: Some(250) }.error();
+        assert_eq!(
+            io_err(stalled),
+            BezelError::Hung("it stopped reading what was sent (250 bytes still queued)".into())
+        );
+        let pipe = std::io::Error::from(std::io::ErrorKind::BrokenPipe);
+        assert!(matches!(io_err(pipe), BezelError::Transport(_)));
+    }
 
     #[test]
     fn storage_roots_map_the_four_folders() {

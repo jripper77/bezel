@@ -1,6 +1,7 @@
 //! Screen discovery and selection, and the switch of a panel in desktop
 //! mode back to USB monitor mode.
 
+use crate::domain::device::Family;
 use crate::domain::discovery::{
     DesktopModePanel, Discovery, MonitorModeConfirmed, MonitorModeSwitch, Screen, ScreenState,
     desktop_mode_panels, group_devices, group_screens,
@@ -57,6 +58,48 @@ where
 {
     let screen = choose_screen(discover_screens(bus)?, address)?;
     connector.connect(&screen)
+}
+
+/// Restarts a hung screen without a USB replug
+/// (D-2026-09-30-release-polish-13): picks the screen like [`open_screen`]
+/// (`address` is its display or wake address), has `connector` restart it
+/// and returns it as the bus lists it afterwards: a rev C display comes back
+/// under a new address, its MCU keeps its own. Disruptive, never
+/// destructive: what the screen plays stops, its stored files stay. A
+/// screen that cannot be restarted ([`Screen::restartable`]) is refused
+/// with `Unsupported` before anything is sent.
+pub fn restart_screen<B, C>(bus: &B, connector: &C, address: Option<&str>) -> Result<Screen>
+where
+    B: DeviceBus + ?Sized,
+    C: ScreenConnector + ?Sized,
+{
+    let screen = choose_screen(discover_screens(bus)?, address)?;
+    if !screen.restartable() {
+        return Err(cannot_restart(&screen));
+    }
+    connector.restart(&screen)?;
+    let anchor = screen.wake.as_ref().map(|e| e.address.0.clone());
+    let back = discover_screens(bus).and_then(|all| choose_screen(all, anchor.as_deref()));
+    Ok(back.unwrap_or(screen))
+}
+
+/// Why `screen` cannot be restarted, and what to do instead.
+fn cannot_restart(screen: &Screen) -> BezelError {
+    let name = screen.model().map_or_else(
+        || {
+            let address = screen.address().map(|a| a.0.as_str()).unwrap_or("?");
+            format!("the screen at {address}")
+        },
+        |m| m.name.to_string(),
+    );
+    let why = if screen.family == Family::TuringRevC {
+        "its wake chip (MCU) is not listed"
+    } else {
+        "only Turing rev C screens restart, through their wake chip (MCU)"
+    };
+    BezelError::Unsupported(format!(
+        "restarting {name}: {why}; unplug the screen and plug it back in"
+    ))
 }
 
 /// Switches a panel in desktop mode back to USB monitor mode

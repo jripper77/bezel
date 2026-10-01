@@ -16,6 +16,9 @@
       "limit",
       "size"
     ],
+    "hung": [
+      "detail"
+    ],
     "inUse": [
       "address",
       "holders"

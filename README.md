@@ -54,6 +54,7 @@ bezel show poster.jpg --orientation vertical --fit contain
 bezel brightness 40
 bezel off                                 # the next command wakes the screen
 bezel release                             # back to the screen's own clock/media
+bezel restart                             # a rev C screen that stopped responding, no replug
 bezel sensors                             # every sensor of this machine
 bezel sensors --watch 1 --json            # live, one JSON document per second
 ```

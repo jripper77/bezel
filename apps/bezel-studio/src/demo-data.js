@@ -23,6 +23,7 @@ const turing88 = Object.freeze({
   ],
   display: { address: '/dev/ttyACM1', usb: '0525:a4a7', serial: null, manufacturer: null, product: null, location: '3-1.2' },
   wake: { address: '/dev/ttyACM0', usb: '1a86:ca88', serial: 'CT88INCH', manufacturer: 'Turing', product: 'UsbMonitor', location: '3-1.1' },
+  restartable: true,
 });
 
 const asleep21 = Object.freeze({
@@ -35,6 +36,7 @@ const asleep21 = Object.freeze({
   ],
   display: null,
   wake: { address: 'COM3', usb: '1a86:ca21', serial: 'CT21INCH', manufacturer: 'Turing', product: 'UsbMonitor', location: null },
+  restartable: true,
 });
 
 // A TURZX USB screen: it stores and plays files, but Bezel neither deletes
@@ -57,6 +59,7 @@ const turzx = Object.freeze({
   ],
   display: { address: '3-1.4', usb: '1cbe:0088', serial: null, manufacturer: 'Turing', product: null, location: '3-1.4' },
   wake: null,
+  restartable: false,
 });
 
 // A Turing USB panel the vendor app left in Windows' desktop mode: listed
@@ -139,7 +142,7 @@ export const DEMO_VIDEO_THEME = Object.freeze({
 export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules && sudo udevadm control --reload && sudo udevadm trigger';
 
 /**
- * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean}>}
+ * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: boolean, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean}>}
  */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
@@ -152,5 +155,8 @@ export const SCENARIOS = Object.freeze({
   turzx: { screens: [turzx] },
   // Linux without Bezel's udev rule: the screen is listed, opening it is denied.
   denied: { screens: [turing88], denied: true },
+  // A screen whose firmware hangs: live mode and uploads stop until it is
+  // restarted (D-2026-09-30-release-polish-13).
+  hung: { screens: [turing88], hung: true },
   desktop: { screens: [turing88], desktopMode: [desktopPanel] },
 });

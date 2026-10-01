@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use bezel_cli::theme::{bundled_candidates, data_home, first_dir, font_dirs, resolve};
 use bezel_cli::{
     Cli, Command, ProgressStyle, Rendering, SensorSettings, SensorsArgs, SleepPace, StorageArgs,
-    StorageKit, WatchStyle, clock, run, run_monitor_mode, run_sensors, run_storage_command,
-    run_theme_command, udev_rules,
+    StorageKit, WatchStyle, clock, hang_hint, run, run_monitor_mode, run_restart, run_sensors,
+    run_storage_command, run_theme_command, udev_rules,
 };
 use bezel_core::domain::job::CancelToken;
 use bezel_core::domain::storage::RemotePath;
@@ -199,6 +199,16 @@ fn monitor_mode(cli: &Cli) -> anyhow::Result<String> {
     }
 }
 
+/// `bezel restart`: the real screen, or the simulated one.
+fn restart(cli: &Cli) -> anyhow::Result<String> {
+    let mut log = std::io::stderr();
+    if cli.fake {
+        run_restart(cli, &fake_bus(), &fake_connector(), &mut log)
+    } else {
+        run_restart(cli, &SystemBus, &SystemConnector, &mut log)
+    }
+}
+
 /// `bezel udev-rules`: the install command names the program the way the
 /// user started it.
 fn print_udev_rules() -> anyhow::Result<String> {
@@ -223,6 +233,7 @@ fn main() -> ExitCode {
         Command::Render { .. } | Command::Run { .. } | Command::Import { .. } => themes(&cli),
         Command::Storage(args) => storage(args, cli.fake),
         Command::MonitorMode { .. } => monitor_mode(&cli),
+        Command::Restart { .. } => restart(&cli),
         Command::UdevRules => print_udev_rules(),
         _ if cli.fake => run(
             &cli,
@@ -241,6 +252,10 @@ fn main() -> ExitCode {
         }
         Err(e) => {
             eprintln!("bezel: {e:#}");
+            // A screen that hung is restarted by the next command, or now.
+            if let Some(hint) = hang_hint(&e) {
+                eprintln!("{hint}");
+            }
             // On Linux a denied device is fixed by the udev rule.
             if cfg!(target_os = "linux")
                 && let Some(hint) = udev_rules::access_hint(&e)

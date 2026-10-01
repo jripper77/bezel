@@ -1,6 +1,7 @@
 //! Byte transports the drivers talk through, and a scripted fake for tests.
 
 use std::collections::VecDeque;
+use std::fmt;
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,40 @@ pub enum Flow {
     Hardware,
 }
 
+/// Why a [`Wire::send`] failed when the device stopped reading what was
+/// sent (a hung firmware, seen on the 8.8"): the inner error of an
+/// `io::Error` of kind `TimedOut`, which the drivers report as
+/// `BezelError::Hung` ([`is_stall`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stalled {
+    /// Bytes still waiting to go to the device, when the port can tell.
+    pub queued: Option<u32>,
+}
+
+impl fmt::Display for Stalled {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("it stopped reading what was sent")?;
+        match self.queued {
+            Some(left) => write!(f, " ({left} bytes still queued)"),
+            None => Ok(()),
+        }
+    }
+}
+
+impl std::error::Error for Stalled {}
+
+impl Stalled {
+    /// The `io::Error` a stalled send fails with.
+    pub fn error(self) -> io::Error {
+        io::Error::new(io::ErrorKind::TimedOut, self)
+    }
+}
+
+/// Whether `e` is a send that failed because the device stopped reading.
+pub fn is_stall(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| inner.is::<Stalled>())
+}
+
 /// How long a write may make no progress before it fails: the SoC reads
 /// while it writes to its flash or the memory card, which can stall.
 const WRITE_STALL: Duration = Duration::from_secs(10);
@@ -38,7 +73,7 @@ const DRAIN_POLL: Duration = Duration::from_millis(1);
 /// Writes every byte of `bytes` through `write`: a write a signal
 /// interrupted is tried again, and so is one that timed out while the last
 /// progress (on `now`'s clock) is less than `stall` old. A write that takes
-/// no bytes, one stalled for `stall` and any other error fail.
+/// no bytes, one stalled for `stall` ([`Stalled`]) and any other error fail.
 fn write_patiently(
     mut bytes: &[u8],
     stall: Duration,
@@ -62,6 +97,9 @@ fn write_patiently(
             Err(e)
                 if e.kind() == io::ErrorKind::TimedOut
                     && now().saturating_duration_since(progress) < stall => {}
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+                return Err(Stalled { queued: None }.error());
+            }
             Err(e) => return Err(e),
         }
     }
@@ -73,7 +111,8 @@ fn write_patiently(
 /// drain: that one waits forever when the device stops reading (seen on
 /// the 8.8": a firmware that hung mid-upload kept a sender blocked for good)
 /// and gives up early when a signal interrupts it. The queue must shrink
-/// at least once every `stall`, else the device stopped reading.
+/// at least once every `stall`, else the device stopped reading
+/// ([`Stalled`]).
 fn drain_watching(
     stall: Duration,
     mut now: impl FnMut() -> Instant,
@@ -91,10 +130,7 @@ fn drain_watching(
             last = left;
             progress = now();
         } else if now().saturating_duration_since(progress) >= stall {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!("the screen stopped reading ({left} bytes still queued)"),
-            ));
+            return Err(Stalled { queued: Some(left) }.error());
         }
         pause();
     }
@@ -127,6 +163,18 @@ impl SerialWire {
             .write_request_to_send(true)
             .map_err(io::Error::other)?;
         Ok(wire)
+    }
+}
+
+impl Drop for SerialWire {
+    /// Drops what a device that stopped reading never took before the port
+    /// closes: closing a CDC-ACM port waits for its output to drain (up to
+    /// 30 s on Linux), which would delay the restart of a hung screen.
+    /// After a successful send nothing is left to drop.
+    fn drop(&mut self) {
+        if let Err(e) = self.port.clear(serialport::ClearBuffer::Output) {
+            tracing::debug!("output not discarded before closing the port: {e}");
+        }
     }
 }
 
@@ -321,7 +369,10 @@ mod tests {
     fn a_stalled_write_fails_at_the_limit() {
         let script = timeouts(100).collect();
         let (result, taken, writes) = write_with(b"abc", Duration::from_secs(3), script);
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(is_stall(&err), "a hung device, not a port error");
+        assert_eq!(err.to_string(), "it stopped reading what was sent");
         assert!(taken.is_empty());
         // The clock moves 1 s per look: the third timeout is 3 s after the
         // start, the limit.
@@ -380,14 +431,18 @@ mod tests {
         let (result, looks) = drain_with((0..100).map(|_| Ok(10_240)).collect());
         let err = result.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::TimedOut);
-        assert!(
-            err.to_string().contains("10240 bytes still queued"),
-            "{err}"
+        assert!(is_stall(&err));
+        assert_eq!(
+            err.to_string(),
+            "it stopped reading what was sent (10240 bytes still queued)"
         );
         assert!(looks < 10, "{looks}");
 
         // The port's own error stands.
         let (result, _) = drain_with(vec![Ok(5), Err(failure(io::ErrorKind::BrokenPipe))]);
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+        assert!(!is_stall(&err));
+        assert!(!is_stall(&failure(io::ErrorKind::TimedOut)));
     }
 }

@@ -68,6 +68,14 @@ pub mod op {
 /// The two bytes HELLO carries (their meaning is unknown; both references send them).
 pub const HELLO_PAYLOAD: [u8; 2] = [0xC5, 0xD3];
 
+/// The MCU command that restarts the SoC (spec § 15, § 16, § 17.2): written
+/// as is to the MCU port, not to the SoC, neither padded nor framed. The
+/// vendor writes it in its reconnect ladder and holds the port 8 s. The SoC
+/// leaves the bus at once and comes back about 10 s later, also from a hung
+/// firmware (hardware, 8.8"). Disruptive, not destructive
+/// (D-2026-09-30-release-polish-13).
+pub const MCU_RESTART: [u8; 6] = [0x00, 0x00, 0x00, 0x00, 0x00, 0xC9];
+
 /// Text the device answers with, matched by content (spec § 3, § 13).
 pub mod reply {
     /// STOP_MEDIA: playback stopped.
@@ -558,6 +566,8 @@ mod tests {
         assert_eq!(head(&set_rotation(2)), "81ef690000000100000002");
         assert_eq!(set_rotation(6)[10], 2);
         assert!(start_display_block().iter().all(|&b| b == 0x2C));
+        // docs: § 17.2, "MCU command": six bytes, not padded.
+        assert_eq!(hex(&MCU_RESTART), "0000000000c9");
     }
 
     /// Asserts the whole 250-byte packet: `head_hex`, then `zeros` zero bytes.

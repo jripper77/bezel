@@ -47,6 +47,10 @@ const state = {
   // The brightness set on each screen in this session (percent, by key):
   // what the slider shows and what the boot media is set with.
   brightness: {},
+  // The screen restarting now, and the one that stopped responding (its
+  // card offers the restart; D-2026-09-30-release-polish-13), by key.
+  restarting: null,
+  hung: null,
 };
 
 function toast(message) {
@@ -105,6 +109,7 @@ const library = createLibrary({
     autostart: () => state.autostart,
     leaveDesktopMode: (panel) => leaveDesktopMode(panel),
     showSensors: (keys) => bridge.showSensors(keys).catch((e) => fail(e)),
+    restart: (screen) => restartScreen(screen),
   },
 });
 
@@ -120,6 +125,7 @@ const storage = createStoragePanel({
     liveVideo: state.liveVideo,
     brightness: state.brightness,
   }),
+  restart: (screen) => restartScreen(screen),
 });
 wireSubtabs(document.querySelector('#panel-screen .subtabs'), (name) => (name === 'storage' ? storage.show() : storage.hide()));
 
@@ -248,10 +254,11 @@ function renderScreenSelect() {
   $('screen-dot').className = `dot${state.live ? ' live' : current?.state === 'awake' ? ' awake' : ''}`;
   let device = t('top.noScreen');
   if (state.screenError) device = t('status.devicesError', { message: errorText(t, state.screenError) });
+  else if (state.restarting) device = t('restart.running');
   else if (current && state.live && state.liveVideo?.state === 'missing') device = t('status.liveVideoMissing');
   else if (current) device = state.live ? t('status.live') : t(`screen.state.${current.state}`);
   $('status-device').textContent = device;
-  library.renderScreen(state.screens, state.screen, state.live, state.brightness, state.desktopMode);
+  library.renderScreen(state.screens, state.screen, state.live, state.brightness, state.desktopMode, { restarting: state.restarting, hung: state.hung });
   storage.update();
 }
 
@@ -280,7 +287,11 @@ function syncLive(s) {
     renderScreenSelect();
   }
   if (live === state.live && (!live || s.live === state.screen)) return;
-  if (!live && state.live && s.liveError) toast(t('toast.liveStopped', { message: errorText(t, s.liveError) }));
+  if (!live && state.live && s.liveError) {
+    toast(t('toast.liveStopped', { message: errorText(t, s.liveError) }));
+    // A screen that hung: its card offers the restart.
+    if (s.liveError.code === 'hung') state.hung = state.screen;
+  }
   state.live = live;
   if (live) state.screen = s.live;
   $('live').checked = live;
@@ -334,6 +345,36 @@ async function leaveDesktopMode(panel) {
   } catch (e) {
     fail(e);
   }
+  await refreshScreens();
+}
+
+// A screen that stopped responding restarts through its wake chip, without a
+// replug, after a dialog that says what stops (D-2026-09-30-release-polish-13).
+// It comes back under a new key; a screen that was live is live again.
+async function restartScreen(key) {
+  if (state.restarting) return;
+  const screen = state.screens.find((s) => s.key === key);
+  const name = screen?.models.length === 1 ? screen.models[0].name : key;
+  const ok = await confirmAction({
+    title: t('restart.confirmTitle', { name }),
+    body: [el('p', { text: t('restart.confirmBody') })],
+    action: t('restart.confirmAction'),
+  });
+  if (!ok) return;
+  state.restarting = key;
+  renderScreenSelect();
+  try {
+    const done = await bridge.restartScreen(key);
+    state.hung = null;
+    if (done?.key) state.screen = done.key;
+    state.live = Boolean(done?.live);
+    $('live').checked = state.live;
+    storage.afterRestart();
+    toast(state.live ? t('restart.doneLive') : t('restart.done'));
+  } catch (e) {
+    fail(e);
+  }
+  state.restarting = null;
   await refreshScreens();
 }
 

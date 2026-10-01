@@ -36,6 +36,9 @@ pub struct ScreenDto {
     pub display: Option<EndpointDto>,
     /// Wake-only micro-controller.
     pub wake: Option<EndpointDto>,
+    /// Bezel can restart it without a replug (a rev C screen with its MCU,
+    /// D-2026-09-30-release-polish-13).
+    pub restartable: bool,
 }
 
 /// A catalog model.
@@ -141,6 +144,7 @@ impl From<&Screen> for ScreenDto {
             models: s.candidates.iter().map(|m| ModelDto::from(*m)).collect(),
             display: s.display.as_ref().map(EndpointDto::from),
             wake: s.wake.as_ref().map(EndpointDto::from),
+            restartable: s.restartable(),
         }
     }
 }
@@ -192,6 +196,16 @@ impl From<&Discovery> for DevicesDto {
             desktop_mode: d.desktop_mode.iter().map(DesktopPanelDto::from).collect(),
         }
     }
+}
+
+/// A screen restarted without a replug (D-2026-09-30-release-polish-13).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestartedDto {
+    /// Its key now: the display comes back under a new address.
+    pub key: String,
+    /// It shows the theme live again (it was live before the restart).
+    pub live: bool,
 }
 
 /// What a confirmed switch back to USB monitor mode did.
@@ -800,6 +814,7 @@ mod tests {
         assert_eq!(json["models"][0]["hardwareValidated"], true);
         assert_eq!(json["models"][0]["capabilities"]["videoPlayback"], true);
         assert_eq!(json["wake"]["serial"], "CT88INCH");
+        assert_eq!(json["restartable"], true);
     }
 
     #[test]

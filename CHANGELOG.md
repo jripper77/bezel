@@ -68,6 +68,13 @@ the Conventional Commits.
 - A cancelled upload reports the incomplete file it left and the command that
   deletes it; an upload whose stored size differs from the file says to delete
   it and send it again.
+- A Turing rev C screen that froze (it stopped reading what Bezel sent, or it
+  is on the bus but answers nothing) is restarted through its wake chip
+  without a USB replug: once, on its own, by the next connection (the next
+  command, `bezel run` started again, turning Live on), with
+  `bezel restart [-s SCREEN]`, or with **Restart screen…** in the studio's
+  Screen panel, which errors meaning a frozen screen also offer. It is back in
+  about 10 s; what it played stops, its stored files stay.
 - `bezel udev-rules` prints the Linux udev rule generated from the device
   catalog and the one-line sudo command that installs it, for AppImage,
   archive and source installs; Bezel never runs it. A refused port points at

@@ -56,6 +56,19 @@ pub trait DesktopModeHid {
 pub trait ScreenConnector {
     /// A live link to `screen`.
     fn connect(&self, screen: &Screen) -> Result<Box<dyn ScreenLink>>;
+
+    /// Restarts a hung screen without a USB replug and returns once it is
+    /// back on the bus (a [`Screen::restartable`] rev C screen: its MCU
+    /// restarts the SoC, about 10 s; D-2026-09-30-release-polish-13).
+    /// Disruptive, never destructive: what the screen plays stops, what it
+    /// stores stays. Nobody may hold the screen's link meanwhile. The
+    /// default, for screens that cannot be restarted: `Unsupported`.
+    fn restart(&self, screen: &Screen) -> Result<()> {
+        Err(crate::BezelError::Unsupported(format!(
+            "restarting a {} screen",
+            screen.family.slug()
+        )))
+    }
 }
 
 /// Driven port: one connected screen. Frames go in the orientation the user

@@ -63,7 +63,7 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   let themes = [];
   let media = [];
   let importReport = null;
-  let screenArgs = [[], null, false, {}, []];
+  let screenArgs = [[], null, false, {}, [], {}];
 
   // ---------------------------------------------------------------- tabs --
   const tabs = [...document.querySelectorAll('.tabs [role="tab"]')];
@@ -310,11 +310,35 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
   }
 
   /**
+   * What a screen that can be restarted without a replug offers: the
+   * Restart button, and why to use it when the screen hung
+   * (D-2026-09-30-release-polish-13).
+   * @param {{key: string, restartable?: boolean}} s
+   * @param {{restarting?: string|null, hung?: string|null}} restart
+   */
+  function restartParts(s, { restarting = null, hung = null }) {
+    if (!s.restartable) return { note: null, button: null };
+    const running = restarting === s.key;
+    let note = null;
+    if (running) note = el('p', { class: 'hint', role: 'status', text: t('restart.running') });
+    else if (hung === s.key) note = el('p', { class: 'dialog-warning', role: 'status' }, [icon(ICONS.warning, 18), el('span', { text: t('restart.hung') })]);
+    const button = el('button', {
+      type: 'button',
+      class: hung === s.key && !running ? 'primary-button' : 'text-button',
+      text: t('screen.restart'),
+      disabled: Boolean(restarting),
+      onclick: () => actions.restart(s.key),
+    });
+    return { note, button };
+  }
+
+  /**
    * @param {Record<string, number>} brightness the level set on each screen in this session
    * @param {object[]} desktopMode the panels in desktop mode
+   * @param {{restarting?: string|null, hung?: string|null}} restart the screen restarting, and the one that hung
    */
-  function renderScreen(screens, current, live, brightness = {}, desktopMode = []) {
-    screenArgs = [screens, current, live, brightness, desktopMode];
+  function renderScreen(screens, current, live, brightness = {}, desktopMode = [], restart = {}) {
+    screenArgs = [screens, current, live, brightness, desktopMode, restart];
     const root = $('screen-panel');
     if (!screens.length) {
       root.replaceChildren(el('p', { class: 'empty-note', text: t('screen.none') }), autostartField(), ...[desktopSection(desktopMode)].filter(Boolean));
@@ -324,12 +348,15 @@ export function createLibrary({ store, canvas, stage, t, actions }) {
       const model = s.models.length === 1 ? s.models[0] : null;
       const slider = el('input', { type: 'range', min: 0, max: 100, step: 1, value: String(brightness[s.key] ?? 70), 'aria-label': t('screen.brightness') });
       slider.addEventListener('change', () => actions.setBrightness(s.key, Number(slider.value)));
+      const { note, button } = restartParts(s, restart);
       return el('section', { class: 'screen-card', 'aria-label': model ? model.name : s.key }, [
         el('strong', { text: model ? model.name : s.models.map((m) => m.name).join(' / ') }),
         el('span', { class: 'meta', text: `${s.key} · ${t(`screen.state.${s.state}`)}${s.key === current && live ? ` · ${t('status.live')}` : ''}` }),
         el('label', { class: 'field' }, [el('span', { text: t('screen.brightness') }), slider]),
+        note,
         el('div', { class: 'button-row' }, [
           el('button', { type: 'button', class: 'text-button', text: t('screen.release'), onclick: () => actions.release(s.key) }),
+          button,
         ]),
       ]);
     }));

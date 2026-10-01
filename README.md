@@ -38,6 +38,11 @@ window to design themes and drive the screen.
   brings it back at login.
 - **Themes**: bundled ones for each screen size, your own library, and import of
   the vendor app's `.turtheme` and turing-smart-screen-python themes.
+- **Video backgrounds**: the canvas plays the video (up to 15 pictures a
+  second), and *Framing* turns it, fills or fits, zooms and places it, also by
+  dragging on the canvas. A video already turned for the panel, like the vendor
+  app's Dragon Ball theme, stands upright on its own
+  ([Framing the video](docs/user/storage-and-video.md#framing-the-video)).
 - **Screen panel**: brightness, and the *Storage* tab for the screen's internal
   flash and memory card (send pictures and videos, play them, choose what the
   screen shows at power-up), which opens full width as the storage manager:
@@ -161,10 +166,13 @@ bezel storage boot default --yes          # back to the built-in start screen
   and interrupted uploads, and `cache clear` frees the copies
   ([Managing the files](docs/user/storage-and-video.md#managing-the-files)).
 - **Themes with a video background.** `bezel run` has the screen loop the video
-  and draws the theme over it. When the screen does not store the video yet, the
-  poster shows and `bezel run` prints the exact `bezel storage put` command;
-  screens that cannot play videos get them decoded on this computer (ffmpeg,
-  `bezel run --ffmpeg PATH`).
+  as the theme frames it and draws the theme over it. When the screen does not
+  store the video yet, the poster shows and `bezel run` says how to send it: the
+  exact `bezel storage put` command, or, for a video framed in Bezel Studio
+  (turned, fitted, zoomed or moved), the studio's *Send to the screen*, since
+  the command line cannot frame a video. A video already in the panel's format
+  goes as it is, without ffmpeg. Screens that cannot play videos get them
+  decoded on this computer (ffmpeg, `bezel run --ffmpeg PATH`).
 
 ## Supported screens
 

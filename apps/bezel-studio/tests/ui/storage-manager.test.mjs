@@ -290,6 +290,23 @@ test('the demo checks only exact signals, like the core\'s test', () => {
   assert.equal(found.get('sd/video/changed.mp4').cataloged, 60);
 });
 
+test('the demo never checks the file a group keeps, like the core\'s test', () => {
+  const pending = (path) => (p) => (p === path ? { state: 'pending', size: 100 } : null);
+  const sized = (paths) => paths.map((path) => ({ path, size: 100 }));
+  const checked = (found) => [...found].filter(([, f]) => f.prechecked).map(([p]) => p);
+  // Two artifact names of equal size next to their base file, an unfinished upload.
+  const clip = demoFindings(sized(['sd/video/clip.mp4', 'sd/video/clip.mp4.mp4', 'sd/video/clip.mp41.mp4']), pending('sd/video/clip.mp4'), () => false);
+  assert.deepEqual(checked(clip), ['sd/video/clip.mp4', 'sd/video/clip.mp41.mp4']);
+  assert.equal(clip.get('sd/video/clip.mp41.mp4').kept, 'sd/video/clip.mp4.mp4');
+  // A group whose shortest name is itself an artifact.
+  const demo = demoFindings(sized(['sd/video/demo.mp4.mp4', 'sd/video/demo.mp4.mp4.mp4', 'sd/video/demo.mp4123.mp4']), pending('sd/video/demo.mp4.mp4'), () => false);
+  assert.deepEqual(checked(demo), ['sd/video/demo.mp4.mp4', 'sd/video/demo.mp4.mp4.mp4']);
+  assert.equal(demo.get('sd/video/demo.mp4.mp4.mp4').kept, 'sd/video/demo.mp4123.mp4');
+  // A protected file stays for its repeats even when its upload is unfinished.
+  const theme = demoFindings([{ path: 'sd/video/amd_90.mp4', size: 200 }, { path: 'sd/video/amd_90.mp4.mp4', size: 201 }], pending('sd/video/amd_90.mp4'), (p) => p === 'sd/video/amd_90.mp4');
+  assert.deepEqual([...theme].map(([p, f]) => [p, f.code, f.kept]), [['sd/video/amd_90.mp4.mp4', 'variant', 'sd/video/amd_90.mp4']]);
+});
+
 test('demo names follow the core: artifacts, upload names and the same file on FAT', () => {
   for (const [name, base] of [
     ['demon_open.mp4.mp4.mp4', 'demon_open.mp4'], ['NVI.mp427034822.mp4', 'nvi.mp4'], ['x.mp41.mp4.mp4', 'x.mp4'], ['logo.png.png', 'logo.png'],

@@ -216,7 +216,8 @@ pub fn artifact_base(name: &str) -> Option<String> {
 /// What the catalog alone says of a listed file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Verdict {
-    /// Bezel sent it and verified it: no finding.
+    /// Bezel sent it and verified it, or it is protected: no finding; it
+    /// stays.
     Own,
     /// A finding.
     Found(Reason),
@@ -228,6 +229,12 @@ fn settle(verdict: &mut Verdict, reason: Reason) {
     if *verdict == Verdict::Open {
         *verdict = Verdict::Found(reason);
     }
+}
+
+/// Whether `verdict` already starts checked (an unfinished Bezel upload,
+/// the hang partial): such a file never stays for another.
+fn checked(verdict: &Verdict) -> bool {
+    matches!(verdict, Verdict::Found(reason) if reason.code().prechecked())
 }
 
 fn from_catalog(file: &FileEntry, record: Option<&ScreenRecord>, card: Option<u64>) -> Verdict {
@@ -275,13 +282,21 @@ fn name_groups(files: &[FileEntry], verdicts: &mut [Verdict]) {
     }
 }
 
-/// `members`: one name group, shortest name first.
+/// `members`: one name group, shortest name first. The file that stays (for
+/// the group, or for the others of its size) is never one that already
+/// starts checked: otherwise the assistant would check every copy of the
+/// same bytes.
 fn judge_group(files: &[FileEntry], members: &[usize], verdicts: &mut [Verdict]) {
-    let Some((&kept, _)) = members.split_first() else {
+    let open: Vec<usize> = members
+        .iter()
+        .copied()
+        .filter(|&i| !checked(&verdicts[i]))
+        .collect();
+    let Some((&kept, _)) = open.split_first() else {
         return;
     };
     let mut by_size: BTreeMap<u64, usize> = BTreeMap::new();
-    for &i in members {
+    for &i in &open {
         let size = files[i].size;
         let reason = match size.and_then(|s| by_size.get(&s).copied()) {
             Some(first) => Reason::Duplicate {
@@ -334,15 +349,19 @@ pub fn findings(
     protected: &Protected,
 ) -> Vec<Finding> {
     let files = &listing.files;
-    let mut verdicts: Vec<Verdict> = files
-        .iter()
-        .map(|f| from_catalog(f, record, listing.card))
-        .collect();
+    let verdict = |f: &FileEntry| {
+        if protected.covers(&f.path) {
+            Verdict::Own
+        } else {
+            from_catalog(f, record, listing.card)
+        }
+    };
+    let mut verdicts: Vec<Verdict> = files.iter().map(verdict).collect();
     name_groups(files, &mut verdicts);
     same_sizes(files, &mut verdicts);
-    let found = files.iter().zip(verdicts);
-    let found = found.filter(|(file, _)| !protected.covers(&file.path));
-    found
+    files
+        .iter()
+        .zip(verdicts)
         .filter_map(|(file, verdict)| {
             let reason = match verdict {
                 Verdict::Own => return None,
@@ -643,6 +662,77 @@ mod tests {
             .collect();
         assert_eq!(prechecked, ["duplicate", "hangPartial", "pending"]);
         assert_eq!(Reason::HangPartial.code(), Code::HangPartial);
+    }
+
+    /// The files `found` pre-checks.
+    fn checked_paths(found: &[Finding]) -> Vec<String> {
+        let checked = found.iter().filter(|f| f.prechecked());
+        checked.map(|f| f.file.path.to_string()).collect()
+    }
+
+    #[test]
+    fn the_file_a_group_keeps_is_never_prechecked() {
+        // An unfinished Bezel upload (pre-checked) whose bytes the vendor
+        // app repeated: one copy of them stays unchecked.
+        let pending = |text: &str| {
+            let content = ContentId::from_digest([7; 32]);
+            ArchiveEntry::pending(path(text), Some(9), 100, content, 1)
+        };
+        // Two artifact names of equal size next to their base file.
+        let mut record = ScreenRecord::default();
+        record.record(pending("sd/video/clip.mp4"));
+        let listing = Listing {
+            files: vec![
+                file("sd/video/clip.mp4", 100),
+                file("sd/video/clip.mp4.mp4", 100),
+                file("sd/video/clip.mp41.mp4", 100),
+            ],
+            card: Some(9),
+        };
+        let found = findings(&listing, Some(&record), &Protected::default());
+        assert_eq!(
+            checked_paths(&found),
+            ["sd/video/clip.mp4", "sd/video/clip.mp41.mp4"]
+        );
+        let at = |p: &str| found.iter().find(|f| f.file.path == path(p));
+        assert_eq!(
+            at("sd/video/clip.mp41.mp4").map(|f| &f.reason),
+            Some(&Reason::Duplicate {
+                kept: path("sd/video/clip.mp4.mp4")
+            }),
+            "the file that stays is the shortest name not checked"
+        );
+        assert!(!at("sd/video/clip.mp4.mp4").is_some_and(Finding::prechecked));
+
+        // A group whose shortest name is itself an artifact.
+        let mut record = ScreenRecord::default();
+        record.record(pending("sd/video/demo.mp4.mp4"));
+        let listing = Listing {
+            files: vec![
+                file("sd/video/demo.mp4.mp4", 100),
+                file("sd/video/demo.mp4.mp4.mp4", 100),
+                file("sd/video/demo.mp4123.mp4", 100),
+            ],
+            card: Some(9),
+        };
+        let found = findings(&listing, Some(&record), &Protected::default());
+        let checked = checked_paths(&found);
+        assert_eq!(
+            checked,
+            ["sd/video/demo.mp4.mp4", "sd/video/demo.mp4.mp4.mp4"]
+        );
+        let kept = found.iter().find_map(|f| match &f.reason {
+            Reason::Duplicate { kept } => Some(kept.clone()),
+            _ => None,
+        });
+        assert_eq!(kept, Some(path("sd/video/demo.mp4123.mp4")));
+        // No duplicate or variant names a checked file as the one that stays.
+        assert!(found.iter().all(|f| match &f.reason {
+            Reason::Duplicate { kept } | Reason::Variant { kept } => {
+                !checked.contains(&kept.to_string())
+            }
+            _ => true,
+        }));
     }
 
     #[test]

@@ -104,7 +104,15 @@ function settle(verdicts, i, reason) {
   if (verdicts[i] === null) verdicts[i] = reason;
 }
 
-/** Vendor name artifacts grouped with the name they stand for (core `name_groups`). */
+const PRECHECKED = new Set(['duplicate', 'hangPartial', 'pending']);
+
+/** Whether a file already starts checked (core `checked`): it never stays for another. */
+const checked = (verdict) => verdict !== null && verdict !== OWN && PRECHECKED.has(verdict.code);
+
+/**
+ * Vendor name artifacts grouped with the name they stand for (core
+ * `name_groups`); the file that stays is never one that starts checked.
+ */
 function nameGroups(files, verdicts) {
   const groups = new Map();
   files.forEach((file, i) => {
@@ -119,9 +127,11 @@ function nameGroups(files, verdicts) {
   for (const { artifact, members } of groups.values()) {
     if (!artifact || members.length < 2) continue;
     members.sort((a, b) => shorter(files[a], files[b]));
-    const kept = members[0];
+    const open = members.filter((i) => !checked(verdicts[i]));
+    if (!open.length) continue;
+    const kept = open[0];
     const bySize = new Map();
-    for (const i of members) {
+    for (const i of open) {
       const { size } = files[i];
       if (size !== null && bySize.has(size)) {
         settle(verdicts, i, { code: 'duplicate', kept: files[bySize.get(size)].path });
@@ -148,8 +158,6 @@ function sameSizes(files, verdicts) {
   }
 }
 
-const PRECHECKED = new Set(['duplicate', 'hangPartial', 'pending']);
-
 /**
  * The cleanup findings of a listing (core `cleanup::findings`), by path: at
  * most one per file, `{code, prechecked, kept, cataloged}`. Files Bezel sent
@@ -160,12 +168,13 @@ const PRECHECKED = new Set(['duplicate', 'hangPartial', 'pending']);
  * @param {(path: string) => boolean} isProtected
  */
 export function demoFindings(files, entryAt, isProtected) {
-  const verdicts = files.map((f) => fromCatalog(f, entryAt(f.path)));
+  // A protected file stays like Bezel's own verified ones.
+  const verdicts = files.map((f) => (isProtected(f.path) ? OWN : fromCatalog(f, entryAt(f.path))));
   nameGroups(files, verdicts);
   sameSizes(files, verdicts);
   const found = new Map();
   files.forEach((file, i) => {
-    if (verdicts[i] === OWN || isProtected(file.path)) return;
+    if (verdicts[i] === OWN) return;
     const reason = verdicts[i] ?? { code: 'unused' };
     found.set(file.path, { code: reason.code, prechecked: PRECHECKED.has(reason.code), kept: reason.kept ?? null, cataloged: reason.cataloged ?? null });
   });

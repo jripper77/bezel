@@ -16,14 +16,20 @@
 //!   conversions report progress from `-progress pipe:1`, and cancelling
 //!   kills ffmpeg and deletes the partial output;
 //! - conversion outputs live in a private temporary folder, removed with the
-//!   transcoder; only the latest output is kept.
+//!   transcoder; only the latest output is kept;
+//! - a theme's poster is one picture of a video or an animated GIF, framed
+//!   by the core's `PosterSpec`; animated GIFs are read natively as moving
+//!   pictures, so a GIF can be a video background and is converted for a
+//!   screen like a video.
 //!
 //! The adapter decides nothing: whether a file is in a screen's profile is
 //! the core's `UploadProfile::mismatches`.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod gif;
 mod mp4;
+mod poster;
 mod probe;
 mod process;
 mod stream;
@@ -33,8 +39,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bezel_core::domain::frame::Frame;
 use bezel_core::domain::job::Job;
 use bezel_core::domain::media::{MediaFormat, MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
+use bezel_core::domain::poster::PosterSpec;
 use bezel_core::ports::{MediaLocation, MediaTranscoder, VideoFrames};
 use bezel_core::{BezelError, Result};
 use tempfile::TempDir;
@@ -225,6 +233,12 @@ impl MediaTranscoder for FfmpegTranscoder {
         let source = existing_file(source)?;
         let decoder = FfmpegDecoder::new(tools.ffmpeg, stream::arguments(source, spec), spec);
         Ok(Box::new(Looping::new(decoder, spec)))
+    }
+
+    fn poster(&mut self, source: &MediaLocation, spec: PosterSpec) -> Result<Frame> {
+        let tools = self.require("Taking a poster from a video")?;
+        let source = existing_file(source)?;
+        poster::take(&tools.ffmpeg, &poster::arguments(source, spec)?, spec)
     }
 }
 
@@ -649,6 +663,101 @@ mod tests {
                 .clone();
             let again = frames.frame_at(Duration::from_millis(200)).unwrap().clone();
             assert_eq!(looped, again);
+        }
+
+        #[test]
+        #[ignore = "needs ffmpeg with libx264 on PATH"]
+        fn real_ffmpeg_takes_a_poster_one_second_in_covering_the_canvas() {
+            let mut media = FfmpegTranscoder::new(None);
+            let dir = tempfile::tempdir().unwrap();
+            let source = generated(dir.path(), "clip.mov", "1920x1080", 3, &[]);
+            let info = media.probe(&source).unwrap();
+            let canvas = Size::new(1920, 480);
+            let spec = PosterSpec::for_canvas(canvas, &info);
+            assert_eq!(spec.at, Duration::from_secs(1));
+            let poster = media.poster(&source, spec).unwrap();
+            assert_eq!(poster.size(), canvas);
+            let first = PosterSpec {
+                at: Duration::ZERO,
+                ..spec
+            };
+            let first = media.poster(&source, first).unwrap();
+            assert_ne!(
+                poster, first,
+                "the pattern moves: 1 s in is another picture"
+            );
+            let late = PosterSpec {
+                at: Duration::from_secs(60),
+                ..spec
+            };
+            let err = media.poster(&source, late).unwrap_err();
+            assert!(err.to_string().contains("no picture 60.0 s in"), "{err}");
+        }
+
+        /// A looping GIF of 64x16 pictures shown for `delays_ms` each.
+        fn animated_gif(dir: &Path, delays_ms: &[u32]) -> MediaLocation {
+            use image::codecs::gif::{GifEncoder, Repeat};
+            use image::{Delay, Frame as Picture, Rgba, RgbaImage};
+
+            let path = dir.join("waves.gif");
+            let file = fs::File::create(&path).unwrap();
+            let mut encoder = GifEncoder::new(file);
+            encoder.set_repeat(Repeat::Infinite).unwrap();
+            let pictures = delays_ms
+                .iter()
+                .zip([40u8, 120, 200, 250])
+                .map(|(ms, shade)| {
+                    let picture =
+                        RgbaImage::from_pixel(64, 16, Rgba([shade, 255 - shade, 90, 255]));
+                    Picture::from_parts(picture, 0, 0, Delay::from_numer_denom_ms(*ms, 1))
+                });
+            encoder.encode_frames(pictures).unwrap();
+            drop(encoder);
+            MediaLocation(path.to_str().unwrap().to_string())
+        }
+
+        #[test]
+        #[ignore = "needs ffmpeg with libx264 on PATH"]
+        fn real_ffmpeg_turns_an_animated_gif_into_a_rev_c_video() {
+            use bezel_core::domain::geometry::Orientation;
+            use bezel_core::domain::media::{FrameRate, fitting_options};
+
+            let mut media = FfmpegTranscoder::new(None);
+            let dir = tempfile::tempdir().unwrap();
+            let gif = animated_gif(dir.path(), &[100, 70, 300]);
+            let info = media.probe(&gif).unwrap();
+            let track = info.video.unwrap();
+            assert_eq!(track.duration, Some(Duration::from_millis(470)));
+            assert_eq!(track.frame_rate, FrameRate::new(100, 7));
+            // Its poster is its first picture, covering the canvas.
+            let canvas = Size::new(1920, 480);
+            let spec = PosterSpec::for_canvas(canvas, &info);
+            assert_eq!(spec.at, Duration::ZERO);
+            let poster = media.poster(&gif, spec).unwrap();
+            assert_eq!(poster.size(), canvas);
+            assert_eq!(&poster.as_rgba()[..3], &[40, 215, 90], "the first picture");
+            // Sent to the 8.8" standing horizontally: turned, cropped, and
+            // resampled at a constant 15 fps (its 70 ms delay) for one pass:
+            // ffmpeg plays a looping GIF once.
+            let model = model_by_id(ModelId("turing-8.8")).unwrap();
+            let options = fitting_options(model, Orientation::Landscape, &info).for_source(&info);
+            assert_eq!((options.quarter_turns, options.frame_rate), (1, Some(15)));
+            let profile = profile("turing-8.8");
+            let token = CancelToken::new();
+            let mut last = None;
+            let mut sink = |p: Progress| last = Some(p);
+            let mut job = quiet_job(&token, &mut sink);
+            let output = media
+                .transcode(&gif, &profile.transcode_target(options), &mut job)
+                .unwrap();
+            assert_eq!(last.map(|p| p.total), Some(470), "progress over one pass");
+            let converted = media.probe(&output).unwrap();
+            assert_eq!(profile.mismatches(MediaKind::Video, &converted), vec![]);
+            let track = converted.video.unwrap();
+            let rate = track.frame_rate.unwrap();
+            assert_eq!(rate.fps().round(), 15.0, "constant 15 fps: {rate:?}");
+            let seconds = track.duration.unwrap().as_secs_f64();
+            assert!((0.3..1.0).contains(&seconds), "one pass: {seconds} s");
         }
     }
 }

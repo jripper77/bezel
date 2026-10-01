@@ -193,6 +193,17 @@ impl MediaInfo {
             None
         }
     }
+
+    /// Whether the file can go to a folder of `kind`: a still format as an
+    /// image, anything that moves as a video. An animated GIF (a still
+    /// format with a video track) can go to both: shown as it is in the
+    /// image folder, converted in the video folder.
+    pub fn stores_as(&self, kind: MediaKind) -> bool {
+        match kind {
+            MediaKind::Image => self.format.is_still(),
+            MediaKind::Video => self.video.is_some(),
+        }
+    }
 }
 
 /// Whether the external media converter can be used.
@@ -300,8 +311,9 @@ pub fn cover_crop(source: Size, quarter_turns: u8, target: Size) -> Option<Rect>
 /// stands in `orientation`: turned by the quarter turns from `orientation`
 /// to the panel's native one, then cropped to cover the panel without
 /// distortion ([`cover_crop`]; no crop when its size is unknown or already
-/// has the panel's shape). Pictures, and screens that store no media, need
-/// no adjustment. The frame rate and tone are left to the caller.
+/// has the panel's shape). Still pictures, and screens that store no media,
+/// need no adjustment; an animated GIF is fitted like a video. The frame
+/// rate and tone are left to the caller.
 pub fn fitting_options(
     model: &DeviceModel,
     orientation: Orientation,
@@ -310,7 +322,7 @@ pub fn fitting_options(
     let Some(profile) = UploadProfile::for_model(model) else {
         return ConvertOptions::default();
     };
-    if media.kind() != Some(MediaKind::Video) {
+    if media.video.is_none() {
         return ConvertOptions::default();
     }
     let quarter_turns = orientation.quarter_turns_to(model.native_orientation);
@@ -331,7 +343,28 @@ impl ConvertOptions {
             && self.frame_rate.is_none()
             && self.tone == Tone::Natural
     }
+
+    /// These options for converting `media`. An animated GIF shows each
+    /// picture for its own delay, but a screen's video plays at one rate:
+    /// without a rate asked for, its pictures are resampled at the rate of
+    /// its shortest delay (rounded up, at most [`MAX_RESAMPLED_FPS`]), so
+    /// every delay keeps its length. Other sources keep their own rate.
+    pub fn for_source(self, media: &MediaInfo) -> Self {
+        let resampled = media
+            .video
+            .filter(|_| media.format == MediaFormat::Gif)
+            .and_then(|track| track.frame_rate)
+            .map(|rate| rate.num.div_ceil(rate.den).clamp(1, MAX_RESAMPLED_FPS));
+        Self {
+            frame_rate: self.frame_rate.or(resampled),
+            ..self
+        }
+    }
 }
+
+/// Highest frame rate an animated GIF is resampled at for a screen
+/// ([`ConvertOptions::for_source`]).
+pub const MAX_RESAMPLED_FPS: u32 = 30;
 
 /// A conversion into a screen's video profile. The output is always H.264
 /// with yuv420p pixels, no audio, exactly `size` pixels (the vendor chain:
@@ -647,6 +680,71 @@ pub(crate) mod tests {
         );
         let tiny = model("weact-fs-0.96");
         assert_eq!(fitting_options(tiny, Orientation::Landscape, &wide), none);
+    }
+
+    /// An animated GIF of `size` whose shortest delay is `delay_cs`
+    /// hundredths of a second, playing 3 s.
+    pub(crate) fn animated_gif(size: Size, delay_cs: u32) -> MediaInfo {
+        MediaInfo {
+            format: MediaFormat::Gif,
+            bytes: 1000,
+            dimensions: Some(size),
+            video: Some(VideoTrack {
+                codec: VideoCodec::Other,
+                pixel_format: Some(VideoPixelFormat::Other),
+                b_frames: Some(false),
+                frame_rate: FrameRate::new(100, delay_cs),
+                duration: Some(Duration::from_secs(3)),
+            }),
+            has_audio: false,
+        }
+    }
+
+    #[test]
+    fn an_animated_gif_is_an_image_that_can_be_stored_as_a_video() {
+        let gif = animated_gif(Size::new(1920, 480), 10);
+        assert_eq!(gif.kind(), Some(MediaKind::Image), "the image folder first");
+        assert!(gif.stores_as(MediaKind::Image) && gif.stores_as(MediaKind::Video));
+        let still_gif = still(MediaFormat::Gif, 10);
+        assert!(still_gif.stores_as(MediaKind::Image));
+        assert!(
+            !still_gif.stores_as(MediaKind::Video),
+            "one picture is no video"
+        );
+        let clip = mp4(Size::new(480, 1920), 10);
+        assert!(clip.stores_as(MediaKind::Video) && !clip.stores_as(MediaKind::Image));
+        // Fitted to the 8.8" like a video: turned once and cropped.
+        let screen = model_by_id(ModelId("turing-8.8")).expect("model");
+        let fitted = fitting_options(screen, Orientation::Landscape, &gif);
+        assert_eq!(fitted.quarter_turns, 1);
+        assert_eq!(
+            fitted.crop,
+            cover_crop(Size::new(1920, 480), 1, Size::new(480, 1920))
+        );
+    }
+
+    #[test]
+    fn a_gif_is_resampled_at_its_shortest_delay() {
+        let options = ConvertOptions::default();
+        let rate = |delay_cs| {
+            options
+                .for_source(&animated_gif(Size::new(64, 64), delay_cs))
+                .frame_rate
+        };
+        assert_eq!(rate(10), Some(10), "10 fps");
+        assert_eq!(rate(7), Some(15), "14.3 fps, rounded up");
+        assert_eq!(rate(2), Some(MAX_RESAMPLED_FPS), "50 fps is capped");
+        assert_eq!(rate(1000), Some(1), "one picture in 10 s");
+        // A rate asked for wins; other sources keep their own.
+        let asked = ConvertOptions {
+            frame_rate: Some(24),
+            ..options
+        };
+        let gif = animated_gif(Size::new(64, 64), 10);
+        assert_eq!(asked.for_source(&gif).frame_rate, Some(24));
+        let clip = mp4(Size::new(480, 1920), 10);
+        assert_eq!(options.for_source(&clip), options);
+        assert_eq!(options.for_source(&still(MediaFormat::Gif, 1)), options);
     }
 
     use crate::domain::catalog::model_by_id;

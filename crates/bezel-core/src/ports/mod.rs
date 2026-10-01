@@ -8,6 +8,7 @@ use crate::domain::geometry::Orientation;
 use crate::domain::history::Histories;
 use crate::domain::job::Job;
 use crate::domain::media::{MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
+use crate::domain::poster::PosterSpec;
 use crate::domain::screen::{Brightness, ScreenIdentity};
 use crate::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
 use crate::domain::storage::{
@@ -214,6 +215,17 @@ pub trait MediaTranscoder: Send {
     /// frames of `spec.size` (the source covers it, cropped to fit) at
     /// `spec.fps`. Without the converter: `BezelError::Unsupported`.
     fn stream(&mut self, source: &MediaLocation, spec: StreamSpec) -> Result<Box<dyn VideoFrames>>;
+
+    /// The poster of the video (or animated GIF) `source` for a theme: the
+    /// picture shown `spec.at` after the start, cropped and scaled to cover
+    /// `spec.size` ([`PosterSpec`]). Without the converter, and for adapters
+    /// that take no pictures: `BezelError::Unsupported`.
+    fn poster(&mut self, source: &MediaLocation, spec: PosterSpec) -> Result<Frame> {
+        let _ = (source, spec);
+        Err(crate::BezelError::Unsupported(
+            "taking a poster from a video".into(),
+        ))
+    }
 }
 
 /// Frames of a video decoded on the host, looping.

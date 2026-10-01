@@ -12,6 +12,7 @@ pub mod history;
 pub mod job;
 pub mod media;
 pub mod pattern;
+pub mod poster;
 pub mod screen;
 pub mod sensor;
 pub mod storage;

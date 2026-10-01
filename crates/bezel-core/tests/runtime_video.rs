@@ -16,6 +16,7 @@ use bezel_core::domain::frame::{Frame, Rgba};
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::job::Job;
 use bezel_core::domain::media::{MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
+use bezel_core::domain::poster::PosterSpec;
 use bezel_core::domain::storage::{RemotePath, Repeat};
 use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::{
@@ -467,4 +468,21 @@ fn a_forgotten_screen_leaves_the_poster_and_nothing_to_stop() {
     rt.replace(plain, BTreeMap::new());
     rt.forget_screen();
     assert_eq!(rt.video(), &VideoState::NoVideo);
+}
+
+#[test]
+fn a_converter_that_takes_no_pictures_says_so() {
+    let clip = MediaInfo {
+        format: bezel_core::domain::media::MediaFormat::Mp4,
+        bytes: 1,
+        dimensions: Some(Size::new(1920, 1080)),
+        video: None,
+        has_audio: false,
+    };
+    let spec = PosterSpec::for_canvas(Size::new(1920, 480), &clip);
+    let taken = Decoder::ready().poster(&MediaLocation("clip.mp4".into()), spec);
+    assert!(
+        matches!(taken, Err(BezelError::Unsupported(_))),
+        "{taken:?}"
+    );
 }

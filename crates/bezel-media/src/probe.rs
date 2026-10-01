@@ -24,8 +24,8 @@ use bezel_core::{BezelError, Result};
 use image::{ImageFormat, ImageReader};
 use serde::Deserialize;
 
-use crate::mp4;
 use crate::process::{self, capture, file_url};
+use crate::{gif, mp4};
 
 /// Longest a `-version` or `-encoders` query may take.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -341,8 +341,9 @@ pub(crate) fn unreadable(path: &Path, e: &std::io::Error) -> BezelError {
     BezelError::InvalidInput(format!("cannot read {}: {e}", path.display()))
 }
 
-/// A still image: format and size from its header, no pixel decoded.
-/// Image formats screens do not show (WebP, TIFF...) are `Other`.
+/// An image: format and size from its header, no pixel decoded. Image
+/// formats screens do not show (WebP, TIFF...) are `Other`. An animated GIF
+/// also has a video track ([`gif_track`]).
 fn still(path: &Path, bytes: u64, format: ImageFormat) -> Result<MediaInfo> {
     let format = match format {
         ImageFormat::Png => MediaFormat::Png,
@@ -362,12 +363,31 @@ fn still(path: &Path, bytes: u64, format: ImageFormat) -> Result<MediaInfo> {
         })?;
         Some(Size::new(width, height))
     };
+    let video = if format == MediaFormat::Gif {
+        let file = File::open(path).map_err(|e| unreadable(path, &e))?;
+        gif::timing(BufReader::new(file)).and_then(gif_track)
+    } else {
+        None
+    };
     Ok(MediaInfo {
         format,
         bytes,
         dimensions,
-        video: None,
+        video,
         has_audio: false,
+    })
+}
+
+/// The moving picture of an animated GIF: its pictures resampled at the
+/// shortest delay make a video of that rate, as long as one pass (the core
+/// decides a conversion's rate from it). A GIF of one picture has none.
+fn gif_track(timing: gif::Timing) -> Option<VideoTrack> {
+    (timing.frames > 1).then(|| VideoTrack {
+        codec: VideoCodec::Other,
+        pixel_format: Some(VideoPixelFormat::Other),
+        b_frames: Some(false),
+        frame_rate: FrameRate::new(100, timing.shortest_cs),
+        duration: Some(Duration::from_millis(timing.total_cs.saturating_mul(10))),
     })
 }
 
@@ -660,6 +680,32 @@ mod tests {
             probe_file(&bad, || None),
             Err(BezelError::InvalidInput(_))
         ));
+    }
+
+    #[test]
+    fn an_animated_gif_is_probed_as_a_moving_picture_without_ffmpeg() {
+        let bytes = crate::gif::tests::gif(&[Some(10), Some(7), Some(300)]);
+        let (_dir, path) = temp_file("waves.gif", &bytes);
+        let info = probe_file(&path, || None).unwrap();
+        assert_eq!(info.format, MediaFormat::Gif);
+        assert_eq!(info.dimensions, Some(Size::new(1, 1)));
+        let track = info.video.unwrap();
+        assert_eq!(track.duration, Some(Duration::from_millis(3170)));
+        assert_eq!(
+            track.frame_rate,
+            FrameRate::new(100, 7),
+            "the shortest delay"
+        );
+        assert_eq!(track.codec, VideoCodec::Other);
+        // Still an image first (the storage tab sends it as one); a video
+        // for a theme's background or a screen's video folder.
+        assert_eq!(
+            info.kind(),
+            Some(bezel_core::domain::media::MediaKind::Image)
+        );
+        let one = crate::gif::tests::gif(&[Some(10)]);
+        let (_one, one) = temp_file("one.gif", &one);
+        assert_eq!(probe_file(&one, || None).unwrap().video, None);
     }
 
     #[test]

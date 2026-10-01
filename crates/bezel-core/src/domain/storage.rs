@@ -600,9 +600,10 @@ pub fn check_size(bytes: u64, cap: u64) -> Result<(), Refusal> {
 }
 
 /// The preflight of an upload (D-2026-09-30-storage-video-3): the name, the
-/// kind of folder, the screen's profile (converting a video when a converter
-/// is available), the size limits, the card and the free space, in that
-/// order. `stored` lists the files on the target medium (sizes optional);
+/// kind of folder ([`MediaInfo::stores_as`]: an animated GIF goes to either),
+/// the screen's profile (converting a video when a converter is available,
+/// [`ConvertOptions::for_source`]), the size limits, the card and the free
+/// space, in that order. `stored` lists the files on the target medium (sizes optional);
 /// it is only read: when the file does not fit, the refusal lists candidates
 /// and nothing is ever deleted.
 pub fn preflight(
@@ -613,11 +614,10 @@ pub fn preflight(
 ) -> Result<UploadPlan, Refusal> {
     let name = FileName::for_upload(check.name).map_err(Refusal::InvalidName)?;
     let kind = check.location.kind;
-    let found = check.media.kind();
-    if found != Some(kind) {
+    if !check.media.stores_as(kind) {
         return Err(Refusal::WrongKind {
             location: kind,
-            file: found,
+            file: check.media.kind(),
         });
     }
     let medium = check.location.medium;
@@ -660,7 +660,7 @@ fn choose_action(
         MediaKind::Video if mismatches.is_empty() && check.options.is_identity() => Ok(as_is),
         MediaKind::Video => match check.converter {
             Converter::Available => Ok(UploadAction::Convert(
-                profile.transcode_target(check.options),
+                profile.transcode_target(check.options.for_source(check.media)),
             )),
             Converter::Missing => Err(Refusal::NeedsConverter(mismatches)),
         },
@@ -768,6 +768,38 @@ mod tests {
         // That the use cases refuse before any byte reaches the screen
         // (overwrite included) runs through the device fake:
         // tests/storage.rs, `replacing_deleting_and_the_boot_slot_need_confirmation`.
+    }
+
+    #[test]
+    fn an_animated_gif_goes_to_the_video_folder_converted_at_a_constant_rate() {
+        let gif = crate::domain::media::tests::animated_gif(Size::new(1920, 480), 10);
+        let roomy = info(500_000_000, None);
+        let mut to_video = check("waves.mp4", INTERNAL_VIDEO, &gif);
+        let refused = run(&to_video, &roomy, &[]).unwrap_err();
+        assert!(
+            matches!(refused, Refusal::NeedsConverter(_)),
+            "not as it is: {refused:?}"
+        );
+        to_video.converter = Converter::Available;
+        let plan = run(&to_video, &roomy, &[]).unwrap();
+        let UploadAction::Convert(target) = plan.action else {
+            panic!("converted: {:?}", plan.action);
+        };
+        assert_eq!(target.format, MediaFormat::Mp4);
+        assert_eq!(target.frame_rate, Some(10), "its 10 cs delays");
+        // In the image folder it stays the picture it is.
+        let images = StorageLocation::new(Medium::Internal, MediaKind::Image);
+        let plan = run(&check("waves.gif", images, &gif), &roomy, &[]).unwrap();
+        assert_eq!(plan.action, UploadAction::AsIs { bytes: 1000 });
+        // A GIF of one picture is no video.
+        let picture = still(MediaFormat::Gif, 10);
+        assert_eq!(
+            run(&check("p.mp4", INTERNAL_VIDEO, &picture), &roomy, &[]),
+            Err(Refusal::WrongKind {
+                location: MediaKind::Video,
+                file: Some(MediaKind::Image)
+            })
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ import { errorText } from '../messages.js';
 import { udevCommand } from './udev.js';
 import { GLYPHS, createManagerView } from './manager.js';
 import {
-  KINDS, MEDIA, baseName, formatBytes, formatMiB, mismatchText, refusalText, reportLines, storageFeatures,
+  KINDS, MEDIA, baseName, formatBytes, formatMiB, haltText, mismatchText, planRefusalText, refusalText, reportLines, storageFeatures,
 } from '../storage-manager.js';
 
 export { KINDS, MEDIA, baseName, formatBytes, formatMiB, mismatchText, refusalText, storageFeatures };
@@ -334,14 +334,18 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
   /**
    * Runs a confirmed plan one file at a time (D-2026-09-30-storage-manager-7,
    * -8): the report lists what was done, what failed and why, and what never
-   * started; a cancelled upload's partial file is offered for a delete.
+   * started; a cancelled upload's partial file is offered for a delete. A
+   * restore that no longer fits is refused before anything is sent.
    */
   async function runPlan(plan) {
     const first = plan.steps[0];
     startJob({ kind: 'plan', transfer: plan.transfer, name: baseName(first.source), step: { index: 0, count: plan.steps.length, source: first.source, target: first.target } });
     try {
       // Only the confirmation's OK leads here.
-      view.notice = { kind: 'report', report: await bridge.runPlan(plan.ticket, true) };
+      const run = await bridge.runPlan(plan.ticket, true);
+      view.notice = run.status === 'refused'
+        ? { kind: 'planRefused', text: planRefusalText(t, locale(), run) }
+        : { kind: 'report', report: run };
     } catch (e) {
       view.notice = errorNotice(e);
     }
@@ -462,7 +466,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
   function deleteReportNotice(report) {
     const stopped = Boolean(report.failed || report.cancelled);
     const children = [el('p', { text: t('storage.report.deleted', { count: report.deleted.length, size: bytes(report.freed) }) })];
-    if (report.failed) children.push(el('p', { text: t('storage.report.deleteFailed', { name: baseName(report.failed.path), reason: errorText(t, report.failed.error) }) }));
+    if (report.failed) children.push(el('p', { text: t('storage.report.deleteFailed', { name: baseName(report.failed.path), reason: haltText(t, locale(), report.failed, errorText) }) }));
     if (report.notStarted.length) children.push(el('p', { text: t('storage.report.notStarted', { count: report.notStarted.length }) }));
     return notice(stopped ? 'error' : 'report', stopped ? ICONS.warning : ICONS.info, t(stopped ? 'storage.report.stopped' : 'storage.report.finished'), children, { dismiss: true });
   }

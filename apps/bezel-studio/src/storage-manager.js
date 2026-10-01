@@ -25,6 +25,10 @@ export const WARNING_CODES = Object.freeze(['bootMedia', 'themeVideo']);
 export const PLAN_REFUSALS = Object.freeze(['noCard', 'notListed', 'sameMedium', 'invalidName', 'extensionChanged', 'sameName', 'unsendable', 'noSpace']);
 /** What a plan does (core `archive::Transfer`). */
 export const TRANSFERS = Object.freeze(['move', 'copy', 'rename', 'restore']);
+/** Why a file stopped its batch (core `manager::Halt`). */
+export const HALT_CODES = Object.freeze(['cancelled', 'sourceChanged', 'conflict', 'noLocalCopy', 'refused', 'failed']);
+/** How far a stopped file had come (core `manager::Stage`), in order. */
+export const STAGES = Object.freeze(['preflight', 'upload', 'verify', 'delete', 'catalog']);
 /** Size limits offered for the local copies of deleted files (default 2 GiB, D-2026-09-30-storage-manager-6). */
 export const CACHE_LIMITS = Object.freeze([512 * 2 ** 20, 2 ** 30, 2 * 2 ** 30, 5 * 2 ** 30, 10 * 2 ** 30]);
 /** Longest upload name, bytes (core `FileName::MAX_BYTES`). */
@@ -415,22 +419,47 @@ export function planTotals(plan) {
 }
 
 /**
- * What a run did, as short sentences: what was done, what failed (and that
- * its original stays), what was cancelled and what never started.
+ * Why a file stopped its batch, by the core's halt code: the backend error of
+ * a failure, the target's refusal, or the halt's own sentence (the file gone
+ * or changed since the list, its local copy gone, its target's name taken).
+ * @param {{halt?: string, error?: object|null, refusal?: object|null, conflict?: {path: string}|null}} why
+ * @param {(t: Function, e: unknown) => string} errorText the backend error's sentence
+ */
+export function haltText(t, locale, why, errorText) {
+  switch (why.halt) {
+    case 'refused':
+      return refusalText(t, locale, why.refusal ?? {});
+    case 'conflict':
+      return t('storage.halt.conflict', { name: baseName(why.conflict?.path ?? '') });
+    case 'cancelled':
+    case 'sourceChanged':
+    case 'noLocalCopy':
+      return t(`storage.halt.${why.halt}`);
+    default:
+      return errorText(t, why.error);
+  }
+}
+
+/**
+ * What a run did, as short sentences: what was done, what failed and why,
+ * what was cancelled, where a moved or renamed file stands by how far it
+ * came (its original still there; also its checked copy; or only the copy),
+ * and what never started.
  * @param {{transfer: string, done: object[], failed: object|null, cancelled: object|null, notStarted: object[]}} report
  * @param {(t: Function, e: unknown) => string} errorText the backend error's sentence
  */
 export function reportLines(t, locale, report, errorText) {
   const lines = [t(`storage.report.done.${report.transfer}`, { count: report.done.length })];
-  const keeps = report.transfer !== 'copy' && report.transfer !== 'restore';
   if (report.failed) {
-    const { step } = report.failed;
-    const reason = report.failed.refusal ? refusalText(t, locale, report.failed.refusal) : errorText(t, report.failed.error);
-    lines.push(t(keeps ? 'storage.report.failedKept' : 'storage.report.failed', { name: baseName(step.source), reason, place: placeText(t, step.source) }));
+    const reason = haltText(t, locale, report.failed, errorText);
+    lines.push(t('storage.report.failed', { name: baseName(report.failed.step.source), reason }));
   }
-  if (report.cancelled) {
-    const { step } = report.cancelled;
-    lines.push(t(keeps ? 'storage.report.cancelledKept' : 'storage.report.cancelled', { name: baseName(step.source), place: placeText(t, step.source) }));
+  if (report.cancelled) lines.push(t('storage.report.cancelled', { name: baseName(report.cancelled.step.source) }));
+  const stopped = report.failed ?? report.cancelled;
+  const deletes = report.transfer === 'move' || report.transfer === 'rename';
+  // A stage this UI does not know says nothing it cannot vouch for.
+  if (stopped && deletes && STAGES.includes(stopped.stage)) {
+    lines.push(t(`storage.report.stage.${stopped.stage}`, { place: placeText(t, stopped.step.source), target: placeText(t, stopped.step.target) }));
   }
   if (report.notStarted.length) lines.push(t('storage.report.notStarted', { count: report.notStarted.length }));
   return lines;

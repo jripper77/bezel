@@ -12,7 +12,8 @@ use bezel_core::domain::screen::Confirm;
 use bezel_core::domain::storage::{FileEntry, Medium, RemotePath};
 
 use super::{
-    DeleteReportDto, Desk, PlanDto, PlanReadyDto, PlanRefusedDto, TransferReportDto, restore_id,
+    DeleteReportDto, Desk, PlanDto, PlanReadyDto, PlanRefusedDto, RunDto, TransferReportDto,
+    restore_id,
 };
 use crate::backend::Backend;
 use crate::clock::unix_seconds;
@@ -221,15 +222,16 @@ impl Backend {
     /// [`Self::cancel_job`]. `confirm` is the answer to the dialog that
     /// listed every file: with `Confirm::No` the core refuses before it
     /// calls the screen. The report says what was done, what stopped the
-    /// run and why, and what never started. `stale` when the plan was run,
-    /// replaced, or another job changed the screen since.
+    /// run and why, and what never started; a restore that no longer fits
+    /// is refused by code before anything is sent. `stale` when the plan
+    /// was run, replaced, or another job changed the screen since.
     pub fn run_plan(
         &self,
         ticket: u64,
         confirm: Confirm,
         time: LocalTime,
         progress: &mut dyn FnMut(ProgressDto),
-    ) -> UiResult<TransferReportDto> {
+    ) -> UiResult<RunDto> {
         let videos = self.theme_videos();
         let _claim = self.storage.claim()?;
         let pending = self.storage.take_plan(ticket)?;
@@ -256,11 +258,11 @@ impl Backend {
         });
         self.storage.end_job();
         match ran? {
-            Ok(report) => Ok(TransferReportDto::from(&report)),
+            Ok(report) => Ok(RunDto::Ran(Box::new(TransferReportDto::from(&report)))),
             Err(ManagerError::Failed(e)) => Err(e.into()),
             // A restore that no longer fits the medium: nothing was sent.
             Err(ManagerError::Refused(refusal)) => {
-                Err(UiError::new(ErrorCode::Refused).arg("detail", refusal))
+                Ok(RunDto::Refused(PlanRefusedDto::from(&refusal)))
             }
         }
     }

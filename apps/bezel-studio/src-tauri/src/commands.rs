@@ -25,7 +25,7 @@ use crate::dto::{
 };
 use crate::manager::{
     Ask, CacheDto, CandidatesDto, ClearedDto, DeleteReportDto, ManagedFileDto, ManagerOverviewDto,
-    PlanDto, TransferReportDto,
+    PlanDto, RunDto,
 };
 use crate::media::{BACKGROUND_EXTENSIONS, IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
@@ -667,7 +667,7 @@ pub async fn run_plan<R: Runtime>(
     state: State<'_, Shared>,
     ticket: u64,
     confirmed: bool,
-) -> UiResult<TransferReportDto> {
+) -> UiResult<RunDto> {
     blocking(&state, move |b| {
         let confirm = confirm_of(confirmed);
         b.run_plan(ticket, confirm, now(), &mut |p| emit_progress(&app, p))

@@ -3,12 +3,15 @@
 
 use std::path::{Path, PathBuf};
 
+use bezel_core::BezelError;
+use bezel_core::app::manager::Halt;
 use bezel_core::domain::archive::{Catalog, EntryState, ScreenKey, ScreenRecord};
 use bezel_core::domain::device::{ModelId, Transport, UsbId};
 use bezel_core::domain::discovery::{DeviceAddress, Endpoint};
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::job::JobPhase;
 use bezel_core::domain::screen::Confirm;
+use bezel_core::domain::storage::FileEntry;
 use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_devices::FakeBus;
 use bezel_devices::fake::{FAKE_UPLOAD_CHUNK, FakeStorage, StorageCall};
@@ -80,18 +83,38 @@ fn plan_of(f: &Fixture, ask: &Ask) -> UiResult<PlanDto> {
     f.backend.plan_transfer(KEY, ask, &[], TIME)
 }
 
+/// The report of a run that ran.
+fn ran(run: RunDto) -> TransferReportDto {
+    match run {
+        RunDto::Ran(report) => *report,
+        RunDto::Refused(refused) => panic!("refused: {refused:?}"),
+    }
+}
+
 fn run(f: &Fixture, ticket: u64) -> (UiResult<TransferReportDto>, Vec<ProgressDto>) {
     let mut seen = Vec::new();
     let report = f
         .backend
         .run_plan(ticket, Confirm::Yes, TIME, &mut |p| seen.push(p));
-    (report, seen)
+    (report.map(ran), seen)
 }
 
 /// Deletes `path` behind Bezel's back (another app, a format on the PC).
 fn delete_elsewhere(f: &Fixture, path: &str) {
     let mut link = bezel_core::app::open_screen(&FakeBus::turing_88(), &f.connector, None).unwrap();
     bezel_core::app::storage::delete(link.as_mut(), &remote_path(path), Confirm::Yes).unwrap();
+}
+
+/// Stores `bytes` bytes at `path` behind Bezel's back (another app).
+fn store_elsewhere(f: &Fixture, path: &str, bytes: usize) {
+    let mut link = bezel_core::app::open_screen(&FakeBus::turing_88(), &f.connector, None).unwrap();
+    let storage = bezel_core::app::storage::storage_of(link.as_mut()).unwrap();
+    let token = bezel_core::domain::job::CancelToken::new();
+    let mut sink = |_| {};
+    let mut job = bezel_core::domain::job::Job::new(&token, &mut sink);
+    storage
+        .upload(&remote_path(path), &vec![7; bytes], &mut job)
+        .unwrap();
 }
 
 /// The bytes `Fixture::local` writes for a file of `bytes` bytes.
@@ -247,7 +270,7 @@ fn a_move_reports_by_code() {
             }
             seen.push(p);
         });
-    let report = report.unwrap();
+    let report = ran(report.unwrap());
     assert_eq!(busy, Some("busy"), "one storage operation at a time");
     assert_eq!(report.done.len(), 2);
     assert_eq!(
@@ -303,11 +326,12 @@ fn a_move_reports_by_code() {
                 }
                 seen.push(p);
             });
-        (report.unwrap(), seen)
+        (ran(report.unwrap()), seen)
     };
     let cancelled = report.cancelled.clone().unwrap();
     assert_eq!(cancelled.step.source, "sd/video/native-a.mp4");
     assert_eq!(cancelled.partial, Some(FAKE_UPLOAD_CHUNK as u64));
+    assert_eq!(cancelled.stage, "upload");
     assert_eq!(report.not_started.len(), 1);
     assert!(
         f.storage()
@@ -325,12 +349,13 @@ fn a_move_reports_by_code() {
     let before = tight.writes().len();
     let report = run(&tight, ready.ticket).0.unwrap();
     let failed = report.failed.clone().unwrap();
-    let refusal = failed.refusal.unwrap();
+    assert_eq!((failed.stage, failed.why.halt), ("preflight", "refused"));
+    let refusal = failed.why.refusal.unwrap();
     assert_eq!(
         (refusal.code, refusal.bytes, refusal.limit),
         ("noSpace", Some(6000), Some(5000))
     );
-    assert_eq!(failed.error, None);
+    assert_eq!(failed.why.error, None);
     assert_eq!(
         tight.writes().len(),
         before,
@@ -343,9 +368,42 @@ fn a_move_reports_by_code() {
     let plan_gone = ready_plan(plan_of(&small, &ask_move(&[&gone], "sd")));
     delete_elsewhere(&small, &gone);
     let report = run(&small, plan_gone.ticket).0.unwrap();
-    let error = report.failed.unwrap().error.unwrap();
-    assert_eq!(error.code(), "invalidInput");
-    assert!(error.to_string().contains("gone or changed"), "{error}");
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(
+        json["failed"],
+        json!({"step": {"source": gone, "target": "sd/video/native-gone.mp4", "size": 400,
+                        "replaces": null},
+               "stage": "preflight", "halt": "sourceChanged", "error": null,
+               "refusal": null, "conflict": null}),
+        "a code, no English to show"
+    );
+
+    // A failure carries the backend's error by code.
+    let failed = FailedStepDto {
+        step: report.failed.unwrap().step,
+        stage: "upload",
+        why: HaltDto::from(&Halt::Failed(BezelError::Hung("no answer".into()))),
+    };
+    let json = serde_json::to_value(&failed).unwrap();
+    assert_eq!(
+        (json["halt"].as_str(), json["error"]["code"].as_str()),
+        (Some("failed"), Some("hung"))
+    );
+    // A name taken since the plan names the file there.
+    let taken = FileEntry {
+        path: remote_path("sd/video/native-gone.mp4"),
+        size: Some(9),
+    };
+    let json = serde_json::to_value(HaltDto::from(&Halt::Conflict(taken))).unwrap();
+    assert_eq!(
+        (json["halt"].as_str(), json["conflict"]["name"].as_str()),
+        (Some("conflict"), Some("native-gone.mp4"))
+    );
+    let json = serde_json::to_value(HaltDto::from(&Halt::NoLocalCopy)).unwrap();
+    assert_eq!(
+        json,
+        json!({"halt": "noLocalCopy", "error": null, "refusal": null, "conflict": null})
+    );
 }
 
 /// Plans moving both files of the card back to the internal flash.
@@ -518,6 +576,39 @@ fn refusals_come_with_their_code_and_arguments() {
             .iter()
             .all(|c| !matches!(c, StorageCall::Delete(_)))
     );
+
+    // Another app filled the medium since the plan: the run is refused by
+    // code before anything is sent.
+    delete_elsewhere(&f, &one);
+    let restore = Ask::Restore {
+        ids: ids[..1].to_vec(),
+        to: "internal".into(),
+    };
+    let ready = ready_plan(plan_of(&f, &restore));
+    store_elsewhere(&f, "internal/video/other-app.mp4", 2000);
+    let before = f.writes().len();
+    let run = f
+        .backend
+        .run_plan(ready.ticket, Confirm::Yes, TIME, &mut |_| {
+            panic!("nothing runs")
+        })
+        .unwrap();
+    let RunDto::Refused(refused) = &run else {
+        panic!("not refused: {run:?}");
+    };
+    assert_eq!(
+        (refused.code, &refused.args),
+        ("noSpace", &json!({"needed": 4000, "free": 3000}))
+    );
+    assert_eq!(f.writes().len(), before, "nothing sent");
+    let json = serde_json::to_value(&run).unwrap();
+    assert_eq!(
+        (json["status"].as_str(), json["code"].as_str()),
+        (Some("refused"), Some("noSpace"))
+    );
+    let json = serde_json::to_value(RunDto::Ran(Box::new(report))).unwrap();
+    assert_eq!(json["status"], "ran");
+    assert_eq!(json["transfer"], "restore");
 }
 
 #[test]
@@ -557,7 +648,7 @@ fn deleting_files_needs_the_confirmation_and_reports_each_file() {
     assert_eq!(report.freed, 700 + 800);
     let failed = report.failed.clone().unwrap();
     assert_eq!(failed.path, "internal/video/gone.mp4");
-    assert_eq!(failed.error.code(), "invalidInput");
+    assert_eq!((failed.why.halt, failed.why.error), ("sourceChanged", None));
     assert_eq!(
         (report.cancelled, report.not_started.clone()),
         (false, paths(&[&b]))
@@ -567,7 +658,7 @@ fn deleting_files_needs_the_confirmation_and_reports_each_file() {
     assert_eq!(seen[1].step.as_ref().unwrap().target, None);
     let json = serde_json::to_value(&report).unwrap();
     assert_eq!(json["notStarted"], json!([b]));
-    assert_eq!(json["failed"]["error"]["code"], "invalidInput");
+    assert_eq!(json["failed"]["halt"], "sourceChanged");
     let deleted = record(&f).entries;
     assert_eq!(deleted[0].state, EntryState::Deleted, "{a} marked deleted");
     assert_eq!(deleted[1].state, EntryState::Stored);
@@ -822,10 +913,10 @@ fn turing_usb_screens_never_delete_move_or_clean_up() {
         to: "sd".into(),
     };
     let copy = ready_plan(f.backend.plan_transfer(USB, &copy, &[], TIME));
-    let report = f
+    let report = ran(f
         .backend
         .run_plan(copy.ticket, Confirm::Yes, TIME, &mut |_| {})
-        .unwrap();
+        .unwrap());
     assert_eq!(report.done[0].target, "sd/image/logo.png");
     assert!(f.storage().files.contains_key(&remote_path(&sent)));
 }

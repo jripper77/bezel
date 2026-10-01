@@ -2,20 +2,19 @@
 //! `src/bridge.js`): reasons travel as the core's stable codes with their
 //! arguments, never as text to parse (D-2026-09-30-release-polish-6).
 
-use bezel_core::BezelError;
-use bezel_core::app::manager::{DeleteReport, Halt, Inventory, Stopped, TransferReport};
+use bezel_core::app::manager::{DeleteReport, Halt, Inventory, Stage, Stopped, TransferReport};
 use bezel_core::domain::archive::{
     ArchiveEntry, CacheInfo, Candidate, Catalog, Listed, PlanRefusal, Skip, Skipped, Step,
     TransferPlan, Warning,
 };
 use bezel_core::domain::cleanup::{Finding, Protected, Reason, artifact_base};
-use bezel_core::domain::storage::{Medium, Operation, RemotePath};
+use bezel_core::domain::storage::{Medium, RemotePath};
 use bezel_themes::dto::SizeDto;
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::dto::{CapacityDto, RefusalDto, StoredFileDto, name_error_char};
-use crate::messages::{ErrorCode, UiError};
+use crate::messages::UiError;
 
 /// A file Bezel sent (or associated) as its catalog entry tells it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -416,18 +415,81 @@ pub enum PlanDto {
     Refused(PlanRefusedDto),
 }
 
+/// What running a confirmed plan did.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum RunDto {
+    /// It ran, to the end or until a file stopped it.
+    Ran(Box<TransferReportDto>),
+    /// A restore that no longer fits the medium (its space and the per-file
+    /// limit are checked again before the first byte): nothing was sent.
+    Refused(PlanRefusedDto),
+}
+
 // --------------------------------------------------------------- reports --
 
-/// The file that stopped a run because it failed.
+/// Why a file stopped its batch, as the core's `Halt` code with what that
+/// code needs: the error of a failure, the target's refusal, the file of a
+/// conflict. Never English text to show (D-2026-09-30-release-polish-6).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HaltDto {
+    /// `failed`, `refused`, `sourceChanged`, `noLocalCopy`, `conflict` or
+    /// `cancelled`.
+    pub halt: &'static str,
+    /// What failed (`failed`), as an error code.
+    pub error: Option<UiError>,
+    /// The target's preflight refusal (`refused`: no card, too large, no
+    /// space).
+    pub refusal: Option<RefusalDto>,
+    /// The file of the target's name there now, whose replacement was not
+    /// confirmed (`conflict`).
+    pub conflict: Option<StoredFileDto>,
+}
+
+impl HaltDto {
+    /// A failure (the core's `failed` code) with its error.
+    pub fn failed(error: UiError) -> Self {
+        Self {
+            halt: "failed",
+            error: Some(error),
+            refusal: None,
+            conflict: None,
+        }
+    }
+}
+
+impl From<&Halt> for HaltDto {
+    fn from(halt: &Halt) -> Self {
+        let mut dto = Self {
+            halt: halt.code(),
+            error: None,
+            refusal: None,
+            conflict: None,
+        };
+        match halt {
+            Halt::Failed(error) => dto.error = Some(UiError::from(error.clone())),
+            Halt::Refused(refusal) => dto.refusal = Some(RefusalDto::from(refusal)),
+            Halt::Conflict(file) => dto.conflict = Some(StoredFileDto::from(file)),
+            Halt::Cancelled { .. } | Halt::SourceChanged | Halt::NoLocalCopy => {}
+        }
+        dto
+    }
+}
+
+/// The file that stopped a run.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FailedStepDto {
     /// The file.
     pub step: PlanStepDto,
-    /// What failed, as an error code; `None` for a refusal.
-    pub error: Option<UiError>,
-    /// The target's preflight refusal (no card, too large, no space).
-    pub refusal: Option<RefusalDto>,
+    /// How far it came: `preflight`, `upload`, `verify`, `delete` (its copy
+    /// verified, the source still there) or `catalog` (the source deleted
+    /// too; only the catalog could not record it).
+    pub stage: &'static str,
+    /// Why.
+    #[serde(flatten)]
+    pub why: HaltDto,
 }
 
 /// The file whose upload the user cancelled.
@@ -436,6 +498,9 @@ pub struct FailedStepDto {
 pub struct CancelledStepDto {
     /// The file.
     pub step: PlanStepDto,
+    /// How far it came (`delete`: its copy verified, the source still
+    /// there).
+    pub stage: &'static str,
     /// Bytes the interrupted upload left at the target.
     pub partial: Option<u64>,
 }
@@ -456,23 +521,6 @@ pub struct TransferReportDto {
     pub not_started: Vec<PlanStepDto>,
 }
 
-/// Why a file stopped its batch, as the UI's error codes: the core's error
-/// for a failure; a target taken since the plan as the confirmation its
-/// replacement still needs; a source changed or a copy gone as unusable
-/// input, with the core's sentence.
-pub fn halt_error(halt: &Halt) -> UiError {
-    match halt {
-        Halt::Failed(error) => UiError::from(error.clone()),
-        Halt::Conflict(file) => UiError::from(BezelError::NotConfirmed(
-            Operation::Overwrite(file.path.clone()).to_string(),
-        )),
-        Halt::Cancelled { partial } => UiError::from(BezelError::Cancelled { partial: *partial }),
-        Halt::SourceChanged | Halt::NoLocalCopy | Halt::Refused(_) => {
-            UiError::new(ErrorCode::InvalidInput).arg("detail", halt)
-        }
-    }
-}
-
 impl From<&TransferReport> for TransferReportDto {
     fn from(report: &TransferReport) -> Self {
         let steps = |steps: &[Step]| steps.iter().map(PlanStepDto::from).collect();
@@ -483,27 +531,21 @@ impl From<&TransferReport> for TransferReportDto {
             cancelled: None,
             not_started: steps(&report.not_started),
         };
-        if let Some(Stopped { step, halt, .. }) = &report.stopped {
-            let step = PlanStepDto::from(step);
+        if let Some(Stopped { step, stage, halt }) = &report.stopped {
+            let (step, stage) = (PlanStepDto::from(step), Stage::slug(*stage));
             match halt {
                 Halt::Cancelled { partial } => {
                     dto.cancelled = Some(CancelledStepDto {
                         step,
+                        stage,
                         partial: *partial,
-                    });
-                }
-                Halt::Refused(refusal) => {
-                    dto.failed = Some(FailedStepDto {
-                        step,
-                        error: None,
-                        refusal: Some(RefusalDto::from(refusal)),
                     });
                 }
                 other => {
                     dto.failed = Some(FailedStepDto {
                         step,
-                        error: Some(halt_error(other)),
-                        refusal: None,
+                        stage,
+                        why: HaltDto::from(other),
                     });
                 }
             }
@@ -518,8 +560,10 @@ impl From<&TransferReport> for TransferReportDto {
 pub struct DeleteFailedDto {
     /// The file.
     pub path: String,
-    /// Why.
-    pub error: UiError,
+    /// Why (`sourceChanged`: gone or another size than confirmed;
+    /// `failed`: the screen's error).
+    #[serde(flatten)]
+    pub why: HaltDto,
 }
 
 /// What deleting a confirmed list did.
@@ -544,7 +588,7 @@ impl DeleteReportDto {
     pub fn failed_at(mut self, path: &RemotePath, error: UiError, rest: &[RemotePath]) -> Self {
         self.failed = Some(DeleteFailedDto {
             path: path.to_string(),
-            error,
+            why: HaltDto::failed(error),
         });
         self.not_started = rest.iter().map(ToString::to_string).collect();
         self
@@ -572,7 +616,7 @@ impl DeleteReportDto {
         } else {
             self.failed = Some(DeleteFailedDto {
                 path,
-                error: halt_error(&stopped.halt),
+                why: HaltDto::from(&stopped.halt),
             });
         }
         self.not_started = not_started;

@@ -565,18 +565,21 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
     return null;
   }
 
+  /** Why a step stopped, as the app reports it: the core's halt code and what it needs. */
+  const halted = (halt, extra = {}) => ({ halt, error: null, refusal: null, conflict: null, ...extra });
+
   /**
    * One file of a plan: send its copy, check the stored size, and only then
-   * delete the source (move, rename). `'done'`, `{cancelled, partial}` or
-   * `{failed}`; the source stays unless done.
+   * delete the source (move, rename). `'done'`, `{cancelled, stage, partial}`
+   * or `{failed}` (with its stage and halt code); the source stays unless done.
    */
   async function runStep(key, transfer, step, info) {
     const to = step.target.split('/')[0];
     const refusal = stepRefusal(key, step, to);
-    if (refusal) return { failed: { error: null, refusal } };
+    if (refusal) return { failed: { stage: 'preflight', ...halted('refused', { refusal }) } };
     if (hung()) {
       const { code, args, message } = demoHung();
-      return { failed: { error: { code, args, message }, refusal: null } };
+      return { failed: { stage: 'upload', ...halted('failed', { error: { code, args, message } }) } };
     }
     const from = transfer === 'restore' ? catalog.entries.find((e) => e.content === step.content) : entryAt(step.source);
     if (step.replaces) files.delete(step.replaces.path);
@@ -585,7 +588,7 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
     if (cancelled) {
       const partial = files.get(step.target) || null;
       if (!partial) files.delete(step.target);
-      return { cancelled: true, partial };
+      return { cancelled: true, stage: 'upload', partial };
     }
     emit('verify', 0, 1, info);
     await delay(DEMO_STEP_MS);
@@ -617,13 +620,29 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
         report.done.push(strip(step));
         continue;
       }
-      if (outcome.cancelled) report.cancelled = { step: strip(step), partial: outcome.partial };
+      if (outcome.cancelled) report.cancelled = { step: strip(step), stage: outcome.stage, partial: outcome.partial };
       else report.failed = { step: strip(step), ...outcome.failed };
       report.notStarted = rest();
       break;
     }
     state.playback = null;
-    return report;
+    return { status: 'ran', ...report };
+  }
+
+  /**
+   * A restore must still fit before its first byte (core `fits`): every
+   * file within the per-file limit, their total below the free space. The
+   * refusal, or `null`.
+   */
+  function restoreRefusal(key, plan) {
+    if (plan.transfer !== 'restore' || !plan.steps.length) return null;
+    const cap = capOf(key);
+    const over = plan.steps.find((step) => step.size > cap);
+    const refusal = (code, args) => ({ status: 'refused', code, args, message: code });
+    if (over) return refusal('unsendable', { path: over.target, refusal: { code: 'tooLarge', bytes: over.size, limit: cap } });
+    const needed = plan.steps.reduce((sum, step) => sum + step.size, 0);
+    const { free } = capacity(plan.to);
+    return needed >= free ? refusal('noSpace', { needed, free }) : null;
   }
 
   /** Runs `work` as the one storage job. */
@@ -647,8 +666,7 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
       emit('delete', i, paths.length, { index: i, count: paths.length, source: path, target: null });
       await delay(DEMO_STEP_MS);
       if (!files.has(path)) {
-        const detail = `${path} is not stored on the screen`;
-        report.failed = { path, error: { code: 'invalidInput', args: { detail }, message: `invalid input: ${detail}` } };
+        report.failed = { path, ...halted('sourceChanged') };
         report.notStarted = paths.slice(i + 1);
         break;
       }
@@ -709,7 +727,8 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
     },
     /**
      * Runs a plan one file at a time once its dialog was confirmed (`confirmed`; without it nothing
-     * runs); the report says what was done, failed and never started.
+     * runs): `{status: 'ran', ...report}` says what was done, failed and never started; a restore
+     * that no longer fits is `{status: 'refused', code, args}` before anything is sent.
      */
     runPlan: (ticket, confirmed) => {
       const held = plans.get(ticket);
@@ -722,6 +741,8 @@ function createDemoStorage(chosen, { delay, now, live, theme, themes, screens, h
         const detail = `${verb} ${count} file${count === 1 ? '' : 's'}`;
         return refuse('notConfirmed', `${detail} needs confirmation`, { detail });
       }
+      const refusal = restoreRefusal(held.key, held.plan);
+      if (refusal) return Promise.resolve(refusal);
       return asJob(() => runPlanSteps(held.key, held.plan));
     },
     /** Deletes the confirmed files one by one (the cleanup's list, or a selection). */

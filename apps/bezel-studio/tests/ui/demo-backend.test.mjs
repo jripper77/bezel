@@ -324,7 +324,7 @@ test('a cancelled or failed move keeps its source and stops the batch', async ()
   assert.equal(await demo.cancelJob(), true);
   const report = await running;
   assert.deepEqual(report.done, []);
-  assert.equal(report.cancelled.step.source, 'internal/video/earth.mp4');
+  assert.deepEqual([report.status, report.cancelled.step.source, report.cancelled.stage], ['ran', 'internal/video/earth.mp4', 'upload']);
   assert.equal(report.cancelled.partial, Math.round(2_516_582 / 8));
   assert.deepEqual(report.notStarted.map((s) => s.source), ['internal/video/aniya.mp4']);
   const files = demo.storageState().files;
@@ -338,7 +338,7 @@ test('a cancelled or failed move keeps its source and stops the batch', async ()
   const hung = createDemoBackend('hung', instant);
   const failing = await hung.planMove(KEY, ['internal/image/logo.png', 'internal/video/amd_90.mp4'], 'sd');
   const failed = await hung.runPlan(failing.ticket, true);
-  assert.equal(failed.failed.error.code, 'hung');
+  assert.deepEqual([failed.failed.stage, failed.failed.halt, failed.failed.error.code], ['upload', 'failed', 'hung']);
   assert.equal(failed.failed.refusal, null);
   assert.equal(failed.notStarted.length, 1);
   assert.ok(hung.storageState().files.has('internal/image/logo.png'));
@@ -379,7 +379,7 @@ test('batch deletes go one by one, are reported and count against the cache limi
   const report = await demo.deleteFiles(KEY, ['sd/video/bezel_test_cancel.mp4', 'internal/video/aniya.mp4', 'sd/video/none.mp4', 'sd/video/AMD.mp4'], true);
   assert.deepEqual(report.deleted, ['sd/video/bezel_test_cancel.mp4', 'internal/video/aniya.mp4']);
   assert.equal(report.freed, 29_577_216 + 3_040_870);
-  assert.deepEqual([report.failed.path, report.failed.error.code, report.notStarted], ['sd/video/none.mp4', 'invalidInput', ['sd/video/AMD.mp4']]);
+  assert.deepEqual([report.failed.path, report.failed.halt, report.failed.error, report.notStarted], ['sd/video/none.mp4', 'sourceChanged', null, ['sd/video/AMD.mp4']]);
   assert.deepEqual(seen.map((p) => [p.phase, p.done, p.total, p.step.source]).slice(0, 2), [
     ['delete', 0, 4, 'sd/video/bezel_test_cancel.mp4'], ['delete', 1, 4, 'internal/video/aniya.mp4'],
   ]);

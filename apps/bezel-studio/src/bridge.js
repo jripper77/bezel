@@ -117,15 +117,33 @@ export const PROGRESS_EVENT = 'storage-progress';
  *   `unsendable` `{path, refusal}` (a preflight refusal, as `prepareUpload`'s);
  *   `noSpace` `{needed, free}`.
  * @typedef {{
+ *   halt: 'failed'|'refused'|'sourceChanged'|'noLocalCopy'|'conflict'|'cancelled',
+ *   error: {code: string, args: object, message: string}|null,
+ *   refusal: object|null,
+ *   conflict: StoredFileDto|null,
+ * }} HaltDto Why a file stopped its batch (core `manager::Halt` code): `error`
+ *   for `failed`, the target's preflight `refusal` for `refused`, the file
+ *   of the target's name for `conflict`; `sourceChanged` (gone or changed
+ *   since the list) and `noLocalCopy` carry nothing more.
+ * @typedef {'preflight'|'upload'|'verify'|'delete'|'catalog'} StageCode How
+ *   far a stopped file had come (core `manager::Stage`): from `delete` on its
+ *   copy is verified at the target; at `catalog` its source is deleted too.
+ * @typedef {{
  *   transfer: 'move'|'copy'|'rename'|'restore',
  *   done: PlanStepDto[],
- *   failed: {step: PlanStepDto, error: {code: string, args: object, message: string}|null, refusal: object|null}|null,
- *   cancelled: {step: PlanStepDto, partial: number|null}|null,
+ *   failed: ({step: PlanStepDto, stage: StageCode} & HaltDto)|null,
+ *   cancelled: {step: PlanStepDto, stage: StageCode, partial: number|null}|null,
  *   notStarted: PlanStepDto[],
- * }} TransferReportDto A run stops at the first failure (a backend error, or
- *   the preflight's refusal on the target) or on Cancel; that file's source
- *   stays. `partial`: bytes a cancelled upload left at the target.
- * @typedef {{deleted: string[], failed: {path: string, error: {code: string, args: object, message: string}}|null, cancelled: boolean, notStarted: string[], freed: number}} DeleteReportDto
+ * }} TransferReportDto A run stops at the first failure (a backend error, the
+ *   preflight's refusal on the target, the source changed, the copy gone, the
+ *   name taken) or on Cancel; `stage` says what became of that file's source.
+ *   `partial`: bytes a cancelled upload left at the target.
+ * @typedef {({status: 'ran'} & TransferReportDto)|PlanRefusedDto} RunDto What
+ *   `runPlan` answers: the report, or a restore refused before anything was
+ *   sent because it no longer fits (`noSpace`, `unsendable`, `noCard`).
+ * @typedef {{deleted: string[], failed: ({path: string} & HaltDto)|null, cancelled: boolean, notStarted: string[], freed: number}} DeleteReportDto
+ *   `failed.halt` is `sourceChanged` for a file gone or of another size than
+ *   confirmed, `failed` for a screen error.
  * @typedef {{source: string, name: string, size: number, kind: 'image'|'video', durationMs: number|null, resolution: {width: number, height: number}|null, sameName: boolean}} CandidateDto
  *   A file on the PC of exactly the screen file's size and kind.
  */
@@ -224,7 +242,7 @@ function tauriBridge(invoke, tauri = {}) {
     planRestore: (screen, ids, to, overwrite = []) => invoke('plan_restore', { screen, ids, to, overwrite }),
     /**
      * Runs a plan; `confirmed` is the answer to the dialog that listed every file (without it nothing runs).
-     * Progress comes as `storage-progress`, Cancel is `cancelJob`. @returns {Promise<TransferReportDto>}
+     * Progress comes as `storage-progress`, Cancel is `cancelJob`. @returns {Promise<RunDto>}
      */
     runPlan: (ticket, confirmed) => invoke('run_plan', { ticket, confirmed }),
     /** Deletes the confirmed files one by one (a cleanup or a selection). @returns {Promise<DeleteReportDto>} */

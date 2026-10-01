@@ -194,20 +194,39 @@ test('renaming previews the upload name and refuses like the core', () => {
   assert.equal(renamePreview('readme2', 'README').problem, null);
 });
 
-test('a run report says what was done, what failed and kept its original, and what never started', () => {
+test('a run report says what was done, what failed and where its original is, and what never started', () => {
   const step = (n) => ({ source: `internal/video/${n}.mp4`, target: `sd/video/${n}.mp4`, size: 1, replaces: null });
-  const failed = { transfer: 'move', done: [step('a')], failed: { step: step('b'), error: { code: 'hung', args: { detail: 'x' } }, refusal: null }, cancelled: null, notStarted: [step('c'), step('d')] };
-  assert.deepEqual(reportLines(en, 'en', failed, errorText), [
+  const halt = (code, extra = {}) => ({ halt: code, error: null, refusal: null, conflict: null, ...extra });
+  const failure = (stage, why) => ({ transfer: 'move', done: [step('a')], failed: { step: step('b'), stage, ...why }, cancelled: null, notStarted: [step('c'), step('d')] });
+  const hung = failure('upload', halt('failed', { error: { code: 'hung', args: { detail: 'x' } } }));
+  assert.deepEqual(reportLines(en, 'en', hung, errorText), [
     'Moved: 1',
-    `“b.mp4” failed: ${errorText(en, failed.failed.error)} The original is still there: b.mp4 (Internal memory).`,
+    `“b.mp4” failed: ${errorText(en, hung.failed.error)}`,
+    'The original is still there: b.mp4 (Internal memory).',
     'Not started: 2',
   ]);
-  const cancelled = { transfer: 'rename', done: [], failed: null, cancelled: { step: step('a'), partial: 10 }, notStarted: [] };
-  assert.deepEqual(reportLines(pt, 'pt-BR', cancelled, errorText), ['Renomeados: 0', 'Cancelado durante o envio de “a.mp4”; o original continua lá: a.mp4 (Memória interna).']);
-  const refused = { transfer: 'restore', done: [], failed: { step: step('a'), error: null, refusal: { code: 'noSpace', bytes: 2_000_000, limit: 1_000_000 } }, cancelled: { step: step('b'), partial: null }, notStarted: [] };
+  // The codes of the core read as sentences, never as its English.
+  const changed = reportLines(pt, 'pt-BR', failure('preflight', halt('sourceChanged')), errorText);
+  assert.equal(changed[1], '“b.mp4” falhou: Sumiu da tela ou mudou desde que a lista foi feita. Atualize a lista.');
+  const gone = reportLines(en, 'en', failure('preflight', halt('noLocalCopy')), errorText);
+  assert.equal(gone[1], '“b.mp4” failed: Bezel no longer has its local copy (the cache was cleared). Associate its original first.');
+  const taken = reportLines(en, 'en', failure('preflight', halt('conflict', { conflict: { path: 'sd/video/b.mp4' } })), errorText);
+  assert.equal(taken[1], '“b.mp4” failed: “b.mp4” is there now and replacing it was not confirmed.');
+  // Past the check the copy is at the target; past the delete, only it.
+  const copied = reportLines(en, 'en', failure('delete', halt('failed', { error: { code: 'timeout', args: {} } })), errorText);
+  assert.equal(copied[2], 'Its copy is checked at b.mp4 (SD card), and the original is still there too: b.mp4 (Internal memory).');
+  const lagging = reportLines(en, 'en', failure('catalog', halt('failed', { error: { code: 'fileError', args: {} } })), errorText);
+  assert.equal(lagging[2], 'It is at b.mp4 (SD card) now and the original was deleted, but Bezel could not update its list of the files it sent.');
+  assert.ok(!lagging.some((line) => line.includes('still there')));
+  assert.equal(reportLines(en, 'en', failure('later', halt('failed')), errorText).length, 3, 'an unknown stage says nothing of the original');
+
+  const cancelled = { transfer: 'rename', done: [], failed: null, cancelled: { step: step('a'), stage: 'upload', partial: 10 }, notStarted: [] };
+  assert.deepEqual(reportLines(pt, 'pt-BR', cancelled, errorText), ['Renomeados: 0', 'Cancelado em “a.mp4”.', 'O original continua lá: a.mp4 (Memória interna).']);
+  const refused = { transfer: 'restore', done: [], failed: { step: step('a'), stage: 'preflight', ...halt('refused', { refusal: { code: 'noSpace', bytes: 2_000_000, limit: 1_000_000 } }) }, cancelled: { step: step('b'), stage: 'upload', partial: null }, notStarted: [] };
   const lines = reportLines(en, 'en', refused, errorText);
   assert.equal(lines[1], '“a.mp4” failed: It does not fit: the file is 2 MB and 1 MB are free. Nothing was deleted; if you want, delete files below and try again.');
-  assert.equal(lines[2], 'Cancelled while sending “b.mp4”.', 'a restore deletes no original');
+  assert.equal(lines[2], 'Cancelled at “b.mp4”.');
+  assert.equal(lines.length, 3, 'a restore deletes no original');
 });
 
 test('the cleanup assistant groups findings, the exact signals first and only they checked', () => {

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use bezel_core::domain::clock::{Language, LocalTime};
@@ -59,7 +59,8 @@ const CONVERTED_BYTES: usize = 5000;
 /// unknown; every video plays 2 s. A conversion writes a
 /// `native-converted-N.mp4` next to the source; a poster is a picture of
 /// [`POSTER`]; a decoded picture is [`STREAMED`] (with [`Self::two_tone`],
-/// its second half [`STREAMED_END`]).
+/// its second half [`STREAMED_END`]). With [`Self::holding`] a call waits
+/// inside it until the test lets it go (a slow ffprobe or ffmpeg).
 #[derive(Clone)]
 pub(crate) struct FakeMedia {
     ready: bool,
@@ -79,6 +80,35 @@ pub(crate) struct FakeMedia {
     output_bytes: u64,
     /// The posters taken, and how.
     pub(crate) posters: Arc<Mutex<Vec<(MediaLocation, PosterSpec)>>>,
+    /// Where a call waits until the test lets it go.
+    gate: Option<Gate>,
+}
+
+/// A call of the converter that can be held ([`FakeMedia::holding`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Call {
+    /// Probing a file.
+    Probe,
+    /// Taking a poster.
+    Poster,
+}
+
+/// Holds every `call` inside the converter: it says it arrived, then waits
+/// for the test's word (or for the test to drop its sender).
+#[derive(Clone)]
+struct Gate {
+    call: Call,
+    arrived: mpsc::Sender<Call>,
+    through: Arc<Mutex<mpsc::Receiver<()>>>,
+}
+
+impl Gate {
+    fn pass(gate: Option<&Self>, call: Call) {
+        if let Some(gate) = gate.filter(|g| g.call == call) {
+            gate.arrived.send(call).unwrap();
+            let _ = gate.through.lock().unwrap().recv();
+        }
+    }
 }
 
 /// The color of every poster [`FakeMedia`] takes.
@@ -150,6 +180,7 @@ impl FakeMedia {
             two_tone: false,
             output_bytes: CONVERTED_BYTES as u64,
             posters: Arc::default(),
+            gate: None,
         }
     }
 
@@ -168,6 +199,20 @@ impl FakeMedia {
     pub(crate) fn two_tone(mut self) -> Self {
         self.two_tone = true;
         self
+    }
+
+    /// Every `call` waits inside it: the receiver tells when one arrived,
+    /// and each goes on at the next word of the sender (all of them once it
+    /// is dropped).
+    pub(crate) fn holding(mut self, call: Call) -> (Self, mpsc::Receiver<Call>, mpsc::Sender<()>) {
+        let (arrived, arrivals) = mpsc::channel();
+        let (go, through) = mpsc::channel();
+        self.gate = Some(Gate {
+            call,
+            arrived,
+            through: Arc::new(Mutex::new(through)),
+        });
+        (self, arrivals, go)
     }
 }
 
@@ -196,6 +241,7 @@ impl MediaTranscoder for FakeMedia {
     }
 
     fn probe(&mut self, source: &MediaLocation) -> Result<MediaInfo> {
+        Gate::pass(self.gate.as_ref(), Call::Probe);
         let path = Path::new(&source.0);
         let bytes = std::fs::metadata(path)
             .map_err(|e| BezelError::InvalidInput(e.to_string()))?
@@ -279,6 +325,7 @@ impl MediaTranscoder for FakeMedia {
         if !self.ready {
             return Err(BezelError::Unsupported("no ffmpeg".into()));
         }
+        Gate::pass(self.gate.as_ref(), Call::Poster);
         self.posters.lock().unwrap().push((source.clone(), spec));
         Ok(Frame::filled(spec.size, POSTER))
     }

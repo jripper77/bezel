@@ -38,7 +38,7 @@ use crate::messages::{ErrorCode, UiError};
 use crate::settings::{SettingsFile, THEME_AXES, THEME_SCOPES};
 use crate::storage::StorageState;
 pub use crate::studio::MAX_REFRESH;
-use crate::studio::{Delivery, Motion, Studio};
+use crate::studio::{Delivery, Motion, Studio, TakenPoster, VideoProbe, Wait};
 use crate::texts::{Texts, language_slug, parse_language, texts};
 use crate::thumbnails::Thumbnails;
 use crate::udev_help::UdevHelp;
@@ -263,10 +263,23 @@ impl Backend {
         outcome
     }
 
-    /// Shows the edited theme on the live screen now.
+    /// Shows the edited theme on the live screen now (its video probed
+    /// first when the screen is to start it).
     pub(crate) fn show_now(&self, time: LocalTime) -> bezel_core::Result<()> {
+        let probe = self.studio().live_video_to_probe();
+        self.learn_video(probe, Wait::No);
         let delivered = self.idle_studio().frame_for_screen(time, Instant::now());
         self.deliver(delivered)
+    }
+
+    /// Runs `probe` of the theme's video outside the session's lock (ffprobe
+    /// reads a container that is not MP4 or GIF) and hands what it said to
+    /// the session; with [`Wait::No`], nothing while a storage job holds the
+    /// converter.
+    fn learn_video(&self, probe: Option<VideoProbe>, wait: Wait) {
+        if let Some(probed) = probe.and_then(|probe| probe.run(wait)) {
+            self.studio().probed(probed);
+        }
     }
 
     fn find_screen(&self, key: &str) -> UiResult<Screen> {
@@ -571,7 +584,10 @@ impl Backend {
 
     /// Takes the UI's theme and renders it at `now` ([`frame_bytes`]: its
     /// size, when its next picture is due, then RGBA). A video background
-    /// plays with `motion` ([`Studio::preview`]), else shows its poster.
+    /// plays with `motion` ([`Studio::preview`]), else shows its poster; a
+    /// video not probed yet is probed first, outside the session's lock
+    /// (while a storage job holds the converter, the poster shows and the UI
+    /// asks again soon).
     pub fn render(
         &self,
         theme: &ThemeDto,
@@ -582,6 +598,12 @@ impl Backend {
         let theme = theme_of(theme)?;
         let mut studio = self.studio();
         studio.set_theme(theme);
+        if let Some(probe) = studio.video_to_probe() {
+            drop(studio);
+            self.learn_video(Some(probe), Wait::No);
+            // The theme the UI sent last, which may be a newer one by now.
+            studio = self.studio();
+        }
         let (frame, change) = studio.preview(time, now, motion)?;
         Ok(frame_bytes(&frame, change))
     }
@@ -592,21 +614,12 @@ impl Backend {
     /// lock, waiting for a storage job that holds the converter.
     pub fn video_auto(&self, theme: &ThemeDto) -> UiResult<VideoAutoDto> {
         let theme = theme_of(theme)?;
-        let unprobed = {
+        let probe = {
             let mut studio = self.studio();
             studio.set_theme(theme);
             studio.video_to_probe()
         };
-        if let Some((asset, location, media)) = unprobed {
-            let probed = media
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .probe(&location);
-            let info = probed
-                .inspect_err(|e| tracing::warn!(video = asset.0, "not probed: {e}"))
-                .ok();
-            self.studio().probed(&asset, info);
-        }
+        self.learn_video(probe, Wait::Yes);
         Ok(VideoAutoDto::of(self.studio().video_auto()))
     }
 
@@ -678,10 +691,14 @@ impl Backend {
         if let Some(target) = target.as_ref().filter(|t| !self.library.allows(t)) {
             return Err(UiError::new(ErrorCode::NotPicked).arg("location", &target.0));
         }
+        let poster = self.retake_poster(&theme);
         let mut studio = self.studio();
         let location =
             target.unwrap_or_else(|| self.library.save_location(studio.location(), &theme.name));
         studio.set_theme(theme);
+        if let Some(poster) = poster {
+            studio.poster_taken(poster);
+        }
         studio.save(self.store.as_ref(), location.clone())?;
         drop(studio);
         // Its gallery card shows it as saved.
@@ -691,6 +708,28 @@ impl Backend {
         Ok(SavedDto {
             location: location.0,
         })
+    }
+
+    /// The poster of `theme`'s video background taken again when the theme
+    /// frames the video otherwise than the poster shows
+    /// (D-2026-10-01-video-background-framing-3), the video probed first if
+    /// it is not yet: both outside the session's lock, so the refresh, the
+    /// live screen and the preview go on meanwhile. `None` when no new
+    /// poster is needed or none could be taken (without ffmpeg, or while a
+    /// storage job holds the converter, the poster stays as it is).
+    fn retake_poster(&self, theme: &Theme) -> Option<TakenPoster> {
+        let probe = {
+            let mut studio = self.studio();
+            studio.set_theme(theme.clone());
+            studio.video_to_probe()
+        };
+        self.learn_video(probe, Wait::No);
+        let retake = {
+            let mut studio = self.studio();
+            studio.set_theme(theme.clone());
+            studio.poster_to_take()
+        };
+        retake?.run()
     }
 
     /// A blank theme sized for `screen` (or the 8.8" when none is known) in
@@ -881,11 +920,15 @@ impl Backend {
     }
 
     /// One refresh of the session at `now`: an attempt to connect a live
-    /// screen that failed when one is due, a sample when one is due, and the
-    /// live screen's frame when it is due (the screen's I/O outside the
-    /// session's lock). Returns when the next refresh is due.
+    /// screen that failed when one is due, the probe of the theme's video
+    /// when the live screen is to start it, a sample when one is due, and
+    /// the live screen's frame when it is due (the screen's I/O and the
+    /// probe outside the session's lock). Returns when the next refresh is
+    /// due.
     pub fn tick(&self, time: LocalTime, now: Instant) -> Instant {
         self.reconnect(now);
+        let probe = self.studio().live_video_to_probe();
+        self.learn_video(probe, Wait::No);
         let delivered = self.studio().tick(time, now);
         if let Err(e) = self.deliver(delivered) {
             tracing::warn!("live screen frame failed: {e}");
@@ -928,11 +971,20 @@ pub const DEFAULT_MODEL: bezel_core::domain::device::ModelId =
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manager::Copies;
+    use crate::storage::tests::{Call, FakeMedia, fixture_on};
+    use crate::studio::CONVERTER_BUSY;
+    use bezel_core::domain::frame::{Frame, Rgba};
+    use bezel_core::domain::framing::{VideoFit, VideoFraming, Zoom};
     use bezel_core::domain::geometry::{Orientation, Size};
+    use bezel_core::domain::theme::AssetRef;
+    use bezel_devices::fake::FakeStorage;
     use bezel_devices::{FakeBus, FakeConnector, FakeHid};
+    use bezel_media::archive::MemoryArchive;
     use bezel_render::{SkiaRenderer, SystemFonts};
     use bezel_sensors::FakeSensors;
     use bezel_themes::FsThemeStore;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
     use std::sync::mpsc;
 
@@ -1564,6 +1616,146 @@ mod tests {
         });
         let log = f.connector.log();
         assert_eq!((log.frames.len(), log.brightness.len()), (1, 1));
+    }
+
+    const DRAGON: &str = "assets/dragon.mp4";
+    const DRAGON_POSTER: &str = "assets/poster-195.png";
+    /// Longest wait for a held call of the converter to arrive (it arrives
+    /// at once; this only keeps a broken test from hanging).
+    const ARRIVAL: Duration = Duration::from_secs(30);
+
+    /// Live on the fake 8.8" (a blank theme first), then editing the Dragon
+    /// Ball theme: 1920x480, its video the vendor's pre-turned 480x1920
+    /// `dragon.mp4` (not probed yet) with its poster. The session probes and
+    /// takes posters with `media`, the storage tab's converter, as in the
+    /// app.
+    fn dragon_live(name: &str, media: FakeMedia) -> (crate::storage::tests::Fixture, Theme) {
+        let copies = Copies::in_memory(MemoryArchive::new());
+        let f = fixture_on(
+            name,
+            FakeBus::turing_88(),
+            FakeStorage::default(),
+            media,
+            copies,
+        );
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        let mut theme = Theme::blank("Dragon Ball", Size::new(480, 1920), Orientation::Landscape);
+        theme.background = Background::Video {
+            asset: AssetRef(DRAGON.into()),
+            poster: Some(AssetRef(DRAGON_POSTER.into())),
+            framing: None,
+        };
+        let poster = Frame::filled(Size::new(1920, 480), Rgba::opaque(9, 9, 9));
+        let assets = BTreeMap::from([
+            (AssetRef(DRAGON.into()), vec![9; 4096]),
+            (
+                AssetRef(DRAGON_POSTER.into()),
+                crate::media::png_of(&poster).unwrap(),
+            ),
+        ]);
+        f.backend.studio().start(theme.clone(), assets, None);
+        (f, theme)
+    }
+
+    /// When a preview ([`frame_bytes`]) changes next, milliseconds.
+    fn next_ms(preview: &[u8]) -> u32 {
+        u32::from_le_bytes(preview[8..12].try_into().unwrap())
+    }
+
+    /// While a call holds the converter, the session goes on: its lock is
+    /// free, the refresh `ms` from now draws the live screen's frame, a push
+    /// shows one at once, and the preview renders `theme` (its poster, asked
+    /// again soon).
+    fn the_session_goes_on(f: &crate::storage::tests::Fixture, theme: &ThemeDto, ms: u64) {
+        assert!(
+            f.backend.studio.studio.try_lock().is_ok(),
+            "the lock is free"
+        );
+        let frames = || f.connector.log().frames.len();
+        let before = frames();
+        f.backend
+            .tick(TIME, Instant::now() + Duration::from_millis(ms));
+        assert_eq!(frames(), before + 1, "the refresh drew a frame");
+        f.backend.push(theme, TIME).unwrap();
+        assert_eq!(frames(), before + 2, "a push shows one at once");
+        let preview = f
+            .backend
+            .render(theme, TIME, Instant::now(), Motion::Allowed)
+            .unwrap();
+        let busy = u32::try_from(CONVERTER_BUSY.as_millis()).unwrap();
+        assert_eq!(next_ms(&preview), busy, "the poster, asked again soon");
+    }
+
+    /// Review W2: probing the theme's video (ffprobe, for a container that
+    /// is not MP4 or GIF) runs outside the session's lock; the live screen
+    /// starts the video once it is probed.
+    #[test]
+    fn the_session_goes_on_while_the_video_is_probed() {
+        let (media, arrivals, go) = FakeMedia::ready().holding(Call::Probe);
+        let (f, theme) = dragon_live("probing", media);
+        let dto = ThemeDto::from(&theme);
+        let backend = &f.backend;
+        std::thread::scope(|scope| {
+            // Dropped if the test fails: the held probe goes on.
+            let go = go;
+            let rendering =
+                scope.spawn(|| backend.render(&dto, TIME, Instant::now(), Motion::Allowed));
+            assert_eq!(arrivals.recv_timeout(ARRIVAL), Ok(Call::Probe));
+            the_session_goes_on(&f, &dto, 60_000);
+            let video = backend.sample().video.unwrap();
+            assert_eq!(video.state, "notStarted", "not before the probe");
+            go.send(()).unwrap();
+            let preview = rendering.join().unwrap().unwrap();
+            assert_eq!(next_ms(&preview), 67, "the video plays");
+        });
+        let auto = f.backend.video_auto(&dto).unwrap();
+        let size = auto.size.map(|s| (s.width, s.height));
+        assert_eq!((auto.rotation, size), (270, Some((480, 1920))));
+        f.backend
+            .tick(TIME, Instant::now() + Duration::from_secs(120));
+        let video = f.backend.sample().video.unwrap();
+        assert_eq!(
+            (video.state, video.path.as_deref()),
+            ("missing", Some("internal/video/dragon.mp4"))
+        );
+    }
+
+    /// Review W2: the poster taken again on save (ffmpeg, up to 30 s) runs
+    /// outside the session's lock; it reaches the saved theme.
+    #[test]
+    fn the_session_goes_on_while_the_poster_is_taken() {
+        let (media, arrivals, go) = FakeMedia::ready().holding(Call::Poster);
+        let (f, mut theme) = dragon_live("posters", media);
+        // The refresh probes the video for the live screen.
+        f.backend
+            .tick(TIME, Instant::now() + Duration::from_secs(60));
+        assert_eq!(f.backend.sample().video.unwrap().state, "missing");
+        let poster = AssetRef(DRAGON_POSTER.into());
+        let before = f.backend.studio().assets()[&poster].clone();
+        if let Background::Video { framing, .. } = &mut theme.background {
+            *framing = Some(VideoFraming {
+                fit: VideoFit::Contain,
+                zoom: Zoom::from_percent(125),
+                ..VideoFraming::default()
+            });
+        }
+        let dto = ThemeDto::from(&theme);
+        let backend = &f.backend;
+        let saved = std::thread::scope(|scope| {
+            // Dropped if the test fails: the held poster goes on.
+            let go = go;
+            let saving = scope.spawn(|| backend.save(&dto, None));
+            assert_eq!(arrivals.recv_timeout(ARRIVAL), Ok(Call::Poster));
+            the_session_goes_on(&f, &dto, 120_000);
+            go.send(()).unwrap();
+            saving.join().unwrap().unwrap()
+        });
+        let taken = f.backend.studio().assets()[&poster].clone();
+        assert_ne!(taken, before, "taken again");
+        let (_, assets) = FsThemeStore.load(&ThemeLocation(saved.location)).unwrap();
+        assert_eq!(assets[&poster], taken, "saved with the theme");
+        let picture = image::load_from_memory(&taken).unwrap().to_rgba8();
+        assert_eq!(picture.dimensions(), (1920, 480));
     }
 
     #[test]

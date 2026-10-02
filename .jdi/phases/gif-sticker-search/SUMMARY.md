@@ -47,6 +47,8 @@
   danificados testados; `2d1272d` — códigos fixos dizem por que o app não abriu (guia de problemas).
 - --- AUTO-RESET 2 --- Rodada 3, iter 1 (D-14): `c05f5b1` — sem logger nem feature `tracing` do Tauri no studio (manifesto e
   features resolvidas pelo `cargo metadata`), panic hook que diz só onde; `86f5c99` — guia de problemas com o que o usuário vê.
+- Rodada 3, iter 2 (D-15): `0bfa420` — sem sockets no core (linha 1) nem no studio; `Command` só na reabertura do próprio
+  app; o navegador do sistema só abre por `open_link`/`open_guide` (clique do usuário).
 
 ## Blocked tasks
 - nenhuma

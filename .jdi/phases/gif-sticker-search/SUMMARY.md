@@ -32,19 +32,9 @@
   inutilizável dita (`6ffa470`), chave curta (`f9bbc24`), `e2e-passed.mjs` (cada teste nos 4 projetos com axe), Privacidade
   exata e exigida pelo `check-docs`, teste do mock só fora do Windows (D-8), grep de TODO e linhas 1/3/4/5 apertadas
   (D-9), token `UserAsked` de `tauri::ipc::Request`, debounce/setas/i18n provados pela UI, guarda de fonte (`ce4ade5`).
-- --- AUTO-RESET 1 (teto de 5 iterações; o crítico da iter 5 achou a chave num `eprintln!` e um anúncio com texto
-  solto) --- Rodada 2, iter 1: D-10; `KlipyKey` (sem `Display`, `Debug` mascarado, um só leitor: imprimir a chave não
-  compila), a guarda de fonte lê identificadores com `syn` (pega `r#eval`, macros, `with_webview`), os helpers da UI só
-  aceitam chaves de i18n (texto solto = chave desconhecida) e o e2e confere `keySavedNow`, `keyRemoved` e
-  `collection.using` no idioma.
-- Rodada 2, iter 2 (crítico: `expose_secret` num print e o token feito por outro comando): `e99c81b` — a chave só é
-  lida como argumento direto do cliente e na gravação do arquivo, nunca dentro de macro; `UserAsked::of` só nos 3
-  comandos de GIF (renomear ou embrulhar também falha); `navigate` e literais `javascript:` recusados.
-- Rodada 2, iter 3 (D-11): `a603c45` — comandos só via IPC, `Request` só nos 3 comandos de GIF, sem print em `commands.rs`.
-- Rodada 2, iter 4 (D-12): `1b66167` — logs só pelo módulo `diag` (38 códigos fixos; os textos de erro saem dos logs),
-  sem `payload`/`Invoke`, sem panic com valor; variável local com nome de comando aceita.
-- Rodada 2, iter 5 (D-13): `6f4afe0` — o arquivo da chave guarda `KlipyKey` (nenhuma `String` com a chave), 12 arquivos
-  danificados testados; `2d1272d` — códigos fixos dizem por que o app não abriu (guia de problemas).
+- --- AUTO-RESET 1 --- Rodada 2 (D-10..D-13): `KlipyKey` (imprimir a chave não compila; nenhuma `String` com ela), guarda de
+  fonte com `syn`, token só nos 3 comandos de GIF, comandos só via IPC, logs só pelo `diag` (códigos fixos), arquivo da
+  chave tipado e testado com 12 arquivos danificados, helpers da UI só com chaves de i18n.
 - --- AUTO-RESET 2 --- Rodada 3, iter 1 (D-14): `c05f5b1` — sem logger nem feature `tracing` do Tauri no studio (manifesto e
   features resolvidas pelo `cargo metadata`), panic hook que diz só onde; `86f5c99` — guia de problemas com o que o usuário vê.
 - Rodada 3, iter 2 (D-15): `0bfa420` — sem sockets no core (linha 1) nem no studio; `Command` só na reabertura do próprio
@@ -53,6 +43,10 @@
   `bezel-klipy`), `3f71b78` (`studio-starts-silent.sh`: o binário real, com chave salva, sob um shim de `connect`/`execve`
   — nada sai para fora no início; abrir o navegador, janela remota ou socket reprovam), `944cfc3` (e2e: nada sem clique,
   mesmo 1 h ociosa); o orquestrador apertou as linhas 1 (core sem I/O) e 10 (`test.fixme(` pede issue).
+- Rodada 3, iter 4 (D-18): `101d53c` — os 4 inícios (com/sem chave, oculto/visível) num `kwin_wayland --virtual` próprio,
+  com prova de que a janela rodou e só os sockets da sessão de teste; `8f437e1` — só o `bridge.js` fala com o backend e só a
+  UI de GIF chama o KLIPY ou abre o Painel; esconder/mostrar a janela não dispara nada. Semgrep (`ws://`) e linha de TODO
+  ajustados pelo orquestrador.
 
 ## Blocked tasks
 - nenhuma
@@ -65,7 +59,7 @@
   `diag`, commands, lib, backend, dto, messages e os módulos que passaram a logar pelo `diag`)
 - `apps/bezel-studio/src/{gif-search,collection,demo-gifs,demo-backend,demo-data,bridge,app}.js`,
   `src/ui/{gif-search,collection,library}.js`, `index.html`, `styles.css`, `i18n/{en,pt-BR}.js`, `tests/**`
-- `docs/user/{,pt-BR/}{gifs-and-stickers,README,troubleshooting}.md`, `scripts/ci/check-docs.sh`, `CHANGELOG.md`, `README.md`
+- `docs/user/{,pt-BR/}{gifs-and-stickers,README,troubleshooting}.md`, `scripts/ci/{check-docs.sh,studio-starts-silent.sh,silent-shim.c}`, `CHANGELOG.md`, `README.md`
 
 ## Tests
 - `cargo test --workspace --locked`: 945 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)

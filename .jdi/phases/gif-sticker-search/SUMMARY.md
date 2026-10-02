@@ -45,6 +45,8 @@
   sem `payload`/`Invoke`, sem panic com valor; variável local com nome de comando aceita.
 - Rodada 2, iter 5 (D-13): `6f4afe0` — o arquivo da chave guarda `KlipyKey` (nenhuma `String` com a chave), 12 arquivos
   danificados testados; `2d1272d` — códigos fixos dizem por que o app não abriu (guia de problemas).
+- --- AUTO-RESET 2 --- Rodada 3, iter 1 (D-14): `c05f5b1` — sem logger nem feature `tracing` do Tauri no studio (manifesto e
+  features resolvidas pelo `cargo metadata`), panic hook que diz só onde; `86f5c99` — guia de problemas com o que o usuário vê.
 
 ## Blocked tasks
 - nenhuma
@@ -60,7 +62,7 @@
 - `docs/user/{,pt-BR/}{gifs-and-stickers,README,troubleshooting}.md`, `scripts/ci/check-docs.sh`, `CHANGELOG.md`, `README.md`
 
 ## Tests
-- `cargo test --workspace --locked`: 943 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
+- `cargo test --workspace --locked`: 945 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
 - DoD 1–6: OK no branch combinado a cada iteração; DoD 7: `rust-windows` verde (iter 3: 153 testes do studio no Windows)
 - UI: 231 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc` sem studio e klipy: o `ring` não compila

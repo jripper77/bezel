@@ -35,6 +35,10 @@
   axe registrado), `b524c83` + `e49329a` (W1: Privacidade exata — PNG nos stickers — e o `check-docs.sh` exige os fatos
   dentro da seção). O orquestrador apertou as linhas 1 (core só com `thiserror`), 3 (CSP igual à da `main` linha a
   linha, todas as capabilities, o teste do `setup`) e 5 (`e2e-passed.mjs`) e o grep de TODO do PROJECT (`e2c9cb2`).
+- Iter 3 (revisor da iter 2: BLOCKED — B1 binário de teste do studio no Windows não carregava com a feature `test`
+  do Tauri; B2 grep de TODO pegava o `test.fixme` do Playwright): D-8; a feature `test` e o teste do `setup` só fora
+  do Windows (árvore de features do Windows igual à de antes), o grep ignora só `test.fixme`/`'fixme'`, e o
+  `e2e-passed.mjs` exige claro e escuro em pt-BR e en (W1).
 
 ## Blocked tasks
 - nenhuma

@@ -1,0 +1,27 @@
+{
+  "result": true,
+  "data": {
+    "data": [
+      {
+        "id": 3021774409811265,
+        "slug": "party-parrot-Qm3",
+        "title": "Party Parrot",
+        "file": {
+          "hd": {
+            "gif": { "url": "https://static.klipy.com/ii/example/2001/hd.gif", "width": 400, "height": 400, "size": 1802210 },
+            "webp": { "url": "https://static.klipy.com/ii/example/2001/hd.webp", "width": 400, "height": 400, "size": 501882 }
+          },
+          "sm": {
+            "gif": { "url": "https://static.klipy.com/ii/example/2001/sm.gif", "width": 200, "height": 200, "size": 310442 },
+            "jpg": { "url": "https://static.klipy.com/ii/example/2001/sm.jpg", "width": 200, "height": 200, "size": 9120 }
+          }
+        },
+        "tags": ["party", "parrot"],
+        "type": "sticker"
+      }
+    ],
+    "current_page": 1,
+    "per_page": 24,
+    "has_next": false
+  }
+}

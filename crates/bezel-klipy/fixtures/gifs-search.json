@@ -1,0 +1,83 @@
+{
+  "result": true,
+  "data": {
+    "data": [
+      {
+        "id": 4170656934727386,
+        "slug": "happy-cat-dance-xT4uQ",
+        "title": "Happy Cat Dance",
+        "file": {
+          "hd": {
+            "gif": { "url": "https://static.klipy.com/ii/example/1001/hd.gif", "width": 498, "height": 280, "size": 2481220 },
+            "webp": { "url": "https://static.klipy.com/ii/example/1001/hd.webp", "width": 498, "height": 280, "size": 612004 },
+            "jpg": { "url": "https://static.klipy.com/ii/example/1001/hd.jpg", "width": 498, "height": 280, "size": 30118 },
+            "mp4": { "url": "https://static.klipy.com/ii/example/1001/hd.mp4", "width": 498, "height": 280, "size": 220410 }
+          },
+          "md": {
+            "gif": { "url": "https://static.klipy.com/ii/example/1001/md.gif", "width": 320, "height": 180, "size": 1103388 },
+            "webp": { "url": "https://static.klipy.com/ii/example/1001/md.webp", "width": 320, "height": 180, "size": 301276 },
+            "jpg": { "url": "https://static.klipy.com/ii/example/1001/md.jpg", "width": 320, "height": 180, "size": 16380 },
+            "mp4": { "url": "https://static.klipy.com/ii/example/1001/md.mp4", "width": 320, "height": 180, "size": 120212 }
+          },
+          "sm": {
+            "gif": { "url": "https://static.klipy.com/ii/example/1001/sm.gif", "width": 220, "height": 124, "size": 80118 },
+            "webp": { "url": "https://static.klipy.com/ii/example/1001/sm.webp", "width": 220, "height": 124, "size": 41022 },
+            "jpg": { "url": "https://static.klipy.com/ii/example/1001/sm.jpg", "width": 220, "height": 124, "size": 8560 },
+            "mp4": { "url": "https://static.klipy.com/ii/example/1001/sm.mp4", "width": 220, "height": 124, "size": 60331 }
+          },
+          "xs": {
+            "gif": { "url": "https://static.klipy.com/ii/example/1001/xs.gif", "width": 90, "height": 50, "size": 20904 },
+            "webp": { "url": "https://static.klipy.com/ii/example/1001/xs.webp", "width": 90, "height": 50, "size": 9870 },
+            "jpg": { "url": "https://static.klipy.com/ii/example/1001/xs.jpg", "width": 90, "height": 50, "size": 2210 },
+            "mp4": { "url": "https://static.klipy.com/ii/example/1001/xs.mp4", "width": 90, "height": 50, "size": 18820 }
+          }
+        },
+        "tags": ["cat", "dance", "happy"],
+        "type": "gif",
+        "blur_preview": "data:image/jpeg;base64,AAAA"
+      },
+      {
+        "type": "ad",
+        "content": "<div class=\"ad\"></div>",
+        "width": 300,
+        "height": 250
+      },
+      {
+        "id": 5512908871236650,
+        "slug": "cat-loop-Rb7",
+        "title": "Cat Loop",
+        "file": {
+          "hd": {
+            "webp": { "url": "https://static.klipy.com/ii/example/1002/hd.webp", "width": 480, "height": 480, "size": 402118 },
+            "mp4": { "url": "https://static.klipy.com/ii/example/1002/hd.mp4", "width": 480, "height": 480, "size": 190020 }
+          }
+        },
+        "tags": ["cat"],
+        "type": "gif"
+      },
+      {
+        "id": 8840391275611024,
+        "slug": "Not a slug!",
+        "file": {
+          "hd": {
+            "gif": { "url": "https://static.klipy.com/ii/example/1003/hd.gif", "height": 360, "size": 3120400 },
+            "jpg": { "url": "https://cdn.example.com/ii/example/1003/hd.jpg", "width": 640, "height": 360, "size": 40210 }
+          },
+          "md": {
+            "gif": { "url": "https://static.klipy.com/ii/example/1003/md.gif", "width": 320, "height": 180, "size": 900120 }
+          },
+          "sm": {
+            "gif": { "url": "https://static.klipy.com/ii/example/1003/sm.gif", "width": 220, "height": 124, "size": 70400 },
+            "jpg": { "url": "https://static.klipy.com/ii/example/1003/sm.jpg", "width": 220, "height": 124, "size": 7302 }
+          }
+        },
+        "tags": [],
+        "type": "gif",
+        "hasaudio": false
+      }
+    ],
+    "current_page": 1,
+    "per_page": 24,
+    "has_next": true
+  }
+}

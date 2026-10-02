@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "npm run test:unit && node scripts/playwright-browsers.mjs && playwright test",
+    "e2e:passed": "node scripts/e2e-passed.mjs",
     "test:unit": "node -e \"fs.mkdirSync('coverage',{recursive:true})\" && node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-exclude=\"src/app.js\" --test-coverage-exclude=\"src/ui/**\" --test-coverage-exclude=\"src/demo-render.js\" --test-coverage-lines=80 --test-reporter=tap --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"tests/ui/**/*.test.mjs\""
   },
   "devDependencies": {

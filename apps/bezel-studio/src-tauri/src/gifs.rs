@@ -34,7 +34,9 @@
 //!     factory and as the key file's `key` field: never bound to a
 //!     variable, never inside a macro call; and any macro in a function
 //!     that reads the key's text;
-//!   - a second `KlipyClient::new`, and print or log macros in this module.
+//!   - a second `KlipyClient::new`; a print or a log macro, as anywhere but
+//!     `diag` (D-2026-10-01-gif-sticker-search-12), and any panic or
+//!     assertion in this module.
 //!
 //!   Code written to get past it otherwise (generated code, another crate)
 //!   is left to code review.

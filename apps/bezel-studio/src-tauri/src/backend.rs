@@ -26,6 +26,7 @@ use bezel_themes::dto::{BackgroundDto, ThemeDto};
 use bezel_themes::import::import_path;
 use bezel_themes::native::{is_native, native_location};
 
+use crate::diag::{self, DiagCode};
 use crate::dto::{
     AddedDto, AssetDto, DevicesDto, ImportedDto, LiveVideoDto, MonitorModeDto, PreferencesDto,
     ReconnectingDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
@@ -447,7 +448,7 @@ impl Backend {
         let live = was_live
             && self
                 .set_live(true, Some(&key), time)
-                .inspect_err(|e| tracing::warn!(screen = key, "live mode not resumed: {e}"))
+                .inspect_err(|_| diag::report(DiagCode::LiveNotResumed))
                 .is_ok();
         Ok(RestartedDto { key, live })
     }
@@ -889,7 +890,7 @@ impl Backend {
             self.library.grant(&location);
             match self.open_at(location) {
                 Ok(_) => return,
-                Err(e) => tracing::warn!(theme = last, "last theme not reopened: {e}"),
+                Err(_) => diag::report(DiagCode::LastThemeNotReopened),
             }
         }
         let screen = discover_screens(self.bus.as_ref())
@@ -901,8 +902,8 @@ impl Backend {
             .map(|a| a.0.clone());
         let blank = match self.new_theme(key.as_deref(), self.texts().untitled, None) {
             Ok(theme) => theme,
-            Err(e) => {
-                tracing::warn!("no starting theme: {e}");
+            Err(_) => {
+                diag::report(DiagCode::NoStartingTheme);
                 return;
             }
         };
@@ -915,9 +916,9 @@ impl Backend {
                 && crate::dto::orientation_slug(e.theme.orientation) == blank.orientation
         });
         if let Some(entry) = fitting
-            && let Err(e) = self.open_at(entry.location.clone())
+            && self.open_at(entry.location.clone()).is_err()
         {
-            tracing::warn!(theme = entry.location.0, "bundled theme not opened: {e}");
+            diag::report(DiagCode::BundledThemeNotOpened);
         }
     }
 
@@ -927,9 +928,9 @@ impl Backend {
     /// display's ([`Self::set_live`]; D-2026-10-01-live-screen-controls-2).
     pub fn restore_live(&self, time: LocalTime) {
         if let Some(key) = self.settings.load().live_screen
-            && let Err(e) = self.set_live(true, Some(&key), time)
+            && self.set_live(true, Some(&key), time).is_err()
         {
-            tracing::warn!(screen = key, "live mode not restored: {e}");
+            diag::report(DiagCode::LiveNotRestored);
         }
     }
 
@@ -944,8 +945,8 @@ impl Backend {
         let probe = self.studio().live_video_to_probe();
         self.learn_video(probe, Wait::No);
         let delivered = self.studio().tick(time, now);
-        if let Err(e) = self.deliver(delivered) {
-            tracing::warn!("live screen frame failed: {e}");
+        if self.deliver(delivered).is_err() {
+            diag::report(DiagCode::LiveFrameFailed);
         }
         self.studio().next_due()
     }

@@ -5,8 +5,9 @@
 //! The window enters a command only through IPC: no code names a command
 //! function but its definition and `generate_handler!` in `run`, only the
 //! GIF commands `search_gifs`, `gif_preview` and `collect_gif` take the
-//! invocation (`Request`), and nothing here prints or logs
-//! (D-2026-10-01-gif-sticker-search-11); the source guard
+//! invocation (`Request`), and nothing here prints, logs or panics
+//! (D-2026-10-01-gif-sticker-search-11, -12: only [`crate::diag`] says
+//! anything, fixed text only); the source guard
 //! `tests::nothing_in_the_app_forges_an_invocation` checks it.
 
 use std::path::PathBuf;

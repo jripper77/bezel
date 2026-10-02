@@ -48,6 +48,7 @@ use bezel_core::ports::{ArchiveStore, MediaLocation, MediaTranscoder, ScreenLink
 
 use crate::backend::Backend;
 use crate::clock::unix_seconds;
+use crate::diag::{self, DiagCode};
 use crate::dto::{
     ConversionDto, FolderDto, JobDto, MediaToolsDto, PrepareDto, PreparedDto, RefusalDto,
     StorageDto, StoredFileDto, media_summary,
@@ -87,9 +88,9 @@ impl Pending {
 
 fn remove_scratch(file: Option<&Path>) {
     if let Some(file) = file
-        && let Err(e) = std::fs::remove_file(file)
+        && std::fs::remove_file(file).is_err()
     {
-        tracing::warn!(file = %file.display(), "copy of the theme video not removed: {e}");
+        diag::report(DiagCode::VideoCopyNotRemoved);
     }
 }
 
@@ -408,8 +409,8 @@ impl Backend {
         if let Access::Live(link) = access {
             let unwanted = self.studio().return_live_link(screen, link, resume);
             drop(unwanted);
-            if let Err(e) = self.show_now(time) {
-                tracing::warn!(screen, "live screen stopped after a storage job: {e}");
+            if self.show_now(time).is_err() {
+                diag::report(DiagCode::LiveStoppedAfterStorageJob);
             }
         }
     }

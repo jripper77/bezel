@@ -167,8 +167,7 @@ impl UiError {
     pub fn arg(mut self, name: &'static str, value: impl fmt::Display) -> Self {
         debug_assert!(
             self.code.params().contains(&name),
-            "{name} is not an argument of {}",
-            self.code.code()
+            "an argument the code does not have"
         );
         self.args.retain(|(n, _)| *n != name);
         self.args.push((name, value.to_string()));

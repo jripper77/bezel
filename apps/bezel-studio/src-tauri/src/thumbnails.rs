@@ -23,6 +23,7 @@ use bezel_core::domain::theme::{AssetRef, Theme};
 use bezel_core::ports::{FrameRenderer, SensorSource, ThemeLocation, ThemeStore};
 use image::{DynamicImage, ImageFormat, RgbaImage};
 
+use crate::diag::{self, DiagCode};
 use crate::library::{Fnv, revision};
 use crate::texts::language_slug;
 
@@ -154,8 +155,8 @@ impl Thumbnails {
             .and_then(|(theme, assets)| self.render(theme, assets, language, time));
         match drawn {
             Ok(frame) => reduce(&frame),
-            Err(e) => {
-                tracing::warn!(theme = %location.0, "no thumbnail: {e}");
+            Err(_) => {
+                diag::report(DiagCode::NoThumbnail);
                 None
             }
         }
@@ -196,8 +197,8 @@ impl Thumbnails {
             std::fs::write(&partial, png)?;
             std::fs::rename(&partial, file)
         };
-        if let Err(e) = write() {
-            tracing::warn!(theme = %location.0, "thumbnail not kept: {e}");
+        if write().is_err() {
+            diag::report(DiagCode::ThumbnailNotKept);
         }
     }
 
@@ -209,9 +210,9 @@ impl Thumbnails {
         let prefix = Self::prefix(location);
         for entry in entries.flatten() {
             if entry.file_name().to_string_lossy().starts_with(&prefix)
-                && let Err(e) = std::fs::remove_file(entry.path())
+                && std::fs::remove_file(entry.path()).is_err()
             {
-                tracing::warn!(theme = %location.0, "old thumbnail not removed: {e}");
+                diag::report(DiagCode::OldThumbnailNotRemoved);
             }
         }
     }

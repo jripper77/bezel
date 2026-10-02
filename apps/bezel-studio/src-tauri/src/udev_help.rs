@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 use bezel_devices::udev::{RuleSource, install_command, rules};
 
+use crate::diag::{self, DiagCode};
+
 /// Where the rule is written for the install command.
 #[derive(Debug, Clone)]
 pub struct UdevHelp {
@@ -31,8 +33,8 @@ impl UdevHelp {
                 }
                 std::fs::write(&self.file, &rule)
             };
-            if let Err(e) = write() {
-                tracing::warn!(file = %self.file.display(), "udev rule not written: {e}");
+            if write().is_err() {
+                diag::report(DiagCode::UdevRuleNotWritten);
                 return None;
             }
         }

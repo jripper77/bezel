@@ -13,6 +13,7 @@
 pub mod backend;
 pub mod clock;
 pub mod commands;
+pub mod diag;
 pub mod dto;
 pub mod gifs;
 pub mod library;
@@ -52,6 +53,7 @@ use crate::backend::{
     Backend, DEFAULT_MODEL, SensorFactory, Session, default_orientation, sleep_until,
 };
 use crate::commands::{Shared, Unsaved};
+use crate::diag::DiagCode;
 use crate::gifs::{
     Gifs, KEY_FILE, KeyFile, KlipyKey, Provider, SharedGifs, SourceFactory, UserAsked,
     collection_in,
@@ -179,7 +181,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 // A UI that cannot be asked does not keep the window open.
                 OnClose::Ask => match window.emit(CLOSE_EVENT, ()) {
                     Ok(()) => api.prevent_close(),
-                    Err(e) => tracing::warn!("unsaved edits not asked about: {e}"),
+                    Err(_) => diag::report(DiagCode::UnsavedEditsNotAsked),
                 },
                 OnClose::Close => {}
             }
@@ -296,11 +298,14 @@ struct Start<R: Runtime> {
 /// its own request or calling a GIF command's function with it, or making
 /// a second KLIPY client: the source guard
 /// `tests::nothing_in_the_app_forges_an_invocation`
-/// (D-2026-10-01-gif-sticker-search-10, -11) refuses, by identifier in the
-/// studio's production code (raw names and the tokens of macro calls
+/// (D-2026-10-01-gif-sticker-search-10, -11, -12) refuses, by identifier in
+/// the studio's production code (raw names and the tokens of macro calls
 /// included), the Tauri APIs that do the first or load a page in the
 /// window (`eval`, `with_webview`, `on_message`, `invoke_key`, `navigate`,
-/// ...) and literals that are `javascript:` URLs; [`UserAsked::of`] but in
+/// ...) and literals that are `javascript:` URLs; what an invocation is made
+/// of (`Invoke`, `InvokeMessage`, `InvokeBody`, `payload`), so that no
+/// invoke handler reads one; a print, a log or a formatted panic anywhere
+/// but in [`diag`], which says fixed text only; [`UserAsked::of`] but in
 /// the bodies of `search_gifs`, `gif_preview` and `collect_gif` (and
 /// [`UserAsked`] renamed, in a qualified path, in another macro call or in
 /// an `impl` outside its module); the window's invocation (`Request`)
@@ -351,12 +356,11 @@ pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
 
 /// Sends a storage job's progress (an upload's, a storage manager plan's)
 /// to the window as [`commands::PROGRESS_EVENT`]; one that cannot be sent is
-/// logged, and the job goes on. Here, not in `commands.rs`, which neither
-/// prints nor logs (D-2026-10-01-gif-sticker-search-11): it is given no key
-/// and no invocation.
+/// said ([`diag`]), and the job goes on. It is given no key and no
+/// invocation.
 pub(crate) fn emit_progress<R: Runtime>(app: &AppHandle<R>, progress: dto::ProgressDto) {
-    if let Err(e) = app.emit(commands::PROGRESS_EVENT, progress) {
-        tracing::warn!("storage progress not sent: {e}");
+    if app.emit(commands::PROGRESS_EVENT, progress).is_err() {
+        diag::report(DiagCode::StorageProgressNotSent);
     }
 }
 
@@ -373,7 +377,7 @@ const SIMULATED_CARD_BYTES: u64 = 31_914_983_424;
 
 fn adapters(simulate: bool) -> Adapters {
     if simulate {
-        eprintln!("bezel-studio: {SIMULATION_SWITCH}=1, simulated Turing 8.8\" and sensors");
+        diag::report(DiagCode::Simulated);
         let storage = FakeStorage::default().with_card(SIMULATED_CARD_BYTES);
         Adapters {
             bus: Arc::new(FakeBus::turing_88()),
@@ -506,8 +510,8 @@ fn compose(folders: &Folders, simulate: bool) -> Backend {
 fn copies(data: &Path) -> Copies {
     match DiskArchive::open(storage_dir(data)) {
         Ok(archive) => Copies::on_disk(archive),
-        Err(e) => {
-            tracing::error!("local copies are kept for this run only: {e}");
+        Err(_) => {
+            diag::report(DiagCode::CopiesInMemory);
             Copies::in_memory(MemoryArchive::new())
         }
     }
@@ -588,8 +592,8 @@ fn start_refresh_loop(backend: Shared, live_item: LiveSync) {
     let spawned = std::thread::Builder::new()
         .name("bezel-refresh".into())
         .spawn(move || {
-            if let Err(e) = backend.studio().refresh_catalog() {
-                tracing::warn!("sensor catalog: {e}");
+            if backend.studio().refresh_catalog().is_err() {
+                diag::report(DiagCode::SensorCatalogNotRead);
             }
             backend.restore_live(clock::now());
             loop {
@@ -601,8 +605,8 @@ fn start_refresh_loop(backend: Shared, live_item: LiveSync) {
                 std::thread::sleep(sleep_until(due, Instant::now()));
             }
         });
-    if let Err(e) = spawned {
-        eprintln!("bezel-studio: refresh loop not started: {e}");
+    if spawned.is_err() {
+        diag::report(DiagCode::RefreshLoopNotStarted);
     }
 }
 
@@ -625,11 +629,12 @@ fn restart_without_dmabuf_renderer() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    let error = std::process::Command::new(exe)
+    // `exec` returns only when the process could not replace itself.
+    let _ = std::process::Command::new(exe)
         .args(std::env::args_os().skip(1))
         .env(DMABUF_SWITCH, "1")
         .exec();
-    eprintln!("bezel-studio: could not restart with the DMA-BUF renderer off: {error}");
+    diag::report(DiagCode::DmabufRendererOn);
 }
 
 #[cfg(test)]
@@ -660,13 +665,17 @@ mod tests {
     #[cfg(not(windows))]
     use tauri::webview::{InvokeRequest, WebviewWindow};
 
-    use proc_macro2::{Ident, Spacing, TokenStream, TokenTree};
+    use proc_macro2::{Delimiter, Ident, Spacing, TokenStream, TokenTree};
     use syn::ext::IdentExt as _;
+    use syn::punctuated::Punctuated;
+    use syn::token::Comma;
     use syn::visit::{self, Visit};
     use syn::{
-        AttrStyle, Attribute, Expr, ExprCall, ExprStruct, ImplItem, ImplItemFn, ImplItemType, Item,
-        ItemExternCrate, ItemFn, ItemImpl, ItemType, ItemUse, Lit, Macro, Member, Meta, QSelf,
-        TraitItemFn, Type, UseName, UseRename, UseTree,
+        Arm, AttrStyle, Attribute, BinOp, Block, Expr, ExprCall, ExprClosure, ExprForLoop, ExprIf,
+        ExprMethodCall, ExprStruct, ExprWhile, Fields, FnArg, ImplItem, ImplItemFn, ImplItemType,
+        Item, ItemExternCrate, ItemFn, ItemImpl, ItemType, ItemUse, Lit, Macro, Member, Meta, Pat,
+        PatIdent, QSelf, ReturnType, Signature, Stmt, TraitItemFn, Type, UseName, UseRename,
+        UseTree,
     };
 
     #[cfg(not(windows))]
@@ -1137,40 +1146,70 @@ mod tests {
         "navigate",
     ];
 
-    /// Macros that print, which the GIF, key and command modules must not
-    /// call: the print macros, and those that panic with a message (the
-    /// panic hook prints it). One is spelled in two parts, so that the
-    /// repository's check for unfinished-work markers does not read it as
-    /// one.
-    const PRINTS: [&str; 15] = [
-        "println",
-        "eprintln",
-        "print",
-        "eprint",
-        "dbg",
-        "panic",
-        "unreachable",
-        concat!("to", "do"),
-        "unimplemented",
-        "assert",
+    /// What an IPC invocation is made of, as Tauri hands it to an invoke
+    /// handler (D-2026-10-01-gif-sticker-search-12): the invocation, its
+    /// message, its body and the accessor of the body (what the window
+    /// sent, the KLIPY key included). No production code names them: only
+    /// Tauri reads an invocation, and a command its arguments.
+    const INVOCATION_PARTS: [&str; 4] = ["Invoke", "InvokeMessage", "InvokeBody", "payload"];
+
+    /// The one module that prints or logs (D-2026-10-01-gif-sticker-search-12).
+    const DIAG_MODULE: &str = "diag.rs";
+
+    /// The closed list of what [`DIAG_MODULE`] says, the one type (with
+    /// `&'static str`) its functions take.
+    const DIAG_CODE: &str = "DiagCode";
+
+    /// Macros that print what they are given, called nowhere but in
+    /// [`DIAG_MODULE`].
+    const PRINT_MACROS: [&str; 5] = ["println", "eprintln", "print", "eprint", "dbg"];
+
+    /// Macros that panic with the message they are given, which the panic
+    /// hook prints: nowhere but in [`DIAG_MODULE`] with a message that is
+    /// more than one string literal without a placeholder. One is spelled
+    /// in two parts, so that the repository's check for unfinished-work
+    /// markers does not read it as one.
+    const PANICS: [&str; 4] = ["panic", "unreachable", concat!("to", "do"), "unimplemented"];
+
+    /// Assertions whose message follows the condition.
+    const ASSERTS: [&str; 2] = ["assert", "debug_assert"];
+
+    /// Assertions that print their operands when they fail: nowhere but in
+    /// [`DIAG_MODULE`], with or without a message.
+    const COMPARISONS: [&str; 4] = [
         "assert_eq",
         "assert_ne",
-        "debug_assert",
         "debug_assert_eq",
         "debug_assert_ne",
     ];
 
-    /// Crates that log, whose paths the GIF, key and command modules must
-    /// not use.
+    /// Methods (and paths) that panic printing the value they hold (a
+    /// `Result`'s error): nowhere but in [`DIAG_MODULE`]. `panic_any`
+    /// panics with any value, which the panic hook prints when it is text.
+    const UNWRAPS: [&str; 5] = ["unwrap", "expect", "unwrap_err", "expect_err", "panic_any"];
+
+    /// Crates that log, whose paths no module but [`DIAG_MODULE`] uses.
     const LOGGERS: [&str; 2] = ["log", "tracing"];
 
-    /// The loggers' macros, which the GIF, key and command modules must not
-    /// call by their bare names either (imported, or by `#[macro_use]`).
+    /// The loggers' macros, which no module but [`DIAG_MODULE`] calls by
+    /// their bare names either (imported, or by `#[macro_use]`).
     const LOG_MACROS: [&str; 7] = ["trace", "debug", "info", "warn", "error", "event", "log"];
 
-    /// The process's output streams, which the GIF, key and command modules
-    /// must not name (`writeln!(std::io::stderr(), …)` prints).
+    /// The process's output streams, which no module but [`DIAG_MODULE`]
+    /// names (`writeln!(std::io::stderr(), …)` prints), whatever the case
+    /// and the suffix (`Stderr`, `StdoutLock`).
     const STDIO: [&str; 2] = ["stdout", "stderr"];
+
+    /// Files that are the output streams, which no literal of production
+    /// code but [`DIAG_MODULE`]'s names (compared without case).
+    const STREAM_FILES: [&str; 6] = [
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/fd/",
+        "/proc/self/fd/",
+        "conout$",
+        "conerr$",
+    ];
 
     /// The module of the `#[tauri::command]` functions: the window's
     /// invocations enter there.
@@ -1253,6 +1292,9 @@ mod tests {
         /// `commands`: items under `#[cfg(test)]` left out.
         fn production<'s>(&'s self, commands: &'s [String]) -> Reader<'s> {
             let mut reader = Reader::new(&self.name, Reading::Production, commands);
+            if reader.in_diag() {
+                reader.own_types = self.tree.items.iter().filter_map(enum_name).collect();
+            }
             reader.visit_file(&self.tree);
             if reader.klipy_named > reader.made.len() + reader.klipy_imported {
                 reader.refuse("KLIPY's client named outside its import");
@@ -1337,6 +1379,19 @@ mod tests {
         klipy_imported: usize,
         /// `KlipyClient` named at all.
         klipy_named: usize,
+        /// The names bound where what is read is (parameters, `let`, closure
+        /// and `match` patterns, ...), by scope, the outermost first: in the
+        /// command module, a name alone bound there is a local, not the
+        /// command of the same name (review W1 of round 2).
+        scopes: Vec<Vec<String>>,
+        /// In [`DIAG_MODULE`], the enums it defines: the only types (with
+        /// `Self` and `tracing`) its paths start with.
+        own_types: Vec<String>,
+        /// Whether what is read is in `impl DiagCode` in [`DIAG_MODULE`]:
+        /// its methods take `self`.
+        in_code_impl: bool,
+        /// The functions [`DIAG_MODULE`] defines.
+        diag_functions: Vec<String>,
         /// What it holds that it must not, or that cannot be classified.
         problems: Vec<String>,
     }
@@ -1362,6 +1417,10 @@ mod tests {
                 macros: Vec::new(),
                 klipy_imported: 0,
                 klipy_named: 0,
+                scopes: Vec::new(),
+                own_types: Vec::new(),
+                in_code_impl: false,
+                diag_functions: Vec::new(),
                 problems: Vec::new(),
             }
         }
@@ -1375,9 +1434,251 @@ mod tests {
         }
 
         /// Whether the file is one of the GIF and key modules or the
-        /// command module, which neither print nor log.
+        /// command module, which do not panic either.
         fn quiet(&self) -> bool {
             self.file == "gifs.rs" || self.file.starts_with("gifs/") || self.file == COMMAND_MODULE
+        }
+
+        /// Whether the file is [`DIAG_MODULE`], the one that prints and logs.
+        fn in_diag(&self) -> bool {
+            self.file == DIAG_MODULE
+        }
+
+        /// Whether production code outside [`DIAG_MODULE`] is read: the
+        /// code that neither prints nor logs.
+        fn silent(&self) -> bool {
+            self.production() && !self.in_diag()
+        }
+
+        /// Reads, with `read`, code where the names `pattern` binds are
+        /// bound, in a new scope.
+        fn scoped(&mut self, patterns: &[&Pat], read: impl FnOnce(&mut Self)) {
+            let mut names = Vec::new();
+            for pattern in patterns {
+                bindings(pattern, &mut names);
+            }
+            self.scopes.push(names);
+            read(self);
+            self.scopes.pop();
+        }
+
+        /// Binds the names `pattern` binds in the innermost scope (a `let`,
+        /// a condition's `let`): bound from what follows on.
+        fn bind(&mut self, pattern: &Pat) {
+            if let Some(scope) = self.scopes.last_mut() {
+                bindings(pattern, scope);
+            }
+        }
+
+        /// Whether `name` is bound where what is read is.
+        fn bound(&self, name: &str) -> bool {
+            self.scopes.iter().flatten().any(|bound| bound == name)
+        }
+
+        /// Reads, with `read`, a function's body, its parameters bound, in
+        /// scopes of its own: an item does not see the locals around it.
+        fn body(&mut self, inputs: &Punctuated<FnArg, Comma>, read: impl FnOnce(&mut Self)) {
+            let outer = std::mem::take(&mut self.scopes);
+            let parameters: Vec<&Pat> = inputs
+                .iter()
+                .filter_map(|input| match input {
+                    FnArg::Typed(typed) => Some(&*typed.pat),
+                    FnArg::Receiver(_) => None,
+                })
+                .collect();
+            self.scoped(&parameters, read);
+            self.scopes = outer;
+        }
+
+        /// A condition (`if`, `while`): what each `let` in it binds is bound
+        /// in the conditions after it and in the scope around (the branch
+        /// it guards).
+        fn condition(&mut self, condition: &Expr) {
+            match condition {
+                Expr::Let(binding) => {
+                    for attribute in &binding.attrs {
+                        self.visit_attribute(attribute);
+                    }
+                    self.visit_expr(&binding.expr);
+                    self.visit_pat(&binding.pat);
+                    self.bind(&binding.pat);
+                }
+                Expr::Binary(both) if matches!(both.op, BinOp::And(_)) => {
+                    self.condition(&both.left);
+                    self.condition(&both.right);
+                }
+                other => self.visit_expr(other),
+            }
+        }
+
+        /// A function's signature in [`DIAG_MODULE`]: no generics, and only
+        /// a `DiagCode` (`self` in `impl DiagCode`) or a `&'static str`
+        /// taken, so no value of the app's reaches what it says.
+        fn diag_signature(&mut self, signature: &Signature) {
+            let name = signature.ident.unraw().to_string();
+            self.diag_functions.push(name.clone());
+            if !signature.generics.params.is_empty() || signature.generics.where_clause.is_some() {
+                self.refuse(format_args!(
+                    "`fn {name}` in `{DIAG_MODULE}` is generic: it takes only `{DIAG_CODE}` and `&'static str`"
+                ));
+            }
+            for input in &signature.inputs {
+                let allowed = match input {
+                    FnArg::Receiver(receiver) => {
+                        self.in_code_impl && receiver.colon_token.is_none()
+                    }
+                    FnArg::Typed(typed) => self.diag_type(&typed.ty),
+                };
+                if !allowed {
+                    let taken = match input {
+                        FnArg::Typed(typed) => match &*typed.pat {
+                            Pat::Ident(parameter) => parameter.ident.unraw().to_string(),
+                            _ => "a pattern".into(),
+                        },
+                        FnArg::Receiver(_) => "self".into(),
+                    };
+                    self.refuse(format_args!(
+                        "`fn {name}` in `{DIAG_MODULE}` takes `{taken}` of another type: it takes \
+                         only `{DIAG_CODE}` and `&'static str`"
+                    ));
+                }
+            }
+        }
+
+        /// Whether a function of [`DIAG_MODULE`] may take `ty`: a
+        /// `DiagCode` (`Self` in `impl DiagCode`), or a `&'static str`.
+        fn diag_type(&self, ty: &Type) -> bool {
+            match ty {
+                Type::Path(path) if path.qself.is_none() => {
+                    let names = segments(&path.path);
+                    let plain = path.path.segments.iter().all(|s| s.arguments.is_none());
+                    plain && (names == [DIAG_CODE] || (self.in_code_impl && names == ["Self"]))
+                }
+                Type::Reference(reference) => {
+                    reference.mutability.is_none()
+                        && reference
+                            .lifetime
+                            .as_ref()
+                            .is_some_and(|lifetime| lifetime.ident == "static")
+                        && matches!(&*reference.elem, Type::Path(text)
+                            if text.qself.is_none() && text.path.is_ident("str"))
+                }
+                Type::Paren(inner) => self.diag_type(&inner.elem),
+                _ => false,
+            }
+        }
+
+        /// An item of [`DIAG_MODULE`]'s production code: it holds only
+        /// closed enums (no data), functions, `impl DiagCode`, constants and
+        /// imports of `tracing`; no `static`, no type that holds data, no
+        /// trait, no macro of its own, no module.
+        fn diag_item(&mut self, item: &Item) {
+            let refused = match item {
+                Item::Enum(codes) => {
+                    if !codes.generics.params.is_empty() {
+                        self.refuse(format_args!(
+                            "`{}` in `{DIAG_MODULE}` is generic",
+                            codes.ident
+                        ));
+                    }
+                    for variant in &codes.variants {
+                        if !matches!(variant.fields, Fields::Unit) {
+                            self.refuse(format_args!(
+                                "`{}::{}` in `{DIAG_MODULE}` carries data: what it says is closed",
+                                codes.ident, variant.ident
+                            ));
+                        }
+                    }
+                    None
+                }
+                Item::Impl(block) => {
+                    let of_code = matches!(&*block.self_ty, Type::Path(path)
+                        if path.qself.is_none() && path.path.is_ident(DIAG_CODE));
+                    let inherent = block.trait_.is_none() && block.generics.params.is_empty();
+                    (!(of_code && inherent)).then_some("an `impl` other than `impl DiagCode`")
+                }
+                Item::Use(import) => {
+                    let roots = use_roots(&import.tree);
+                    let logger = roots.iter().all(|root| LOGGERS.iter().any(|l| *root == l));
+                    (!logger || roots.is_empty()).then_some("an import of another than a logger")
+                }
+                Item::Fn(_) | Item::Const(_) => None,
+                Item::Static(_) => Some("a `static`"),
+                Item::Struct(_) | Item::Union(_) => Some("a type that holds data"),
+                Item::Trait(_) | Item::TraitAlias(_) => Some("a trait"),
+                Item::Macro(_) => Some("a macro's item (`macro_rules!`, `thread_local!`, ...)"),
+                Item::Mod(_) => Some("a module"),
+                _ => Some("an item it does not need"),
+            };
+            if let Some(refused) = refused {
+                self.refuse(format_args!(
+                    "{refused} in `{DIAG_MODULE}`: it says only what it is given"
+                ));
+            }
+        }
+
+        /// A path in [`DIAG_MODULE`]: one of two or more names starts with
+        /// `tracing`, `Self` or an enum of its own, never another module of
+        /// the app (`crate`, `super`) or the standard library's I/O.
+        fn diag_path(&mut self, segments: &[String]) {
+            let Some(first) = segments.first().filter(|_| segments.len() > 1) else {
+                return;
+            };
+            let own = first == "Self" || self.own_types.contains(first);
+            if !own && !LOGGERS.contains(&first.as_str()) {
+                self.refuse(format_args!(
+                    "`{}` in `{DIAG_MODULE}`: it uses only a logger and its own items",
+                    segments.join("::")
+                ));
+            }
+        }
+
+        /// A macro called, `arguments` its tokens when known: outside
+        /// [`DIAG_MODULE`], a panic or an assertion that formats its message
+        /// (more than one string literal without a placeholder) or prints
+        /// its operands; in the GIF, key and command modules, any panic or
+        /// assertion.
+        fn panics(&mut self, segments: &[String], arguments: Option<TokenStream>) {
+            if !self.silent() {
+                return;
+            }
+            let last = segments.last().map_or("", String::as_str);
+            let path = segments.join("::");
+            let panics = PANICS.contains(&last);
+            let asserts = ASSERTS.contains(&last);
+            let compares = COMPARISONS.contains(&last);
+            if self.quiet() && (panics || asserts || compares) {
+                self.refuse(format_args!(
+                    "`{path}!` panics in a GIF, key or command module"
+                ));
+            }
+            if compares {
+                self.refuse(format_args!(
+                    "`{path}!` prints its operands when it fails, outside `{DIAG_MODULE}`"
+                ));
+            }
+            let skipped = usize::from(asserts);
+            let message = arguments.map(|tokens| arguments_of(tokens).into_iter().skip(skipped));
+            let formats = message.is_some_and(|mut parts| match (parts.next(), parts.next()) {
+                (None, _) => false,
+                (Some(only), None) => !is_plain_text(&only),
+                _ => true,
+            });
+            if (panics || asserts) && formats {
+                self.refuse(format_args!(
+                    "`{path}!` formats its message outside `{DIAG_MODULE}`: the panic hook prints it"
+                ));
+            }
+        }
+
+        /// A method called, or a function named by a path: one that panics
+        /// printing the value it holds ([`UNWRAPS`]) outside [`DIAG_MODULE`].
+        fn panics_printing(&mut self, name: &str) {
+            if self.silent() && UNWRAPS.contains(&name) {
+                self.refuse(format_args!(
+                    "`{name}` panics printing what it holds, outside `{DIAG_MODULE}`"
+                ));
+            }
         }
 
         /// Whether an item marked with `attributes` is left out: a test
@@ -1443,6 +1744,12 @@ mod tests {
             if FORGERIES.contains(&name) {
                 self.refuse(format_args!("`{name}` in production code"));
             }
+            if INVOCATION_PARTS.contains(&name) {
+                self.refuse(format_args!(
+                    "`{name}` (an invocation the window sent) in production code: only Tauri \
+                     reads one"
+                ));
+            }
             if name == "KlipyClient" {
                 self.klipy_named += 1;
             }
@@ -1461,9 +1768,10 @@ mod tests {
                     PROOF_COMMANDS.join("`, `")
                 ));
             }
-            if self.quiet() && STDIO.contains(&name) {
+            let lower = name.to_ascii_lowercase();
+            if self.silent() && STDIO.iter().any(|stream| lower.starts_with(stream)) {
                 self.refuse(format_args!(
-                    "`{name}` prints in a GIF, key or command module"
+                    "`{name}` names an output stream outside `{DIAG_MODULE}`"
                 ));
             }
         }
@@ -1492,7 +1800,10 @@ mod tests {
                 && parent
                     .iter()
                     .all(|module| module == "self" || module == "super");
-            if !(generated.is_some() || in_module || here) {
+            // A name alone that a parameter or a pattern binds where it is
+            // read is that local, not the command function.
+            let local = parent.is_empty() && generated.is_none() && self.bound(name);
+            if !(generated.is_some() || in_module || here) || local {
                 return;
             }
             if self.in_handler {
@@ -1519,6 +1830,9 @@ mod tests {
             }
             if last == "*" && module {
                 self.refuse("the command module imported by a glob");
+            }
+            if path.len() > 1 {
+                self.panics_printing(last);
             }
             self.command_named(path);
         }
@@ -1574,12 +1888,18 @@ mod tests {
                 self.refuse("`include!` in production code: it cannot be classified");
             }
             let logs = segments.len() > 1 && LOGGERS.contains(&segments[0].as_str());
-            let prints = called && (PRINTS.contains(&last) || LOG_MACROS.contains(&last));
-            if self.quiet() && (logs || prints) {
+            let prints = called && (PRINT_MACROS.contains(&last) || LOG_MACROS.contains(&last));
+            if self.silent() && (logs || prints) {
                 self.refuse(format_args!(
-                    "`{}` prints or logs in a GIF, key or command module",
+                    "`{}` prints or logs outside `{DIAG_MODULE}`",
                     segments.join("::")
                 ));
+            }
+            if !called && segments.len() > 1 {
+                self.panics_printing(last);
+            }
+            if self.in_diag() {
+                self.diag_path(segments);
             }
             self.command_named(segments);
         }
@@ -1601,6 +1921,12 @@ mod tests {
             if is_script_url(&value) {
                 self.refuse(format_args!("a literal is a `{SCRIPT_SCHEME}:` URL"));
             }
+            let lower = value.to_ascii_lowercase();
+            if self.silent() && STREAM_FILES.iter().any(|file| lower.contains(file)) {
+                self.refuse(format_args!(
+                    "a literal names an output stream's file outside `{DIAG_MODULE}`"
+                ));
+            }
         }
 
         /// Tokens `syn` leaves unparsed (a macro call's, an attribute's):
@@ -1621,8 +1947,20 @@ mod tests {
                         for segment in &path {
                             self.ident(segment);
                         }
-                        if !is_member(&tokens, at) {
-                            self.path(&path, is_punct(tokens.get(next), '!'));
+                        let member = is_member(&tokens, at);
+                        let called = is_punct(tokens.get(next), '!');
+                        if member && is_call(tokens.get(next)) {
+                            self.panics_printing(&path[0]);
+                        }
+                        if !member {
+                            self.path(&path, called);
+                        }
+                        if !member && called {
+                            let arguments = match tokens.get(next + 1) {
+                                Some(TokenTree::Group(group)) => Some(group.stream()),
+                                _ => None,
+                            };
+                            self.panics(&path, arguments);
                         }
                         at = next;
                         continue;
@@ -1635,9 +1973,13 @@ mod tests {
 
     impl<'ast> Visit<'ast> for Reader<'_> {
         fn visit_item(&mut self, item: &'ast Item) {
-            if !self.skips(item_attributes(item)) {
-                visit::visit_item(self, item);
+            if self.skips(item_attributes(item)) {
+                return;
             }
+            if self.production() && self.in_diag() {
+                self.diag_item(item);
+            }
+            visit::visit_item(self, item);
         }
 
         fn visit_impl_item(&mut self, item: &'ast ImplItem) {
@@ -1651,21 +1993,114 @@ mod tests {
             if command {
                 self.defined.push(item.sig.ident.unraw().to_string());
             }
+            if self.production() && self.in_diag() {
+                self.diag_signature(&item.sig);
+            }
+            let main = self.file == "main.rs" && item.sig.ident == "main";
+            if self.production() && main && returns_a_result(&item.sig.output) {
+                self.refuse("`main` returns a `Result`: its error is printed when it fails");
+            }
             self.function(&item.sig.ident, command, |reader| {
-                visit::visit_item_fn(reader, item);
+                reader.body(&item.sig.inputs, |reader| {
+                    visit::visit_item_fn(reader, item)
+                });
             });
         }
 
         fn visit_impl_item_fn(&mut self, item: &'ast ImplItemFn) {
+            if self.production() && self.in_diag() {
+                self.diag_signature(&item.sig);
+            }
             self.function(&item.sig.ident, false, |reader| {
-                visit::visit_impl_item_fn(reader, item);
+                reader.body(&item.sig.inputs, |reader| {
+                    visit::visit_impl_item_fn(reader, item);
+                });
             });
         }
 
         fn visit_trait_item_fn(&mut self, item: &'ast TraitItemFn) {
+            if self.production() && self.in_diag() {
+                self.diag_signature(&item.sig);
+            }
             self.function(&item.sig.ident, false, |reader| {
-                visit::visit_trait_item_fn(reader, item);
+                reader.body(&item.sig.inputs, |reader| {
+                    visit::visit_trait_item_fn(reader, item);
+                });
             });
+        }
+
+        /// A block: each `let` binds its names from the next statement on
+        /// (its value and its `else` read before).
+        fn visit_block(&mut self, block: &'ast Block) {
+            self.scoped(&[], |reader| {
+                for statement in &block.stmts {
+                    let Stmt::Local(local) = statement else {
+                        reader.visit_stmt(statement);
+                        continue;
+                    };
+                    for attribute in &local.attrs {
+                        reader.visit_attribute(attribute);
+                    }
+                    if let Some(init) = &local.init {
+                        reader.visit_expr(&init.expr);
+                        if let Some((_, otherwise)) = &init.diverge {
+                            reader.visit_expr(otherwise);
+                        }
+                    }
+                    reader.visit_pat(&local.pat);
+                    reader.bind(&local.pat);
+                }
+            });
+        }
+
+        fn visit_expr_closure(&mut self, closure: &'ast ExprClosure) {
+            let inputs: Vec<&Pat> = closure.inputs.iter().collect();
+            self.scoped(&inputs, |reader| visit::visit_expr_closure(reader, closure));
+        }
+
+        fn visit_arm(&mut self, arm: &'ast Arm) {
+            self.scoped(&[&arm.pat], |reader| visit::visit_arm(reader, arm));
+        }
+
+        fn visit_expr_for_loop(&mut self, looped: &'ast ExprForLoop) {
+            for attribute in &looped.attrs {
+                self.visit_attribute(attribute);
+            }
+            self.visit_expr(&looped.expr);
+            self.scoped(&[&looped.pat], |reader| {
+                reader.visit_pat(&looped.pat);
+                reader.visit_block(&looped.body);
+            });
+        }
+
+        fn visit_expr_if(&mut self, branch: &'ast ExprIf) {
+            for attribute in &branch.attrs {
+                self.visit_attribute(attribute);
+            }
+            self.scoped(&[], |reader| {
+                reader.condition(&branch.cond);
+                reader.visit_block(&branch.then_branch);
+            });
+            if let Some((_, otherwise)) = &branch.else_branch {
+                self.visit_expr(otherwise);
+            }
+        }
+
+        fn visit_expr_while(&mut self, looped: &'ast ExprWhile) {
+            for attribute in &looped.attrs {
+                self.visit_attribute(attribute);
+            }
+            self.scoped(&[], |reader| {
+                reader.condition(&looped.cond);
+                reader.visit_block(&looped.body);
+            });
+        }
+
+        /// A method call: one that panics printing what it holds is
+        /// refused outside [`DIAG_MODULE`].
+        fn visit_expr_method_call(&mut self, call: &'ast ExprMethodCall) {
+            self.panics_printing(&call.method.unraw().to_string());
+            visit::visit_expr_method_call(self, call);
         }
 
         fn visit_attribute(&mut self, attribute: &'ast Attribute) {
@@ -1768,7 +2203,11 @@ mod tests {
                     "an `impl` for `{PROOF}` outside `{PROOF_MODULE}`"
                 ));
             }
+            self.in_code_impl = self.in_diag()
+                && item.trait_.is_none()
+                && matches!(&*item.self_ty, Type::Path(path) if path.path.is_ident(DIAG_CODE));
             visit::visit_item_impl(self, item);
+            self.in_code_impl = false;
         }
 
         fn visit_item_type(&mut self, item: &'ast ItemType) {
@@ -1801,8 +2240,8 @@ mod tests {
             let logs = use_roots(&item.tree)
                 .iter()
                 .any(|root| LOGGERS.iter().any(|logger| *root == logger));
-            if self.production() && self.quiet() && logs {
-                self.refuse("a logger imported in a GIF, key or command module");
+            if self.silent() && logs {
+                self.refuse(format_args!("a logger imported outside `{DIAG_MODULE}`"));
             }
             for (path, renamed) in use_leaves(&item.tree, &[]) {
                 self.imported(&path, renamed);
@@ -1812,8 +2251,8 @@ mod tests {
 
         fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
             let logs = LOGGERS.iter().any(|logger| item.ident.unraw() == logger);
-            if self.production() && self.quiet() && logs {
-                self.refuse("a logger imported in a GIF, key or command module");
+            if self.silent() && logs {
+                self.refuse(format_args!("a logger imported outside `{DIAG_MODULE}`"));
             }
             visit::visit_item_extern_crate(self, item);
         }
@@ -1846,6 +2285,7 @@ mod tests {
         fn visit_macro(&mut self, call: &'ast Macro) {
             let path = segments(&call.path);
             self.path(&path, true);
+            self.panics(&path, Some(call.tokens.clone()));
             for segment in &call.path.segments {
                 self.visit_path_segment(segment);
             }
@@ -2059,6 +2499,76 @@ mod tests {
         dot(before) && !before.checked_sub(1).is_some_and(dot)
     }
 
+    /// Whether `token` is a call's parenthesized arguments.
+    fn is_call(token: Option<&TokenTree>) -> bool {
+        matches!(token, Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis)
+    }
+
+    /// The arguments of a macro call (its tokens split at the commas
+    /// outside any group), each as tokens; none for no tokens.
+    fn arguments_of(tokens: TokenStream) -> Vec<Vec<TokenTree>> {
+        let mut arguments = vec![Vec::new()];
+        for token in tokens {
+            match (&token, arguments.last_mut()) {
+                (TokenTree::Punct(comma), _) if comma.as_char() == ',' => {
+                    arguments.push(Vec::new());
+                }
+                (_, Some(argument)) => argument.push(token),
+                (_, None) => {}
+            }
+        }
+        arguments.retain(|argument| !argument.is_empty());
+        arguments
+    }
+
+    /// Whether `argument` is one string literal without a placeholder: a
+    /// message the panic hook prints as it is written.
+    fn is_plain_text(argument: &[TokenTree]) -> bool {
+        let [TokenTree::Literal(literal)] = argument else {
+            return false;
+        };
+        let Lit::Str(text) = Lit::new(literal.clone()) else {
+            return false;
+        };
+        let text = text.value();
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '{' && chars.next_if_eq(&'{').is_none() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Whether a function returns `output`, a `Result` (by its last name).
+    fn returns_a_result(output: &ReturnType) -> bool {
+        match output {
+            ReturnType::Type(_, ty) => matches!(&**ty, Type::Path(path)
+                if path.path.segments.last().is_some_and(|last| last.ident == "Result")),
+            ReturnType::Default => false,
+        }
+    }
+
+    /// The names `pattern` binds, added to `names`.
+    fn bindings(pattern: &Pat, names: &mut Vec<String>) {
+        struct Bindings<'n>(&'n mut Vec<String>);
+        impl<'ast> Visit<'ast> for Bindings<'_> {
+            fn visit_pat_ident(&mut self, ident: &'ast PatIdent) {
+                self.0.push(ident.ident.unraw().to_string());
+                visit::visit_pat_ident(self, ident);
+            }
+        }
+        Bindings(names).visit_pat(pattern);
+    }
+
+    /// The name of `item` when it is an enum.
+    fn enum_name(item: &Item) -> Option<String> {
+        match item {
+            Item::Enum(codes) => Some(codes.ident.unraw().to_string()),
+            _ => None,
+        }
+    }
+
     /// Whether `tokens` hold the identifier `name`, in a group or not.
     fn names(tokens: TokenStream, name: &str) -> bool {
         tokens.into_iter().any(|token| match token {
@@ -2152,8 +2662,8 @@ mod tests {
             .collect()
     }
 
-    /// D-2026-10-01-gif-sticker-search-3, -10 and -11 (DoD row 3), the
-    /// source guard. [`UserAsked`] guards the GIF state, its source factory
+    /// D-2026-10-01-gif-sticker-search-3, -10, -11 and -12 (DoD row 3),
+    /// the source guard. [`UserAsked`] guards the GIF state, its source factory
     /// and the command functions: setup code has no command `Request` to
     /// make one from. [`KlipyKey`] cannot be printed. Neither stops the app
     /// from forging an invocation Tauri then dispatches, from making a
@@ -2167,13 +2677,19 @@ mod tests {
     /// checks that:
     /// - production code holds none of `FORGERIES`: no invocation handed to
     ///   a webview with the app's invoke key, no script run in the window,
-    ///   no page loaded in it (`navigate`);
+    ///   no page loaded in it (`navigate`); and none of `INVOCATION_PARTS`
+    ///   (`Invoke`, `InvokeMessage`, `InvokeBody`, `payload`): no code reads
+    ///   an invocation the window sent, an invoke handler wrapped around
+    ///   `generate_handler!` included;
     /// - no path names a command function (each free `#[tauri::command]`
     ///   function, found in the syntax trees; or the macro Tauri makes for
     ///   it, `__cmd__…`), nor does a `use` import one, but the list of
     ///   `generate_handler!` in `run`, the one `generate_handler!`: a
     ///   command is entered only through IPC. Its definition is a name, not
-    ///   a path, and a method or a field of the same name is not a path;
+    ///   a path, a method or a field of the same name is not a path, and in
+    ///   `commands.rs` a name alone that a parameter or a pattern binds
+    ///   where it is read (`let video_auto = …; Ok(video_auto)`) is that
+    ///   local, from the binding on and in its scope only;
     /// - the window's invocation (`Request`) is named only in the GIF
     ///   commands that take it (`search_gifs`, `gif_preview` and
     ///   `collect_gif`), in `UserAsked::of` and in the imports of their two
@@ -2190,10 +2706,24 @@ mod tests {
     ///   variable, inside any macro call's tokens, a path, another argument,
     ///   field, function or file) it is refused;
     /// - a function that reads the key's text (those three) calls no macro
-    ///   at all, and the GIF, key and command modules (`gifs.rs`, `gifs/`,
-    ///   `commands.rs`) call no print or panic macro (`PRINTS`) nor a
-    ///   logger's macro by its bare name, use no logger's path, import no
-    ///   logger and name no output stream;
+    ///   at all;
+    /// - nothing prints or logs but `diag.rs`
+    ///   (D-2026-10-01-gif-sticker-search-12): elsewhere, production code
+    ///   calls no print macro (`PRINT_MACROS`) nor a logger's macro by its
+    ///   bare name, uses no logger's path, imports no logger, names no
+    ///   output stream (`stderr`, `Stdout`, ...) nor holds a literal naming
+    ///   its file (`/dev/stderr`, ...), calls no panic or assertion that
+    ///   formats its message (more than one string literal without a
+    ///   placeholder) or prints its operands (`assert_eq!`, ...), and no
+    ///   method or function that panics printing what it holds (`unwrap`,
+    ///   `expect`, `panic_any`, ...); `main` returns no `Result`. The GIF,
+    ///   key and command modules call no panic or assertion at all. In
+    ///   `diag.rs`, every function takes only a `DiagCode` (`self` in `impl
+    ///   DiagCode`) or a `&'static str` and is not generic, every enum is
+    ///   closed (no variant holds data), and it holds no `static`, type that
+    ///   holds data, trait, other `impl`, macro of its own, module, nor an
+    ///   import or a path of two names or more but of a logger or its own
+    ///   items: it says only what it is given;
     /// - `UserAsked::of` is named (called, or taken as a value, a macro's
     ///   tokens included) only in the bodies of the `#[tauri::command]`
     ///   functions `search_gifs`, `gif_preview` and `collect_gif` of
@@ -2237,6 +2767,7 @@ mod tests {
         let commands: Vec<String> = built.iter().flat_map(|s| s.commands()).collect();
         let (mut made, mut reads, mut asked) = (Vec::new(), Vec::new(), Vec::new());
         let (mut handled, mut handlers) = (Vec::new(), Vec::new());
+        let mut diag_functions = Vec::new();
         for source in &built {
             let reader = source.production(&commands);
             let at = |f: &String| format!("{}: {f}", source.name);
@@ -2244,10 +2775,16 @@ mod tests {
             reads.extend(reader.reads.iter().map(at));
             asked.extend(reader.asked.iter().map(at));
             handlers.extend(reader.handlers.iter().map(at));
+            diag_functions.extend(reader.diag_functions.iter().map(at));
             handled.extend(reader.handled);
             problems.extend(reader.problems);
         }
         assert!(problems.is_empty(), "{problems:#?}");
+        // The one module that prints is built, and its functions were read.
+        assert!(
+            diag_functions.iter().any(|f| f == "diag.rs: report"),
+            "{diag_functions:?}"
+        );
         assert_eq!(
             made,
             ["lib.rs: klipy_source"],
@@ -2298,7 +2835,7 @@ mod tests {
         };
         assert!(role("gifs/tests.rs") && role("manager/tests.rs") && role("storage/tests.rs"));
         assert!(!role("gifs/asked.rs") && !role("gifs/key.rs") && !role("gifs.rs"));
-        assert!(!role("main.rs"));
+        assert!(!role("main.rs") && !role(DIAG_MODULE));
     }
 
     /// The command functions of the studio's `commands.rs`.
@@ -2732,10 +3269,10 @@ fn after(w: W) { w.on_message(request) }
         ]
     }
 
-    /// A print or a log in the command module
-    /// (D-2026-10-01-gif-sticker-search-11): each is refused.
+    /// A print, a log or a panic in the command module
+    /// (D-2026-10-01-gif-sticker-search-11, -12): each is refused.
     fn prints_in_commands() -> Vec<Case> {
-        let prints = "prints or logs in a GIF, key or command module";
+        let prints = "prints or logs outside `diag.rs`";
         let command = |body: &str| {
             format!("#[tauri::command]\npub fn save_klipy_key(key: KlipyKey) {{ {body} }}")
         };
@@ -2756,10 +3293,12 @@ fn after(w: W) { w.on_message(request) }
                 prints,
             ),
             (COMMAND_MODULE, command("dbg!(&key)"), prints),
+            // A panic, even without a value: not in the GIF, key and
+            // command modules.
             (
                 COMMAND_MODULE,
                 command("unreachable!(\"key saved\")"),
-                prints,
+                "panics in a GIF, key or command module",
             ),
             // A logger's macro by its bare name, its import, its crate.
             (COMMAND_MODULE, command("warn!(\"key saved\")"), prints),
@@ -2777,24 +3316,325 @@ fn after(w: W) { w.on_message(request) }
             (
                 COMMAND_MODULE,
                 command("let _ = writeln!(std::io::stderr(), \"key saved\");"),
-                "`stderr` prints",
+                "`stderr` names an output stream",
+            ),
+        ]
+    }
+
+    /// An invoke handler wrapped around `generate_handler!` that logs each
+    /// invocation (the DoD critic of round 2, iteration 3): it prints with
+    /// `print`, the invocation's body with its arguments (`save_klipy_key`'s
+    /// is the KLIPY key).
+    fn logged(print: &str) -> String {
+        format!(
+            "fn logged<R: Runtime>(\
+             handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,\
+             ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {{ \
+             move |invoke| {{ {print}; handler(invoke) }} }}\n\
+             fn run() -> R {{ tauri::Builder::default().invoke_handler(logged(\
+             tauri::generate_handler![commands::save_klipy_key])).run(tauri::generate_context!()) }}"
+        )
+    }
+
+    /// A print, a log or a formatted panic outside `diag.rs`, or what an
+    /// invocation is made of named (D-2026-10-01-gif-sticker-search-12, the
+    /// DoD critic of round 2, iteration 3): each is refused.
+    fn prints_outside_diag() -> Vec<Case> {
+        let prints = "prints or logs outside `diag.rs`";
+        let formats = "formats its message outside `diag.rs`";
+        let unwraps = "panics printing what it holds";
+        let read = "(an invocation the window sent) in production code";
+        let f = |body: &str| format!("fn f(x: X, r: R, ok: bool) {{ {body} }}");
+        vec![
+            // The critic's mutant: the IPC wrapper prints each invocation's
+            // body; through `diag` too (which does not compile: `report`
+            // takes a `DiagCode`), or without naming the invocation's type.
+            (
+                "lib.rs",
+                logged(
+                    "eprintln!(\"ipc {} {:?}\", invoke.message.command(), \
+                     invoke.message.payload())",
+                ),
+                "`payload` (an invocation the window sent)",
+            ),
+            (
+                "lib.rs",
+                logged(
+                    "eprintln!(\"ipc {} {:?}\", invoke.message.command(), \
+                     invoke.message.payload())",
+                ),
+                "`Invoke` (an invocation the window sent)",
+            ),
+            (
+                "lib.rs",
+                logged("eprintln!(\"ipc {:?}\", invoke.message)"),
+                prints,
+            ),
+            (
+                "lib.rs",
+                logged("diag::report(invoke.message.payload())"),
+                "`payload` (an invocation the window sent)",
+            ),
+            (
+                "lib.rs",
+                "fn run(b: B) -> B { b.invoke_handler(move |invoke| { \
+                 tracing::debug!(body = ?invoke.message.payload()); true }) }"
+                    .into(),
+                prints,
+            ),
+            // The other mutants: a value printed in the backend, an error
+            // logged, a panic that formats a value, the invocation's message
+            // named.
+            (
+                "backend.rs",
+                "impl Backend { fn f(&self) { eprintln!(\"{:?}\", self.settings.load()); } }"
+                    .into(),
+                prints,
+            ),
+            (
+                "storage.rs",
+                f("if let Err(e) = r { tracing::warn!(\"{e}\") }"),
+                prints,
+            ),
+            ("studio.rs", f("panic!(\"{x:?}\")"), formats),
+            (
+                "lib.rs",
+                "fn f<R: Runtime>(m: &tauri::ipc::InvokeMessage<R>) {}".into(),
+                read,
+            ),
+            ("lib.rs", "use tauri::ipc::{InvokeBody as B};".into(), read),
+            // Other prints and logs: by name, imported, as a crate, an
+            // output stream or its file, from `main`.
+            ("lib.rs", f("println!(\"{x:?}\")"), prints),
+            ("lib.rs", f("log::info!(\"{x:?}\")"), prints),
+            (
+                "library.rs",
+                "use tracing::warn;".into(),
+                "a logger imported",
+            ),
+            ("lib.rs", "extern crate log;".into(), "a logger imported"),
+            (
+                "lib.rs",
+                f("let _ = writeln!(std::io::stderr(), \"{x:?}\");"),
+                "`stderr` names an output stream",
+            ),
+            (
+                "tray.rs",
+                f("let out: std::io::Stdout = make(); keep(out, x)"),
+                "`Stdout` names an output stream",
+            ),
+            (
+                "settings.rs",
+                f("let _ = std::fs::write(\"/dev/stderr\", format!(\"{x:?}\"));"),
+                "an output stream's file",
+            ),
+            (
+                "main.rs",
+                "fn main() -> Result<(), tauri::Error> { bezel_studio::run() }".into(),
+                "`main` returns a `Result`",
+            ),
+            // Panics and assertions that print a value: a formatted
+            // message, the operands, the value an `unwrap` holds.
+            ("studio.rs", f("unreachable!(\"{}\", x)"), formats),
+            ("studio.rs", f("assert!(ok, \"{x:?}\")"), formats),
+            ("studio.rs", f("debug_assert!(ok, \"at {}\", x)"), formats),
+            (
+                "studio.rs",
+                f("assert_eq!(x, r)"),
+                "prints its operands when it fails",
+            ),
+            (
+                "studio.rs",
+                f("r.unwrap_or_else(|e| panic!(\"{e}\"))"),
+                formats,
+            ),
+            ("studio.rs", f("r.expect(&format!(\"{x:?}\"))"), unwraps),
+            ("studio.rs", f("r.expect(\"saved\")"), unwraps),
+            ("studio.rs", f("r.unwrap()"), unwraps),
+            ("studio.rs", f("let _ = rs.map(Result::unwrap);"), unwraps),
+            ("studio.rs", f("std::panic::panic_any(x)"), unwraps),
+            ("studio.rs", "use std::panic::panic_any;".into(), unwraps),
+            // Inside another macro call's tokens.
+            (
+                "lib.rs",
+                f("spawn!(async move { eprintln!(\"{x:?}\") })"),
+                prints,
+            ),
+            (
+                "lib.rs",
+                f("spawn!(async move { panic!(\"{x:?}\") })"),
+                formats,
+            ),
+            ("lib.rs", f("spawn!(async move { r.unwrap() })"), unwraps),
+        ]
+    }
+
+    /// `diag.rs` made to say a value of the app's
+    /// (D-2026-10-01-gif-sticker-search-12): each is refused.
+    fn diag_says_a_value() -> Vec<Case> {
+        let takes = "of another type: it takes only `DiagCode` and `&'static str`";
+        let said = "in `diag.rs`: it says only what it is given";
+        let report = |body: &str| format!("pub fn report(code: DiagCode) {{ {body} }}");
+        vec![
+            // Functions that take a value.
+            ("diag.rs", "pub fn note(text: &str) {}".into(), takes),
+            ("diag.rs", "pub fn note(text: String) {}".into(), takes),
+            (
+                "diag.rs",
+                "pub fn note(text: &'static mut str) {}".into(),
+                takes,
+            ),
+            (
+                "diag.rs",
+                "pub fn note(code: DiagCode, n: u64) {}".into(),
+                takes,
+            ),
+            (
+                "diag.rs",
+                "pub fn show(value: impl std::fmt::Display) {}".into(),
+                takes,
+            ),
+            (
+                "diag.rs",
+                "pub fn show<T: std::fmt::Debug>(value: T) {}".into(),
+                "is generic",
+            ),
+            (
+                "diag.rs",
+                "fn ipc<R: Runtime>(body: &tauri::ipc::InvokeBody) {}".into(),
+                takes,
+            ),
+            (
+                "diag.rs",
+                "impl DiagCode { pub fn with(self, text: String) {} }".into(),
+                takes,
+            ),
+            (
+                "diag.rs",
+                "pub fn report(code: Option<DiagCode>) {}".into(),
+                takes,
+            ),
+            // Codes that carry data, other types, traits, `impl`s.
+            (
+                "diag.rs",
+                "pub enum DiagCode { Said(String) }".into(),
+                "carries data",
+            ),
+            ("diag.rs", "pub struct Said(pub String);".into(), said),
+            ("diag.rs", "pub trait Say { fn say(&self); }".into(), said),
+            (
+                "diag.rs",
+                "impl From<String> for DiagCode { fn from(s: String) -> Self { Self::A } }".into(),
+                said,
+            ),
+            // State the app writes, read and said: a `static`, another
+            // module's, the environment's; an import; a macro of its own.
+            (
+                "diag.rs",
+                "pub static LAST: std::sync::Mutex<String> = \
+                 std::sync::Mutex::new(String::new());"
+                    .into(),
+                said,
+            ),
+            (
+                "diag.rs",
+                "thread_local! { static SAID: String = String::new(); }".into(),
+                said,
+            ),
+            (
+                "diag.rs",
+                report("eprintln!(\"{:?}\", crate::gifs::LAST.lock())"),
+                "`crate::gifs::LAST` in `diag.rs`",
+            ),
+            (
+                "diag.rs",
+                report("eprintln!(\"{:?}\", std::env::var(\"X\"))"),
+                "`std::env::var` in `diag.rs`",
+            ),
+            ("diag.rs", "use crate::commands::Shared;".into(), said),
+            (
+                "diag.rs",
+                "macro_rules! say { ($x:expr) => { eprintln!(\"{:?}\", $x) } }".into(),
+                said,
+            ),
+            ("diag.rs", "mod inner { fn f() {} }".into(), said),
+        ]
+    }
+
+    /// A command function named where a local of the same name is not
+    /// bound (review W1 of round 2): before the binding, in its own value,
+    /// after its scope, with a path: each is refused.
+    fn commands_beside_locals() -> Vec<Case> {
+        let named = "names a command function";
+        vec![
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub async fn preferences(state: State<'_, Shared>) -> R { \
+                 let _ = cache_info(state.clone()).await; let cache_info = 1; \
+                 Ok(state.preferences()) }"
+                    .into(),
+                "`cache_info` names a command function",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(s: S, t: T) -> V { let video_auto = video_auto(s, t); video_auto }".into(),
+                "`video_auto` names a command function",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(s: S) { { let preferences = 1; } let _ = preferences(s); }".into(),
+                named,
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(s: S) { let g = |cache_info: u8| cache_info; let _ = cache_info(s); }".into(),
+                named,
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(o: Option<u8>, s: S) { if let Some(preferences) = o { keep(preferences) } \
+                 else { let _ = preferences(s); } }"
+                    .into(),
+                named,
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(o: Option<u8>, s: S) -> u8 { let Some(video_auto) = o else { \
+                 let _ = video_auto(s); return 0 }; video_auto }"
+                    .into(),
+                named,
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(s: S, t: T) { let video_auto = 1; let _ = self::video_auto(s, t); }".into(),
+                named,
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(v: V) { let video_auto = 1; fn inner(s: S) { video_auto(s); } }".into(),
+                named,
             ),
         ]
     }
 
     /// The source guard reads identifiers, not text
-    /// (D-2026-10-01-gif-sticker-search-10, -11): a raw name, a name passed
-    /// to a macro, an alias's import, an escaped literal and each rule's
-    /// other forms are refused in made-up production files, and so are the
-    /// key's text in a macro or a variable ([`key_leaks`]), a proof made
-    /// outside the GIF commands ([`proofs_made_elsewhere`]), a page loaded
-    /// in the window ([`pages_loaded`]), a command function entered from
-    /// Rust ([`commands_called_from_rust`]), the window's invocation taken
-    /// elsewhere ([`invocations_taken_elsewhere`]) and a print or a log in
-    /// the command module ([`prints_in_commands`]); what the studio does
-    /// (the source factory, the key file, the GIF commands and their
-    /// invocation, the handler list, a method named like a command, a print
-    /// outside the GIF, key and command modules) is not.
+    /// (D-2026-10-01-gif-sticker-search-10, -11, -12): a raw name, a name
+    /// passed to a macro, an alias's import, an escaped literal and each
+    /// rule's other forms are refused in made-up production files, and so
+    /// are the key's text in a macro or a variable ([`key_leaks`]), a proof
+    /// made outside the GIF commands ([`proofs_made_elsewhere`]), a page
+    /// loaded in the window ([`pages_loaded`]), a command function entered
+    /// from Rust ([`commands_called_from_rust`]) or named beside a local of
+    /// the same name ([`commands_beside_locals`]), the window's invocation
+    /// taken elsewhere ([`invocations_taken_elsewhere`]), a print, a log or
+    /// a panic in the command module ([`prints_in_commands`]), a print, a
+    /// log, a formatted panic or an invocation's parts outside `diag.rs`
+    /// ([`prints_outside_diag`]) and `diag.rs` made to say a value
+    /// ([`diag_says_a_value`]); what the studio does (the source factory,
+    /// the key file, the GIF commands and their invocation, the handler
+    /// list, a method named like a command, a local named like one in
+    /// `commands.rs` (review W1 of round 2), a panic with fixed text, what
+    /// `diag.rs` is and its calls) is not.
     #[test]
     fn the_source_guard_reads_identifiers_not_text() {
         let call = "macro_rules! call { ($w:ident, $m:ident, $s:expr) => { $w.$m($s) } }";
@@ -2860,8 +3700,11 @@ fn after(w: W) { w.on_message(request) }
             proofs_made_elsewhere(),
             pages_loaded(),
             commands_called_from_rust(),
+            commands_beside_locals(),
             invocations_taken_elsewhere(),
             prints_in_commands(),
+            prints_outside_diag(),
+            diag_says_a_value(),
         ];
         let more = more.iter().flatten();
         let refused = refused
@@ -2915,10 +3758,82 @@ fn after(w: W) { w.on_message(request) }
                  let p = state.preferences(); Prefs { set_language: format!(\"{}\", \
                  state.set_language), ..p } }",
             ),
-            // A print outside the GIF, key and command modules.
+            // A local named like a command in `commands.rs` (review W1 of
+            // round 2): the reviewer's `fp2` and `fp1`, a parameter, a
+            // closure's, a `match` arm's, a condition's, a `for`'s, a
+            // `let … else`'s, a field's shorthand, a macro's tokens.
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub async fn video_auto(state: State<'_, Shared>, \
+                 theme: ThemeDto) -> UiResult<VideoAutoDto> { \
+                 let video_auto = blocking(&state, move |b| b.video_auto(&theme)).await?; \
+                 Ok(video_auto) }",
+            ),
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub fn preferences(state: State<'_, Shared>) -> P { \
+                 let preferences = state.preferences(); preferences }",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn keep(video_auto: VideoAutoDto) -> VideoAutoDto { video_auto }",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(v: V) -> W { v.into_iter().map(|cache_info| cache_info).collect() }",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(r: R) -> X { match r { Ok(preferences) => preferences, \
+                 Err(e) => e.into() } }",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(o: Option<X>) -> X { if let Some(cache_info) = o && cache_info.ok \
+                 { cache_info } else { X::default() } }",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(o: Option<X>) { while let Some(preferences) = next(o) { keep(preferences) } \
+                 for cache_info in o { keep(cache_info) } }",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(o: Option<X>) -> X { let Some(video_auto) = o else { return X::default() }; \
+                 video_auto }",
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f(s: S) -> Dto { let video_auto = s.video_auto(); \
+                 let preferences = format!(\"{}\", video_auto); Dto { video_auto, preferences } }",
+            ),
+            // `diag.rs` as it is, its codes said, panics with fixed text,
+            // `write!` to a formatter, a lint's `expect` attribute.
+            (DIAG_MODULE, include_str!("diag.rs")),
+            (
+                DIAG_MODULE,
+                "pub fn note(code: DiagCode, text: &'static str) { \
+                 tracing::warn!(code = ?code, \"{text}\") }\n\
+                 impl DiagCode { pub const fn text(self) -> &'static str { \"x\" } }",
+            ),
             (
                 "lib.rs",
-                r##"fn f() { eprintln!("bezel-studio: not a GIF module") }"##,
+                "fn f(r: R) { if r.is_err() { diag::report(DiagCode::NotStarted); } }",
+            ),
+            (
+                "studio.rs",
+                "fn f(ok: bool) { assert!(ok); debug_assert!(ok, \"a {{braced}} text\"); \
+                 if !ok { panic!(\"fixed text\") } unreachable!() }",
+            ),
+            (
+                "messages.rs",
+                "impl fmt::Display for E { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> \
+                 fmt::Result { write!(f, \"{{{}}}\", self.0) } }",
+            ),
+            (
+                "studio.rs",
+                "#[expect(dead_code)]\nfn f(m: &Mutex<u8>) -> u8 { \
+                 *m.lock().unwrap_or_else(PoisonError::into_inner) }",
             ),
         ];
         for (name, text) in accepted {

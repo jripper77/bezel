@@ -13,8 +13,9 @@
 // preview is dropped) or makes it the background, in vertical and horizontal
 // themes alike, renames it in place and deletes it after a confirmation that
 // names the themes using it; its previews are stills while motion is
-// reduced. No console errors, no serious or critical accessibility
-// violations.
+// reduced. The dialog's live region and the collection's status line say,
+// word for word in the UI's language, the message of each step. No console
+// errors, no serious or critical accessibility violations.
 import { test, expect, watchErrors, expectAccessible, dragTo } from './helpers.mjs';
 
 const root = (page) => page.locator('html');
@@ -123,6 +124,9 @@ test.describe('gif search', () => {
     await key.fill('refused-key');
     await key.press('Enter');
     await expect(dialog.getByText(t('gifs.keySaved', { last4: '-key' }))).toBeVisible();
+    // The live region says so in the UI's language, with the message of a saved key.
+    const live = dialog.locator('[aria-live="polite"]');
+    await expect(live).toHaveText(t('gifs.keySavedNow'));
     await expect(key).toHaveValue('');
     await expect(dialog.getByText(t('gifs.keyInvalid'))).toBeHidden();
     expect(await lastQuery(page)).toBeNull();
@@ -138,6 +142,7 @@ test.describe('gif search', () => {
     await page.keyboard.press('Escape');
     await dialog.getByRole('button', { name: t('gifs.keyRemove') }).click();
     await expect(dialog.getByText(t('gifs.keyNone'))).toBeVisible();
+    await expect(live).toHaveText(t('gifs.keyRemoved'));
     await expect(field).toBeDisabled();
     await expect(key).toBeFocused();
 
@@ -314,6 +319,27 @@ async function collect(page, t, { kind, text, picks }) {
   await expect(dialog).toBeHidden();
 }
 
+/**
+ * Records every text the collection's status line says from now on, even
+ * one the next replaces at once (what it says while an item is used).
+ * @returns {Promise<() => Promise<string[]>>} the texts said so far, in order
+ */
+async function watchStatus(panel) {
+  await panel.getByRole('status').evaluate((status) => {
+    const said = [];
+    const keep = (records) => {
+      for (const record of records) said.push(...[...record.addedNodes].map((node) => node.textContent));
+    };
+    const observer = new MutationObserver(keep);
+    observer.observe(status, { childList: true });
+    globalThis.collectionSaid = () => {
+      keep(observer.takeRecords());
+      return said;
+    };
+  });
+  return () => panel.page().evaluate(() => globalThis.collectionSaid());
+}
+
 /** The items the collection lists. */
 const itemsOf = (panel, t) => panel.getByRole('list', { name: t('collection.list') }).getByRole('listitem');
 
@@ -370,10 +396,13 @@ test.describe('gif collection', () => {
     await expectAccessible(page);
 
     // Add as image, from the keyboard: an image element in the middle (the Demo theme is
-    // vertical, 480x1920), named after the item.
+    // vertical, 480x1920), named after the item. The status line says it is being
+    // copied, then that it was added, in the UI's language.
+    const said = await watchStatus(panel);
     await happy.getByRole('button', { name: t('collection.addImage') }).press('Enter');
     const status = panel.getByRole('status');
     await expect(status).toHaveText(t('collection.addedImage', { name: 'Happy dance' }));
+    expect(await said()).toEqual([t('collection.using', { name: 'Happy dance' }), t('collection.addedImage', { name: 'Happy dance' })]);
     const inspector = page.locator('#inspector');
     await expect(inspector.getByRole('combobox', { name: t('inspector.asset'), exact: true })).toHaveValue('assets/happy-dance.gif');
     await expect(inspector.getByRole('textbox', { name: t('inspector.name'), exact: true })).toHaveValue('Happy dance');
@@ -444,6 +473,15 @@ test.describe('gif collection', () => {
     await expect(panel.getByText(t('collection.empty'))).toBeVisible();
     await expect(count).toBeHidden();
     await expect(page.getByRole('button', { name: t('media.searchGifs') })).toBeFocused();
+    // Everything the status line said, in order.
+    expect(await said()).toEqual([
+      t('collection.using', { name: 'Happy dance' }),
+      t('collection.addedImage', { name: 'Happy dance' }),
+      t('collection.renamed', { old: 'Happy dance', name: 'Party time' }),
+      t('collection.deleted', { name: 'Thumbs up' }),
+      t('collection.deleted', { name: 'Party time' }),
+      t('collection.deleted', { name: 'Star' }),
+    ]);
     expect(errors).toEqual([]);
   });
 

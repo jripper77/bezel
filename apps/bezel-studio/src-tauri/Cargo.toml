@@ -26,6 +26,14 @@ bezel-render = { workspace = true }
 bezel-sensors = { workspace = true }
 bezel-themes = { workspace = true }
 bezel-media = { workspace = true }
+# The KLIPY adapter behind the GIF search (D-2026-10-01-gif-sticker-search-2):
+# only the studio reaches the network, never the CLI.
+bezel-klipy = { workspace = true }
+# Not called: caps every `log` record at debug for the whole binary, so the
+# HTTP client's trace records, which print request paths (the KLIPY key is
+# one of their segments), are compiled out even if a `log` bridge is ever
+# installed.
+log = { version = "0.4.34", features = ["max_level_debug", "release_max_level_debug"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

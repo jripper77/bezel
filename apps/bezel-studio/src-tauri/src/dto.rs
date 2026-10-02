@@ -8,6 +8,7 @@ use bezel_core::domain::discovery::{
     DesktopModePanel, Discovery, Endpoint, MonitorModeSwitch, Screen, ScreenState,
 };
 use bezel_core::domain::geometry::{Orientation, Size};
+use bezel_core::domain::gifs::{CollectedGif, GifItem, GifPage, GifQuery};
 use bezel_core::domain::job::Progress;
 use bezel_core::domain::media::{MediaInfo, MediaTools, Mismatch};
 use bezel_core::domain::sensor::{
@@ -919,6 +920,142 @@ pub fn media_summary(media: &MediaInfo) -> (String, Option<SizeDto>) {
             height: d.height,
         }),
     )
+}
+
+// ---------------------------------------------------- GIFs and stickers --
+
+/// Whether a KLIPY key is saved, as the window sees it: never the key
+/// (D-2026-10-01-gif-sticker-search-3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyDto {
+    /// A key is saved.
+    pub configured: bool,
+    /// Its last 4 characters, to tell keys apart; `None` without a key, or
+    /// for a key of 8 characters or fewer (most of it would show).
+    pub last4: Option<String>,
+}
+
+/// A page of search results (`search_gifs`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GifPageDto {
+    /// `gif` or `sticker`.
+    pub kind: &'static str,
+    /// What was searched, trimmed; empty for the trending items.
+    pub text: String,
+    /// The page, from 1.
+    pub page: u32,
+    /// Whether "Load more" has another page.
+    pub has_next: bool,
+    /// The results, in the provider's order.
+    pub items: Vec<GifItemDto>,
+}
+
+impl GifPageDto {
+    /// The page `page` answered for `query`.
+    pub fn of(query: &GifQuery, page: &GifPage) -> Self {
+        Self {
+            kind: query.kind.slug(),
+            text: query.text.clone(),
+            page: query.page,
+            has_next: page.has_next,
+            items: page.items.iter().map(GifItemDto::from).collect(),
+        }
+    }
+}
+
+/// One search result, named by its id: the window never gets an address.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GifItemDto {
+    /// The provider's id of the item.
+    pub id: String,
+    /// Its title (may be empty).
+    pub title: String,
+    /// Width of the GIF collected from it, pixels (0 when unknown).
+    pub width: u32,
+    /// Height of that GIF, pixels.
+    pub height: u32,
+}
+
+impl From<&GifItem> for GifItemDto {
+    fn from(item: &GifItem) -> Self {
+        let (width, height) = item.download().map_or((0, 0), |r| (r.width, r.height));
+        Self {
+            id: item.id.clone(),
+            title: item.title.clone(),
+            width,
+            height,
+        }
+    }
+}
+
+/// One item of the collection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectedDto {
+    /// Its bytes' SHA-256, in hex.
+    pub id: String,
+    /// Its name.
+    pub name: String,
+    /// `gif` or `sticker`.
+    pub kind: &'static str,
+    /// Width, pixels.
+    pub width: u32,
+    /// Height, pixels.
+    pub height: u32,
+    /// Size of the GIF, bytes.
+    pub bytes: u64,
+    /// When it was added, seconds since the Unix epoch.
+    pub added_at: u64,
+    /// Where it came from.
+    pub source: GifSourceDto,
+    /// Its preview as a `data:` URL; `None` when it has none.
+    pub preview: Option<String>,
+}
+
+impl CollectedDto {
+    /// `item` with its `preview`.
+    pub fn of(item: &CollectedGif, preview: Option<String>) -> Self {
+        Self {
+            id: item.content.to_string(),
+            name: item.name.clone(),
+            kind: item.kind.slug(),
+            width: item.width,
+            height: item.height,
+            bytes: item.bytes,
+            added_at: item.added_at,
+            source: GifSourceDto {
+                provider: item.origin.provider.clone(),
+                id: item.origin.id.clone(),
+                url: item.origin.page_url.clone(),
+            },
+            preview,
+        }
+    }
+}
+
+/// Where a collected item came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GifSourceDto {
+    /// The provider (`klipy`).
+    pub provider: String,
+    /// The provider's id of the item.
+    pub id: String,
+    /// The provider's page about it.
+    pub url: Option<String>,
+}
+
+/// What holds a collected item's bytes: the delete dialog names them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectedUsersDto {
+    /// Names of the user's themes holding the same bytes.
+    pub themes: Vec<String>,
+    /// The open theme holds them.
+    pub open_theme: bool,
 }
 
 #[cfg(test)]

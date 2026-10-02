@@ -170,7 +170,24 @@ fn check_rotation(background: &BackgroundDto) -> UiResult<()> {
 }
 
 /// Pages of the user guide the UI opens in the system's browser.
-pub const GUIDE_PAGES: &[&str] = &["ffmpeg"];
+pub const GUIDE_PAGES: &[&str] = &["ffmpeg", "gifs-and-stickers"];
+
+/// The other pages the UI opens in the system's browser, by the name it
+/// asks for: KLIPY's Partner Panel, where a key is made
+/// (D-2026-10-01-gif-sticker-search-3).
+pub const LINKS: &[(&str, &str)] = &[("klipyPartnerPanel", "https://partner.klipy.com")];
+
+/// The fixed address of the link named `link` ([`LINKS`]), so the UI can
+/// open no other.
+pub fn link_url(link: &str) -> UiResult<&'static str> {
+    LINKS
+        .iter()
+        .find(|(name, _)| *name == link)
+        .map(|(_, url)| *url)
+        .ok_or_else(|| {
+            UiError::new(ErrorCode::InvalidInput).arg("detail", format!("link \"{link}\""))
+        })
+}
 
 /// Where the guide's `page` is in `language` (`en` or `pt-BR`): a fixed
 /// address on the project's site, so the UI can open no other.
@@ -1304,6 +1321,78 @@ mod tests {
             assert_eq!(error.code(), "invalidInput", "{page} {language}");
             assert!(error.to_string().contains(page), "{error}");
         }
+    }
+
+    /// D-2026-10-01-gif-sticker-search-3: KLIPY's Partner Panel is the one
+    /// link the UI may open besides the guide's pages (the GIF guide among
+    /// them); the app's code names no other address and the window gets no
+    /// permission to open one itself.
+    #[test]
+    fn partner_panel_is_the_only_new_link() {
+        assert_eq!(
+            LINKS,
+            [("klipyPartnerPanel", "https://partner.klipy.com")],
+            "one link"
+        );
+        assert_eq!(
+            link_url("klipyPartnerPanel").unwrap(),
+            "https://partner.klipy.com"
+        );
+        for link in [
+            "",
+            "klipy",
+            "KlipyPartnerPanel",
+            "https://partner.klipy.com",
+            "https://example.com",
+            "../ffmpeg",
+        ] {
+            let error = link_url(link).unwrap_err();
+            assert_eq!(error.code(), "invalidInput", "{link}");
+            assert!(error.to_string().contains(link), "{error}");
+        }
+        assert_eq!(GUIDE_PAGES, ["ffmpeg", "gifs-and-stickers"]);
+        let site = "https://github.com/slipalison/bezel/blob/main/";
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for (language, page) in [
+            ("en", "docs/user/gifs-and-stickers.md"),
+            ("pt-BR", "docs/user/pt-BR/gifs-and-stickers.md"),
+        ] {
+            assert_eq!(
+                guide_url("gifs-and-stickers", language).unwrap(),
+                format!("{site}{page}")
+            );
+            assert!(repo.join(page).is_file(), "{page}");
+        }
+        // Every address the app's own code holds: the guide's site and the
+        // panel.
+        let code = [
+            include_str!("backend.rs"),
+            include_str!("commands.rs"),
+            include_str!("gifs.rs"),
+            include_str!("gifs/key.rs"),
+            include_str!("lib.rs"),
+        ];
+        let mut addresses: Vec<&str> = code
+            .iter()
+            .map(|source| source.split("#[cfg(test)]\nmod tests {").next().unwrap())
+            .flat_map(|source| {
+                source
+                    .match_indices("https://")
+                    .map(|(at, _)| &source[at..])
+            })
+            .map(|from| from.split(['"', '{', ')', ' ']).next().unwrap())
+            .collect();
+        addresses.sort_unstable();
+        addresses.dedup();
+        assert_eq!(
+            addresses,
+            [
+                "https://github.com/slipalison/bezel/blob/main/docs/user/",
+                "https://partner.klipy.com",
+            ]
+        );
+        let capability = include_str!("../capabilities/default.json");
+        assert!(!capability.contains("\"opener:"), "no opener permission");
     }
 
     #[test]

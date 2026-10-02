@@ -12,6 +12,7 @@ pub mod backend;
 pub mod clock;
 pub mod commands;
 pub mod dto;
+pub mod gifs;
 pub mod library;
 pub mod manager;
 pub mod media;
@@ -33,11 +34,13 @@ use std::time::Instant;
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::theme::Theme;
-use bezel_core::ports::{DesktopModeHid, DeviceBus, ScreenConnector};
+use bezel_core::ports::{DesktopModeHid, DeviceBus, GifCollection, GifSource, ScreenConnector};
 use bezel_devices::fake::FakeStorage;
 use bezel_devices::{FakeBus, FakeConnector, FakeHid, SystemBus, SystemConnector, SystemHid};
+use bezel_klipy::KlipyClient;
 use bezel_media::FfmpegTranscoder;
 use bezel_media::archive::{DiskArchive, MemoryArchive, storage_dir};
+use bezel_media::collection::{DiskCollection, MemoryCollection, collection_dir};
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
@@ -47,6 +50,7 @@ use crate::backend::{
     Backend, DEFAULT_MODEL, SensorFactory, Session, default_orientation, sleep_until,
 };
 use crate::commands::{Shared, Unsaved};
+use crate::gifs::{Gifs, KEY_FILE, KeyFile, Provider, SharedGifs};
 use crate::library::ThemeLibrary;
 use crate::manager::Copies;
 use crate::settings::SettingsFile;
@@ -151,6 +155,9 @@ pub fn run() -> Result<(), tauri::Error> {
             // for the connected screen.
             backend.restore_theme();
             app.manage(Arc::clone(&backend));
+            // Its own state, which asks nothing of KLIPY until a search.
+            let gifs: SharedGifs = Arc::new(gifs(app.handle())?);
+            app.manage(gifs);
             app.manage(Unsaved::default());
             let live = backend.studio().live_key().is_some();
             let tray = tray::create(app.handle(), live, &backend.texts())?;
@@ -246,6 +253,18 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::cache_info,
             commands::clear_cache,
             commands::set_cache_limit,
+            commands::klipy_key,
+            commands::save_klipy_key,
+            commands::remove_klipy_key,
+            commands::search_gifs,
+            commands::gif_preview,
+            commands::collect_gif,
+            commands::gif_collection,
+            commands::rename_collected,
+            commands::collected_users,
+            commands::delete_collected,
+            commands::use_collected,
+            commands::open_link,
         ])
         .run(tauri::generate_context!())
 }
@@ -384,6 +403,35 @@ fn copies(data: &Path) -> Copies {
             Copies::in_memory(MemoryArchive::new())
         }
     }
+}
+
+/// The GIF search and the collection (D-2026-10-01-gif-sticker-search-3,
+/// -5): the KLIPY key in `<config>/klipy.json`, the collection in
+/// `<data>/bezel/collection` shared with the CLI's data folder (in memory for
+/// this run when that folder cannot be made), a background's copy in
+/// `<cache>/collection`. Nothing is read from KLIPY here.
+fn gifs(app: &AppHandle) -> tauri::Result<Gifs> {
+    let path = app.path();
+    let collection: Box<dyn GifCollection> =
+        match DiskCollection::open(collection_dir(&path.data_dir()?)) {
+            Ok(disk) => Box::new(disk),
+            Err(e) => {
+                tracing::error!("the GIF collection is kept for this run only: {e}");
+                Box::new(MemoryCollection::new())
+            }
+        };
+    let provider = Provider {
+        source: Arc::new(|key: &str, customer: &str| -> Arc<dyn GifSource> {
+            Arc::new(KlipyClient::new(key, customer))
+        }),
+        customer_id: bezel_klipy::new_customer_id,
+    };
+    Ok(Gifs::new(
+        KeyFile::new(path.app_config_dir()?.join(KEY_FILE)),
+        provider,
+        collection,
+        path.app_cache_dir()?.join("collection"),
+    ))
 }
 
 /// The library's thumbnails, kept in `dir`: drawn with the bundled themes'
@@ -528,11 +576,48 @@ mod tests {
         (commands, allowed)
     }
 
+    /// The commands `generate_handler!` registers in [`run`].
+    fn handled() -> Vec<String> {
+        let source = include_str!("lib.rs");
+        let list = &source[source.find("generate_handler![").unwrap()..];
+        let list = &list[..list.find(']').unwrap()];
+        list.split(',')
+            .filter_map(|entry| entry.trim().rsplit_once("::"))
+            .map(|(_, command)| format!("allow-{}", command.replace('_', "-")))
+            .collect()
+    }
+
+    /// The commands of the GIF search and the collection, and the one that
+    /// opens a fixed link (D-2026-10-01-gif-sticker-search-3..-5).
+    const GIF_COMMANDS: [&str; 12] = [
+        "klipy_key",
+        "save_klipy_key",
+        "remove_klipy_key",
+        "search_gifs",
+        "gif_preview",
+        "collect_gif",
+        "gif_collection",
+        "rename_collected",
+        "collected_users",
+        "delete_collected",
+        "use_collected",
+        "open_link",
+    ];
+
     #[test]
     fn every_command_is_allowed_by_name() {
         let (commands, allowed) = permissions();
         assert!(commands.contains(&"allow-run-plan".to_string()));
+        for command in GIF_COMMANDS {
+            let permission = format!("allow-{}", command.replace('_', "-"));
+            assert!(commands.contains(&permission), "{command} in build.rs");
+        }
         assert_eq!(commands, allowed, "build.rs and capabilities/default.json");
+        let mut handled = handled();
+        let mut listed = commands.clone();
+        handled.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(handled, listed, "generate_handler! and build.rs");
     }
 
     #[test]

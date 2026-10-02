@@ -66,6 +66,18 @@
     "allow-associate-original",
     "allow-cache-info",
     "allow-clear-cache",
-    "allow-set-cache-limit"
+    "allow-set-cache-limit",
+    "allow-klipy-key",
+    "allow-save-klipy-key",
+    "allow-remove-klipy-key",
+    "allow-search-gifs",
+    "allow-gif-preview",
+    "allow-collect-gif",
+    "allow-gif-collection",
+    "allow-rename-collected",
+    "allow-collected-users",
+    "allow-delete-collected",
+    "allow-use-collected",
+    "allow-open-link"
   ]
 }

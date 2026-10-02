@@ -221,12 +221,34 @@ test.describe('gif search', () => {
     await expect.poll(() => lastQuery(page)).toEqual({ kind: 'sticker', text: 'ca', page: 2, explicit: true });
     await expect(tiles).toHaveCount(46);
 
-    // The keyboard: arrows, Home, End; Enter adds.
+    // The keyboard: Left and Right move by one result, Up and Down by a row
+    // of the grid as laid out (its columns, counted here on the page),
+    // staying put at the first and the last rows; Home, End; Enter adds.
+    const tops = await grid.getByRole('listitem').evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)));
+    const columns = tops.filter((top) => top === tops[0]).length;
+    const last = tops.length - 1;
+    expect(tops).toHaveLength(46);
+    expect(columns).toBeGreaterThan(1);
+    expect(columns).toBeLessThan(tops.length);
     await tiles.first().focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(tiles.first()).toBeFocused();
     await page.keyboard.press('ArrowRight');
     await expect(tiles.nth(1)).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(tiles.nth(1 + columns)).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(tiles.nth(columns)).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(tiles.first()).toBeFocused();
     await page.keyboard.press('End');
     await expect(tiles.last()).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(tiles.last()).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(tiles.nth(last - columns)).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(tiles.nth(last)).toBeFocused();
     await page.keyboard.press('Home');
     await expect(tiles.first()).toBeFocused();
     await page.keyboard.press('ArrowRight');

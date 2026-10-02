@@ -5,9 +5,10 @@
 //! The window enters a command only through IPC: no code names a command
 //! function but its definition and `generate_handler!` in `run`, only the
 //! GIF commands `search_gifs`, `gif_preview` and `collect_gif` take the
-//! invocation (`Request`), and nothing here prints, logs or panics
+//! invocation (`Request`), nothing here prints, logs or panics
 //! (D-2026-10-01-gif-sticker-search-11, -12: only [`crate::diag`] says
-//! anything, fixed text only); the source guard
+//! anything, fixed text only), and only `open_fixed`, which `open_link` and
+//! `open_guide` call, uses the system opener (-15); the source guard
 //! `tests::nothing_in_the_app_forges_an_invocation` checks it.
 
 use std::path::PathBuf;
@@ -187,6 +188,9 @@ pub async fn open_link<R: Runtime>(app: AppHandle<R>, link: String) -> UiResult<
 }
 
 /// Opens `url`, one of the app's fixed addresses, in the system's browser.
+/// The one user of the system opener, called only by [`open_link`] and
+/// [`open_guide`], so a page opens only on the user's click
+/// (D-2026-10-01-gif-sticker-search-15; the source guard checks it).
 async fn open_fixed<R: Runtime>(app: AppHandle<R>, url: String) -> UiResult<()> {
     tauri::async_runtime::spawn_blocking(move || app.opener().open_url(url, None::<&str>))
         .await

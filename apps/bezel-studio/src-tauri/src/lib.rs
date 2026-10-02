@@ -349,9 +349,13 @@ struct Start<R: Runtime> {
 /// [`UserAsked`] renamed, in a qualified path, in another macro call or in
 /// an `impl` outside its module); the window's invocation (`Request`)
 /// taken by any other function; a command function named but at its
-/// definition and in the list of `generate_handler!` in [`run`]; and any
-/// `KlipyClient::new` but the source factory's. Code written to get past
-/// it otherwise is left to code review.
+/// definition and in the list of `generate_handler!` in [`run`]; any
+/// `KlipyClient::new` but the source factory's; and every other way out of
+/// the computer (D-2026-10-01-gif-sticker-search-15): a socket or a path
+/// through `net`, a program spawned but the studio's own re-exec, a webview
+/// made here, and the system opener but in the helper the `open_link` and
+/// `open_guide` commands call. Code written to get past it otherwise is left
+/// to code review.
 fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
     // Each part that fails says so, before the app says it did not start.
     let folders =
@@ -661,6 +665,10 @@ fn switch_on(value: Option<&OsStr>) -> bool {
 /// on NVIDIA's driver (seen on the dev machine with ddc-control). WebKit reads
 /// the switch once at start and setting it in-process needs `unsafe`, so the
 /// process replaces itself with the switch on, unless the user chose a value.
+/// The studio's one spawned program, its own file
+/// (D-2026-10-01-gif-sticker-search-15): the source guard accepts
+/// `Command` only here, as `std::process::Command::new` of the name bound
+/// once to `std::env::current_exe()`, and no macro here.
 #[cfg(target_os = "linux")]
 fn restart_without_dmabuf_renderer() {
     use std::os::unix::process::CommandExt;
@@ -1396,6 +1404,100 @@ mod tests {
     /// `:` is added where it is used, so that no literal here is one).
     const SCRIPT_SCHEME: &str = "javascript";
 
+    /// Sockets and name lookups: the standard library's (`std::net`,
+    /// `std::os::unix::net`) and any runtime's of the same names, named
+    /// nowhere in the studio's production code
+    /// (D-2026-10-01-gif-sticker-search-15). HTTP leaves the studio only
+    /// through `bezel-klipy`'s client, which the KLIPY rules fence.
+    const SOCKETS: [&str; 7] = [
+        "TcpStream",
+        "TcpListener",
+        "UdpSocket",
+        "UnixStream",
+        "UnixListener",
+        "UnixDatagram",
+        "ToSocketAddrs",
+    ];
+
+    /// The module of the sockets (`std::net`, `std::os::unix::net`,
+    /// `tokio::net`, ...): no path and no import of production code goes
+    /// through it, whatever comes before it (`use std::{fs, net::…}`, `use
+    /// std as s; s::net::…`).
+    const NET_MODULE: &str = "net";
+
+    /// Crates that speak to the network, open a page or spawn a program,
+    /// which the studio does not use: no path, import or `extern crate` of
+    /// production code starts with one (in a package's name, `-` is `_`).
+    const WAY_OUT_CRATES: [&str; 21] = [
+        "attohttpc",
+        "curl",
+        "duct",
+        "hyper",
+        "hyper_util",
+        "isahc",
+        "minreq",
+        "mio",
+        "open",
+        "reqwest",
+        "socket2",
+        "subprocess",
+        "surf",
+        "tauri_plugin_http",
+        "tauri_plugin_shell",
+        "tauri_plugin_upload",
+        "tauri_plugin_websocket",
+        "tokio_tungstenite",
+        "tungstenite",
+        "ureq",
+        "webbrowser",
+    ];
+
+    /// A webview made in Rust, with the page it loads: the studio's one
+    /// window is the configuration's, and loads the app's own pages.
+    const WEBVIEWS: [&str; 3] = ["WebviewUrl", "WebviewWindowBuilder", "WebviewBuilder"];
+
+    /// What spawns a program (`std::process::Command`, `tokio::process::Command`,
+    /// any runtime's, and the extension traits of the standard library's):
+    /// named only in [`RESTART`], as [`SPAWN_CALL`] of [`OWN_PROGRAM`].
+    const SPAWNS: [&str; 2] = ["Command", "CommandExt"];
+
+    /// The one function of `lib.rs` that spawns a program: the studio
+    /// itself again, without WebKit's DMA-BUF renderer.
+    const RESTART: &str = "restart_without_dmabuf_renderer";
+
+    /// The one call in [`RESTART`] that names `Command`.
+    const SPAWN_CALL: [&str; 4] = ["std", "process", "Command", "new"];
+
+    /// Where the program [`SPAWN_CALL`] runs comes from: the studio's own
+    /// file, bound by `let Ok(name) = std::env::current_exe() else { … };`.
+    const OWN_PROGRAM: [&str; 3] = ["std", "env", "current_exe"];
+
+    /// The system opener (`tauri-plugin-opener`): its extension trait, its
+    /// accessor, its state and what opens a page, a file or a folder. Named
+    /// only in [`OPEN_HELPER`], and the trait imported as `_` at the top of
+    /// [`COMMAND_MODULE`].
+    const OPENER: [&str; 7] = [
+        "OpenerExt",
+        "opener",
+        "Opener",
+        "open_url",
+        "open_path",
+        "reveal_item_in_dir",
+        "reveal_items_in_dir",
+    ];
+
+    /// The opener's crate.
+    const OPENER_CRATE: &str = "tauri_plugin_opener";
+
+    /// The one helper of [`COMMAND_MODULE`] that opens a page in the
+    /// system's browser, named only at its definition and in the bodies of
+    /// [`OPEN_COMMANDS`].
+    const OPEN_HELPER: &str = "open_fixed";
+
+    /// The `#[tauri::command]`s that call [`OPEN_HELPER`]: a page opens
+    /// only when the window invokes one, on the user's click.
+    const OPEN_COMMANDS: [&str; 2] = ["open_link", "open_guide"];
+
     /// What no literal of the studio holds, tests included: the window's
     /// IPC object, then KLIPY's API and file hosts (they are
     /// `bezel-klipy`'s). Made here, so that this file's literals do not
@@ -1542,6 +1644,28 @@ mod tests {
         diag_functions: Vec<String>,
         /// The outermost function around each [`PANIC_HOOK`] named.
         hooks: Vec<String>,
+        /// Whether the item about to be read is one of the file's own
+        /// (not in a module, a function or a block): a free function or an
+        /// import.
+        at_top: bool,
+        /// Whether the outermost function around what is read is a free
+        /// function of the file's own items.
+        top: bool,
+        /// In [`RESTART`], the one name bound to [`OWN_PROGRAM`]'s file,
+        /// when it is bound once and nothing else in the function binds it.
+        program: Option<String>,
+        /// Whether what is read is the path of the one accepted
+        /// [`SPAWN_CALL`].
+        spawning: bool,
+        /// The outermost function around each accepted [`SPAWN_CALL`].
+        spawns: Vec<String>,
+        /// Whether what is read is the opener's trait imported as `_` at
+        /// the top of [`COMMAND_MODULE`].
+        opener_import: bool,
+        /// The outermost function around each name of the opener accepted.
+        opens: Vec<String>,
+        /// The outermost function around each [`OPEN_HELPER`] named.
+        helpers: Vec<String>,
         /// What it holds that it must not, or that cannot be classified.
         problems: Vec<String>,
     }
@@ -1572,6 +1696,14 @@ mod tests {
                 in_code_impl: false,
                 diag_functions: Vec::new(),
                 hooks: Vec::new(),
+                at_top: false,
+                top: false,
+                program: None,
+                spawning: false,
+                spawns: Vec::new(),
+                opener_import: false,
+                opens: Vec::new(),
+                helpers: Vec::new(),
                 problems: Vec::new(),
             }
         }
@@ -1599,6 +1731,112 @@ mod tests {
         /// one place that sets the panic hook.
         fn sets_the_hook(&self) -> bool {
             self.in_diag() && self.within == [HOOK_FUNCTION]
+        }
+
+        /// Whether what is read is in [`RESTART`], a free function of
+        /// `lib.rs`'s own items (not nested in another function).
+        fn in_restart(&self) -> bool {
+            self.production() && self.file == "lib.rs" && self.top && self.within == [RESTART]
+        }
+
+        /// Whether what is read is in [`OPEN_HELPER`], a free function of
+        /// [`COMMAND_MODULE`]'s own items: its definition or its body.
+        fn in_open_helper(&self) -> bool {
+            self.file == COMMAND_MODULE && self.top && self.within == [OPEN_HELPER]
+        }
+
+        /// Whether what is read is the body of one of [`OPEN_COMMANDS`], a
+        /// free `#[tauri::command]` function of [`COMMAND_MODULE`]'s own.
+        fn in_open_command(&self) -> bool {
+            self.file == COMMAND_MODULE
+                && self.top
+                && self.command
+                && self.within.len() == 1
+                && OPEN_COMMANDS.contains(&self.within[0].as_str())
+        }
+
+        /// An identifier of production code that leaves the computer, or
+        /// names what does (D-2026-10-01-gif-sticker-search-15): a socket, a
+        /// webview made in Rust, a program spawned but the studio's own
+        /// re-exec, the system opener outside [`OPEN_HELPER`], and that
+        /// helper named but at its definition and by [`OPEN_COMMANDS`].
+        fn way_out(&mut self, name: &str) {
+            if SOCKETS.contains(&name) {
+                self.refuse(format_args!(
+                    "`{name}` (a socket) in production code: the studio speaks to the network \
+                     only through `bezel-klipy`"
+                ));
+            }
+            if WEBVIEWS.contains(&name) {
+                self.refuse(format_args!(
+                    "`{name}` makes a webview in Rust: the one window is the configuration's"
+                ));
+            }
+            let re_exec = self.in_restart() && (self.spawning || name == "CommandExt");
+            if SPAWNS.contains(&name) && !re_exec {
+                self.refuse(format_args!(
+                    "`{name}` spawns a program outside `{RESTART}`, whose one `{}` runs the \
+                     studio's own file (`{}()`)",
+                    SPAWN_CALL.join("::"),
+                    OWN_PROGRAM.join("::")
+                ));
+            }
+            if OPENER.contains(&name) && self.in_open_helper() {
+                self.opens.push(OPEN_HELPER.into());
+            } else if OPENER.contains(&name) && !self.opener_import {
+                self.refuse(format_args!(
+                    "`{name}` (the system opener) outside `{OPEN_HELPER}` in `{COMMAND_MODULE}`: a \
+                     page opens only when the user clicks"
+                ));
+            }
+            if name == OPEN_HELPER && self.in_open_command() {
+                self.helpers.push(self.within[0].clone());
+            } else if name == OPEN_HELPER && !self.in_open_helper() {
+                self.refuse(format_args!(
+                    "`{OPEN_HELPER}`, which opens a page, named outside its definition and the \
+                     bodies of `{}` in `{COMMAND_MODULE}`",
+                    OPEN_COMMANDS.join("` and `")
+                ));
+            }
+        }
+
+        /// A path of two names or more, an import or an `extern crate`
+        /// (D-2026-10-01-gif-sticker-search-15): through the sockets'
+        /// module, or into a crate that leaves the computer, it is refused.
+        fn way_out_path(&mut self, segments: &[String]) {
+            let path = segments.join("::");
+            if segments.iter().any(|segment| segment == NET_MODULE) {
+                self.refuse(format_args!(
+                    "`{path}` goes through `{NET_MODULE}`, the sockets' module: the studio speaks \
+                     to the network only through `bezel-klipy`"
+                ));
+            }
+            let first = segments.first().map_or("", String::as_str);
+            if WAY_OUT_CRATES.contains(&first) {
+                self.refuse(format_args!(
+                    "`{path}` is a crate that speaks to the network, opens a page or spawns a \
+                     program"
+                ));
+            }
+        }
+
+        /// Whether `call` is the one program [`RESTART`] spawns: the first
+        /// [`SPAWN_CALL`] there, its one argument the name bound to the
+        /// studio's own file ([`own_program`]).
+        fn spawns_itself(&self, call: &ExprCall) -> bool {
+            let program = self.program.as_deref();
+            let runs_the_studio = |argument: &Expr| {
+                matches!(argument, Expr::Path(name)
+                    if name.attrs.is_empty()
+                        && name.qself.is_none()
+                        && name.path.get_ident().is_some_and(|i| program == Some(&*i.unraw().to_string())))
+            };
+            self.in_restart()
+                && self.spawns.is_empty()
+                && call.attrs.is_empty()
+                && is_exactly(&call.func, &SPAWN_CALL)
+                && call.args.len() == 1
+                && call.args.first().is_some_and(runs_the_studio)
         }
 
         /// A path (or an import, an `extern crate`) that starts with
@@ -1867,12 +2105,20 @@ mod tests {
         }
 
         /// Reads, with `read`, the function `name`, a free
-        /// `#[tauri::command]` one when `command`.
-        fn function(&mut self, name: &Ident, command: bool, read: impl FnOnce(&mut Self)) {
+        /// `#[tauri::command]` one when `command`, one of the file's own
+        /// free functions when `top`.
+        fn function(
+            &mut self,
+            name: &Ident,
+            command: bool,
+            top: bool,
+            read: impl FnOnce(&mut Self),
+        ) {
             let name = name.unraw().to_string();
             self.functions.push(name.clone());
             if self.within.is_empty() {
                 self.command = command;
+                self.top = top;
             }
             self.within.push(name);
             read(self);
@@ -1913,6 +2159,7 @@ mod tests {
             if !self.production() {
                 return;
             }
+            self.way_out(name);
             if FORGERIES.contains(&name) {
                 self.refuse(format_args!("`{name}` in production code"));
             }
@@ -2022,6 +2269,7 @@ mod tests {
                 return;
             }
             self.logger_crate(path.first().map_or("", String::as_str), &path.join("::"));
+            self.way_out_path(path);
             let last = path.last().map_or("", String::as_str);
             let module = path.len() > 1 && path[path.len() - 2] == "commands";
             if renamed && (last == "commands" || (last == "self" && module)) {
@@ -2089,6 +2337,7 @@ mod tests {
             }
             if segments.len() > 1 {
                 self.logger_crate(&segments[0], &segments.join("::"));
+                self.way_out_path(segments);
             }
             let logs = segments.len() > 1 && LOGGERS.contains(&segments[0].as_str());
             let prints = called && (PRINT_MACROS.contains(&last) || LOG_MACROS.contains(&last));
@@ -2191,7 +2440,24 @@ mod tests {
             }
         }
 
+        /// The file's own items, each free function and import read as one
+        /// (not nested in a module, a function or a block).
+        fn visit_file(&mut self, file: &'ast syn::File) {
+            for attribute in &file.attrs {
+                self.visit_attribute(attribute);
+            }
+            for item in &file.items {
+                self.at_top = matches!(item, Item::Fn(_) | Item::Use(_));
+                self.visit_item(item);
+                self.at_top = false;
+            }
+        }
+
         fn visit_item_fn(&mut self, item: &'ast ItemFn) {
+            let top = std::mem::take(&mut self.at_top);
+            if self.production() && top && self.file == "lib.rs" && item.sig.ident == RESTART {
+                self.program = own_program(&item.block);
+            }
             let command = item.attrs.iter().any(is_command);
             if command {
                 self.defined.push(item.sig.ident.unraw().to_string());
@@ -2209,7 +2475,7 @@ mod tests {
                      its message"
                 ));
             }
-            self.function(&item.sig.ident, command, |reader| {
+            self.function(&item.sig.ident, command, top, |reader| {
                 reader.body(&item.sig.inputs, |reader| {
                     visit::visit_item_fn(reader, item)
                 });
@@ -2220,7 +2486,7 @@ mod tests {
             if self.production() && self.in_diag() {
                 self.diag_signature(&item.sig);
             }
-            self.function(&item.sig.ident, false, |reader| {
+            self.function(&item.sig.ident, false, false, |reader| {
                 reader.body(&item.sig.inputs, |reader| {
                     visit::visit_impl_item_fn(reader, item);
                 });
@@ -2231,7 +2497,7 @@ mod tests {
             if self.production() && self.in_diag() {
                 self.diag_signature(&item.sig);
             }
-            self.function(&item.sig.ident, false, |reader| {
+            self.function(&item.sig.ident, false, false, |reader| {
                 reader.body(&item.sig.inputs, |reader| {
                     visit::visit_trait_item_fn(reader, item);
                 });
@@ -2359,7 +2625,19 @@ mod tests {
 
         /// A call; the key's text as an argument of `KlipyClient::new` in
         /// `klipy_source` is accepted, its key read as an expression.
+        /// In [`RESTART`], the one [`SPAWN_CALL`] of the studio's own file
+        /// is accepted, its `Command` read as accepted.
         fn visit_expr_call(&mut self, call: &'ast ExprCall) {
+            if self.spawns_itself(call) {
+                self.spawns.push(RESTART.into());
+                self.spawning = true;
+                self.visit_expr(&call.func);
+                self.spawning = false;
+                for argument in &call.args {
+                    self.visit_expr(argument);
+                }
+                return;
+            }
             let makes_the_client = self.production()
                 && self.file == "lib.rs"
                 && self.outer() == Some("klipy_source")
@@ -2435,7 +2713,16 @@ mod tests {
             visit::visit_qself(self, qself);
         }
 
+        /// An import; the opener's trait imported as `_` at the top of
+        /// [`COMMAND_MODULE`] is accepted: it adds no name, only the
+        /// trait's methods, which only [`OPEN_HELPER`] may call.
         fn visit_item_use(&mut self, item: &'ast ItemUse) {
+            let top = std::mem::take(&mut self.at_top);
+            self.opener_import = self.production()
+                && top
+                && self.file == COMMAND_MODULE
+                && item.attrs.is_empty()
+                && is_opener_import(&item.tree);
             let logs = use_roots(&item.tree)
                 .iter()
                 .any(|root| LOGGERS.iter().any(|logger| *root == logger));
@@ -2446,11 +2733,15 @@ mod tests {
                 self.imported(&path, renamed);
             }
             visit::visit_item_use(self, item);
+            self.opener_import = false;
         }
 
         fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
             let name = item.ident.unraw().to_string();
             self.logger_crate(&name, &name);
+            if self.production() {
+                self.way_out_path(std::slice::from_ref(&name));
+            }
             let logs = LOGGERS.iter().any(|logger| item.ident.unraw() == logger);
             if self.silent() && logs {
                 self.refuse(format_args!("a logger imported outside `{DIAG_MODULE}`"));
@@ -2487,6 +2778,11 @@ mod tests {
             let path = segments(&call.path);
             self.path(&path, true);
             self.panics(&path, Some(call.tokens.clone()));
+            if self.in_restart() {
+                self.refuse(format_args!(
+                    "a macro called in `{RESTART}`: what it binds or spawns cannot be read"
+                ));
+            }
             for segment in &call.path.segments {
                 self.visit_path_segment(segment);
             }
@@ -2759,6 +3055,66 @@ mod tests {
                     if called.qself.is_none() && ends_with(&called.path, ["diag", HOOK_FUNCTION])))
     }
 
+    /// Whether `expr` is the plain path `names` (no leading `::`, no
+    /// generics, no qualified self, no attribute; `r#` removed).
+    fn is_exactly(expr: &Expr, names: &[&str]) -> bool {
+        matches!(expr, Expr::Path(path)
+            if path.attrs.is_empty()
+                && path.qself.is_none()
+                && path.path.leading_colon.is_none()
+                && path.path.segments.iter().all(|s| s.arguments.is_none())
+                && segments(&path.path).iter().map(String::as_str).eq(names.iter().copied()))
+    }
+
+    /// The name [`RESTART`]'s `body` binds to the studio's own file: a
+    /// statement of the body itself `let Ok(name) = std::env::current_exe()
+    /// else { … };` ([`OWN_PROGRAM`]), the name bound by value, not `mut`,
+    /// and bound nowhere else in the function (no shadowing, no closure's
+    /// or arm's binding of the same name).
+    fn own_program(body: &Block) -> Option<String> {
+        let name = body.stmts.iter().find_map(|statement| {
+            let Stmt::Local(local) = statement else {
+                return None;
+            };
+            let init = local.init.as_ref()?;
+            let own = matches!(&*init.expr, Expr::Call(call)
+                if call.attrs.is_empty() && call.args.is_empty()
+                    && is_exactly(&call.func, &OWN_PROGRAM));
+            if !(own && init.diverge.is_some() && local.attrs.is_empty()) {
+                return None;
+            }
+            ok_binding(&local.pat)
+        })?;
+        let mut bound = Vec::new();
+        Bindings(&mut bound).visit_block(body);
+        (bound.iter().filter(|b| **b == name).count() == 1).then_some(name)
+    }
+
+    /// The name `pattern` binds when it is `Ok(name)`, by value, not `mut`.
+    fn ok_binding(pattern: &Pat) -> Option<String> {
+        let Pat::TupleStruct(ok) = pattern else {
+            return None;
+        };
+        let [Pat::Ident(name)] = ok.elems.iter().collect::<Vec<_>>()[..] else {
+            return None;
+        };
+        let plain = name.attrs.is_empty()
+            && name.by_ref.is_none()
+            && name.mutability.is_none()
+            && name.subpat.is_none();
+        let is_ok = ok.attrs.is_empty() && ok.qself.is_none() && ok.path.is_ident("Ok");
+        (plain && is_ok).then(|| name.ident.unraw().to_string())
+    }
+
+    /// Whether `tree` is exactly `tauri_plugin_opener::OpenerExt as _`: the
+    /// opener's trait imported without a name.
+    fn is_opener_import(tree: &UseTree) -> bool {
+        matches!(tree, UseTree::Path(krate)
+            if krate.ident == OPENER_CRATE
+                && matches!(&*krate.tree, UseTree::Rename(opener)
+                    if opener.ident == "OpenerExt" && opener.rename == "_"))
+    }
+
     /// Whether the crate or package `name` installs a logger
     /// ([`LOGGER_CRATES`], `-` read as `_`).
     fn is_logger_crate(name: &str) -> bool {
@@ -2768,14 +3124,17 @@ mod tests {
 
     /// The names `pattern` binds, added to `names`.
     fn bindings(pattern: &Pat, names: &mut Vec<String>) {
-        struct Bindings<'n>(&'n mut Vec<String>);
-        impl<'ast> Visit<'ast> for Bindings<'_> {
-            fn visit_pat_ident(&mut self, ident: &'ast PatIdent) {
-                self.0.push(ident.ident.unraw().to_string());
-                visit::visit_pat_ident(self, ident);
-            }
-        }
         Bindings(names).visit_pat(pattern);
+    }
+
+    /// The names the patterns read bind, added to its list.
+    struct Bindings<'n>(&'n mut Vec<String>);
+
+    impl<'ast> Visit<'ast> for Bindings<'_> {
+        fn visit_pat_ident(&mut self, ident: &'ast PatIdent) {
+            self.0.push(ident.ident.unraw().to_string());
+            visit::visit_pat_ident(self, ident);
+        }
     }
 
     /// The name of `item` when it is an enum.
@@ -2956,6 +3315,27 @@ mod tests {
     ///   installer declared (any kind, any target) or built for it, and no
     ///   package of the Tauri family with its `tracing` feature on, as
     ///   declared or as resolved;
+    /// - every way out of the computer is named and fenced
+    ///   (D-2026-10-01-gif-sticker-search-15): production code names no
+    ///   socket (`SOCKETS`: `TcpStream`, `TcpListener`, `UdpSocket`,
+    ///   `UnixStream`, `UnixListener`, `UnixDatagram`, `ToSocketAddrs`), no
+    ///   path or import goes through `net` (`std::net`, `std::os::unix::net`,
+    ///   `tokio::net`, grouped or renamed), and none starts with a crate that
+    ///   leaves the computer (`WAY_OUT_CRATES`); nothing makes a webview in
+    ///   Rust (`WEBVIEWS`); `Command` (any runtime's) and `CommandExt` are
+    ///   named only in `restart_without_dmabuf_renderer`, a free function
+    ///   of `lib.rs` that calls no macro, as the one
+    ///   `std::process::Command::new(name)` whose `name` is bound once, by
+    ///   `let Ok(name) = std::env::current_exe() else { … };` (the studio's
+    ///   own file); the system opener (`OPENER`: `OpenerExt`, `opener`,
+    ///   `Opener`, `open_url`, `open_path`, `reveal_item_in_dir`,
+    ///   `reveal_items_in_dir`) is named only in `open_fixed`, a free
+    ///   function of `commands.rs`, and in the import
+    ///   `use tauri_plugin_opener::OpenerExt as _;` at the top of
+    ///   `commands.rs` (it adds no name, only the trait's methods); and
+    ///   `open_fixed` is named only at its definition and in the bodies of
+    ///   the `#[tauri::command]`s `open_link` and `open_guide`, so a page
+    ///   opens only when the window invokes one, on the user's click;
     /// - `UserAsked::of` is named (called, or taken as a value, a macro's
     ///   tokens included) only in the bodies of the `#[tauri::command]`
     ///   functions `search_gifs`, `gif_preview` and `collect_gif` of
@@ -3000,10 +3380,14 @@ mod tests {
         let (mut made, mut reads, mut asked) = (Vec::new(), Vec::new(), Vec::new());
         let (mut handled, mut handlers) = (Vec::new(), Vec::new());
         let (mut diag_functions, mut hooks) = (Vec::new(), Vec::new());
+        let (mut spawns, mut opens, mut helpers) = (Vec::new(), Vec::new(), Vec::new());
         for source in &built {
             let reader = source.production(&commands);
             let at = |f: &String| format!("{}: {f}", source.name);
             hooks.extend(reader.hooks.iter().map(at));
+            spawns.extend(reader.spawns.iter().map(at));
+            opens.extend(reader.opens.iter().map(at));
+            helpers.extend(reader.helpers.iter().map(at));
             made.extend(reader.made.iter().map(at));
             reads.extend(reader.reads.iter().map(at));
             asked.extend(reader.asked.iter().map(at));
@@ -3019,6 +3403,25 @@ mod tests {
             hooks,
             ["diag.rs: hook_panics"],
             "one panic hook, set by `diag::hook_panics`"
+        );
+        // Every way out (D-2026-10-01-gif-sticker-search-15): one program
+        // spawned, the studio itself again; the system opener used by one
+        // helper, which the two commands that open a page call.
+        assert_eq!(
+            spawns,
+            ["lib.rs: restart_without_dmabuf_renderer"],
+            "one program spawned: the studio's own file, by its re-exec"
+        );
+        opens.dedup();
+        assert_eq!(
+            opens,
+            ["commands.rs: open_fixed"],
+            "the opener, in one helper"
+        );
+        assert_eq!(
+            helpers,
+            ["commands.rs: open_guide", "commands.rs: open_link"],
+            "the helper, called by the commands that open a page"
         );
         // The one module that prints is built, and its functions were read.
         assert!(
@@ -4312,6 +4715,342 @@ fn after(w: W) { w.on_message(request) }
         ]
     }
 
+    /// The studio's re-exec as `lib.rs` has it ([`RESTART`]), `body` its
+    /// statements after the switch's check.
+    fn restart(body: &str) -> String {
+        format!(
+            "#[cfg(target_os = \"linux\")]\nfn restart_without_dmabuf_renderer() {{ \
+             use std::os::unix::process::CommandExt; \
+             if std::env::var_os(DMABUF_SWITCH).is_some() {{ return; }} {body} }}"
+        )
+    }
+
+    /// The re-exec's statements in `lib.rs`: the studio's own file run
+    /// again with the switch on.
+    const RE_EXEC: &str = "let Ok(exe) = std::env::current_exe() else { return; }; \
+        let error = std::process::Command::new(exe).args(std::env::args_os().skip(1)) \
+        .env(DMABUF_SWITCH, \"1\").exec(); diag::report(restart_failure(&error));";
+
+    /// The DoD critic's `setup` of round 3, iteration 1: without a saved
+    /// key, a welcome step does `step` (it opens KLIPY's Partner Panel).
+    fn welcome(step: &str) -> String {
+        format!(
+            "fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn Error>> {{ \
+             let folders = (start.folders)(app.handle())?; \
+             if !folders.config.join(KEY_FILE).exists() \
+             && let Ok(url) = crate::backend::link_url(\"klipyPartnerPanel\") {{ {step} }} \
+             Ok(()) }}"
+        )
+    }
+
+    /// A socket, a program spawned but the studio's re-exec, or a crate
+    /// that leaves the computer (D-2026-10-01-gif-sticker-search-15, the
+    /// DoD critic of round 3, iteration 1): each is refused.
+    fn sockets_and_programs() -> Vec<Case> {
+        let socket = |name: &str| match name {
+            "TcpStream" => "`TcpStream` (a socket)",
+            "UdpSocket" => "`UdpSocket` (a socket)",
+            "UnixStream" => "`UnixStream` (a socket)",
+            _ => "(a socket)",
+        };
+        let net = "goes through `net`, the sockets' module";
+        let spawns = "`Command` spawns a program outside `restart_without_dmabuf_renderer`";
+        let crate_out = "is a crate that speaks to the network, opens a page or spawns";
+        vec![
+            // A hand-written request from the backend, by path, imported
+            // in a group, raw, in a macro's tokens, by another runtime.
+            (
+                "backend.rs",
+                "impl Backend { fn hello(&self) { \
+                 let _ = std::net::TcpStream::connect((\"partner.klipy.com\", 80)); } }"
+                    .into(),
+                socket("TcpStream"),
+            ),
+            (
+                "backend.rs",
+                "impl Backend { fn hello(&self) { \
+                 let _ = std::net::TcpStream::connect((\"partner.klipy.com\", 80)); } }"
+                    .into(),
+                net,
+            ),
+            ("lib.rs", "use std::{fs, net::TcpStream};".into(), net),
+            ("lib.rs", "use std::{fs, net::{self as n}};".into(), net),
+            (
+                "lib.rs",
+                "use std as s;\nfn f(a: A) { let _ = s::net::r#TcpListener::bind(a); }".into(),
+                net,
+            ),
+            (
+                "lib.rs",
+                "fn f(a: A) { let _ = r#TcpStream::connect(a); }".into(),
+                socket("TcpStream"),
+            ),
+            (
+                "lib.rs",
+                "fn f(a: A) { spawn!(async move { UdpSocket::bind(a) }) }".into(),
+                socket("UdpSocket"),
+            ),
+            (
+                "studio.rs",
+                "use std::os::unix::net::UnixStream;".into(),
+                socket("UnixStream"),
+            ),
+            (
+                "studio.rs",
+                "fn f() { let _ = std::os::unix::net::UnixDatagram::unbound(); }".into(),
+                net,
+            ),
+            (
+                "gifs.rs",
+                "use std::net::ToSocketAddrs as _;\nfn f() { let _ = \"a:1\".to_socket_addrs(); }"
+                    .into(),
+                net,
+            ),
+            (
+                "lib.rs",
+                "async fn f(a: A) { let _ = tokio::net::TcpStream::connect(a).await; }".into(),
+                net,
+            ),
+            // The critic's other way: a program that opens the page, by
+            // path, imported, renamed, raw, another runtime's, its
+            // extension trait.
+            (
+                "lib.rs",
+                welcome("let _ = std::process::Command::new(\"xdg-open\").arg(url).spawn();"),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                format!(
+                    "use std::process::Command;\n{}",
+                    welcome("let _ = Command::new(\"xdg-open\").arg(url).spawn();")
+                ),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                "use std::process::{Command as Run};".into(),
+                spawns,
+            ),
+            (
+                "tray.rs",
+                "fn f(u: &str) { let _ = r#Command::new(\"xdg-open\").arg(u).spawn(); }".into(),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                "async fn f(u: &str) { let _ = tokio::process::Command::new(\"open\").arg(u) \
+                 .status().await; }"
+                    .into(),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                "use std::os::unix::process::CommandExt;".into(),
+                "`CommandExt` spawns a program",
+            ),
+            // The re-exec made to run another program: by name, shadowed,
+            // `mut`, not the studio's file, a second one, a macro there, a
+            // closure's binding of the name, nested, in another file.
+            (
+                "lib.rs",
+                restart(&RE_EXEC.replace("Command::new(exe)", "Command::new(\"xdg-open\")")),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                restart(&RE_EXEC.replace(
+                    "let error",
+                    "let exe = std::path::PathBuf::from(\"/usr/bin/xdg-open\"); let error",
+                )),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                restart(&RE_EXEC.replace(
+                    "Ok(exe) = std::env::current_exe() else { return; };",
+                    "Ok(mut exe) = std::env::current_exe() else { return; }; \
+                     exe.set_file_name(\"xdg-open\");",
+                )),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                restart(&RE_EXEC.replace("std::env::current_exe()", "which(\"xdg-open\")")),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                restart(&format!(
+                    "{RE_EXEC} let _ = std::process::Command::new(exe).arg(\"u\").spawn();"
+                )),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                restart(&format!("{RE_EXEC} shadow!(exe);")),
+                "a macro called in `restart_without_dmabuf_renderer`",
+            ),
+            (
+                "lib.rs",
+                restart(
+                    &RE_EXEC.replace("let error", "let run = |exe: &str| exe.len(); let error"),
+                ),
+                spawns,
+            ),
+            (
+                "lib.rs",
+                format!(
+                    "fn restart_without_dmabuf_renderer() {{ fn inner() {{ {RE_EXEC} }} inner() }}"
+                ),
+                spawns,
+            ),
+            ("studio.rs", restart(RE_EXEC), spawns),
+            // Crates that leave the computer, and a webview made in Rust
+            // that loads a page.
+            (
+                "lib.rs",
+                "fn f(u: &str) { let _ = reqwest::blocking::get(u); }".into(),
+                crate_out,
+            ),
+            (
+                "lib.rs",
+                "fn f(u: &str) { let _ = open::that(u); }".into(),
+                crate_out,
+            ),
+            ("lib.rs", "use webbrowser as w;".into(), crate_out),
+            ("lib.rs", "extern crate ureq;".into(), crate_out),
+            (
+                "lib.rs",
+                welcome(
+                    "let _ = tauri::WebviewWindowBuilder::new(app, \"k\", \
+                     tauri::WebviewUrl::External(url.parse()?)).build();",
+                ),
+                "`WebviewWindowBuilder` makes a webview in Rust",
+            ),
+        ]
+    }
+
+    /// The system opener used, or its helper called, outside the one
+    /// helper and the two commands that open a page
+    /// (D-2026-10-01-gif-sticker-search-15, the DoD critic of round 3,
+    /// iteration 1: the setup opening KLIPY's Partner Panel when no key is
+    /// saved): each is refused.
+    fn pages_opened() -> Vec<Case> {
+        let opener = |name: &'static str| match name {
+            "Opener" => "`Opener` (the system opener) outside `open_fixed` in `commands.rs`",
+            "open_url" => "`open_url` (the system opener) outside `open_fixed`",
+            "opener" => "`opener` (the system opener) outside `open_fixed`",
+            "OpenerExt" => "`OpenerExt` (the system opener) outside `open_fixed`",
+            _ => "(the system opener) outside `open_fixed`",
+        };
+        let helper = "`open_fixed`, which opens a page, named outside its definition";
+        let critic = welcome(
+            "if let Some(opener) = app.try_state::<tauri_plugin_opener::Opener<R>>() { \
+             let _ = opener.open_url(url, None::<&str>); }",
+        );
+        let by_trait = format!(
+            "use tauri_plugin_opener::OpenerExt as _;\n{}",
+            welcome("let _ = app.opener().open_url(url, None::<&str>);")
+        );
+        let open_link = |body: &str| {
+            format!(
+                "#[tauri::command]\npub async fn open_link<R: Runtime>(app: AppHandle<R>, \
+                 link: String) -> UiResult<()> {{ {body} }}"
+            )
+        };
+        vec![
+            // The critic's m2 (the opener's state) and m2b (its trait).
+            ("lib.rs", critic.clone(), opener("Opener")),
+            ("lib.rs", critic, opener("open_url")),
+            ("lib.rs", by_trait.clone(), opener("opener")),
+            ("lib.rs", by_trait, opener("OpenerExt")),
+            // The helper called from the setup, raw, imported, as a value.
+            (
+                "lib.rs",
+                welcome(
+                    "tauri::async_runtime::spawn(commands::open_fixed(app.handle().clone(), \
+                     url.to_string()));",
+                ),
+                helper,
+            ),
+            (
+                "lib.rs",
+                welcome("let _ = crate::commands::r#open_fixed;"),
+                helper,
+            ),
+            ("lib.rs", "use crate::commands::open_fixed;".into(), helper),
+            // The opener's functions, by the plugin's path, elsewhere.
+            (
+                "lib.rs",
+                welcome("let _ = tauri_plugin_opener::open_url(url, None::<&str>);"),
+                opener("open_url"),
+            ),
+            (
+                "storage.rs",
+                "fn f(p: &Path) { let _ = tauri_plugin_opener::reveal_item_in_dir(p); }".into(),
+                "`reveal_item_in_dir` (the system opener)",
+            ),
+            (
+                "storage.rs",
+                "fn f(o: &O, p: &Path) { let _ = o.open_path(p, None::<&str>); }".into(),
+                "`open_path` (the system opener)",
+            ),
+            (
+                "lib.rs",
+                "fn f(a: &AppHandle) { spawn!(a.opener().open_url(U, None::<&str>)) }".into(),
+                opener("opener"),
+            ),
+            // In the command module: a command opening a page without the
+            // helper, the helper as a method or in a module, called by a
+            // function that is not one of the two commands, the trait
+            // imported by its name or inside a function.
+            (
+                COMMAND_MODULE,
+                open_link("app.opener().open_url(link, None::<&str>).map_err(UiError::system)"),
+                opener("opener"),
+            ),
+            (
+                COMMAND_MODULE,
+                "impl Gifs { fn open_fixed<R: Runtime>(&self, app: AppHandle<R>) { \
+                 let _ = app.opener().open_url(U, None::<&str>); } }"
+                    .into(),
+                opener("opener"),
+            ),
+            (
+                COMMAND_MODULE,
+                "mod m { pub fn open_fixed<R: Runtime>(app: AppHandle<R>) { \
+                 let _ = app.opener().open_url(U, None::<&str>); } }"
+                    .into(),
+                opener("opener"),
+            ),
+            (
+                COMMAND_MODULE,
+                "fn welcome<R: Runtime>(app: AppHandle<R>) { \
+                 tauri::async_runtime::spawn(open_fixed(app, U.into())); }"
+                    .into(),
+                helper,
+            ),
+            (
+                COMMAND_MODULE,
+                "pub async fn open_link<R: Runtime>(app: AppHandle<R>, link: String) \
+                 -> UiResult<()> { open_fixed(app, link).await }"
+                    .into(),
+                helper,
+            ),
+            (
+                COMMAND_MODULE,
+                "use tauri_plugin_opener::OpenerExt;".into(),
+                opener("OpenerExt"),
+            ),
+            (
+                COMMAND_MODULE,
+                "fn f() { use tauri_plugin_opener::OpenerExt as _; }".into(),
+                opener("OpenerExt"),
+            ),
+        ]
+    }
+
     /// A command function named where a local of the same name is not
     /// bound (review W1 of round 2): before the binding, in its own value,
     /// after its scope, with a path: each is refused.
@@ -4381,12 +5120,15 @@ fn after(w: W) { w.on_message(request) }
     /// a panic in the command module ([`prints_in_commands`]), a print, a
     /// log, a formatted panic or an invocation's parts outside `diag.rs`
     /// ([`prints_outside_diag`]), `diag.rs` made to say a value
-    /// ([`diag_says_a_value`]), and a logger installed or another panic
-    /// hook ([`loggers_and_hooks`]); what the studio does (the source factory,
+    /// ([`diag_says_a_value`]), a logger installed or another panic
+    /// hook ([`loggers_and_hooks`]), a socket or a program spawned
+    /// ([`sockets_and_programs`]) and a page opened but by the opener's
+    /// helper ([`pages_opened`]); what the studio does (the source factory,
     /// the key file, the GIF commands and their invocation, the handler
     /// list, a method named like a command, a local named like one in
     /// `commands.rs` (review W1 of round 2), a panic with fixed text, what
-    /// `diag.rs` and `main.rs` are and the calls of `diag`) is not.
+    /// `diag.rs` and `main.rs` are and the calls of `diag`, the re-exec, the
+    /// opener's helper and its two commands, `commands.rs` as it is) is not.
     #[test]
     fn the_source_guard_reads_identifiers_not_text() {
         let call = "macro_rules! call { ($w:ident, $m:ident, $s:expr) => { $w.$m($s) } }";
@@ -4458,6 +5200,8 @@ fn after(w: W) { w.on_message(request) }
             prints_outside_diag(),
             diag_says_a_value(),
             loggers_and_hooks(),
+            sockets_and_programs(),
+            pages_opened(),
         ];
         let more = more.iter().flatten();
         let refused = refused
@@ -4596,7 +5340,25 @@ fn after(w: W) { w.on_message(request) }
                  *m.lock().unwrap_or_else(PoisonError::into_inner) }",
             ),
         ];
-        for (name, text) in accepted {
+        // Every way out as the studio has it
+        // (D-2026-10-01-gif-sticker-search-15): its re-exec, the opener's
+        // helper and the two commands that call it, the command module.
+        let open_commands = "use tauri_plugin_opener::OpenerExt as _;\n\
+            #[tauri::command]\npub async fn open_guide<R: Runtime>(app: AppHandle<R>, \
+            page: String, language: String) -> UiResult<()> { \
+            open_fixed(app, guide_url(&page, &language)?).await }\n\
+            #[tauri::command]\npub async fn open_link<R: Runtime>(app: AppHandle<R>, \
+            link: String) -> UiResult<()> { open_fixed(app, link_url(&link)?.to_string()).await }\n\
+            async fn open_fixed<R: Runtime>(app: AppHandle<R>, url: String) -> UiResult<()> { \
+            tauri::async_runtime::spawn_blocking(move || app.opener().open_url(url, None::<&str>)) \
+            .await.map_err(UiError::system)?.map_err(UiError::system) }";
+        let re_exec = restart(RE_EXEC);
+        let ways_out = [
+            ("lib.rs", re_exec.as_str()),
+            (COMMAND_MODULE, open_commands),
+            (COMMAND_MODULE, include_str!("commands.rs")),
+        ];
+        for (name, text) in accepted.into_iter().chain(ways_out) {
             assert_eq!(
                 guard(name, text),
                 (Vec::new(), Vec::new()),

@@ -1,205 +1,137 @@
 # Phase 11: Review  (slug: gif-sticker-search)
 
-**Verdict:** APPROVED_WITH_WARNINGS
+**Verdict:** BLOCKED
 
-> Revisão em modo `verify`, iteração 1 do loop autônomo (`/jdi-issue`). Branch `jdi/gif-sticker-search`, `HEAD` =
-> `8df7ffa` (igual ao remoto). Escopo: `git diff origin/main...HEAD` inteiro (76 arquivos: `crates/`, `apps/`,
-> `docs/`, `scripts/`, `CHANGELOG.md`, `README.md`, `Cargo.toml`, `Cargo.lock`), as 7 decisões
-> `D-2026-10-01-gif-sticker-search-{1..7}` em texto integral, CONTEXT, PLAN, SUMMARY e LOOP. Árvore limpa durante a
-> revisão (só o `LOOP.md` do orquestrador como não rastreado).
+> Revisão em modo `verify`, iteração 2 do loop autônomo (`/jdi-issue`). Branch `jdi/gif-sticker-search`, `HEAD` =
+> `9c8295d` (igual ao remoto, inalterado do início ao fim). Escopo: `git diff origin/main...HEAD` inteiro (82
+> arquivos), com atenção aos commits da iter 2 (`e2c9cb2`, `f3bd567`, `6ffa470`, `f9bbc24`, `d5fa90e`, `b524c83`,
+> `e49329a`, `9c8295d`), as 7 decisões `D-2026-10-01-gif-sticker-search-{1..7}`, PROJECT, CONTEXT (linhas 1, 3 e 5
+> apertadas), PLAN, SUMMARY, LOOP e o REVIEW da iter 1 (revisor W1–W3 + crítico nas linhas 1, 3, 5, 6 e 10).
 >
 > - **Números:** todos das minhas execuções (`CARGO_TARGET_DIR=target/review`, `cargo llvm-cov clean --workspace`
->   antes da cobertura), nenhum copiado do SUMMARY.
-> - **Rede e hardware:** nada tocou `/dev/ttyACM*`, o app instalado nem `api.klipy.com`/`static.klipy.com` (o teste
->   real `#[ignore]` não rodou; os testes do cliente usam o servidor de loopback). Playwright com `BEZEL_E2E_PORT=1442`.
-> - **Mutações:** numa cópia de `HEAD` no scratchpad (`git archive`), alvo próprio `target/review-mut` (apagado no
->   fim). Cada mutação editou o arquivo depois do build anterior, e cada uma derrubou só os testes da sua regra, o
->   que mostra que foi recompilada. O repositório não foi alterado.
+>   antes da cobertura); nenhum copiado do SUMMARY. Os `Verify:` rodaram como escritos, extraídos do Markdown por
+>   script e executados com `bash`.
+> - **Rede e hardware:** nada tocou `/dev/ttyACM*`, o app instalado nem os servidores do KLIPY. Playwright com
+>   `BEZEL_E2E_PORT=1442`.
+> - **Mutações:** num `git clone` de `9c8295d` no scratchpad (com `origin/main` copiado do repositório), uma cópia
+>   e um `CARGO_TARGET_DIR` próprio por mutante (apagados depois). Para cada uma rodei o `Verify` da iter 1 e o de
+>   agora. O repositório não foi alterado.
 
 ## Gates
 | Gate | Status | Details |
 |---|---|---|
-| Build | PASS | `cargo build --workspace --locked`: exit 0 (o `Cargo.lock` passa no `--locked`) |
-| Tests | PASS | **930 passed, 0 failed, 12 ignored** (39 binários). Os ignorados: 8 de ffmpeg real, 1 de timing, 1 de hardware, 1 do corpus local e o novo `client::tests::real_klipy_answers_with_the_users_key` (rede real, `BEZEL_KLIPY_KEY`). +51 sobre os 879 da fase anterior; bate com o SUMMARY |
-| Coverage | PASS | **94.20%** lines (TOTAL, sem `main.rs`/`build.rs`), exit 0. Pelo comando do DoD do PROJECT, sem filtro: **94.15%**. Arquivos novos: `domain/gifs.rs` e `app/gifs.rs` 100%, `bezel-klipy` `client.rs` 90.04% (o resto é o teste real ignorado) e `dto.rs` 99.16%, `collection/disk.rs` 97.32%, studio `gifs.rs` 96.87% e `gifs/key.rs` 89.89% |
-| Lint | PASS | `cargo fmt --all --check` e `cargo clippy --workspace --all-targets --locked -- -D warnings`: exit 0. Clippy cruzado `--target x86_64-pc-windows-msvc --exclude bezel-studio --exclude bezel-klipy` (o `ring` não compila para MSVC aqui): exit 0. Nenhum `allow` novo fora de `tests/` (o de `crates/bezel-core/tests/gifs.rs:4` segue o padrão dos outros arquivos de teste de integração) |
-| Hexagonal/Safety/Protocol/Hygiene | PASS | 5.1 a 5.11 limpos (detalhe abaixo). `cargo audit`: exit 0 (1279 advisories, 620 crates) |
-| Consistency | PASS | 13 commits, todos com escopo `gif-sticker-search` (mais o `chore(jdi)` de abertura); arquivos batem com o PLAN (fora dele só o `Hash` em `domain/clock.rs`, o reexport de `archive/mod.rs` e uma linha de `tests/ui/video-framing.test.mjs`, todos consequência direta das tasks). D-1..D-7 cumpridas; nenhuma D-XX anterior contrariada (detalhe abaixo) |
-| UI Validation | PASS | `npm ci` ok. `npm run test:unit`: **207/207**, 99.94% de linhas (`gif-search.js` 100%, `collection.js` 100%, `demo-gifs.js` 100%). Playwright completo: **208/208** (claro/escuro × pt-BR/en, axe); `-g "gif search\|gif collection"`: 24 passed |
-| DoD | PASS | As 7 linhas Auto do CONTEXT (a 7 com o CI **36948045888** no `HEAD` `8df7ffa`) e as 3 Auto do PROJECT passam como escritas. O CONTEXT não tem Manual; os 2 Manual do PROJECT são do corte de release |
+| Build | PASS | `cargo build --workspace --locked`: exit 0 |
+| Tests | PASS | **933 passed, 0 failed, 12 ignored** (39 binários). +3 sobre os 930 da iter 1: `tests::the_app_setup_sends_nothing_at_start`, `tests::the_app_never_keeps_the_collection_in_memory` e `gifs::tests::a_collection_folder_that_cannot_be_used_is_said_not_lost`. Bate com o SUMMARY |
+| Coverage | PASS | **94.46%** lines (TOTAL, sem `main.rs`/`build.rs`), exit 0. Pelo comando do DoD do PROJECT: **94.40%**. Studio `lib.rs` 72.50% (o `setup` agora roda em teste), `gifs.rs` 96.89% |
+| Lint | PASS | `cargo fmt --all --check` e `cargo clippy --workspace --all-targets --locked -- -D warnings`: exit 0. Clippy `--target x86_64-pc-windows-msvc` sem `bezel-studio`/`bezel-klipy`: exit 0. Nenhum `allow` novo fora de testes |
+| Hexagonal/Safety/Protocol/Hygiene | PASS | 5.1 a 5.11 sem achado novo: os hits de 5.3b, 5.5, 5.9 e 5.10 são anteriores à fase (nenhum desses arquivos está no diff); `KlipyClient::new` e `DiskCollection::open` fora de teste só em `lib.rs:487` e `:506` (composição); nenhum `unwrap`/`expect` fora de `mod tests` em `lib.rs`/`gifs.rs`. `cargo audit`: exit 0 |
+| Consistency | WARN | 22 commits com escopo `gif-sticker-search` (mais o `chore(jdi)`); `Cargo.lock` igual ao da iter 1 (o `tauri` com a feature `test` é só dev-dependency e não entra no build normal: `cargo tree -e normal,features -i tauri` sem `"test"`). D-1..D-7 cumpridas. Ver W2: o DoD LOCKED do PROJECT mudou sem a D-XX que ele exige |
+| UI Validation | PASS | `npm ci` ok. `npm run test:unit`: **222/222**, 99.94% de linhas. Playwright completo: **208/208** (claro/escuro × pt-BR/en, axe) |
+| DoD | FAIL | Linha 7 (Windows no CI) e linha 10 (TODO/FIXME do PROJECT) falham como escritas; as outras 8 Auto passam |
 
-### Detalhe do gate 5
-| Check | Resultado |
-|---|---|
-| 5.1 dependências do core | PASS: só `thiserror` |
-| 5.2 I/O e threads no core | PASS: nada. `app::gifs` recebe a hora do chamador (`added_at`) |
-| 5.3 ports | PASS. `GifSource` e `GifCollection` estão em `bezel_core::ports` (`ports/mod.rs:218`, `:241`); nenhuma impl de porta no core; nenhuma `pub trait` nova fora do core |
-| 5.4 adapters na composição | PASS. `KlipyClient::new`, `DiskCollection::open` e `MemoryCollection::new` fora de teste só em `apps/bezel-studio/src-tauri/src/lib.rs:416-428` |
-| 5.5 `unsafe` | PASS: nada novo (`bezel-klipy` tem `#![forbid(unsafe_code)]`) |
-| 5.6 panics | PASS: os `unwrap`/`expect` novos estão todos em `mod tests` (`backend.rs`, `lib.rs`, `domain/gifs.rs`, `client.rs`, `dto.rs`, `fake.rs`, `memory.rs`). O código de produção usa `unwrap_or_else(PoisonError::into_inner)` nos locks |
-| 5.7 escrita no dispositivo | PASS: os `Confirm::Yes` novos são doc ou teste; `delete_collected` só confirma pelo `confirmed` do diálogo (`commands.rs`), e o use case recusa `Confirm::No` antes de ler |
-| 5.8 protocolo | PASS: nada em `protocol/` nem em `docs/reverse-engineering/` mudou |
-| 5.9 caminhos no core | PASS: nada novo; o DoD 1 confirma que `crates/bezel-core` não cita `klipy`, `ureq` nem `reqwest` |
-| 5.10 comandos síncronos | PASS: os 12 comandos novos são `async` e rodam no pool de bloqueio (`with_gifs` → `blocking`); os síncronos listados são anteriores |
-| 5.11 supply chain | PASS: `cargo audit` exit 0; nenhum segredo (as chaves dos testes são `test-key`, `fake-KLIPY_key-...` e `demo-demo-demo-a1b2`; os fixtures só têm URLs de `static.klipy.com` e o `blur_preview` em base64) |
+## Itens da iter 1
+| Item | Estado | Evidência |
+|---|---|---|
+| W1 — Privacidade errava os formatos dos stickers | **CLEARED** | `docs/user/gifs-and-stickers.md`: "`gif,jpg` for GIFs and `gif,png` for stickers: a GIF comes with JPEG stills, a sticker with PNG ones" e "JPEG for a GIF, PNG for a sticker"; o pt-BR diz o mesmo. Conferido contra o código: `customer_id` de 128 bits refeito só para outra chave (`gifs.rs:291-294`), `ureq` sem cabeçalho próprio, `io.github.slipalison.bezel` (`tauri.conf.json:5`), prévias e stills locais (`preview_data_url`), `last4` só com 9+ caracteres. `check-docs.sh` agora exige esses fatos dentro da seção |
+| W2 — coleção que não abre virava coleção em memória | **CLEARED** | `lib.rs` não usa mais `MemoryCollection`; `Gifs` abre por `CollectionOpener` (`gifs.rs:82`) e `with_collection` (`gifs.rs:259`) reabre a cada uso; pasta inutilizável = `collectionUnavailable {folder, reason}` (en/pt-BR, fixture), `collect` recusa antes de baixar (`gifs.rs:388`); a Coleção mostra `collection.loadFailed` + o texto do erro + "Tentar de novo" (`ui/collection.js:61-70`). Provado por `a_collection_folder_that_cannot_be_used_is_said_not_lost` e `the_app_never_keeps_the_collection_in_memory` (sobre o `gifs()` do app) |
+| W3 — "Saved key ending in " vazio | **CLEARED** | `keyStatus` usa `gifs.keySavedNoEnding` ("Saved key"/"Chave salva") quando `last4` é nulo ou vazio; o demo responde como o backend (`last4: null` abaixo de 9 caracteres); teste "a short saved key shows no ending" |
+| Crítico, linha 1 (`http` no core) | **CLEARED** | Mutante: `http = "1.5.0"` no core + `ServiceFailure::of_status(http::StatusCode)`, `Cargo.lock` atualizado offline. `Verify` da iter 1: `OK`; o de agora: exit 1 (`cargo tree` de profundidade 1 dá `http thiserror`) |
+| Crítico, linha 3 (CSP) | **CLEARED** | Mutante: `img-src 'self' https://static.klipy.com data: blob:`. Iter 1: `OK` (a substring continua lá); agora: exit 1, só a cláusula da CSP falha (testes ok) |
+| Crítico, linha 3 (nada sai no início) | **CLEARED** | Mutante: busca de aquecimento (em alta) numa thread disparada no `setup` real, depois do `gifs()`. Iter 1: `OK`; agora: exit 1, `the_app_setup_sends_nothing_at_start` cai em "a GIF source was made at start" |
+| Crítico, linha 3 (capabilities) | **CLEARED** | Mutante: `capabilities/links.json` com `opener:default` e `opener:allow-open-url` (compila: o `tauri-plugin-opener` é dependência). Iter 1: `OK` (só lia `default.json`); agora: exit 1 na cláusula `capabilities/*.json` |
+| Crítico, linha 5 (contagem de e2e) | **CLEARED** | Mutante: `test.fixme('429: 100 per hour')` + um teste vazio + o axe tirado de "vertical and horizontal". Iter 1: `OK` (24 passed); agora: exit 1, `e2e-passed.mjs` aponta `fixme` e `no axe` nos 4 projetos (8 problemas). Resta um furo: ver W1 |
+| Crítico, linha 6 (Privacidade oca) | **CLEARED** | Mutante: a seção nas duas línguas trocada por uma frase. O `check-docs.sh` da iter 1 passa ("all checks passed"); o de agora: exit 1, 60 problemas nomeados |
+| Crítico, linha 10 (pathspec do TODO) | **CLEARED, mas a linha falha** | Mutante: `// TODO: …` em `tests/e2e/gif-search.spec.mjs`. Iter 1: `OK`; agora a linha é listada. Mas a linha alargada já falha no `HEAD` limpo: B2 |
 
-### Dependências novas (`Cargo.lock`)
-Só entradas: `bezel-klipy`, `ureq 3.4.2`, `ureq-proto 0.6.4`, `rustls 0.23.45`, `rustls-pki-types 1.15.1`,
-`rustls-webpki 0.103.15`, `ring 0.17.14`, `untrusted 0.9.0`, `webpki-roots 1.0.9`, `subtle 2.6.1`, `zeroize 1.9.0`,
-`utf8-zero 0.8.1`; nenhuma linha `-version`. Licenças (do `Cargo.toml` de cada crate): MIT/Apache-2.0 (ureq,
-ureq-proto, pki-types, utf8-zero, zeroize), Apache-2.0/ISC/MIT (rustls), ISC (rustls-webpki, untrusted),
-Apache-2.0 AND ISC (ring), BSD-3-Clause (subtle) e **CDLA-Permissive-2.0** (webpki-roots, dados das raízes da
-Mozilla): todas compatíveis com GPL-3.0-or-later. `cargo tree` confirma `ureq` só via `bezel-klipy`, e nem `ureq`,
-`rustls`, `ring` nem `webpki-roots` na árvore da CLI `bezel`.
-
-## Segurança da chave e da rede (revisão além dos gates)
-Conferido na fonte, e onde dava, por mutação:
-- **A chave nunca volta à janela.** `KeyDto` só tem `configured` e `last4` (e `last4` só para chaves de 9+
-  caracteres, `gifs/key.rs:69-72`); `SavedKey`, `KlipyClient` e `Gifs` têm `Debug` manual sem a chave; o erro de um
-  `klipy.json` ilegível descarta o texto do serde, que poderia citar o valor (`key.rs:108-122`); a chave inválida
-  recebida não é ecoada (`invalid_key`). O teste `key_never_reaches_the_window` serializa toda resposta e erro que a
-  janela recebe, incluindo as 3 falhas do serviço, e procura a chave.
-- **Logs.** O studio não instala nenhum logger (`log` ou `tracing`), e mesmo assim o `log` vem com
-  `max_level_debug`/`release_max_level_debug` (`src-tauri/Cargo.toml:36`): `cargo tree -e features -i log` mostra as
-  duas features no `log` do alvo do studio, e o teste `the_http_client_cannot_log_request_paths` prova
-  `STATIC_MAX_LEVEL <= Debug` no próprio build. Na fonte do `ureq 3.4.2`, o único ponto que imprime o caminho é o
-  `DebugUri`, que só escreve `path_and_query` com `log_enabled!(Trace)` (`util.rs:272-277`) e senão `/******`; o
-  `ureq-proto 0.6.4` só despeja os bytes da requisição em `trace!` (`util.rs:73-76`). Com o teto em debug, os dois
-  ficam fora do binário.
-- **Erros.** `failure()` (`client.rs:279-299`) troca todo `ureq::Error` por um texto fixo; o `RequireHttpsOnly(uri)`
-  do ureq, que carrega a URL inteira, nunca vira texto. **Mutação M1** (`unavailable(&error.to_string())`): caem
-  `errors_hide_the_key` e `stops_at_the_byte_limit`.
-- **Arquivo.** `<config>/klipy.json` ao lado do `settings.json` (`lib.rs:354` e `:430`), gravado num temporário
-  `create_new` com `0o600` e renomeado por cima (`key.rs:153-184`); um `klipy.json` antigo com outro modo é
-  substituído por um inode novo `0600`. **M3** (`0o644`): cai `key_never_reaches_the_window`. No Windows não há ACL
-  própria: vale a do perfil (`%APPDATA%`), como D-3 e o guia dizem.
-- **Coleção e DTOs.** `collection.json` guarda provedor, id e a página `https://klipy.com/{gifs|stickers}/{slug}`
-  (slug validado em `dto.rs:159-164`), nunca uma URL de arquivo nem da API; `CollectedDto.source.url` é essa página.
-- **SSRF.** A janela só nomeia resultados por id (`gif_preview`, `collect_gif`) e só os das páginas da última busca
-  (`Searches::item`, `gifs.rs:152-157`; **M4**, sem zerar os itens a cada busca nova: cai
-  `only_items_of_the_last_search`). Os endereços vêm só da resposta da API, filtrados duas vezes para
-  `https://static.klipy.com/` (`dto.rs:142-144` e `file_address`, `client.rs:144-155`, que recusa `@`, `:porta`,
-  sufixo de host e `http`). `open_link` e `open_guide` só abrem endereços fixos; a capability não ganhou `opener:` nem
-  `http:` e a CSP é a mesma (DoD 3).
-- **Transporte.** HTTPS only, rustls com raízes webpki, `max_redirects(0)` (**M2**, 5 redirects: caem
-  `production_is_https_api_klipy_com` e `maps_429_and_refused_keys`, que também prova que o host do `Location` não
-  recebeu conexão), `timeout_global` de 10 s, corpo limitado (4 MiB na API, 2 MiB na prévia, 25 MiB no item) e um
-  `Content-Length` maior recusado antes de ler. A chave é um único segmento percent-encoded do caminho.
-- **D-7.** `format_filter` por tipo (`gif,jpg` / `gif,png`; **M7**, sticker com `gif,jpg`: caem
-  `searches_over_loopback_http` e `locale_and_filter_follow_the_query`), still PNG dos stickers com o MIME dos bytes
-  (`stills_take_the_media_type_of_their_bytes`, `a_sticker_still_is_its_png`) e 404 da API = `KeyRejected` (**M8**,
-  sem o 404: cai `maps_429_and_refused_keys`). Os fixtures são respostas reais aparadas, sem chave.
-
-## Privacidade, coleção e UI
-- **Nada sai sem ação.** A composição só monta o estado (`lib.rs:413-436`); a fonte é criada na primeira busca,
-  prévia ou adição com chave; salvar a chave não pede nada; abrir o diálogo só chama `klipy_key` (local); a
-  Coleção só lê o disco. Provado em `no_request_at_start_or_without_key` e, na UI, por `data-demo-gif-query` nulo
-  após abrir e após salvar a chave (e2e).
-- **Coleção.** Conteúdo por SHA-256 (`keep` não regrava bytes iguais), índice e arquivos por `write_atomically`,
-  índice ilegível = erro com o caminho e nada é salvo por cima (`add`, `rename` e `delete` carregam antes; **M5**,
-  índice ilegível virando coleção vazia: cai `unreadable_index_is_an_error`). Caminhos só de `ContentId` (64 hex) e
-  do `file_stem` (letras e dígitos, até 64): nenhuma travessia. Excluir salva o índice antes de apagar os bytes e o
-  diálogo nomeia os temas do usuário e o aberto que têm os mesmos bytes (`delete_names_themes_using_it`). Não-GIF é
-  recusado sem guardar (**M6**: cai `refuses_a_download_that_is_not_a_gif`).
-- **UI.** Placeholder e nome acessível "Search KLIPY" nas duas línguas, "Powered by KLIPY" visível, explícitos
-  desligados a cada início e mantidos na sessão, popover "?" como disclosure (`aria-expanded`/`aria-controls`, Esc
-  fecha só ele, clique fora, foco volta ao "?"), 429 com 100/h e o Painel, chave recusada abre a ajuda, grade com
-  roving tabindex, `aria-live`, stills com movimento reduzido e animações só em `prefers-reduced-motion:
-  no-preference`. Tudo coberto pelos 6 testes e2e × 4 projetos com axe e `watchErrors`. Paridade i18n pelo teste
-  existente. Nada de ternário aninhado, `force: true`, `RegExp` de variável ou promessa solta nos arquivos novos
-  (as chamadas `void` têm `catch` dentro).
+## Regressões e o código novo
+- **`setup(app, Start)` em produção.** Comparei com o fechamento antigo. A ordem é a mesma (compor, `restore_theme`,
+  `manage` do backend, do `Gifs` e do `Unsaved`, bandeja, laço de atualização, janela salvo `--hidden`); `add_tray`
+  faz o mesmo `tray::create` e os dois `manage`, e o laço chama o mesmo `LiveItem::sync` por uma closure. As pastas
+  vêm de `Folders::of` com os mesmos métodos do Tauri; antes `data_dir()` já era exigido (em `gifs()`), e uma
+  falha agora para o setup um pouco antes, com o mesmo resultado (o app não abre). Plugins (single-instance
+  primeiro, dialog, autostart, opener), `on_window_event`, os comandos e o `run` seguem iguais.
+  `show_main_window` só ficou genérica. Não achei mudança de comportamento.
+- **O teste do setup não grava nas pastas do usuário.** Rodei os dois testes novos de `lib.rs` com
+  `HOME`/`XDG_*`/`TMPDIR` apontando para uma pasta vazia. O teste da coleção não toca nada fora do `TMPDIR`, e a
+  raiz temporária é apagada. O do setup só cria `$XDG_DATA_HOME` vazio: com `~/.local` somente leitura, o Tauri do
+  mock falha com "Failed to setup app: Permission denied". No `HOME` real essa pasta já existe, então nada muda
+  lá. Não sobrou `/tmp/bezel-app-setup-*` (o laço de atualização que continua vivo não recria a raiz).
+- **`collectionUnavailable`.** Coerente nos 7 usos (`list`, `collect`, `rename`, `delete`, `users`,
+  `use_in_theme`, `dto`); a pasta é reaberta a cada uso; o texto cita pasta e motivo, sem chave. Sem chave e com a
+  pasta inutilizável, "Adicionar" diz `collectionUnavailable` antes de `klipyNoKey`: aceitável.
+- **`e2e-passed.mjs`.** Correto no que promete: exige `expected`/`passed` no último resultado e a anotação `axe` em
+  cada projeto; `fixme`, `skipped`, `flaky`, `missing`, `no axe` e falhas de testes não nomeados reprovam;
+  relatório num temporário novo; o Playwright que cai sem relatório dá exit 1. Mas o número de projetos não é
+  conferido (W1).
 
 ## Blockers
-- Nenhum.
+- **B1 — DoD 7: o `rust-windows` falha no `HEAD` `9c8295d`** (`.jdi/phases/gif-sticker-search/CONTEXT.md`, linha 7
+  do DoD). No run **36952865167**, o passo "cargo test com cobertura" para quando sobe o binário de testes da lib do
+  studio. Em `Running unittests src\lib.rs (…\bezel_studio-fb074d879e999991.exe)` o processo sai com
+  **`0xc0000139` (STATUS_ENTRYPOINT_NOT_FOUND)** antes do primeiro teste. Tinham passado 663 testes em 25 binários;
+  nenhum teste do studio no Windows rodou, nem os binários depois dele. `Portao` = failure. O run anterior,
+  36948045888 no `8df7ffa`, estava verde com esse mesmo binário. A única mudança da iter 2 no link desse binário é a
+  `f3bd567`: `tauri` com `features = ["test"]` em `apps/bezel-studio/src-tauri/Cargo.toml:52-54` e o teste do mock
+  em `src/lib.rs:655`. Causa provável (hipótese, sem Windows aqui): o `tauri-build` só embute o manifest do Common
+  Controls v6 nos bins (`tauri-build-2.7.0/src/lib.rs:816`), e o código do `App` puxado pelo mock passa a importar
+  entradas do `comctl32` v6. O Linux passou (933/0/12, com os 3 testes novos).
+  **Correção:** fazer o binário de testes subir no Windows, por exemplo embutindo o mesmo manifest nos testes pelo
+  `build.rs` (`cargo:rustc-link-arg-tests=/MANIFEST:EMBED` + `/MANIFESTINPUT:<manifest>` no alvo msvc). Depois,
+  provar com o `rust-windows` verde no novo `HEAD`. Tirar o teste do Windows por `cfg` esconderia a falha.
+- **B2 — PROJECT DoD "No TODO/FIXME" falha no `HEAD`** (`.jdi/PROJECT.md:59`, alargada em `e2c9cb2`). Rodando como
+  está escrita, sai com exit 1 e 9 linhas, todas do `d5fa90e`, que veio depois do alargamento:
+  `apps/bezel-studio/scripts/e2e-passed.mjs:2`, `:5`, `:92` e `apps/bezel-studio/tests/ui/e2e-passed.test.mjs:4`,
+  `:64-66`, `:68-69`. É a palavra `fixme` da API do Playwright (`test.fixme`, anotação `'fixme'`), não um
+  marcador, mas o `\b(todo|fixme)\b` case-insensitive conta. O "OK no HEAD" do `e2c9cb2` valia antes do `d5fa90e`,
+  e o SUMMARY não roda essa linha depois dele. **Correção:** registrar a D-XX que o PROJECT exige (ver W2) e
+  ajustar o `Verify` para ignorar a anotação do Playwright (por exemplo `grep -vE "test\.fixme|'fixme'"` antes do
+  filtro de issue). Outra saída é mudar as 9 linhas sem perder o sentido. Depois, rodar a linha de novo no `HEAD`.
 
 ## Warnings
-- **W1 — A seção Privacidade do guia erra os formatos pedidos aos stickers.** `docs/user/gifs-and-stickers.md:162` e
-  `docs/user/pt-BR/gifs-and-stickers.md:169` dizem que o Bezel pede "GIF, and JPEG stills" / "GIF, e imagens paradas
-  em JPEG"; desde D-7 os stickers pedem `gif,png` (`client.rs:334-339`) e o still de um sticker é PNG. É a seção
-  que D-6 manda listar exatamente o que é enviado; trocar por "GIF, with JPEG stills for GIFs and PNG stills for
-  stickers" nas duas línguas.
-- **W2 — Uma coleção que não abre vira, calada, uma coleção em memória.** `lib.rs:415-422`: se
-  `DiskCollection::open` falha (pasta sem permissão, disco cheio), o studio usa `MemoryCollection` e só registra
-  `tracing::error!`, que nenhum subscriber do studio mostra. A janela exibe uma coleção vazia mesmo havendo
-  `collection.json`, e o que o usuário adicionar some ao fechar, sem aviso: o oposto do "a collection never
-  vanishes" de D-5 (que o caso do índice ilegível cumpre). Repete o padrão de `copies()` (`lib.rs:398-405`), por
-  isso não bloqueia; o mínimo é a Coleção dizer que está guardando só nesta sessão.
-- **W3 — Chave curta salva mostra "Saved key ending in " sem nada.** `gif-search.js:267` passa `last4: ''` quando o
-  backend devolve `last4: null` (chaves de 1 a 8 caracteres passam no `is_valid_key`), e `gifs.keySaved` (en e
-  pt-BR) termina vazio. Uma chave do KLIPY é longa, mas uma colagem errada curta chega aqui; usar um texto
-  "Key saved" sem final para `last4 === null`.
+- **W1 — A linha 5 não confere os "4 projetos".** `e2e-passed.mjs` exige "cada projeto que o config declara"
+  (`scripts/e2e-passed.mjs:120`, `:132`), mas o `Verify` não fixa quantos são. Tirei 3 dos 4 projetos de
+  `playwright.config.mjs` (linhas 23-28) numa cópia, e o `Verify` de agora deu `ok: 6 tests × 1 projects` → `OK`.
+  O critério fala em 4 projetos (claro/escuro × pt-BR/en). **Correção:** o `Verify` exigir `× 4 projects` na saída,
+  ou a ferramenta receber a lista esperada.
+- **W2 — O DoD LOCKED do PROJECT mudou sem D-XX.** `.jdi/PROJECT.md:49` diz "Change requires a new D-XX in
+  DECISIONS.md plus manual edit here". O `e2c9cb2` alargou o pathspec (correção pedida pelo crítico) sem registrar
+  a decisão; `git diff origin/main...HEAD -- .jdi/decisions` só tem as 7 desta fase. Registrar junto com a
+  correção de B2.
 
 ## DoD Checklist (gate 8)
 | # | Criterion | Source | Type | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | Core: filtro, GIF ≤ 25 MiB, cópia única, não-GIF recusado; sem KLIPY/HTTP | CONTEXT | Auto | PASS | `OK` (comando como escrito): `ok. 2 passed` na lib e `ok. 3 passed` em `tests/gifs.rs`; `grep` vazio. M6 derruba `refuses_a_download_that_is_not_a_gif` |
-| 2 | `KlipyClient` contra servidor HTTP loopback com JSON gravado | CONTEXT | Auto | PASS | `OK` (`ok. 6 passed`). M1, M2, M7 e M8 derrubam testes desta linha |
-| 3 | Studio e disco: nada sai sem chave/no início, chave privada, só itens da última busca, alpha, fundo animado, excluir nomeia temas; CSP igual | CONTEXT | Auto | PASS | `OK` (`ok. 8 passed` no studio, `ok. 2 passed` no `bezel-media`, CSP e capability conferidas). M3, M4 e M5 derrubam testes desta linha |
-| 4 | `Cargo.lock` só ganha pacotes; `ureq` só via `bezel-klipy`; CLI sem `ureq`/`rustls` | CONTEXT | Auto | PASS | `OK`. Nenhuma linha `-version`; também sem `ring`/`webpki-roots` na CLI |
-| 5 | UI: `gif-search.test.mjs`, i18n, Playwright 4 projetos + axe | CONTEXT | Auto | PASS | `OK` com `BEZEL_E2E_PORT=1442` (rodado em `bash -c` com as aspas trocadas, por causa do zsh; mesma semântica): `# pass 4`, `test:unit` 207/207, `-g "gif search\|gif collection"` 24 passed |
-| 6 | Guia en/pt-BR com Privacidade, check-docs e CHANGELOG | CONTEXT | Auto | PASS | `OK`; `check-docs.sh` exit 0. Ver W1 sobre o conteúdo da seção |
-| 7 | CI do Windows verde no HEAD do PR | CONTEXT | Auto | PASS | Esperei o run terminar (`gh run watch 36948045888 --exit-status`: exit 0) e rodei o comando como escrito com `HEAD` = `8df7ffa` → `OK` (achou o run **36948045888**, `completed success`). `rust-windows`: fmt, clippy e `cargo test` com cobertura verdes, **863 passed, 0 failed, 12 ignored**, com `bezel-klipy` (ring/rustls para MSVC), `gifs::tests::key_never_reaches_the_window` (o `create_private` de `cfg(not(unix))`) e `collection::tests::saves_atomically_by_content` (o bloqueio por `share_mode`) ok; empacotamento ok. Verdes também `rust-linux`, `node-ui`, CodeQL (rust, js, actions), Varreduras (Gitleaks/TruffleHog), Versao e `Portao`; `sonar`, `imagem`, `publicar` e `lancar` `skipped`, como nas fases anteriores (D-2026-09-30-foundation-2) |
-| 8 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | Exit 0 → `OK`; 930/0/12 |
-| 9 | Coverage >= 80% of lines | PROJECT | Auto | PASS | Exit 0 → `OK`; TOTAL 94.15% |
-| 10 | No `TODO`/`FIXME` without issue | PROJECT | Auto | PASS | `OK` |
-| 11 | CHANGELOG.md updated per release | PROJECT | Manual | MANUAL_REQUIRED (release) | `[Unreleased]` → `### Added` com a busca KLIPY e a coleção; evidência sugerida: `## [x.y.z] - <data>` no corte de release |
-| 12 | README describes current behavior | PROJECT | Manual | MANUAL_REQUIRED (release) | README cita a busca de GIFs e stickers e o guia novo; evidência sugerida: diff do README revisado no PR |
+| 1 | Core: filtro, GIF ≤ 25 MiB, cópia única, não-GIF recusado; sem KLIPY/HTTP | CONTEXT | Auto | PASS | `OK`. Mutante `http` no core: iter 1 `OK`, agora exit 1 |
+| 2 | `KlipyClient` contra servidor HTTP loopback | CONTEXT | Auto | PASS | `OK` (6 passed) |
+| 3 | Studio e disco: nada sai sem chave/no início, chave privada, …; CSP igual | CONTEXT | Auto | PASS | `OK` (9 + 2 passed, CSP igual à da `origin/main`, nenhuma capability com `opener:`/`http:`). Os 3 mutantes do crítico derrubam o `Verify` |
+| 4 | `Cargo.lock` só ganha pacotes; `ureq` só via `bezel-klipy`; CLI sem `ureq`/`rustls` | CONTEXT | Auto | PASS | `OK` |
+| 5 | UI: `gif-search.test.mjs`, i18n, Playwright 4 projetos + axe | CONTEXT | Auto | PASS | `OK`: `# pass 4`, `test:unit` ok, `ok: 6 tests × 4 projects, 24/24 runs passed with axe`. Mutante `fixme`/sem axe: exit 1. Ver W1 |
+| 6 | Guia en/pt-BR com Privacidade, check-docs e CHANGELOG | CONTEXT | Auto | PASS | `OK`. Mutante de Privacidade oca: exit 1 (60 problemas) |
+| 7 | CI do Windows verde no HEAD do PR | CONTEXT | Auto | **FAIL** | Esperei o run 36952865167 terminar (`gh run watch --exit-status`: exit 1, `completed failure`) e rodei o comando como escrito com `HEAD` = `9c8295d`: exit 1 (`rust-windows` = `failure`). B1 |
+| 8 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | `OK`; 933/0/12 |
+| 9 | Coverage >= 80% of lines | PROJECT | Auto | PASS | `OK`; TOTAL 94.40% |
+| 10 | No `TODO`/`FIXME` without issue | PROJECT | Auto | **FAIL** | Exit 1: 9 linhas com `fixme` em `scripts/e2e-passed.mjs` e `tests/ui/e2e-passed.test.mjs`. B2 |
+| 11 | CHANGELOG.md updated per release | PROJECT | Manual | MANUAL_REQUIRED (release) | `[Unreleased]` cita KLIPY; evidência sugerida: `## [x.y.z] - <data>` no corte de release |
+| 12 | README describes current behavior | PROJECT | Manual | MANUAL_REQUIRED (release) | README cita a busca e o guia; evidência sugerida: diff do README revisado no PR |
 
-As linhas 11 e 12 são do corte de release, como nas fases anteriores. Os itens de "Deferred to PR review" (busca real
-com a chave do usuário, já feita pelo orquestrador e registrada no SUMMARY; termos do KLIPY; visual; sticker na 8.8"
-real, T-8) não são linhas de DoD.
+## CI (run 36952865167, `9c8295d`)
+`rust-windows` **failure** (B1); `rust-linux` success (933/0/12, os 3 testes novos ok); `node-ui`, CodeQL (rust,
+js, actions), Varreduras e Versao success; `Portao` **failure**; `sonar`, `imagem`, `publicar` e `lancar` skipped.
 
 ## Observações (sem aviso)
-- **Tempo de 10 s para o arquivo inteiro.** `timeout_global` (`client.rs:98`) cobre do DNS ao último byte, como D-2
-  e a doc do crate dizem. Os GIFs reais dos fixtures têm até 3,7 MB (a 10 s, ~3 Mbit/s bastam), mas um GIF grande numa
-  conexão lenta falha com "no answer within 10 s", o que soa como servidor mudo. Um texto "took longer than 10 s"
-  seria mais honesto.
-- **`collected_users` lê a biblioteca inteira.** `gifs.rs:399-417` carrega cada tema do usuário com todos os assets
-  (vídeos de até 25 MiB) a cada "Excluir…", só para comparar tamanhos e hashes. Funciona fora da thread da UI; com
-  uma biblioteca grande o diálogo demora a abrir.
-- **Nomes reservados do Windows.** `file_stem` (`gifs.rs:582`) deixa passar `con`, `nul`, `aux`, `com1`…: "Usar como
-  fundo" grava `<cache>/collection/nul.gif`, que no Windows 10 é o dispositivo NUL, e a adição falha. Só o caminho do
-  fundo toca o disco com esse nome; o usuário contorna renomeando.
-- **`klipy.json` no Windows sem nova tentativa.** `write_private` (`key.rs:153-167`) renomeia uma vez; o
-  `write_atomically` da coleção tenta de novo enquanto um antivírus ou indexador segura o arquivo (`patiently`).
-- **Proxy.** O `ureq 3` lê `HTTP(S)_PROXY`/`ALL_PROXY` do ambiente por padrão (`config.rs:948`). Para HTTPS ele abre
-  um túnel `CONNECT`, então a chave segue dentro do TLS; o guia já fala de firewall/proxy.
-- **Avisos de terceiros.** O projeto não distribui avisos de licença dos crates (anterior à fase). O
-  `webpki-roots` (CDLA-Permissive-2.0) entra nessa mesma lacuna; vale para um todo de empacotamento, não para esta fase.
-- **PLAN.** As tasks seguem `Status: pending` no PLAN; o SUMMARY registra 8/9 concluídas.
+- O teste do setup espera a 1ª volta do laço e mais 1,5 s. Um aquecimento atrasado além disso escaparia. É o
+  limite de um teste com janela de tempo; o mutante do crítico (imediato) cai.
+- Os testes novos de `lib.rs` só apagam a raiz temporária quando chegam ao fim; uma falha no meio deixa
+  `/tmp/bezel-app-*`. Há um `/tmp/bezel-app-collection-2188221` das 22:41, anterior a esta revisão.
+- Ficam valendo as observações da iter 1 (timeout de 10 s, `collected_users` lendo a biblioteca, nomes reservados
+  do Windows, `klipy.json` sem nova tentativa, proxy, avisos de terceiros).
 
 ## Recommendation
-Nenhum gate falha e as 10 linhas Auto passam, incluindo o Windows no CI do `HEAD` `8df7ffa` (run 36948045888,
-`rust-windows` 863/0/12, `Portao` verde). A chave do usuário não chega à janela, a DTO, erro, `Debug`, log,
-temporário nem índice; a rede só sai por ação do usuário, para `api.klipy.com` (chave no caminho, sem redirect) e
-`static.klipy.com` (sem chave, com teto), e a janela não consegue apontar o backend para outro endereço. As regras
-de D-7 estão no código e nos testes. As 8 mutações que fiz (vazamento no erro, redirects, modo do arquivo, itens só da
-última busca, índice ilegível, não-GIF, filtro dos stickers, 404) derrubaram os testes do DoD que nomeiam a regra.
-
-Ficam 3 avisos sem bloqueio: a seção Privacidade do guia diz que os stickers são pedidos com stills JPEG (W1), a
-queda silenciosa para uma coleção em memória quando a pasta não abre (W2) e o "Saved key ending in " vazio de uma
-chave curta (W3). Vale corrigir W1 antes do PR, porque é a seção que o usuário lê para saber o que sai do
-computador. W2 e W3 podem ir para o PR ou para um todo. As 2 linhas Manual do PROJECT ficam para o corte de release;
-a T-8 (sticker na 8.8" real) e o visual seguem em "Deferred to PR review", com o orquestrador.
-
-## DoD Critic (enhanced)
-
-- DoD row «1 | Core … sem KLIPY/HTTP»: oca e objetiva — o grep só procura nomes; `http = "1.5.0"` no core e um
-  `ServiceFailure::of_status(http::StatusCode)` passam com OK. Correção: o Verify exige que o core só dependa de
-  `thiserror` (`cargo tree -p bezel-core -e normal --depth 1`).
-- DoD row «3 | Studio e disco … CSP igual»: oca e objetiva — (a) a CSP é checada por substring
-  (`img-src 'self' https://static.klipy.com data: blob:` passa); (b) "nada sai no início" só é provado num `Gifs` de
-  teste: uma busca de aquecimento no `setup` real (`lib.rs:153-160`) com a chave salva passa. Suspeita: só
-  `capabilities/default.json` é lido. Correção: CSP igual à da `main` byte a byte; teste do `setup` real com a fonte
-  injetada; todas as capabilities.
-- DoD row «5 | UI … Playwright 4 projetos + axe»: oca e objetiva — só conta `>= 24 passed`; `test.fixme('429: 100 per
-  hour')` + outro teste qualquer passa. Correção: cada um dos 6 testes nomeados aprovado nos 4 projetos, com o axe
-  registrado em cada execução.
-- DoD row «6 | Guia … Privacidade»: oca e objetiva — só o título é exigido; trocar a seção por uma frase passa (por
-  isso o W1 passou). Correção: o `check-docs.sh` exige na seção o que sai, para onde, quando, onde fica a chave e como
-  removê-la.
-- DoD row «10 | No TODO/FIXME without issue» (PROJECT): oca e objetiva — o pathspec ignora `.mjs`, `.css`, `.html`,
-  `.sh`; um TODO em `gif-search.spec.mjs` passa. Correção: ampliar o pathspec.
-- Linhas 2, 4, 7, 8, 9: provam o critério.
-
-**Verdict:** BLOCKED
+Os 3 avisos da iter 1 e as 5 linhas do crítico estão resolvidos. Cada mutação do crítico, refeita, passa no
+`Verify` da iter 1 e derruba o de agora. A refatoração do `setup` mantém o comportamento de produção. Há dois
+bloqueios novos, os dois vindos da iter 2:
+(B1) o teste com o mock runtime do Tauri faz o binário de testes do studio não subir no Windows, e o CI do `HEAD`
+está vermelho; (B2) a linha de TODO/FIXME do PROJECT, alargada nesta iteração, reprova a própria ferramenta
+`e2e-passed.mjs`.
+Corrigir os dois, registrar a D-XX da mudança do PROJECT (W2) e fixar os 4 projetos na linha 5 (W1). Depois,
+fazer push e rodar de novo as linhas 7 e 10 no novo `HEAD`.

@@ -13,7 +13,7 @@ GIFs/stickers do KLIPY, com a chave do usuário, numa coleção local gerenciáv
 - D-7: API real: `format_filter` por tipo, still PNG no sticker, 404 = chave recusada.
 
 ## Canonical refs
-- Card: pedido de 2026-10-01; `D-2026-10-01-gif-sticker-search-{1..9}`; video-background-framing-7; docs.klipy.com
+- Card: pedido de 2026-10-01; `D-2026-10-01-gif-sticker-search-{1..15}`; docs.klipy.com
 
 ## Out of scope
 - CLI, arquivos locais, WebP/MP4, Share/Report, desfazer, keyring: `.jdi/todos/2026-10-01-gif-sticker-search.md`.
@@ -22,7 +22,7 @@ GIFs/stickers do KLIPY, com a chave do usuário, numa coleção local gerenciáv
 
 ### Auto-verifiable
 - [ ] Core: filtro, GIF ≤ 25 MiB, cópia única, não-GIF recusado; sem KLIPY/HTTP
-      **Verify:** `cargo test -p bezel-core --locked --lib -- --exact domain::gifs::tests::explicit_maps_to_the_filter domain::gifs::tests::picks_the_largest_gif_under_25_mib 2>&1 | grep -q 'ok. 2 passed' && cargo test -p bezel-core --locked --test gifs -- --exact keeps_one_copy_per_content refuses_a_download_that_is_not_a_gif renames_and_deletes_items 2>&1 | grep -q 'ok. 3 passed' && ! grep -rqi klipy crates/bezel-core && [ "$(cargo tree -p bezel-core --locked -e normal --depth 1 --prefix none | sed 1d | cut -d' ' -f1 | sort -u)" = thiserror ] && echo OK`
+      **Verify:** `cargo test -p bezel-core --locked --lib -- --exact domain::gifs::tests::explicit_maps_to_the_filter domain::gifs::tests::picks_the_largest_gif_under_25_mib 2>&1 | grep -q 'ok. 2 passed' && cargo test -p bezel-core --locked --test gifs -- --exact keeps_one_copy_per_content refuses_a_download_that_is_not_a_gif renames_and_deletes_items 2>&1 | grep -q 'ok. 3 passed' && ! grep -rqiE 'klipy|TcpStream|UdpSocket|TcpListener|net::' crates/bezel-core && [ "$(cargo tree -p bezel-core --locked -e normal --depth 1 --prefix none | sed 1d | cut -d' ' -f1 | sort -u)" = thiserror ] && echo OK`
       **Source:** CONTEXT
 - [ ] `KlipyClient` contra servidor HTTP loopback com JSON gravado
       **Verify:** `cargo test -p bezel-klipy --locked --lib -- --exact client::tests::searches_over_loopback_http client::tests::maps_429_and_refused_keys client::tests::stops_at_the_byte_limit client::tests::files_only_from_klipy_without_key client::tests::errors_hide_the_key client::tests::production_is_https_api_klipy_com 2>&1 | grep -q 'ok. 6 passed' && echo OK`
@@ -53,4 +53,4 @@ GIFs/stickers do KLIPY, com a chave do usuário, numa coleção local gerenciáv
 - Sticker na 8.8" real com transparência.
 
 ## Notes
-- DoD 1, 3, 4, 5 apertadas após o crítico (D-9..D-14).
+- DoD 1, 3, 4, 5 apertadas após o crítico.

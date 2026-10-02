@@ -1,12 +1,19 @@
-//! The user's KLIPY key on disk (D-2026-10-01-gif-sticker-search-3):
-//! `<config>/klipy.json`, next to `settings.json` and not inside it, holding
-//! the key and the customer id made for it. It is replaced atomically
-//! (written whole to a temporary file next to it, then renamed over it) and,
-//! on Unix, readable only by the user (0600); on Windows the profile's ACL
-//! keeps it. Removing the key deletes the file.
+//! The user's KLIPY key (D-2026-10-01-gif-sticker-search-3, -10).
 //!
-//! The key never leaves this module but towards the GIF source: no error
-//! text, log line or `Debug` output carries it.
+//! - [`KlipyKey`] is the key from the command boundary on: the
+//!   `save_klipy_key` command's argument is one, checked as the window's
+//!   invocation is read, and so is the key the file holds. It has no
+//!   `Display`, no `Serialize` and no conversion to a string, and its
+//!   `Debug` is the same for every key, so printing or logging it does not
+//!   compile, or shows nothing of it. Its text is read by one crate-private
+//!   accessor, [`KlipyKey::expose_secret`], for KLIPY's client (the source
+//!   factory, `klipy_source` in `lib.rs`) and for the key file here.
+//! - The key file is `<config>/klipy.json`, next to `settings.json` and not
+//!   inside it, holding the key and the customer id made for it. It is
+//!   replaced atomically (written whole to a temporary file next to it, then
+//!   renamed over it) and, on Unix, readable only by the user (0600); on
+//!   Windows the profile's ACL keeps it. Removing the key deletes the file.
+//!   No error text it gives quotes the key.
 
 use std::fmt;
 use std::fs::{self, File};
@@ -14,6 +21,8 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use tauri::Runtime;
+use tauri::ipc::{CommandArg, CommandItem, InvokeError};
 
 use crate::messages::{ErrorCode, UiError, UiResult};
 
@@ -27,35 +36,84 @@ const MAX_KEY_CHARS: usize = 128;
 /// key would show most of itself.
 const SHOWN_FROM_CHARS: usize = 9;
 
-/// Whether `text` can be a KLIPY key: 1 to 128 letters, digits, `_` and
-/// `-` (it is a segment of the API's path).
-pub fn is_valid_key(text: &str) -> bool {
+/// Whether `text` can be a KLIPY key or a customer id: 1 to 128 letters,
+/// digits, `_` and `-` (each is a segment of the API's path).
+fn is_valid_key(text: &str) -> bool {
     (1..=MAX_KEY_CHARS).contains(&text.len())
         && text
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
+/// A KLIPY key: 1 to 128 letters, digits, `_` and `-`. Nothing shows it:
+/// no `Display`, no `Serialize`, no `Deref`, `AsRef<str>` or conversion to
+/// a `String`, and a `Debug` that prints only `KlipyKey(..)`.
+#[derive(Clone, PartialEq, Eq)]
+pub struct KlipyKey(String);
+
+impl KlipyKey {
+    /// `text` as a key; `invalidInput`, which never quotes it, when it
+    /// cannot be one.
+    pub fn parse(text: &str) -> UiResult<Self> {
+        if is_valid_key(text) {
+            Ok(Self(text.to_string()))
+        } else {
+            Err(invalid_key())
+        }
+    }
+
+    /// The key's text: for KLIPY's client, made by the source factory
+    /// (`klipy_source`), and for the key file only.
+    pub(crate) fn expose_secret(&self) -> &str {
+        &self.0
+    }
+
+    /// The last 4 characters the window may show: only of a key of more
+    /// than 8 characters.
+    pub fn last4(&self) -> Option<String> {
+        let shown = self.0.len().checked_sub(4)?;
+        (self.0.len() >= SHOWN_FROM_CHARS).then(|| self.0[shown..].to_string())
+    }
+}
+
+/// The same for every key: nothing of it.
+impl fmt::Debug for KlipyKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("KlipyKey(..)")
+    }
+}
+
+/// The window's key, as a command's argument: the same JSON string as
+/// before, checked as the invocation is read. Not through `Deserialize`,
+/// which Tauri turns into a plain-text rejection: a key that cannot be one
+/// rejects with `invalidInput`, as the window expects (`keyFailure`).
+impl<'de, R: Runtime> CommandArg<'de, R> for KlipyKey {
+    fn from_command(command: CommandItem<'de, R>) -> Result<Self, InvokeError> {
+        let (name, arg) = (command.name, command.key);
+        let text =
+            String::deserialize(command).map_err(|e| tauri::Error::InvalidArgs(name, arg, e))?;
+        Ok(Self::parse(&text)?)
+    }
+}
+
 /// A saved key and the customer id made for it.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SavedKey {
-    key: String,
+    key: KlipyKey,
     customer_id: String,
 }
 
 impl SavedKey {
-    /// `key` (checked with [`is_valid_key`] by the caller) and its
-    /// `customer_id`.
-    pub fn new(key: &str, customer_id: &str) -> Self {
+    /// `key` and its `customer_id`.
+    pub fn new(key: KlipyKey, customer_id: &str) -> Self {
         Self {
-            key: key.to_string(),
+            key,
             customer_id: customer_id.to_string(),
         }
     }
 
-    /// The key: for the GIF source only.
-    pub fn key(&self) -> &str {
+    /// The key.
+    pub fn key(&self) -> &KlipyKey {
         &self.key
     }
 
@@ -64,17 +122,9 @@ impl SavedKey {
         &self.customer_id
     }
 
-    /// The last 4 characters the window may show: only of a key of more
-    /// than 8 characters.
+    /// The last 4 characters of the key the window may show.
     pub fn last4(&self) -> Option<String> {
-        let shown = self.key.len().checked_sub(4)?;
-        (self.key.len() >= SHOWN_FROM_CHARS).then(|| self.key[shown..].to_string())
-    }
-
-    /// Whether what was read can be used: a valid key and a customer id of
-    /// the same characters.
-    fn is_valid(&self) -> bool {
-        is_valid_key(&self.key) && is_valid_key(&self.customer_id)
+        self.key.last4()
     }
 }
 
@@ -82,6 +132,23 @@ impl SavedKey {
 impl fmt::Debug for SavedKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SavedKey").finish_non_exhaustive()
+    }
+}
+
+/// The key file's JSON: `{"key": …, "customerId": …}`.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyJson {
+    key: String,
+    customer_id: String,
+}
+
+impl KeyJson {
+    /// What was read, when it can be used: a valid key and a customer id of
+    /// the same characters.
+    fn saved(self) -> Option<SavedKey> {
+        let key = KlipyKey::parse(&self.key).ok()?;
+        is_valid_key(&self.customer_id).then(|| SavedKey::new(key, &self.customer_id))
     }
 }
 
@@ -111,8 +178,8 @@ impl KeyFile {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(UiError::file(self.path.display(), e)),
         };
-        let saved = serde_json::from_slice::<SavedKey>(&bytes).ok();
-        match saved.filter(SavedKey::is_valid) {
+        let saved = serde_json::from_slice::<KeyJson>(&bytes).ok();
+        match saved.and_then(KeyJson::saved) {
             Some(saved) => Ok(Some(saved)),
             None => Err(UiError::file(
                 self.path.display(),
@@ -124,7 +191,11 @@ impl KeyFile {
     /// Saves `saved`, replacing the file atomically, readable only by the
     /// user on Unix.
     pub fn save(&self, saved: &SavedKey) -> UiResult<()> {
-        let json = serde_json::to_vec_pretty(saved).map_err(UiError::system)?;
+        let json = KeyJson {
+            key: saved.key.expose_secret().to_string(),
+            customer_id: saved.customer_id.clone(),
+        };
+        let json = serde_json::to_vec_pretty(&json).map_err(UiError::system)?;
         write_private(&self.path, &json).map_err(|e| UiError::file(self.path.display(), e))
     }
 
@@ -140,7 +211,7 @@ impl KeyFile {
 }
 
 /// A key the window sent that cannot be one; the message never quotes it.
-pub fn invalid_key() -> UiError {
+fn invalid_key() -> UiError {
     UiError::new(ErrorCode::InvalidInput).arg(
         "detail",
         "a KLIPY key has 1 to 128 letters, digits, _ and -",

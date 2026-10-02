@@ -31,6 +31,11 @@ use crate::studio::Motion as Playback;
 /// An obvious fake key: long enough for its last 4 characters to show.
 const KEY: &str = "fake-KLIPY_key-0123456789abcdef";
 
+/// `text` as a key.
+fn klipy(text: &str) -> KlipyKey {
+    KlipyKey::parse(text).unwrap()
+}
+
 /// The user's action behind each search, preview and collect of these
 /// tests: what a command the window invoked gives the GIF state.
 const ASKED: UserAsked = UserAsked::in_a_test();
@@ -128,10 +133,10 @@ fn gifs_in(
         let source = source.clone();
         let made = Arc::clone(made);
         Arc::new(
-            move |_: &UserAsked, key: &str, customer: &str| -> Arc<dyn GifSource> {
+            move |_: &UserAsked, key: &KlipyKey, customer: &str| -> Arc<dyn GifSource> {
                 made.lock()
                     .unwrap()
-                    .push((key.to_string(), customer.to_string()));
+                    .push((key.expose_secret().to_string(), customer.to_string()));
                 Arc::new(source.clone())
             },
         )
@@ -321,7 +326,7 @@ fn no_request_at_start_or_without_key() {
     assert!(f.source.calls().is_empty(), "nothing without a key");
     assert!(f.made().is_empty());
 
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
     assert!(f.source.calls().is_empty(), "saving a key asks nothing");
     assert!(f.made().is_empty());
 
@@ -357,7 +362,7 @@ fn key_never_reaches_the_window() {
         false,
     );
     let f = fixture("key", source);
-    let saved = f.gifs.save_key(KEY).unwrap();
+    let saved = f.gifs.save_key(klipy(KEY)).unwrap();
     assert_eq!(
         saved,
         KeyDto {
@@ -381,8 +386,8 @@ fn key_never_reaches_the_window() {
         json(&f.gifs.rename(&collected.id, "Mine").unwrap()),
         json(&f.gifs.users(f.backend(), &collected.id).unwrap()),
         json(&f.gifs.preview(&ASKED, "s9", false).unwrap_err()),
-        json(&f.gifs.save_key("not a key!").unwrap_err()),
-        json(&f.gifs.save_key(&format!("{KEY}/x")).unwrap_err()),
+        json(&KlipyKey::parse("not a key!").unwrap_err()),
+        json(&KlipyKey::parse(&format!("{KEY}/x")).unwrap_err()),
     ];
     // What the provider said goes to the window as a code, never with the
     // key.
@@ -395,12 +400,13 @@ fn key_never_reaches_the_window() {
             "key-failing",
             FakeGifSource::new().failing(BezelError::Service(failure)),
         );
-        failing.gifs.save_key(KEY).unwrap();
+        failing.gifs.save_key(klipy(KEY)).unwrap();
         let star = query("sticker", "star", 1, false, Language::English).unwrap();
         window.push(json(&failing.gifs.search(&ASKED, &star).unwrap_err()));
     }
     window.push(format!("{:?}", f.gifs));
     window.push(format!("{:?}", f.gifs.key.load().unwrap()));
+    window.push(format!("{:?}", klipy(KEY)));
     for answer in &window {
         assert!(!answer.contains(KEY), "{answer}");
     }
@@ -426,14 +432,14 @@ fn key_never_reaches_the_window() {
 
     // Saving it again keeps its customer id; another key gets a new one, and
     // a short key shows no characters.
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
     assert_eq!(f.gifs.key.load().unwrap().unwrap().customer_id(), customer);
-    let short = f.gifs.save_key("abcd1234").unwrap();
+    let short = f.gifs.save_key(klipy("abcd1234")).unwrap();
     assert_eq!((short.configured, short.last4), (true, None));
     assert_ne!(f.gifs.key.load().unwrap().unwrap().customer_id(), customer);
 
     for bad in ["", "two words", "slash/es", "ç", &"k".repeat(129)] {
-        let error = f.gifs.save_key(bad).unwrap_err();
+        let error = KlipyKey::parse(bad).unwrap_err();
         assert_eq!(error.code(), "invalidInput");
         assert!(
             bad.is_empty() || !error.to_string().contains(bad),
@@ -455,6 +461,30 @@ fn key_never_reaches_the_window() {
     assert!(!f.key_path().exists());
     assert!(!f.gifs.key_status().unwrap().configured);
     f.gifs.remove_key().unwrap();
+}
+
+/// D-2026-10-01-gif-sticker-search-10: a [`KlipyKey`]'s `Debug`, plain or
+/// pretty, and its saved key's, show no character of it beyond what its
+/// last 4 show the window: `KlipyKey(..)` for every key.
+#[test]
+fn a_key_prints_nothing_of_itself() {
+    // Keys of characters that `KlipyKey(..)` and `SavedKey { .. }` do not
+    // hold, long and short.
+    for text in ["0123456789-_ABCDEFGHJ", "ZQ_-0987654321MNOPRTU", "1234"] {
+        let key = klipy(text);
+        assert_eq!(format!("{key:?}"), "KlipyKey(..)");
+        let shown = key.last4().unwrap_or_default();
+        let saved = SavedKey::new(key.clone(), "customer-1");
+        for printed in [
+            format!("{key:?}"),
+            format!("{key:#?}"),
+            format!("{saved:?}"),
+            format!("{:?}", Some(&key)),
+        ] {
+            let rest = printed.replace(&shown, "");
+            assert!(!rest.chars().any(|c| text.contains(c)), "{printed}");
+        }
+    }
 }
 
 /// D-2026-10-01-gif-sticker-search-4: the window names results by id and
@@ -488,7 +518,7 @@ fn only_items_of_the_last_search() {
         false,
     );
     let f = fixture("last-search", source);
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
 
     let first = f.search("gif", "  cat ", 1);
     assert_eq!(
@@ -599,7 +629,7 @@ fn a_late_answer_does_not_replace_a_newer_search() {
         KeyFile::new(root.join(KEY_FILE)),
         Provider {
             source: Arc::new(
-                move |_: &UserAsked, _: &str, _: &str| -> Arc<dyn GifSource> { late.clone() },
+                move |_: &UserAsked, _: &KlipyKey, _: &str| -> Arc<dyn GifSource> { late.clone() },
             ),
             customer_id: bezel_klipy::new_customer_id,
         },
@@ -607,7 +637,7 @@ fn a_late_answer_does_not_replace_a_newer_search() {
         root.join("scratch"),
     ));
     cell.set(Arc::downgrade(&gifs)).unwrap();
-    gifs.save_key(KEY).unwrap();
+    gifs.save_key(klipy(KEY)).unwrap();
 
     let ca = query("gif", "ca", 1, false, Language::English).unwrap();
     assert_eq!(
@@ -676,7 +706,7 @@ fn sticker_alpha_shows_the_background() {
         false,
     );
     let f = fixture("alpha", source);
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
     let collected = f.collect_first("sticker", "star");
     assert_eq!(collected.kind, "sticker");
     for orientation in [Orientation::Portrait, Orientation::Landscape] {
@@ -731,7 +761,7 @@ fn animated_gif_background_as_today() {
         false,
     );
     let f = fixture("background", source);
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
     let collected = f.collect_first("gif", "waves");
     let added = f
         .gifs
@@ -782,7 +812,7 @@ fn delete_names_themes_using_it() {
         false,
     );
     let f = fixture("delete", source);
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
     f.search("gif", "party", 1);
     let used = f.gifs.collect(&ASKED, "p1").unwrap();
     let unused = f.gifs.collect(&ASKED, "p2").unwrap();
@@ -858,7 +888,7 @@ fn the_collection_lists_renames_and_shows_stills() {
         false,
     );
     let f = fixture("list", source);
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
     let trending = f.search("gif", "", 1);
     assert_eq!(trending.text, "");
     let still = f.gifs.preview(&ASKED, "t1", true).unwrap().unwrap();
@@ -916,7 +946,7 @@ fn stills_take_the_media_type_of_their_bytes() {
         false,
     );
     let f = fixture("stills", source);
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
     for (kind, id, still) in [
         ("gif", "g1", "data:image/jpeg;base64,"),
         ("sticker", "s1", "data:image/png;base64,"),
@@ -954,7 +984,7 @@ fn queries_failures_and_files_that_are_not_gifs() {
         "limited",
         FakeGifSource::new().failing(BezelError::Service(ServiceFailure::RateLimited)),
     );
-    limited.gifs.save_key(KEY).unwrap();
+    limited.gifs.save_key(klipy(KEY)).unwrap();
     let any = query("gif", "x", 1, false, english).unwrap();
     assert_eq!(
         limited.gifs.search(&ASKED, &any).unwrap_err().code(),
@@ -970,7 +1000,7 @@ fn queries_failures_and_files_that_are_not_gifs() {
         false,
     );
     let f = fixture("not-gif", source);
-    f.gifs.save_key(KEY).unwrap();
+    f.gifs.save_key(klipy(KEY)).unwrap();
     f.search("gif", "html", 1);
     assert_eq!(
         f.gifs.collect(&ASKED, "h1").unwrap_err().code(),
@@ -1010,7 +1040,7 @@ fn a_collection_folder_that_cannot_be_used_is_said_not_lost() {
     std::fs::create_dir_all(folder.parent().unwrap()).unwrap();
     std::fs::write(&folder, b"not a folder").unwrap();
     let gifs = gifs_in(&f.studio.root, &data, &f.source, &f.made);
-    gifs.save_key(KEY).unwrap();
+    gifs.save_key(klipy(KEY)).unwrap();
 
     let unusable = |error: UiError| {
         assert_eq!(error.code(), "collectionUnavailable", "{error}");

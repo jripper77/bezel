@@ -53,7 +53,8 @@ use crate::backend::{
 };
 use crate::commands::{Shared, Unsaved};
 use crate::gifs::{
-    Gifs, KEY_FILE, KeyFile, Provider, SharedGifs, SourceFactory, UserAsked, collection_in,
+    Gifs, KEY_FILE, KeyFile, KlipyKey, Provider, SharedGifs, SourceFactory, UserAsked,
+    collection_in,
 };
 use crate::library::ThemeLibrary;
 use crate::manager::Copies;
@@ -490,10 +491,12 @@ fn copies(data: &Path) -> Copies {
 
 /// KLIPY's client for a saved key (D-2026-10-01-gif-sticker-search-2),
 /// made only for a user action ([`UserAsked`]): making one asks nothing.
+/// The one reader of the key's text outside the key file
+/// (D-2026-10-01-gif-sticker-search-10).
 fn klipy_source() -> SourceFactory {
     Arc::new(
-        |_: &UserAsked, key: &str, customer: &str| -> Arc<dyn GifSource> {
-            Arc::new(KlipyClient::new(key, customer))
+        |_: &UserAsked, key: &KlipyKey, customer: &str| -> Arc<dyn GifSource> {
+            Arc::new(KlipyClient::new(key.expose_secret(), customer))
         },
     )
 }
@@ -669,7 +672,7 @@ mod tests {
     fn counting(source: &FakeGifSource, made: mpsc::Sender<()>) -> SourceFactory {
         let source = source.clone();
         Arc::new(
-            move |_: &UserAsked, _: &str, _: &str| -> Arc<dyn GifSource> {
+            move |_: &UserAsked, _: &KlipyKey, _: &str| -> Arc<dyn GifSource> {
                 let _ = made.send(());
                 Arc::new(source.clone())
             },
@@ -693,7 +696,7 @@ mod tests {
     fn the_app_setup_sends_nothing_at_start() {
         let root = temp_root("setup");
         let folders = Folders::under(&root);
-        let saved = SavedKey::new(KEY, "customer-0001");
+        let saved = SavedKey::new(KlipyKey::parse(KEY).unwrap(), "customer-0001");
         KeyFile::new(folders.config.join(KEY_FILE))
             .save(&saved)
             .unwrap();
@@ -792,7 +795,10 @@ mod tests {
         let root = temp_root("ipc");
         let folders = Folders::under(&root);
         KeyFile::new(folders.config.join(KEY_FILE))
-            .save(&SavedKey::new(KEY, "customer-0001"))
+            .save(&SavedKey::new(
+                KlipyKey::parse(KEY).unwrap(),
+                "customer-0001",
+            ))
             .unwrap();
         let cat = GifItem {
             id: "a1".into(),
@@ -881,6 +887,69 @@ mod tests {
             _ => None,
         };
         assert_eq!(asked, Some(("cat", "f/a1.gif", "f/a1.gif")), "{calls:?}");
+    }
+
+    /// D-2026-10-01-gif-sticker-search-10: through Tauri's IPC (the mock
+    /// runtime's), with the argument the UI sends (`bridge.js`, unchanged:
+    /// `{key}`, a string), `save_klipy_key` reads the key straight into a
+    /// [`KlipyKey`]: one that cannot be a key rejects with `invalidInput`,
+    /// as before and never quoting it, so the window still says which
+    /// characters a key has; a key saves, and the window sees its last 4.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_window_sends_the_key_as_before() {
+        let root = temp_root("ipc-key");
+        let folders = Folders::under(&root);
+        let key_file = KeyFile::new(folders.config.join(KEY_FILE));
+        let (made, made_rx) = mpsc::channel();
+        let start = Start {
+            simulate: true,
+            hidden: true,
+            folders: Box::new(move |_: &AppHandle<MockRuntime>| Ok(folders)),
+            gif_source: counting(&FakeGifSource::new(), made),
+            tray: Box::new(|_: &AppHandle<MockRuntime>, _, _: &Texts| {
+                let synced: LiveSync = Box::new(|_| {});
+                Ok(synced)
+            }),
+        };
+        let app = mock_builder()
+            .setup(move |app| setup(app, start))
+            .invoke_handler(tauri::generate_handler![
+                commands::klipy_key,
+                commands::save_klipy_key,
+            ])
+            .build(context_with_the_window())
+            .unwrap();
+
+        let (seen, seen_rx) = mpsc::channel();
+        app.run_return(move |app, event| {
+            if !matches!(event, RunEvent::Ready) {
+                return;
+            }
+            let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+                return;
+            };
+            let answers = [
+                invoke(&window, "save_klipy_key", json!({"key": "not a key!"})),
+                invoke(&window, "save_klipy_key", json!({"key": KEY})),
+                invoke(&window, "klipy_key", json!({})),
+            ];
+            seen.send(answers).unwrap();
+            // The window closes: the app ends.
+            window.destroy().unwrap();
+        });
+        let [refused, saved, status] = seen_rx.recv().unwrap();
+        let on_disk = key_file.load();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let refused = refused.unwrap_err();
+        assert_eq!(refused["code"], "invalidInput", "{refused}");
+        assert!(!refused.to_string().contains("not a key"), "{refused}");
+        let shown = json!({"configured": true, "last4": "cdef"});
+        assert_eq!(saved.unwrap(), shown);
+        assert_eq!(status.unwrap(), shown);
+        assert!(on_disk.unwrap().is_some(), "the key was saved");
+        assert!(made_rx.try_recv().is_err(), "saving a key asks nothing");
     }
 
     /// Review W2: the app's collection lives in its folder: one that cannot

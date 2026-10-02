@@ -61,7 +61,7 @@ use bezel_media::archive::content_id;
 use image::ImageFormat;
 
 pub use self::asked::UserAsked;
-pub use self::key::{KEY_FILE, KeyFile, SavedKey, is_valid_key};
+pub use self::key::{KEY_FILE, KeyFile, KlipyKey, SavedKey};
 use crate::backend::Backend;
 use crate::clock::unix_seconds;
 use crate::dto::{AddedMediaDto, CollectedDto, CollectedUsersDto, GifPageDto, KeyDto};
@@ -69,7 +69,8 @@ use crate::messages::{ErrorCode, UiError, UiResult};
 
 /// Makes the source for a saved key and its customer id, when the user
 /// asked for something it serves. Making one asks nothing of the provider.
-pub type SourceFactory = Arc<dyn Fn(&UserAsked, &str, &str) -> Arc<dyn GifSource> + Send + Sync>;
+pub type SourceFactory =
+    Arc<dyn Fn(&UserAsked, &KlipyKey, &str) -> Arc<dyn GifSource> + Send + Sync>;
 
 /// The GIF provider: its sources, and the customer id each new key gets.
 pub struct Provider {
@@ -290,13 +291,10 @@ impl Gifs {
     /// Saves `key` (with a new customer id, unless it is the key already
     /// saved); nothing is asked of the provider. A refused key shows at the
     /// first search.
-    pub fn save_key(&self, key: &str) -> UiResult<KeyDto> {
-        if !is_valid_key(key) {
-            return Err(key::invalid_key());
-        }
+    pub fn save_key(&self, key: KlipyKey) -> UiResult<KeyDto> {
         let kept = self.key.load().ok().flatten();
         let customer_id = match kept {
-            Some(saved) if saved.key() == key => saved.customer_id().to_string(),
+            Some(saved) if *saved.key() == key => saved.customer_id().to_string(),
             _ => (self.provider.customer_id)()?,
         };
         let saved = SavedKey::new(key, &customer_id);

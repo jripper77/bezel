@@ -25,7 +25,7 @@ use crate::dto::{
     ProgressDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, StorageDto,
     ThemeEntryDto, VideoAutoDto, parse_orientation,
 };
-use crate::gifs::{Gifs, SharedGifs, Target, UserAsked};
+use crate::gifs::{Gifs, KlipyKey, SharedGifs, Target, UserAsked};
 use crate::manager::{
     Ask, CacheDto, CandidatesDto, ClearedDto, ConfirmedFileDto, DeleteReportDto, ManagedFileDto,
     ManagerOverviewDto, PlanDto, RunDto,
@@ -845,14 +845,16 @@ pub async fn klipy_key(gifs: State<'_, SharedGifs>, state: State<'_, Shared>) ->
     with_gifs(&gifs, &state, |g, _| g.key_status()).await
 }
 
-/// Saves the user's KLIPY key; nothing is sent to KLIPY.
+/// Saves the user's KLIPY key; nothing is sent to KLIPY. The window sends
+/// it as a string, read straight into a [`KlipyKey`]: one that cannot be a
+/// key is `invalidInput` (D-2026-10-01-gif-sticker-search-10).
 #[tauri::command]
 pub async fn save_klipy_key(
     gifs: State<'_, SharedGifs>,
     state: State<'_, Shared>,
-    key: String,
+    key: KlipyKey,
 ) -> UiResult<KeyDto> {
-    with_gifs(&gifs, &state, move |g, _| g.save_key(&key)).await
+    with_gifs(&gifs, &state, move |g, _| g.save_key(key)).await
 }
 
 /// Deletes the saved KLIPY key.

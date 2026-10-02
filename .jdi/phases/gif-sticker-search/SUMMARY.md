@@ -28,28 +28,10 @@
   imagem/fundo pelos caminhos de hoje, `log` limitado a debug (o trace do ureq traria a chave).
 - T-6 `4094f49`: UI — Coleção na aba Mídia (Todos/GIFs/Stickers, usar, arrastar, renomear, excluir com os temas que
   usam o item), still com movimento reduzido.
-- Iter 2 (crítico da iter 1: linhas 1, 3, 5, 6 e 10 ocas e objetivas → BLOCKED): `f3bd567` (o `setup` real do app
-  roda num teste com a fonte injetada: `tests::the_app_setup_sends_nothing_at_start`; um aquecimento no início o
-  derruba), `6ffa470` (W2: pasta da coleção inutilizável vira `collectionUnavailable`, nada some calado), `f9bbc24` (W3:
-  chave curta = "Chave salva"), `d5fa90e` (`scripts/e2e-passed.mjs`: cada teste nomeado aprovado nos 4 projetos com o
-  axe registrado), `b524c83` + `e49329a` (W1: Privacidade exata — PNG nos stickers — e o `check-docs.sh` exige os fatos
-  dentro da seção). O orquestrador apertou as linhas 1 (core só com `thiserror`), 3 (CSP igual à da `main` linha a
-  linha, todas as capabilities, o teste do `setup`) e 5 (`e2e-passed.mjs`) e o grep de TODO do PROJECT (`e2c9cb2`).
-- Iter 3 (revisor da iter 2: BLOCKED — B1 binário de teste do studio no Windows não carregava com a feature `test`
-  do Tauri; B2 grep de TODO pegava o `test.fixme` do Playwright): D-8; a feature `test` e o teste do `setup` só fora
-  do Windows (árvore de features do Windows igual à de antes), o grep ignora só `test.fixme`/`'fixme'`, e o
-  `e2e-passed.mjs` exige claro e escuro em pt-BR e en (W1).
-- Iter 4 (crítico da iter 3: linhas 3, 4, 5 e 10 ocas e objetivas → BLOCKED): D-9 (o orquestrador reescreveu a linha de
-  TODO do PROJECT — todo arquivo versionado, só tokens do Playwright e `TODO(#N)` saem — e apertou as linhas 3, sem
-  overlays de config do Tauri, e 4, sem `source`/`checksum` removidos); `d8d17d9` (só uma invocação de comando chega
-  ao KLIPY: o token `UserAsked` nasce de `tauri::ipc::Request`, que o app não fabrica; um aquecimento no `setup`, já ou
-  atrasado, não compila), `832e861` (o e2e prova o debounce pela UI: 1 caractere não busca, "cat" busca uma vez após a
-  pausa, Enter busca na hora).
-- Iter 5 (crítico da iter 4: linha 3 — invocação IPC forjada, drible deliberado; linha 5 — texto fixo via helper e
-  setas no eixo errado → BLOCKED): `ce4ade5` (guarda de fonte `tests::nothing_in_the_app_forges_an_invocation`: o código
-  de produção do studio não usa `on_message`/`invoke_key`/`eval`/`__TAURI` e cria o cliente do KLIPY num só lugar; na
-  linha 3 do DoD), `8793841` (a varredura de i18n reprova qualquer frase fixa no código da UI), `3e1d1ae` (o e2e prova
-  as setas pelas colunas reais e a mensagem de chave vazia no idioma).
+- Iters 2–5 (críticos: linhas ocas e objetivas a cada rodada): o `setup` real num teste (`f3bd567`), coleção
+  inutilizável dita (`6ffa470`), chave curta (`f9bbc24`), `e2e-passed.mjs` (cada teste nos 4 projetos com axe), Privacidade
+  exata e exigida pelo `check-docs`, teste do mock só fora do Windows (D-8), grep de TODO e linhas 1/3/4/5 apertadas
+  (D-9), token `UserAsked` de `tauri::ipc::Request`, debounce/setas/i18n provados pela UI, guarda de fonte (`ce4ade5`).
 - --- AUTO-RESET 1 (teto de 5 iterações; o crítico da iter 5 achou a chave num `eprintln!` e um anúncio com texto
   solto) --- Rodada 2, iter 1: D-10; `KlipyKey` (sem `Display`, `Debug` mascarado, um só leitor: imprimir a chave não
   compila), a guarda de fonte lê identificadores com `syn` (pega `r#eval`, macros, `with_webview`), os helpers da UI só
@@ -58,6 +40,7 @@
 - Rodada 2, iter 2 (crítico: `expose_secret` num print e o token feito por outro comando): `e99c81b` — a chave só é
   lida como argumento direto do cliente e na gravação do arquivo, nunca dentro de macro; `UserAsked::of` só nos 3
   comandos de GIF (renomear ou embrulhar também falha); `navigate` e literais `javascript:` recusados.
+- Rodada 2, iter 3 (D-11): `a603c45` — comandos só via IPC, `Request` só nos 3 comandos de GIF, sem print em `commands.rs`.
 
 ## Blocked tasks
 - nenhuma

@@ -292,12 +292,17 @@ struct Start<R: Runtime> {
 /// makes and searches a source only with a [`UserAsked`], which only a
 /// command Tauri is running has, so a search through it from here does not
 /// compile. What the type cannot stop is making Tauri dispatch an
-/// invocation the window never sent, or making a second KLIPY client: the
-/// source guard `tests::nothing_in_the_app_forges_an_invocation`
+/// invocation the window never sent, another command making a proof of
+/// its own request, or making a second KLIPY client: the source guard
+/// `tests::nothing_in_the_app_forges_an_invocation`
 /// (D-2026-10-01-gif-sticker-search-10) refuses, by identifier in the
 /// studio's production code (raw names and the tokens of macro calls
-/// included), the Tauri APIs that do the first (`eval`, `with_webview`,
-/// `on_message`, `invoke_key`, ...) and any `KlipyClient::new` but the
+/// included), the Tauri APIs that do the first or load a page in the
+/// window (`eval`, `with_webview`, `on_message`, `invoke_key`, `navigate`,
+/// ...) and literals that are `javascript:` URLs; [`UserAsked::of`] but in
+/// the bodies of `search_gifs`, `gif_preview` and `collect_gif` (and
+/// [`UserAsked`] renamed, in a qualified path, in another macro call or in
+/// an `impl` outside its module); and any `KlipyClient::new` but the
 /// source factory's. Code written to get past it otherwise is left to code
 /// review.
 fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
@@ -497,7 +502,9 @@ fn copies(data: &Path) -> Copies {
 /// KLIPY's client for a saved key (D-2026-10-01-gif-sticker-search-2),
 /// made only for a user action ([`UserAsked`]): making one asks nothing.
 /// The one reader of the key's text outside the key file
-/// (D-2026-10-01-gif-sticker-search-10).
+/// (D-2026-10-01-gif-sticker-search-10): `key.expose_secret()` only as a
+/// direct argument of `KlipyClient::new`, and no macro here, which the
+/// source guard checks (a print or a log of the key does not pass it).
 fn klipy_source() -> SourceFactory {
     Arc::new(
         |_: &UserAsked, key: &KlipyKey, customer: &str| -> Arc<dyn GifSource> {
@@ -643,8 +650,9 @@ mod tests {
     use syn::ext::IdentExt as _;
     use syn::visit::{self, Visit};
     use syn::{
-        AttrStyle, Attribute, ImplItem, ImplItemFn, Item, ItemFn, ItemUse, Lit, Macro, Meta,
-        TraitItemFn, UseName, UseTree,
+        AttrStyle, Attribute, Expr, ExprCall, ExprStruct, ImplItem, ImplItemFn, ImplItemType, Item,
+        ItemFn, ItemImpl, ItemType, ItemUse, Lit, Macro, Member, Meta, QSelf, TraitItemFn, Type,
+        UseName, UseRename, UseTree,
     };
 
     #[cfg(not(windows))]
@@ -1096,7 +1104,7 @@ mod tests {
     /// Identifiers the studio's production code must not hold
     /// (D-2026-10-01-gif-sticker-search-10): each lets the app forge a user
     /// action (D-2026-10-01-gif-sticker-search-3).
-    const FORGERIES: [&str; 8] = [
+    const FORGERIES: [&str; 9] = [
         // An invocation handed to a webview as if the window sent it, the
         // invoke key it must carry, and the invocation itself.
         "on_message",
@@ -1110,6 +1118,9 @@ mod tests {
         "with_webview",
         "initialization_script",
         "js_init_script",
+        // A page loaded in the window, which a `javascript:` URL makes a
+        // script run there. The studio never navigates its window.
+        "navigate",
     ];
 
     /// Macros that print, which the GIF and key modules must not call.
@@ -1118,8 +1129,26 @@ mod tests {
     /// Crates that log, whose paths the GIF and key modules must not use.
     const LOGGERS: [&str; 2] = ["log", "tracing"];
 
-    /// The one accessor that reads a [`KlipyKey`]'s text.
+    /// The one accessor that reads a [`KlipyKey`]'s text, defined in
+    /// [`KEY_MODULE`].
     const KEY_READER: &str = "expose_secret";
+
+    /// The key's module: its type, its accessor, its file.
+    const KEY_MODULE: &str = "gifs/key.rs";
+
+    /// The proof that the user asked, made by `UserAsked::of` only.
+    const PROOF: &str = "UserAsked";
+
+    /// The proof's module, the one place that defines it.
+    const PROOF_MODULE: &str = "gifs/asked.rs";
+
+    /// The commands of `commands.rs` that take the window's `Request` and
+    /// make a [`UserAsked`] of it, the only ones that may.
+    const PROOF_COMMANDS: [&str; 3] = ["search_gifs", "gif_preview", "collect_gif"];
+
+    /// The URL scheme that runs a script in the page that loads it (its
+    /// `:` is added where it is used, so that no literal here is one).
+    const SCRIPT_SCHEME: &str = "javascript";
 
     /// What no literal of the studio holds, tests included: the window's
     /// IPC object, then KLIPY's API and file hosts (they are
@@ -1163,6 +1192,17 @@ mod tests {
             if reader.klipy_named > reader.made.len() + reader.klipy_imported {
                 reader.refuse("KLIPY's client named outside its import");
             }
+            let in_readers: Vec<String> = reader
+                .macros
+                .iter()
+                .filter(|(function, _)| reader.reads.contains(function))
+                .map(|(function, called)| {
+                    format!("`{called}!` in `{function}`, which reads the KLIPY key")
+                })
+                .collect();
+            for problem in in_readers {
+                reader.refuse(problem);
+            }
             reader
         }
 
@@ -1196,10 +1236,23 @@ mod tests {
         reading: Reading,
         /// The functions around what is read, the outermost first.
         within: Vec<String>,
+        /// Whether the outermost of them is a free `#[tauri::command]`
+        /// function.
+        command: bool,
+        /// How deep in macro calls' tokens what is read is.
+        in_macro: usize,
         /// Every function read, in order.
         functions: Vec<String>,
         /// The outermost function around each `KlipyClient::new`.
         made: Vec<String>,
+        /// The outermost function around each read of the key's text, its
+        /// accessor's definition included.
+        reads: Vec<String>,
+        /// The outermost function around each `UserAsked::of` it accepts.
+        asked: Vec<String>,
+        /// Each macro called in a function: the outermost function and the
+        /// macro's path.
+        macros: Vec<(String, String)>,
         /// `KlipyClient` imported by its name (`use …::KlipyClient;`).
         klipy_imported: usize,
         /// `KlipyClient` named at all.
@@ -1214,8 +1267,13 @@ mod tests {
                 file,
                 reading,
                 within: Vec::new(),
+                command: false,
+                in_macro: 0,
                 functions: Vec::new(),
                 made: Vec::new(),
+                reads: Vec::new(),
+                asked: Vec::new(),
+                macros: Vec::new(),
                 klipy_imported: 0,
                 klipy_named: 0,
                 problems: Vec::new(),
@@ -1241,13 +1299,43 @@ mod tests {
             self.production() && attributes.iter().any(is_test)
         }
 
-        /// Reads, with `read`, the function `name`.
-        fn function(&mut self, name: &Ident, read: impl FnOnce(&mut Self)) {
+        /// A type alias of `ty` (`type … = ty`): refused for the proof.
+        fn alias(&mut self, ty: &Type) {
+            if self.production() && is_proof(ty) {
+                self.refuse(format_args!("`{PROOF}` renamed: it is named as itself"));
+            }
+        }
+
+        /// Reads, with `read`, the function `name`, a free
+        /// `#[tauri::command]` one when `command`.
+        fn function(&mut self, name: &Ident, command: bool, read: impl FnOnce(&mut Self)) {
             let name = name.unraw().to_string();
             self.functions.push(name.clone());
+            if self.within.is_empty() {
+                self.command = command;
+            }
             self.within.push(name);
             read(self);
             self.within.pop();
+        }
+
+        /// The outermost function around what is read.
+        fn outer(&self) -> Option<&str> {
+            self.within.first().map(String::as_str)
+        }
+
+        /// Whether what is read is in the body of one of [`PROOF_COMMANDS`].
+        fn in_gif_command(&self) -> bool {
+            self.file == "commands.rs"
+                && self.command
+                && self.outer().is_some_and(|f| PROOF_COMMANDS.contains(&f))
+        }
+
+        /// A read of the key's text, accepted or not.
+        fn read_key(&mut self) {
+            if let Some(outer) = self.outer().map(str::to_string) {
+                self.reads.push(outer);
+            }
         }
 
         /// An identifier, its `r#` removed.
@@ -1261,11 +1349,32 @@ mod tests {
             if name == "KlipyClient" {
                 self.klipy_named += 1;
             }
-            let in_factory =
-                self.file == "lib.rs" && self.within.first().is_some_and(|f| f == "klipy_source");
-            if name == KEY_READER && !in_factory && self.file != "gifs/key.rs" {
+            if name == KEY_READER {
+                self.key_reader();
+            }
+            if name == PROOF && self.in_macro > 0 && !self.in_gif_command() {
                 self.refuse(format_args!(
-                    "`{name}` reads the KLIPY key outside `klipy_source` and `gifs/key.rs`"
+                    "`{PROOF}` inside a macro call outside the GIF commands"
+                ));
+            }
+        }
+
+        /// The key's accessor, named where no rule accepts it (the two
+        /// accepted reads are not read as identifiers): refused, but in its
+        /// own definition.
+        fn key_reader(&mut self) {
+            self.read_key();
+            if self.file == KEY_MODULE && self.within == [KEY_READER] {
+                return;
+            }
+            if self.in_macro > 0 {
+                self.refuse(format_args!(
+                    "`{KEY_READER}` reads the KLIPY key inside a macro call"
+                ));
+            } else {
+                self.refuse(format_args!(
+                    "`{KEY_READER}` reads the KLIPY key outside its two uses: an argument of \
+                     `KlipyClient::new` in `klipy_source`, the key file's `key` field"
                 ));
             }
         }
@@ -1282,7 +1391,21 @@ mod tests {
                 let around = self.within.first().cloned().unwrap_or_default();
                 self.made.push(around);
             }
+            if segments.windows(2).any(|pair| pair == [PROOF, "of"]) {
+                let command = self.outer().filter(|_| self.in_gif_command());
+                match command.map(str::to_string) {
+                    Some(command) => self.asked.push(command),
+                    None => self.refuse(format_args!(
+                        "`{PROOF}::of` outside the GIF commands that take the window's \
+                         `Request` (`{}` in `commands.rs`)",
+                        PROOF_COMMANDS.join("`, `")
+                    )),
+                }
+            }
             let last = segments.last().map_or("", String::as_str);
+            if called && let Some(outer) = self.outer().map(str::to_string) {
+                self.macros.push((outer, segments.join("::")));
+            }
             if called && last == "include" {
                 self.refuse("`include!` in production code: it cannot be classified");
             }
@@ -1308,6 +1431,9 @@ mod tests {
                 if value.contains(&marker) {
                     self.refuse(format_args!("a literal holds {marker}"));
                 }
+            }
+            if is_script_url(&value) {
+                self.refuse(format_args!("a literal is a `{SCRIPT_SCHEME}:` URL"));
             }
         }
 
@@ -1351,17 +1477,20 @@ mod tests {
         }
 
         fn visit_item_fn(&mut self, item: &'ast ItemFn) {
-            self.function(&item.sig.ident, |reader| visit::visit_item_fn(reader, item));
+            let command = item.attrs.iter().any(is_command);
+            self.function(&item.sig.ident, command, |reader| {
+                visit::visit_item_fn(reader, item);
+            });
         }
 
         fn visit_impl_item_fn(&mut self, item: &'ast ImplItemFn) {
-            self.function(&item.sig.ident, |reader| {
+            self.function(&item.sig.ident, false, |reader| {
                 visit::visit_impl_item_fn(reader, item);
             });
         }
 
         fn visit_trait_item_fn(&mut self, item: &'ast TraitItemFn) {
-            self.function(&item.sig.ident, |reader| {
+            self.function(&item.sig.ident, false, |reader| {
                 visit::visit_trait_item_fn(reader, item);
             });
         }
@@ -1375,7 +1504,124 @@ mod tests {
             if self.production() && (path.is_ident("path") || set_by_cfg_attr) {
                 self.refuse("a module read from another path: it cannot be classified");
             }
+            let derives_more = match &attribute.meta {
+                Meta::List(list) if path.is_ident("derive") => list
+                    .tokens
+                    .clone()
+                    .into_iter()
+                    .any(|token| matches!(token, TokenTree::Ident(name) if name != "Debug")),
+                _ => false,
+            };
+            if self.production() && self.file == PROOF_MODULE && derives_more {
+                self.refuse(format_args!(
+                    "`{PROOF_MODULE}` derives more than `Debug`: a `{PROOF}` made another way"
+                ));
+            }
             visit::visit_attribute(self, attribute);
+        }
+
+        /// A call; the key's text as an argument of `KlipyClient::new` in
+        /// `klipy_source` is accepted, its key read as an expression.
+        fn visit_expr_call(&mut self, call: &'ast ExprCall) {
+            let makes_the_client = self.production()
+                && self.file == "lib.rs"
+                && self.outer() == Some("klipy_source")
+                && matches!(&*call.func, Expr::Path(func)
+                    if func.qself.is_none() && ends_with(&func.path, ["KlipyClient", "new"]));
+            if !makes_the_client {
+                visit::visit_expr_call(self, call);
+                return;
+            }
+            for attribute in &call.attrs {
+                self.visit_attribute(attribute);
+            }
+            self.visit_expr(&call.func);
+            for argument in &call.args {
+                match key_text(argument) {
+                    Some(key) => {
+                        self.read_key();
+                        self.visit_expr(key);
+                    }
+                    None => self.visit_expr(argument),
+                }
+            }
+        }
+
+        /// A struct literal; in `KeyFile::save`, the key's text as the
+        /// `key` field of the key file's JSON is accepted, its key read as
+        /// an expression. A literal in the proof's module makes a proof:
+        /// only `UserAsked::of` may.
+        fn visit_expr_struct(&mut self, literal: &'ast ExprStruct) {
+            if self.production() && self.file == PROOF_MODULE && self.outer() != Some("of") {
+                self.refuse(format_args!(
+                    "a struct literal in `{PROOF_MODULE}` outside `{PROOF}::of`: a `{PROOF}` \
+                     made another way"
+                ));
+            }
+            let writes_the_key = self.production()
+                && self.file == KEY_MODULE
+                && self.outer() == Some("save")
+                && literal.qself.is_none()
+                && literal.path.is_ident("KeyJson");
+            if !writes_the_key {
+                visit::visit_expr_struct(self, literal);
+                return;
+            }
+            for attribute in &literal.attrs {
+                self.visit_attribute(attribute);
+            }
+            self.visit_path(&literal.path);
+            for field in &literal.fields {
+                let named_key = matches!(&field.member, Member::Named(name) if name == "key");
+                match receiver(&field.expr, "to_string").and_then(key_text) {
+                    Some(key) if named_key => {
+                        self.read_key();
+                        for attribute in &field.attrs {
+                            self.visit_attribute(attribute);
+                        }
+                        self.visit_expr(key);
+                    }
+                    _ => self.visit_field_value(field),
+                }
+            }
+            if let Some(rest) = &literal.rest {
+                self.visit_expr(rest);
+            }
+        }
+
+        fn visit_item_impl(&mut self, item: &'ast ItemImpl) {
+            if self.production() && self.file != PROOF_MODULE && is_proof(&item.self_ty) {
+                self.refuse(format_args!(
+                    "an `impl` for `{PROOF}` outside `{PROOF_MODULE}`"
+                ));
+            }
+            visit::visit_item_impl(self, item);
+        }
+
+        fn visit_item_type(&mut self, item: &'ast ItemType) {
+            self.alias(&item.ty);
+            visit::visit_item_type(self, item);
+        }
+
+        fn visit_impl_item_type(&mut self, item: &'ast ImplItemType) {
+            self.alias(&item.ty);
+            visit::visit_impl_item_type(self, item);
+        }
+
+        fn visit_use_rename(&mut self, rename: &'ast UseRename) {
+            if self.production() && rename.ident.unraw() == PROOF {
+                self.refuse(format_args!("`{PROOF}` renamed: it is named as itself"));
+            }
+            visit::visit_use_rename(self, rename);
+        }
+
+        fn visit_qself(&mut self, qself: &'ast QSelf) {
+            if self.production() && is_proof(&qself.ty) {
+                self.refuse(format_args!(
+                    "`{PROOF}` in a qualified path (`<{PROOF}>::…`)"
+                ));
+            }
+            visit::visit_qself(self, qself);
         }
 
         fn visit_item_use(&mut self, item: &'ast ItemUse) {
@@ -1409,7 +1655,9 @@ mod tests {
             for segment in &call.path.segments {
                 self.visit_path_segment(segment);
             }
+            self.in_macro += 1;
             self.tokens(call.tokens.clone());
+            self.in_macro -= 1;
         }
 
         fn visit_lit(&mut self, literal: &'ast Lit) {
@@ -1427,6 +1675,67 @@ mod tests {
         matches!(attribute.style, AttrStyle::Outer)
             && matches!(&attribute.meta, Meta::List(list)
                 if list.path.is_ident("cfg") && list.tokens.to_string() == "test")
+    }
+
+    /// Whether `attribute` makes a command (`#[tauri::command]`).
+    fn is_command(attribute: &Attribute) -> bool {
+        let last = attribute.path().segments.last();
+        matches!(attribute.style, AttrStyle::Outer)
+            && last.is_some_and(|segment| segment.ident.unraw() == "command")
+    }
+
+    /// Whether `path` ends with `tail` (`r#` removed).
+    fn ends_with(path: &syn::Path, tail: [&str; 2]) -> bool {
+        segments(path).ends_with(&tail.map(String::from))
+    }
+
+    /// The receiver of `expr` when it is the call `receiver.method()`, no
+    /// argument and no turbofish.
+    fn receiver<'e>(expr: &'e Expr, method: &str) -> Option<&'e Expr> {
+        match expr {
+            Expr::MethodCall(call)
+                if call.attrs.is_empty()
+                    && call.turbofish.is_none()
+                    && call.args.is_empty()
+                    && call.method.unraw() == method =>
+            {
+                Some(&call.receiver)
+            }
+            _ => None,
+        }
+    }
+
+    /// The key `expr` reads when it is `key.expose_secret()`.
+    fn key_text(expr: &Expr) -> Option<&Expr> {
+        receiver(expr, KEY_READER)
+    }
+
+    /// Whether `ty` is the proof (`UserAsked`, a reference to it, ...).
+    fn is_proof(ty: &Type) -> bool {
+        match ty {
+            Type::Path(path) => path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident.unraw() == PROOF),
+            Type::Reference(reference) => is_proof(&reference.elem),
+            Type::Paren(inner) => is_proof(&inner.elem),
+            Type::Group(inner) => is_proof(&inner.elem),
+            _ => false,
+        }
+    }
+
+    /// Whether `text` is a `javascript:` URL as a browser reads one:
+    /// leading spaces and control characters cut, tabs and newlines
+    /// dropped, the scheme in any case.
+    fn is_script_url(text: &str) -> bool {
+        let url: String = text
+            .trim_start_matches(|c: char| c <= ' ')
+            .chars()
+            .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+            .collect();
+        url.split_once(':')
+            .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case(SCRIPT_SCHEME))
     }
 
     /// The attributes of `item`; none for one `syn` does not parse.
@@ -1612,22 +1921,39 @@ mod tests {
     /// the command functions: setup code has no command `Request` to make
     /// one from. [`KlipyKey`] cannot be printed. Neither stops the app from
     /// forging an invocation Tauri then dispatches, from making a second
-    /// KLIPY client, nor from reading the key's text where it should not;
-    /// this does, for the studio's production code. It parses every `.rs`
-    /// file under `src/` as it runs (a new file is read too) with `syn` and
-    /// reads each identifier, `r#` removed, the tokens of macro calls and
-    /// attributes included. It checks that:
+    /// KLIPY client or a proof in another command, nor from reading the
+    /// key's text where it should not; this does, for the studio's
+    /// production code. It parses every `.rs` file under `src/` as it runs
+    /// (a new file is read too) with `syn` and reads each identifier, `r#`
+    /// removed, the tokens of macro calls and attributes included. It
+    /// checks that:
     /// - production code holds none of `FORGERIES`: no invocation handed to
-    ///   a webview with the app's invoke key, no script run in the window;
+    ///   a webview with the app's invoke key, no script run in the window,
+    ///   no page loaded in it (`navigate`);
     /// - `KlipyClient::new` is called once, in `klipy_source`, and the type
     ///   is named nowhere else but its import;
-    /// - the key's accessor (`KEY_READER`) is called only in `klipy_source`
-    ///   and in `gifs/key.rs`;
-    /// - the GIF and key modules (`gifs.rs`, `gifs/`) call no print macro
-    ///   and use no logger;
+    /// - the key's accessor (`KEY_READER`) is named in two places only,
+    ///   besides its definition in `gifs/key.rs`: as `key.expose_secret()`,
+    ///   a direct argument of `KlipyClient::new` in `klipy_source`, and as
+    ///   `key.expose_secret().to_string()`, the `key` field of the
+    ///   `KeyJson` literal in `KeyFile::save`. Anywhere else (bound to a
+    ///   variable, inside any macro call's tokens, a path, another argument,
+    ///   field, function or file) it is refused;
+    /// - a function that reads the key's text (those three) calls no macro
+    ///   at all, and the GIF and key modules (`gifs.rs`, `gifs/`) call no
+    ///   print macro and use no logger;
+    /// - `UserAsked::of` is named (called, or taken as a value, a macro's
+    ///   tokens included) only in the bodies of the `#[tauri::command]`
+    ///   functions `search_gifs`, `gif_preview` and `collect_gif` of
+    ///   `commands.rs`. So that no other spelling reaches it, `UserAsked` is
+    ///   not renamed (`use … as`, `type … =`), not in a qualified path
+    ///   (`<UserAsked>::of`), not in another macro call's tokens, and has no
+    ///   `impl` outside `gifs/asked.rs`, where it derives only `Debug` and
+    ///   only `of` makes one;
     /// - no literal of the studio, tests included, holds the window's IPC
-    ///   object, and no file names KLIPY's API and file hosts: they are
-    ///   `bezel-klipy`'s.
+    ///   object or is a `javascript:` URL (any case, leading spaces and
+    ///   controls cut, tabs and newlines dropped), and no file names KLIPY's
+    ///   API and file hosts: they are `bezel-klipy`'s.
     ///
     /// Test code is left out by one rule, and only it: an item (a module,
     /// an `impl` and its items, a function, a `use`, ...) marked exactly
@@ -1647,7 +1973,7 @@ mod tests {
                 Err(why) => problems.push(why),
             }
         }
-        let mut made = Vec::new();
+        let (mut made, mut reads, mut asked) = (Vec::new(), Vec::new(), Vec::new());
         for source in &read {
             problems.extend(source.literals());
             match test_only(source, &read) {
@@ -1655,7 +1981,10 @@ mod tests {
                 Ok(true) => {}
                 Ok(false) => {
                     let reader = source.production();
-                    made.extend(reader.made.iter().map(|f| format!("{}: {f}", source.name)));
+                    let at = |f: &String| format!("{}: {f}", source.name);
+                    made.extend(reader.made.iter().map(at));
+                    reads.extend(reader.reads.iter().map(at));
+                    asked.extend(reader.asked.iter().map(at));
                     problems.extend(reader.problems);
                 }
             }
@@ -1665,6 +1994,24 @@ mod tests {
             made,
             ["lib.rs: klipy_source"],
             "KLIPY's client is made once in production, by the source factory"
+        );
+        assert_eq!(
+            reads,
+            [
+                "gifs/key.rs: expose_secret",
+                "gifs/key.rs: save",
+                "lib.rs: klipy_source"
+            ],
+            "the key's text is read by its accessor, for the key file and KLIPY's client"
+        );
+        assert_eq!(
+            asked,
+            [
+                "commands.rs: search_gifs",
+                "commands.rs: gif_preview",
+                "commands.rs: collect_gif"
+            ],
+            "a proof is made by the GIF commands that take the window's request"
         );
         // The rule read this file's tests as tests, and the GIF files as
         // they are built.
@@ -1742,11 +2089,236 @@ fn after(w: W) { w.on_message(request) }
         assert!(Source::new("z.rs", "const S: &str = \"open;\n").is_err());
     }
 
+    /// A made-up case of the source guard: a file's name, its text, and
+    /// what one of its findings says.
+    type Case = (&'static str, String, &'static str);
+
+    /// The key's text reaching a macro, a variable or another place
+    /// (D-2026-10-01-gif-sticker-search-10, review W1 of round 2): each is
+    /// refused.
+    fn key_leaks() -> Vec<Case> {
+        let factory = |body: &str| {
+            format!(
+                "fn klipy_source() -> F {{ Arc::new(|_: &UserAsked, key: &KlipyKey, c: &str| \
+                 {{ {body} }}) }}"
+            )
+        };
+        let made = "Arc::new(KlipyClient::new(key.expose_secret(), c))";
+        let save = |key: &str, more: &str| {
+            format!(
+                "fn save(s: &SavedKey, o: &mut W) -> J {{ {more} KeyJson {{ key: {key}, \
+                 customer_id: s.customer_id.clone() }} }}"
+            )
+        };
+        vec![
+            // Printed or logged by the factory (the reviewer's m3e, m3d).
+            (
+                "lib.rs",
+                factory(&format!(
+                    "eprintln!(\"bezel-studio: KLIPY client for key {{}}\", \
+                     key.expose_secret()); {made}"
+                )),
+                "inside a macro call",
+            ),
+            (
+                "lib.rs",
+                factory(&format!(
+                    "tracing::debug!(key = key.expose_secret()); {made}"
+                )),
+                "inside a macro call",
+            ),
+            // Any macro where the key is read, even without the key.
+            (
+                "lib.rs",
+                factory(&format!(
+                    "eprintln!(\"bezel-studio: KLIPY for {{c}}\"); {made}"
+                )),
+                "`eprintln!` in `klipy_source`, which reads the KLIPY key",
+            ),
+            // Bound to a variable (then passed to anything), passed through
+            // another expression, read through a path, or by another
+            // function.
+            (
+                "lib.rs",
+                factory("let k = key.expose_secret(); Arc::new(KlipyClient::new(k, c))"),
+                "outside its two uses",
+            ),
+            (
+                "lib.rs",
+                factory("Arc::new(KlipyClient::new(&key.expose_secret().to_owned(), c))"),
+                "outside its two uses",
+            ),
+            (
+                "lib.rs",
+                factory("Arc::new(KlipyClient::new(KlipyKey::expose_secret(key), c))"),
+                "outside its two uses",
+            ),
+            (
+                "lib.rs",
+                "fn warm_up(key: &KlipyKey) { KlipyClient::new(key.expose_secret(), c); }".into(),
+                "outside its two uses",
+            ),
+            // The key file: formatted, another field, a macro in `save`.
+            (
+                KEY_MODULE,
+                save("format!(\"{}\", s.key.expose_secret())", ""),
+                "inside a macro call",
+            ),
+            (
+                KEY_MODULE,
+                save("k", "let c = s.key.expose_secret().to_string();"),
+                "outside its two uses",
+            ),
+            (
+                KEY_MODULE,
+                save(
+                    "s.key.expose_secret().to_string()",
+                    "let _ = writeln!(o, \"saving\");",
+                ),
+                "`writeln!` in `save`, which reads the KLIPY key",
+            ),
+            // A command logging it.
+            (
+                "commands.rs",
+                "fn save_klipy_key(key: KlipyKey) { tracing::info!(\"{}\", key.expose_secret()) }"
+                    .into(),
+                "inside a macro call",
+            ),
+        ]
+    }
+
+    /// A proof made outside the GIF commands' bodies, or reached by another
+    /// spelling (D-2026-10-01-gif-sticker-search-10, the critic of round 2):
+    /// each is refused.
+    fn proofs_made_elsewhere() -> Vec<Case> {
+        // The critic's mutant: a command the window calls at start makes a
+        // proof of its request and searches.
+        let preferences = |made: &str| {
+            format!(
+                "#[tauri::command]\npub fn preferences(request: Request<'_>, \
+                 gifs: State<'_, SharedGifs>, state: State<'_, Shared>) -> PreferencesDto {{ \
+                 let asked = {made}; \
+                 let _ = query(\"gif\", \"\", 1, false, Language::En).map(|q| gifs.search(&asked, &q)); \
+                 state.preferences() }}"
+            )
+        };
+        let outside = "`UserAsked::of` outside the GIF commands";
+        vec![
+            (
+                "commands.rs",
+                preferences("UserAsked::of(&request)"),
+                outside,
+            ),
+            (
+                "commands.rs",
+                preferences("crate::gifs::r#UserAsked::r#of(&request)"),
+                outside,
+            ),
+            (
+                "commands.rs",
+                preferences("<UserAsked>::of(&request)"),
+                "qualified path",
+            ),
+            // A helper, the setup, a method or a file that is not the
+            // command's.
+            (
+                "commands.rs",
+                "fn asked(request: &Request<'_>) -> UserAsked { UserAsked::of(request) }".into(),
+                outside,
+            ),
+            (
+                "lib.rs",
+                "fn setup(app: &App) { let make = UserAsked::of; }".into(),
+                outside,
+            ),
+            (
+                "commands.rs",
+                "impl Gifs { fn search_gifs(r: Request<'_>) { UserAsked::of(&r); } }".into(),
+                outside,
+            ),
+            (
+                "gifs.rs",
+                "#[tauri::command]\nfn search_gifs(r: Request<'_>) { UserAsked::of(&r); }".into(),
+                outside,
+            ),
+            // Other spellings.
+            (
+                "commands.rs",
+                "use crate::gifs::UserAsked as Proof;".into(),
+                "renamed",
+            ),
+            ("commands.rs", "type Proof = UserAsked;".into(), "renamed"),
+            (
+                "commands.rs",
+                "macro_rules! of { ($t:ident, $r:expr) => { $t::of($r) } }\n\
+                 fn f(r: &Request<'_>) { of!(UserAsked, r); }"
+                    .into(),
+                "`UserAsked` inside a macro call",
+            ),
+            (
+                "gifs.rs",
+                "impl From<&Request<'_>> for UserAsked { \
+                 fn from(r: &Request<'_>) -> Self { Self::of(r) } }"
+                    .into(),
+                "an `impl` for `UserAsked`",
+            ),
+            // Made otherwise in its own module.
+            (
+                PROOF_MODULE,
+                "#[derive(Debug, Default)]\npub struct UserAsked { _invoked: () }".into(),
+                "derives more than `Debug`",
+            ),
+            (
+                PROOF_MODULE,
+                "impl UserAsked { pub fn at_start() -> Self { Self { _invoked: () } } }".into(),
+                "a struct literal",
+            ),
+        ]
+    }
+
+    /// A page loaded in the window, or a URL that runs a script
+    /// (D-2026-10-01-gif-sticker-search-10, review of round 2): each is
+    /// refused.
+    fn pages_loaded() -> Vec<Case> {
+        let script = "`javascript:` URL";
+        vec![
+            (
+                "lib.rs",
+                "fn f(w: WebviewWindow, u: Url) { let _ = w.navigate(u); }".into(),
+                "`navigate`",
+            ),
+            (
+                "lib.rs",
+                "fn f(w: &Webview, u: Url) { let _ = tauri::Webview::r#navigate(w, u); }".into(),
+                "`navigate`",
+            ),
+            (
+                "lib.rs",
+                "const GO: &str = \" JavaScript:document.getElementById('x').click()\";".into(),
+                script,
+            ),
+            (
+                "lib.rs",
+                r#"fn f() -> String { format!("java\tscript:{}", 1) }"#.into(),
+                script,
+            ),
+            (
+                "lib.rs",
+                "#[cfg(test)]\nmod tests { const GO: &[u8] = b\"JAVASCRIPT:go()\"; }".into(),
+                script,
+            ),
+        ]
+    }
+
     /// The source guard reads identifiers, not text
     /// (D-2026-10-01-gif-sticker-search-10): a raw name, a name passed to a
     /// macro, an alias's import, an escaped literal and each rule's other
-    /// forms are refused in made-up production files; what the studio does
-    /// (the source factory, a print outside the GIF modules) is not.
+    /// forms are refused in made-up production files, and so are the key's
+    /// text in a macro or a variable ([`key_leaks`]), a proof made outside
+    /// the GIF commands ([`proofs_made_elsewhere`]) and a page loaded in the
+    /// window ([`pages_loaded`]); what the studio does (the source factory,
+    /// the key file, the GIF commands, a print outside the GIF modules) is
+    /// not.
     #[test]
     fn the_source_guard_reads_identifiers_not_text() {
         let call = "macro_rules! call { ($w:ident, $m:ident, $s:expr) => { $w.$m($s) } }";
@@ -1807,6 +2379,11 @@ fn after(w: W) { w.on_message(request) }
             ),
             ("lib.rs", "include!(\"elsewhere.rs\");", "classified"),
         ];
+        let more = [key_leaks(), proofs_made_elsewhere(), pages_loaded()];
+        let more = more.iter().flatten();
+        let refused = refused
+            .into_iter()
+            .chain(more.map(|(n, t, w)| (*n, t.as_str(), *w)));
         for (name, text, why) in refused {
             let (problems, _) = guard(name, text);
             assert!(
@@ -1823,6 +2400,32 @@ fn after(w: W) { w.on_message(request) }
         );
         let printed = r##"fn f() { eprintln!("bezel-studio: not a GIF module") }"##;
         assert_eq!(guard("commands.rs", printed), (Vec::new(), Vec::new()));
+        let accepted = [
+            (
+                KEY_MODULE,
+                "impl KlipyKey { pub(crate) fn expose_secret(&self) -> &str { &self.0 } }\n\
+                 impl KeyFile { fn save(&self, s: &SavedKey) -> J { KeyJson { \
+                 key: s.key.expose_secret().to_string(), customer_id: s.customer_id.clone() } } }",
+            ),
+            (
+                "commands.rs",
+                "#[tauri::command]\npub async fn search_gifs(request: Request<'_>) -> R { \
+                 let asked = UserAsked::of(&request); go(&asked) }",
+            ),
+            (
+                PROOF_MODULE,
+                "#[derive(Debug)]\npub struct UserAsked { _invoked: () }\n\
+                 impl UserAsked { pub fn of(_request: &Request<'_>) -> Self { \
+                 Self { _invoked: () } } }",
+            ),
+        ];
+        for (name, text) in accepted {
+            assert_eq!(
+                guard(name, text),
+                (Vec::new(), Vec::new()),
+                "{name}: {text}"
+            );
+        }
         let second = "fn warm_up() { bezel_klipy::KlipyClient::new(\"k\", \"c\"); }";
         let (problems, made) = guard("lib.rs", &format!("{factory}\n{second}"));
         assert!(problems.is_empty(), "{problems:#?}");

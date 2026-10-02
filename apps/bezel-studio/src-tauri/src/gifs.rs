@@ -7,21 +7,35 @@
 //! - The key lives in [`KeyFile`] (`<config>/klipy.json`); the window only
 //!   learns whether one is saved and its last 4 characters ([`KeyDto`]).
 //!   Saving it asks nothing of the provider. From the command on, the key is
-//!   a [`KlipyKey`]: printing or logging it does not compile, and only the
-//!   source factory and the key file read its text (`key.rs`).
+//!   a [`KlipyKey`]: printing or logging it does not compile, and its text
+//!   is read in two places only, as an argument of `KlipyClient::new` in
+//!   the source factory and as the key file's `key` field (`key.rs`).
 //! - Nothing reaches the provider at start or without a key: the source is
 //!   made on the first search, preview or download after a key is saved,
 //!   and only those commands, each a user action, use it. Making a source
 //!   and each of those operations take a [`UserAsked`], which only a
 //!   command's invocation gives: a request at start through this state
 //!   does not compile.
-//! - What the type cannot stop, the source guard
+//! - What the types cannot stop, the source guard
 //!   (`tests::nothing_in_the_app_forges_an_invocation` in `lib.rs`,
 //!   D-2026-10-01-gif-sticker-search-10) refuses by identifier in the
 //!   studio's production code, raw names and the tokens of macro calls
-//!   included: the Tauri APIs that dispatch an invocation the window never
-//!   sent or run a script in it (`eval`, `with_webview`, `on_message`, ...),
-//!   a second `KlipyClient::new`, and print or log macros in this module.
+//!   included:
+//!   - the Tauri APIs that dispatch an invocation the window never sent,
+//!     run a script in it or load a page in it (`eval`, `with_webview`,
+//!     `on_message`, `navigate`, ...), and literals that are `javascript:`
+//!     URLs;
+//!   - [`UserAsked::of`] anywhere but in the bodies of the GIF commands
+//!     that take the window's request (`search_gifs`, `gif_preview`,
+//!     `collect_gif` in `commands.rs`), or [`UserAsked`] under another name
+//!     (`use … as`, `type … =`, `<UserAsked>::`, a macro's tokens, an
+//!     `impl` outside `asked.rs`);
+//!   - `expose_secret` but as `KlipyClient::new`'s argument in the source
+//!     factory and as the key file's `key` field: never bound to a
+//!     variable, never inside a macro call; and any macro in a function
+//!     that reads the key's text;
+//!   - a second `KlipyClient::new`, and print or log macros in this module.
+//!
 //!   Code written to get past it otherwise (generated code, another crate)
 //!   is left to code review.
 //! - Pages answered in this session are kept by query (kind, text, filter,

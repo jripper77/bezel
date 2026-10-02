@@ -6,10 +6,15 @@
 //!   `Display`, no `Serialize` and no conversion to a string, and its
 //!   `Debug` is the same for every key, so printing or logging it does not
 //!   compile, or shows nothing of it. Its text is read by one crate-private
-//!   accessor, [`KlipyKey::expose_secret`], for KLIPY's client (the source
-//!   factory, `klipy_source` in `lib.rs`) and for the key file here; the
-//!   source guard (`tests::nothing_in_the_app_forges_an_invocation`)
-//!   refuses it anywhere else in production code.
+//!   accessor, [`KlipyKey::expose_secret`], in two places only, which the
+//!   source guard (`tests::nothing_in_the_app_forges_an_invocation`) checks
+//!   in production code: `key.expose_secret()` as a direct argument of
+//!   `KlipyClient::new` in the source factory (`klipy_source` in `lib.rs`),
+//!   and `key.expose_secret().to_string()` as the `key` field of the key
+//!   file's JSON in [`KeyFile::save`]. It refuses the accessor anywhere
+//!   else: bound to a variable, inside any macro call's tokens, through a
+//!   path, in another function or file. Neither function calls a macro: the
+//!   guard refuses any macro in a function that reads the key's text.
 //! - The key file is `<config>/klipy.json`, next to `settings.json` and not
 //!   inside it, holding the key and the customer id made for it. It is
 //!   replaced atomically (written whole to a temporary file next to it, then
@@ -64,9 +69,10 @@ impl KlipyKey {
         }
     }
 
-    /// The key's text: for KLIPY's client, made by the source factory
-    /// (`klipy_source`), and for the key file only. The source guard
-    /// refuses this accessor anywhere else in production code.
+    /// The key's text: a direct argument of `KlipyClient::new` in the
+    /// source factory (`klipy_source`), and the key file's `key` field in
+    /// [`KeyFile::save`], only. The source guard refuses this accessor
+    /// anywhere else in production code, a macro call's tokens included.
     pub(crate) fn expose_secret(&self) -> &str {
         &self.0
     }
@@ -192,7 +198,8 @@ impl KeyFile {
     }
 
     /// Saves `saved`, replacing the file atomically, readable only by the
-    /// user on Unix.
+    /// user on Unix. One of the key's two readers: no macro here, and its
+    /// text only as the JSON's `key` field (the source guard).
     pub fn save(&self, saved: &SavedKey) -> UiResult<()> {
         let json = KeyJson {
             key: saved.key.expose_secret().to_string(),

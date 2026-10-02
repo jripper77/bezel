@@ -15,15 +15,27 @@
 //! invocation the window never sent, which then carries a real
 //! [`Request`] (an `InvokeRequest` handed to `WebviewWindow::on_message`
 //! with `AppHandle::invoke_key`, or a script run in the window that calls
-//! `invoke` or presses Search), nor a second `KlipyClient` made and asked
-//! apart from the GIF state. The source guard,
-//! `tests::nothing_in_the_app_forges_an_invocation` in `lib.rs`
-//! (D-2026-10-01-gif-sticker-search-10), reads the studio's production code
-//! as a syntax tree and refuses, by identifier (raw names and the tokens of
-//! macro calls included), the APIs that do so: `eval`,
-//! `eval_with_callback`, `with_webview`, `on_message`, `invoke_key`,
-//! `InvokeRequest`, `initialization_script` and `js_init_script`; and it
-//! accepts one `KlipyClient::new`, in the source factory (`klipy_source`).
+//! `invoke` or presses Search), another command making a proof of its own
+//! request, nor a second `KlipyClient` made and asked apart from the GIF
+//! state. The source guard, `tests::nothing_in_the_app_forges_an_invocation`
+//! in `lib.rs` (D-2026-10-01-gif-sticker-search-10), reads the studio's
+//! production code as a syntax tree, by identifier (raw names and the
+//! tokens of macro calls included), and refuses:
+//! - the APIs that forge an invocation or run a script in the window:
+//!   `eval`, `eval_with_callback`, `with_webview`, `on_message`,
+//!   `invoke_key`, `InvokeRequest`, `initialization_script`,
+//!   `js_init_script` and `navigate`, and any literal that is a
+//!   `javascript:` URL (in any case);
+//! - [`UserAsked::of`] named anywhere but in the bodies of the three
+//!   `#[tauri::command]` functions of `commands.rs` that take the window's
+//!   [`Request`]: `search_gifs`, `gif_preview` and `collect_gif`. So that
+//!   no other spelling reaches it, [`UserAsked`] is never renamed (`use …
+//!   as`, `type … =`), put in a qualified path (`<UserAsked>::of`) or in
+//!   another macro call's tokens, nor given an `impl` outside this module;
+//!   here it derives only `Debug`, and in production only
+//!   [`UserAsked::of`] makes one;
+//! - any `KlipyClient::new` but the source factory's (`klipy_source`).
+//!
 //! Code written to get past it otherwise (generated code, another crate
 //! doing the forging) is left to code review.
 

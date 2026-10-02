@@ -557,8 +557,13 @@ test('the manager refuses like the overview, and a theme\'s video and the boot m
 
 /** A demo with the GIF hooks recorded. */
 function gifDemo(scenario) {
-  const seen = { queries: [], links: [] };
-  const demo = createDemoBackend(scenario, fixed, { onGifQuery: (q) => seen.queries.push(q), onLink: (l) => seen.links.push(l) });
+  const seen = { queries: [], previews: [], collects: [], links: [] };
+  const demo = createDemoBackend(scenario, fixed, {
+    onGifQuery: (q) => seen.queries.push(q),
+    onGifPreview: (id) => seen.previews.push(id),
+    onGifCollect: (id) => seen.collects.push(id),
+    onLink: (l) => seen.links.push(l),
+  });
   return { demo, seen };
 }
 const code = (expected, args) => (e) => e.code === expected && (args === undefined || JSON.stringify(e.args) === JSON.stringify(args));
@@ -602,7 +607,10 @@ test('the demo KLIPY pages: 24 results, later pages repeat a few, the query show
 });
 
 test('the demo previews and adds only results of the last search, once per content', async () => {
-  const { demo } = gifDemo('gifs');
+  const { demo, seen } = gifDemo('gifs');
+  await assert.rejects(demo.gifPreview('gif-cat-1', false), code('gifNotInResults', { item: 'gif-cat-1' }), 'no search yet');
+  await assert.rejects(demo.collectGif('gif-cat-1'), code('gifNotInResults', { item: 'gif-cat-1' }));
+  assert.deepEqual([seen.previews, seen.collects], [[], []], 'nothing asked of KLIPY for what no search found');
   const page = await demo.searchGifs({ kind: 'sticker', text: 'star', page: 1, explicit: false });
   const [a, b] = page.items;
   const moving = await demo.gifPreview(a.id, false);
@@ -619,6 +627,8 @@ test('the demo previews and adds only results of the last search, once per conte
   assert.ok(added.bytes > 0 && added.bytes < 26_214_400);
   assert.deepEqual(await demo.collectGif(a.id), added, 'the same content: the item already there');
   await demo.collectGif(b.id);
+  assert.deepEqual(seen.previews, [a.id, a.id], 'each preview asked of KLIPY is shown');
+  assert.deepEqual(seen.collects, [a.id, a.id, b.id], 'each download, even of content already there');
   assert.deepEqual((await demo.gifCollection(false)).map((c) => c.name), ['Heart', 'Star'], 'newest first');
   assert.ok(!(await demo.gifCollection(true))[0].preview.includes('animate'), 'stills when motion is reduced');
   await demo.searchGifs({ kind: 'gif', text: 'other', page: 1, explicit: false });

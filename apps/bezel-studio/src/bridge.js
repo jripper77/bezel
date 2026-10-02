@@ -450,7 +450,7 @@ export function createBridge(win) {
   // are the sensors the list shows (`data-demo-sensors`).
   const root = win.document?.documentElement;
   // So are the preview's video decoder, the guide pages and links opened,
-  // and the last query asked of KLIPY.
+  // and the last query, preview and download asked of KLIPY.
   const demo = createDemoBackend(scenario, {}, {
     onWindow: (state) => root?.setAttribute('data-demo-window', state),
     onSensorsShown: (keys) => root?.setAttribute('data-demo-sensors', keys.join(' ')),
@@ -458,6 +458,8 @@ export function createBridge(win) {
     onGuide: (page, language) => root?.setAttribute('data-demo-guide', `${page} ${language}`),
     onLink: (link) => root?.setAttribute('data-demo-link', link),
     onGifQuery: (query) => root?.setAttribute('data-demo-gif-query', JSON.stringify(query)),
+    onGifPreview: (id) => root?.setAttribute('data-demo-gif-preview', id),
+    onGifCollect: (id) => root?.setAttribute('data-demo-gif-collect', id),
     languages: win.navigator?.languages ?? [],
     hold: params.has('hold'),
   });

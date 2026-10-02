@@ -4,8 +4,8 @@
 // reaches KLIPY. The scenarios (`demo-data.js`): `gifs` (a key saved),
 // `gifsNoKey` and `gifsRateLimited` (every search answers 429); a key saved
 // as `DEMO_REFUSED_KEY` is refused at the first search, like a key KLIPY
-// does not know. The last query and the links opened go to hooks, which the
-// bridge shows on the page.
+// does not know. Each query, preview and download asked of KLIPY and each
+// link opened go to hooks, which the bridge shows on the page.
 
 /** Results in a page (the core's `PAGE_SIZE`). */
 export const DEMO_GIF_PAGE_SIZE = 24;
@@ -110,9 +110,11 @@ function checkQuery({ kind, text, page, explicit }) {
  * @param {(item: object, target: 'image'|'background') => Promise<object>} deps.useInTheme copies an item into the theme (`AddedMediaDto`)
  * @param {(refs: string[]) => {themes: string[], openTheme: boolean}} deps.themesUsing the themes that use one of `refs`
  * @param {(query: object) => void} [deps.onQuery] each query asked of KLIPY
+ * @param {(id: string) => void} [deps.onPreview] each preview fetched from KLIPY (a result's id)
+ * @param {(id: string) => void} [deps.onCollect] each result downloaded from KLIPY into the collection (its id)
  * @param {(link: string) => void} [deps.onLink] each link opened
  */
-export function createDemoGifs(setup, { now, useInTheme, themesUsing, onQuery = () => {}, onLink = () => {} }) {
+export function createDemoGifs(setup, { now, useInTheme, themesUsing, onQuery = () => {}, onPreview = () => {}, onCollect = () => {}, onLink = () => {} }) {
   let key = setup.key ?? null;
   // The results of the last search (its pages so far), by id.
   let lastSearch = { signature: null, items: new Map() };
@@ -149,6 +151,7 @@ export function createDemoGifs(setup, { now, useInTheme, themesUsing, onQuery = 
 
   function collect(id) {
     const result = resultOf(id);
+    onCollect(id);
     const content = demoContentId(id);
     const known = collection.find((c) => c.id === content);
     if (known) return { ...known };
@@ -182,7 +185,11 @@ export function createDemoGifs(setup, { now, useInTheme, themesUsing, onQuery = 
       return structuredClone(page);
     },
     /** The preview of a result of the last search, as a `data:` URL. */
-    gifPreview: async (id, still) => demoGifPreview(resultOf(id), Boolean(still)),
+    gifPreview: async (id, still) => {
+      const result = resultOf(id);
+      onPreview(id);
+      return demoGifPreview(result, Boolean(still));
+    },
     /** Adds a result of the last search to the collection, once per content. */
     collectGif: async (id) => collect(id),
     /** The collection, newest first, previews still or moving. */

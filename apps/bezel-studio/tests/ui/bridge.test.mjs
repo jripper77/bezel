@@ -293,12 +293,16 @@ test('tauri mode maps the GIF search and the collection to their commands', asyn
   ]);
 });
 
-test('demo mode shows on the page the last query asked of KLIPY and the links opened', async () => {
+test('demo mode shows on the page the last query, preview and download asked of KLIPY and the links opened', async () => {
   const attributes = {};
   const bridge = createBridge({ ...page('?demo=gifs'), document: { documentElement: { setAttribute: (k, v) => { attributes[k] = v; } } } });
-  assert.equal(attributes['data-demo-gif-query'], undefined, 'nothing asked at start');
-  await bridge.searchGifs({ kind: 'gif', text: 'cat', page: 1, explicit: false });
+  assert.deepEqual(attributes, {}, 'nothing asked at start');
+  const { items } = await bridge.searchGifs({ kind: 'gif', text: 'cat', page: 1, explicit: false });
   assert.deepEqual(JSON.parse(attributes['data-demo-gif-query']), { kind: 'gif', text: 'cat', page: 1, explicit: false });
+  await bridge.gifPreview(items[1].id, true);
+  assert.equal(attributes['data-demo-gif-preview'], items[1].id);
+  await bridge.collectGif(items[2].id);
+  assert.equal(attributes['data-demo-gif-collect'], items[2].id);
   await bridge.openLink('klipyPartnerPanel');
   assert.equal(attributes['data-demo-link'], 'klipyPartnerPanel');
 });

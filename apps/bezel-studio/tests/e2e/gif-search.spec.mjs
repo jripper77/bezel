@@ -1,6 +1,8 @@
 // Searching GIFs and stickers on KLIPY (D-2026-10-01-gif-sticker-search-3,
 // -4, -6), in demo mode, in pt-BR and en, light and dark: the dialog opens
-// from the Media tab's Collection and asks nothing of KLIPY; without a key
+// from the Media tab's Collection and asks nothing of KLIPY; without a click
+// nothing goes out, with a key or without, even after an hour idle on the
+// page's clock (D-2026-10-01-gif-sticker-search-16); without a key
 // searching waits for one and the "?" discloses how to get it (Esc and a
 // click outside close it, the focus goes back), the Partner Panel and the
 // guide open through the backend; a refused key opens the help; explicit
@@ -48,9 +50,92 @@ async function watchQueries(page) {
   return async () => (await page.evaluate(() => globalThis.demoGifQueries())).map((value) => JSON.parse(value));
 }
 
+/**
+ * Where the demo shows what would leave the machine: each link and guide
+ * page opened in the browser, and each query, preview and download asked of
+ * KLIPY (the bridge's `onLink`, `onGuide`, `onGifQuery`, `onGifPreview`,
+ * `onGifCollect`).
+ */
+const OUTSIDE = Object.freeze({
+  link: 'data-demo-link',
+  guide: 'data-demo-guide',
+  query: QUERY_ATTRIBUTE,
+  preview: 'data-demo-gif-preview',
+  collect: 'data-demo-gif-collect',
+});
+/** Nothing written in any of them. */
+const NOTHING_OUT = Object.freeze(Object.fromEntries(Object.keys(OUTSIDE).map((what) => [what, []])));
+/** A minute, ms. */
+const MINUTE_MS = 60 * 1000;
+/** How long the studio idles at start on the page's clock before the check that nothing went out, ms. */
+const IDLE_MS = 60 * MINUTE_MS;
+
+/**
+ * Records every write of the OUTSIDE attributes from the start of each page
+ * the test goes to (before its scripts run), not only the last: like
+ * `watchQueries`, from the values each write replaced. Call it before
+ * going to the page.
+ * @returns {Promise<() => Promise<Record<string, string[]>>>} the values written so far, by OUTSIDE key
+ */
+async function recordOutside(page) {
+  await page.addInitScript((names) => {
+    const replaced = Object.fromEntries(names.map((name) => [name, []]));
+    const keep = (records) => {
+      for (const record of records) replaced[record.attributeName].push(record.oldValue);
+    };
+    const observer = new MutationObserver(keep);
+    observer.observe(document, { subtree: true, attributeFilter: names, attributeOldValue: true });
+    globalThis.demoOutside = () => {
+      keep(observer.takeRecords());
+      const now = (name) => document.documentElement.getAttribute(name);
+      return Object.fromEntries(names.map((name) => [name, replaced[name].length ? [...replaced[name].slice(1), now(name)] : []]));
+    };
+  }, Object.values(OUTSIDE));
+  return async () => {
+    const written = await page.evaluate(() => globalThis.demoOutside());
+    return Object.fromEntries(Object.entries(OUTSIDE).map(([what, name]) => [what, written[name]]));
+  };
+}
+
+/**
+ * Moves the page's clock an hour on: the first minute fires every timer as
+ * it comes, the rest jumps a minute at a time, firing each timer due in the
+ * minute (an interval once). Every second of the hour as it comes would
+ * replay the preview's and the sensors' refreshes: half a minute of test.
+ */
+async function idleAnHour(page) {
+  await page.clock.runFor(MINUTE_MS);
+  for (let gone = MINUTE_MS; gone < IDLE_MS; gone += MINUTE_MS) await page.clock.fastForward(MINUTE_MS);
+}
+
+/**
+ * Starts the studio in `scenario` on Playwright's clock, installed before
+ * the page so every timer the app sets at start is on it (it runs as usual
+ * until a test holds it), and lets it idle for an hour: without a click no
+ * link opens and nothing is asked of KLIPY (D-2026-10-01-gif-sticker-search-16).
+ * @returns {Promise<() => Promise<Record<string, string[]>>>} what went out so far (`recordOutside`)
+ */
+async function startIdle(page, scenario) {
+  const outside = await recordOutside(page);
+  await page.clock.install();
+  await page.goto(`/index.html?demo=${scenario}`);
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  expect(await outside()).toEqual(NOTHING_OUT);
+  const started = await page.evaluate(() => Date.now());
+  await idleAnHour(page);
+  expect(await page.evaluate(() => Date.now()) - started).toBeGreaterThanOrEqual(IDLE_MS);
+  expect(await outside()).toEqual(NOTHING_OUT);
+  return outside;
+}
+
 async function openSearch(page, t, scenario) {
   await page.goto(`/index.html?demo=${scenario}`);
   await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  return openDialog(page, t);
+}
+
+/** Opens the search dialog from the Media tab's Collection. */
+async function openDialog(page, t) {
   await page.getByRole('tab', { name: t('library.media') }).click();
   await expect(page.getByRole('tab', { name: t('media.thisTheme') })).toHaveAttribute('aria-selected', 'true');
   await page.getByRole('tab', { name: t('media.collection') }).click();
@@ -63,7 +148,9 @@ async function openSearch(page, t, scenario) {
 test.describe('gif search', () => {
   test('no key: help', async ({ page, t, lang }) => {
     const errors = watchErrors(page);
-    const dialog = await openSearch(page, t, 'gifsNoKey');
+    // Without a key and without a click: nothing goes out, even after an hour.
+    await startIdle(page, 'gifsNoKey');
+    const dialog = await openDialog(page, t);
     const key = dialog.getByLabel(t('gifs.key'));
     await expect(key).toBeFocused();
     await expect(key).toHaveAttribute('type', 'password');
@@ -156,9 +243,10 @@ test.describe('gif search', () => {
   test('explicit off by default', async ({ page, t }) => {
     const errors = watchErrors(page);
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    // The page's clock is Playwright's: it runs as usual until the test holds it.
-    await page.clock.install();
-    const dialog = await openSearch(page, t, 'gifs');
+    // With a key and without a click: nothing goes out, even after an hour;
+    // nor when the dialog opens.
+    const outside = await startIdle(page, 'gifs');
+    const dialog = await openDialog(page, t);
     await expect(dialog.getByText(t('gifs.keySaved', { last4: 'a1b2' }))).toBeVisible();
     const field = dialog.getByRole('searchbox', { name: 'Search KLIPY' });
     await expect(field).toBeFocused();
@@ -166,7 +254,7 @@ test.describe('gif search', () => {
     await expect(explicit).not.toBeChecked();
     await expect(dialog.getByText(t('gifs.start'))).toBeVisible();
     await expectAccessible(page);
-    expect(await lastQuery(page)).toBeNull();
+    expect(await outside()).toEqual(NOTHING_OUT);
 
     // Typing searches only after a 600 ms pause from the last key, with 2
     // characters or more; Enter at once. Every query KLIPY is asked is
@@ -208,6 +296,8 @@ test.describe('gif search', () => {
     await expect(dialog.locator('[aria-live="polite"]')).toHaveText(t('gifs.announce', { count: 24, text: 'ca' }));
     const preview = grid.locator('img').first();
     await expect(preview).toHaveAttribute('src', /^data:image\/svg/);
+    // Each preview asked of KLIPY is recorded too (so the check at start can see one).
+    expect((await outside()).preview).toContain('gif-ca-1');
     expect(await preview.getAttribute('src')).not.toContain('animate');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await expect(preview).toHaveAttribute('src', /animate/);
@@ -260,6 +350,7 @@ test.describe('gif search', () => {
     await page.keyboard.press('Enter');
     await expect(dialog.locator('[aria-live="polite"]')).toHaveText(t('gifs.added', { name: 'Heart' }));
     await expect(tiles.nth(1)).toContainText(t('gifs.inCollection'));
+    expect((await outside()).collect).toEqual(['sticker-ca-2']);
 
     // Kept while the app runs; nothing asked when the dialog opens again.
     await page.keyboard.press('Escape');

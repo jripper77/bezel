@@ -1188,6 +1188,8 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     useInTheme,
     themesUsing,
     onQuery: (query) => hooks.onGifQuery?.(query),
+    onPreview: (id) => hooks.onGifPreview?.(id),
+    onCollect: (id) => hooks.onGifCollect?.(id),
     onLink: (link) => hooks.onLink?.(link),
   });
   // The window, like the app: the close button hides it while a screen is

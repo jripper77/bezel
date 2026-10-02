@@ -1,6 +1,13 @@
 //! The `#[tauri::command]`s the UI invokes: each runs its [`Backend`] method
 //! on a blocking thread (screens and files block) and opens the native file
 //! dialogs the method needs.
+//!
+//! The window enters a command only through IPC: no code names a command
+//! function but its definition and `generate_handler!` in `run`, only the
+//! GIF commands `search_gifs`, `gif_preview` and `collect_gif` take the
+//! invocation (`Request`), and nothing here prints or logs
+//! (D-2026-10-01-gif-sticker-search-11); the source guard
+//! `tests::nothing_in_the_app_forges_an_invocation` checks it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,7 +19,7 @@ use bezel_core::ports::ThemeLocation;
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::native::EXTENSION;
 use tauri::ipc::{Request, Response};
-use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, State, WebviewWindow};
+use tauri::{AppHandle, Manager as _, Runtime, State, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
 use tauri_plugin_opener::OpenerExt as _;
@@ -25,6 +32,7 @@ use crate::dto::{
     ProgressDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, StorageDto,
     ThemeEntryDto, VideoAutoDto, parse_orientation,
 };
+use crate::emit_progress;
 use crate::gifs::{Gifs, KlipyKey, SharedGifs, Target, UserAsked};
 use crate::manager::{
     Ask, CacheDto, CandidatesDto, ClearedDto, ConfirmedFileDto, DeleteReportDto, ManagedFileDto,
@@ -479,7 +487,8 @@ pub async fn pick_folder<R: Runtime>(app: AppHandle<R>) -> UiResult<Option<Strin
 
 // ------------------------------------------------------------- storage --
 
-/// Event carrying a running upload's progress ([`ProgressDto`]).
+/// Event carrying a storage job's progress ([`ProgressDto`]): an upload's,
+/// a storage manager plan's; `crate::emit_progress` sends it.
 pub const PROGRESS_EVENT: &str = "storage-progress";
 
 /// The answer of the UI's confirmation dialog (which names the file) as the
@@ -555,10 +564,8 @@ pub async fn run_upload<R: Runtime>(
     blocking(&state, move |b| {
         let mut throttle = ProgressThrottle::default();
         let mut report = |progress: Progress| {
-            if throttle.pass(progress)
-                && let Err(e) = app.emit(PROGRESS_EVENT, ProgressDto::from(progress))
-            {
-                tracing::warn!("upload progress not sent: {e}");
+            if throttle.pass(progress) {
+                emit_progress(&app, ProgressDto::from(progress));
             }
         };
         b.run_upload(ticket, confirm_of(overwrite), now(), &mut report)
@@ -617,13 +624,6 @@ pub async fn set_boot_media(
 }
 
 // ----------------------------------------------------- storage manager --
-
-/// Sends a storage manager job's progress as [`PROGRESS_EVENT`].
-fn emit_progress<R: Runtime>(app: &AppHandle<R>, progress: ProgressDto) {
-    if let Err(e) = app.emit(PROGRESS_EVENT, progress) {
-        tracing::warn!("storage progress not sent: {e}");
-    }
-}
 
 /// Both media of a screen next to the catalog of what Bezel sent.
 #[tauri::command]

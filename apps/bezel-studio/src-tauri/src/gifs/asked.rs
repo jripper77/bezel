@@ -16,9 +16,10 @@
 //! [`Request`] (an `InvokeRequest` handed to `WebviewWindow::on_message`
 //! with `AppHandle::invoke_key`, or a script run in the window that calls
 //! `invoke` or presses Search), another command making a proof of its own
-//! request, nor a second `KlipyClient` made and asked apart from the GIF
-//! state. The source guard, `tests::nothing_in_the_app_forges_an_invocation`
-//! in `lib.rs` (D-2026-10-01-gif-sticker-search-10), reads the studio's
+//! request or calling a GIF command's function with it, nor a second
+//! `KlipyClient` made and asked apart from the GIF state. The source guard,
+//! `tests::nothing_in_the_app_forges_an_invocation` in `lib.rs`
+//! (D-2026-10-01-gif-sticker-search-10, -11), reads the studio's
 //! production code as a syntax tree, by identifier (raw names and the
 //! tokens of macro calls included), and refuses:
 //! - the APIs that forge an invocation or run a script in the window:
@@ -34,6 +35,10 @@
 //!   another macro call's tokens, nor given an `impl` outside this module;
 //!   here it derives only `Debug`, and in production only
 //!   [`UserAsked::of`] makes one;
+//! - [`Request`] named by any function but those three commands and
+//!   [`UserAsked::of`], or imported but by its own name in their modules;
+//! - a command function named but at its definition and in the list of
+//!   `generate_handler!` in `run` (a command is entered only through IPC);
 //! - any `KlipyClient::new` but the source factory's (`klipy_source`).
 //!
 //! Code written to get past it otherwise (generated code, another crate

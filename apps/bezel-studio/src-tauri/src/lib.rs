@@ -293,18 +293,21 @@ struct Start<R: Runtime> {
 /// command Tauri is running has, so a search through it from here does not
 /// compile. What the type cannot stop is making Tauri dispatch an
 /// invocation the window never sent, another command making a proof of
-/// its own request, or making a second KLIPY client: the source guard
+/// its own request or calling a GIF command's function with it, or making
+/// a second KLIPY client: the source guard
 /// `tests::nothing_in_the_app_forges_an_invocation`
-/// (D-2026-10-01-gif-sticker-search-10) refuses, by identifier in the
+/// (D-2026-10-01-gif-sticker-search-10, -11) refuses, by identifier in the
 /// studio's production code (raw names and the tokens of macro calls
 /// included), the Tauri APIs that do the first or load a page in the
 /// window (`eval`, `with_webview`, `on_message`, `invoke_key`, `navigate`,
 /// ...) and literals that are `javascript:` URLs; [`UserAsked::of`] but in
 /// the bodies of `search_gifs`, `gif_preview` and `collect_gif` (and
 /// [`UserAsked`] renamed, in a qualified path, in another macro call or in
-/// an `impl` outside its module); and any `KlipyClient::new` but the
-/// source factory's. Code written to get past it otherwise is left to code
-/// review.
+/// an `impl` outside its module); the window's invocation (`Request`)
+/// taken by any other function; a command function named but at its
+/// definition and in the list of `generate_handler!` in [`run`]; and any
+/// `KlipyClient::new` but the source factory's. Code written to get past
+/// it otherwise is left to code review.
 fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
     let folders = (start.folders)(app.handle())?;
     let backend: Shared = Arc::new(compose(&folders, start.simulate));
@@ -343,6 +346,17 @@ pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+/// Sends a storage job's progress (an upload's, a storage manager plan's)
+/// to the window as [`commands::PROGRESS_EVENT`]; one that cannot be sent is
+/// logged, and the job goes on. Here, not in `commands.rs`, which neither
+/// prints nor logs (D-2026-10-01-gif-sticker-search-11): it is given no key
+/// and no invocation.
+pub(crate) fn emit_progress<R: Runtime>(app: &AppHandle<R>, progress: dto::ProgressDto) {
+    if let Err(e) = app.emit(commands::PROGRESS_EVENT, progress) {
+        tracing::warn!("storage progress not sent: {e}");
     }
 }
 
@@ -651,8 +665,8 @@ mod tests {
     use syn::visit::{self, Visit};
     use syn::{
         AttrStyle, Attribute, Expr, ExprCall, ExprStruct, ImplItem, ImplItemFn, ImplItemType, Item,
-        ItemFn, ItemImpl, ItemType, ItemUse, Lit, Macro, Member, Meta, QSelf, TraitItemFn, Type,
-        UseName, UseRename, UseTree,
+        ItemExternCrate, ItemFn, ItemImpl, ItemType, ItemUse, Lit, Macro, Member, Meta, QSelf,
+        TraitItemFn, Type, UseName, UseRename, UseTree,
     };
 
     #[cfg(not(windows))]
@@ -1123,11 +1137,56 @@ mod tests {
         "navigate",
     ];
 
-    /// Macros that print, which the GIF and key modules must not call.
-    const PRINTS: [&str; 5] = ["println", "eprintln", "print", "eprint", "dbg"];
+    /// Macros that print, which the GIF, key and command modules must not
+    /// call: the print macros, and those that panic with a message (the
+    /// panic hook prints it). One is spelled in two parts, so that the
+    /// repository's check for unfinished-work markers does not read it as
+    /// one.
+    const PRINTS: [&str; 15] = [
+        "println",
+        "eprintln",
+        "print",
+        "eprint",
+        "dbg",
+        "panic",
+        "unreachable",
+        concat!("to", "do"),
+        "unimplemented",
+        "assert",
+        "assert_eq",
+        "assert_ne",
+        "debug_assert",
+        "debug_assert_eq",
+        "debug_assert_ne",
+    ];
 
-    /// Crates that log, whose paths the GIF and key modules must not use.
+    /// Crates that log, whose paths the GIF, key and command modules must
+    /// not use.
     const LOGGERS: [&str; 2] = ["log", "tracing"];
+
+    /// The loggers' macros, which the GIF, key and command modules must not
+    /// call by their bare names either (imported, or by `#[macro_use]`).
+    const LOG_MACROS: [&str; 7] = ["trace", "debug", "info", "warn", "error", "event", "log"];
+
+    /// The process's output streams, which the GIF, key and command modules
+    /// must not name (`writeln!(std::io::stderr(), …)` prints).
+    const STDIO: [&str; 2] = ["stdout", "stderr"];
+
+    /// The module of the `#[tauri::command]` functions: the window's
+    /// invocations enter there.
+    const COMMAND_MODULE: &str = "commands.rs";
+
+    /// The window's invocation, as a command takes it
+    /// (`tauri::ipc::Request`): its body is what the window sent.
+    const INVOCATION: &str = "Request";
+
+    /// The macro that lists the commands the window may invoke: in `run`,
+    /// the one place that names a command function but its definition.
+    const HANDLER: &str = "generate_handler";
+
+    /// The prefix of the macro `#[tauri::command]` makes for each command
+    /// (`__cmd__search_gifs!`), which `generate_handler!` calls.
+    const GENERATED: &str = "__cmd__";
 
     /// The one accessor that reads a [`KlipyKey`]'s text, defined in
     /// [`KEY_MODULE`].
@@ -1185,9 +1244,15 @@ mod tests {
             })
         }
 
-        /// Its production code read: items under `#[cfg(test)]` left out.
-        fn production(&self) -> Reader<'_> {
-            let mut reader = Reader::new(&self.name, Reading::Production);
+        /// The `#[tauri::command]` functions its production code defines.
+        fn commands(&self) -> Vec<String> {
+            self.production(&[]).defined
+        }
+
+        /// Its production code read, the studio's command functions being
+        /// `commands`: items under `#[cfg(test)]` left out.
+        fn production<'s>(&'s self, commands: &'s [String]) -> Reader<'s> {
+            let mut reader = Reader::new(&self.name, Reading::Production, commands);
             reader.visit_file(&self.tree);
             if reader.klipy_named > reader.made.len() + reader.klipy_imported {
                 reader.refuse("KLIPY's client named outside its import");
@@ -1209,7 +1274,7 @@ mod tests {
         /// Its literals (escapes read) that hold a marker, tests included,
         /// and KLIPY's hosts anywhere in its text, comments too.
         fn literals(&self) -> Vec<String> {
-            let mut reader = Reader::new(&self.name, Reading::Literals);
+            let mut reader = Reader::new(&self.name, Reading::Literals, &[]);
             reader.visit_file(&self.tree);
             for host in markers().iter().skip(1) {
                 if self.text.contains(host.as_str()) {
@@ -1234,6 +1299,9 @@ mod tests {
     struct Reader<'f> {
         file: &'f str,
         reading: Reading,
+        /// The studio's command functions, which only the list of
+        /// `generate_handler!` in `run` may name.
+        commands: &'f [String],
         /// The functions around what is read, the outermost first.
         within: Vec<String>,
         /// Whether the outermost of them is a free `#[tauri::command]`
@@ -1241,8 +1309,20 @@ mod tests {
         command: bool,
         /// How deep in macro calls' tokens what is read is.
         in_macro: usize,
+        /// Whether what is read is the list of `generate_handler!` in
+        /// `run` in `lib.rs`.
+        in_handler: bool,
+        /// Whether what is read is the invocation's type imported by its
+        /// own name, at the top of the command module or the proof's.
+        importing: bool,
         /// Every function read, in order.
         functions: Vec<String>,
+        /// The free `#[tauri::command]` functions it defines.
+        defined: Vec<String>,
+        /// The commands the list of `generate_handler!` in `run` names.
+        handled: Vec<String>,
+        /// The outermost function around each `generate_handler!` call.
+        handlers: Vec<String>,
         /// The outermost function around each `KlipyClient::new`.
         made: Vec<String>,
         /// The outermost function around each read of the key's text, its
@@ -1262,14 +1342,20 @@ mod tests {
     }
 
     impl<'f> Reader<'f> {
-        fn new(file: &'f str, reading: Reading) -> Self {
+        fn new(file: &'f str, reading: Reading, commands: &'f [String]) -> Self {
             Self {
                 file,
                 reading,
+                commands,
                 within: Vec::new(),
                 command: false,
                 in_macro: 0,
+                in_handler: false,
+                importing: false,
                 functions: Vec::new(),
+                defined: Vec::new(),
+                handled: Vec::new(),
+                handlers: Vec::new(),
                 made: Vec::new(),
                 reads: Vec::new(),
                 asked: Vec::new(),
@@ -1288,9 +1374,10 @@ mod tests {
             self.reading == Reading::Production
         }
 
-        /// Whether the file is one of the GIF and key modules.
-        fn gif_module(&self) -> bool {
-            self.file == "gifs.rs" || self.file.starts_with("gifs/")
+        /// Whether the file is one of the GIF and key modules or the
+        /// command module, which neither print nor log.
+        fn quiet(&self) -> bool {
+            self.file == "gifs.rs" || self.file.starts_with("gifs/") || self.file == COMMAND_MODULE
         }
 
         /// Whether an item marked with `attributes` is left out: a test
@@ -1326,9 +1413,19 @@ mod tests {
 
         /// Whether what is read is in the body of one of [`PROOF_COMMANDS`].
         fn in_gif_command(&self) -> bool {
-            self.file == "commands.rs"
+            self.file == COMMAND_MODULE
                 && self.command
                 && self.outer().is_some_and(|f| PROOF_COMMANDS.contains(&f))
+        }
+
+        /// Whether the invocation's type ([`INVOCATION`]) may be named where
+        /// what is read is: in one of [`PROOF_COMMANDS`], in `UserAsked::of`
+        /// that takes it, or imported by its own name at the top of their
+        /// modules.
+        fn takes_the_invocation(&self) -> bool {
+            self.in_gif_command()
+                || (self.file == PROOF_MODULE && self.within == ["of"])
+                || self.importing
         }
 
         /// A read of the key's text, accepted or not.
@@ -1357,6 +1454,73 @@ mod tests {
                     "`{PROOF}` inside a macro call outside the GIF commands"
                 ));
             }
+            if name == INVOCATION && !self.takes_the_invocation() {
+                self.refuse(format_args!(
+                    "`{INVOCATION}` (the window's invocation) named outside the GIF commands \
+                     that take it (`{}` in `{COMMAND_MODULE}`) and `{PROOF}::of`",
+                    PROOF_COMMANDS.join("`, `")
+                ));
+            }
+            if self.quiet() && STDIO.contains(&name) {
+                self.refuse(format_args!(
+                    "`{name}` prints in a GIF, key or command module"
+                ));
+            }
+        }
+
+        /// A path that names a command function: accepted in the list of
+        /// `generate_handler!` in `run`, refused anywhere else, so that a
+        /// command is entered only through IPC. It names one when it ends
+        /// with a command's name after the command module (`commands::…`,
+        /// `crate::commands::…`), or in the command module after nothing,
+        /// `self` or `super`, or when it is the macro Tauri makes for a
+        /// command (`__cmd__…`, exported at the crate's root). Elsewhere a
+        /// name alone is not the command's: the core's use cases and the
+        /// backend's methods share their names, and an import of the
+        /// command is refused ([`Reader::imported`]).
+        fn command_named(&mut self, segments: &[String]) {
+            let Some((last, parent)) = segments.split_last() else {
+                return;
+            };
+            let generated = last.strip_prefix(GENERATED);
+            let name = generated.unwrap_or(last);
+            if !self.commands.iter().any(|command| command == name) {
+                return;
+            }
+            let in_module = parent.last().is_some_and(|module| module == "commands");
+            let here = self.file == COMMAND_MODULE
+                && parent
+                    .iter()
+                    .all(|module| module == "self" || module == "super");
+            if !(generated.is_some() || in_module || here) {
+                return;
+            }
+            if self.in_handler {
+                self.handled.push(name.to_string());
+            } else {
+                self.refuse(format_args!(
+                    "`{name}` names a command function outside its definition and the list of \
+                     `{HANDLER}!` in `run`: a command is entered only through IPC"
+                ));
+            }
+        }
+
+        /// What a `use` imports, `path` (its last name the item's, `*` for
+        /// a glob), renamed when `renamed`: a command function is not
+        /// imported, nor the command module renamed or imported by a glob.
+        fn imported(&mut self, path: &[String], renamed: bool) {
+            if !self.production() {
+                return;
+            }
+            let last = path.last().map_or("", String::as_str);
+            let module = path.len() > 1 && path[path.len() - 2] == "commands";
+            if renamed && (last == "commands" || (last == "self" && module)) {
+                self.refuse("the command module renamed: it is named as itself");
+            }
+            if last == "*" && module {
+                self.refuse("the command module imported by a glob");
+            }
+            self.command_named(path);
         }
 
         /// The key's accessor, named where no rule accepts it (the two
@@ -1410,12 +1574,14 @@ mod tests {
                 self.refuse("`include!` in production code: it cannot be classified");
             }
             let logs = segments.len() > 1 && LOGGERS.contains(&segments[0].as_str());
-            if self.gif_module() && (logs || (called && PRINTS.contains(&last))) {
+            let prints = called && (PRINTS.contains(&last) || LOG_MACROS.contains(&last));
+            if self.quiet() && (logs || prints) {
                 self.refuse(format_args!(
-                    "`{}` prints or logs in a GIF or key module",
+                    "`{}` prints or logs in a GIF, key or command module",
                     segments.join("::")
                 ));
             }
+            self.command_named(segments);
         }
 
         /// A literal: its value, escapes read, holds no marker.
@@ -1439,7 +1605,9 @@ mod tests {
 
         /// Tokens `syn` leaves unparsed (a macro call's, an attribute's):
         /// each path, called as a macro when a `!` follows it, each of its
-        /// identifiers, each literal, and the same inside each group.
+        /// identifiers, each literal, and the same inside each group. A
+        /// name after a `.` (a field, a method) is an identifier, not a
+        /// path.
         fn tokens(&mut self, tokens: TokenStream) {
             let tokens: Vec<TokenTree> = tokens.into_iter().collect();
             let mut at = 0;
@@ -1453,7 +1621,9 @@ mod tests {
                         for segment in &path {
                             self.ident(segment);
                         }
-                        self.path(&path, is_punct(tokens.get(next), '!'));
+                        if !is_member(&tokens, at) {
+                            self.path(&path, is_punct(tokens.get(next), '!'));
+                        }
                         at = next;
                         continue;
                     }
@@ -1478,6 +1648,9 @@ mod tests {
 
         fn visit_item_fn(&mut self, item: &'ast ItemFn) {
             let command = item.attrs.iter().any(is_command);
+            if command {
+                self.defined.push(item.sig.ident.unraw().to_string());
+            }
             self.function(&item.sig.ident, command, |reader| {
                 visit::visit_item_fn(reader, item);
             });
@@ -1628,17 +1801,35 @@ mod tests {
             let logs = use_roots(&item.tree)
                 .iter()
                 .any(|root| LOGGERS.iter().any(|logger| *root == logger));
-            if self.production() && self.gif_module() && logs {
-                self.refuse("a logger imported in a GIF or key module");
+            if self.production() && self.quiet() && logs {
+                self.refuse("a logger imported in a GIF, key or command module");
+            }
+            for (path, renamed) in use_leaves(&item.tree, &[]) {
+                self.imported(&path, renamed);
             }
             visit::visit_item_use(self, item);
         }
 
+        fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
+            let logs = LOGGERS.iter().any(|logger| item.ident.unraw() == logger);
+            if self.production() && self.quiet() && logs {
+                self.refuse("a logger imported in a GIF, key or command module");
+            }
+            visit::visit_item_extern_crate(self, item);
+        }
+
+        /// An imported name: the invocation's type imported by its own
+        /// name at the top of its two modules is accepted.
         fn visit_use_name(&mut self, name: &'ast UseName) {
-            if name.ident.unraw() == "KlipyClient" {
+            let ident = name.ident.unraw();
+            if ident == "KlipyClient" {
                 self.klipy_imported += 1;
             }
+            self.importing = ident == INVOCATION
+                && self.within.is_empty()
+                && (self.file == COMMAND_MODULE || self.file == PROOF_MODULE);
             visit::visit_use_name(self, name);
+            self.importing = false;
         }
 
         fn visit_ident(&mut self, ident: &'ast Ident) {
@@ -1650,14 +1841,24 @@ mod tests {
             visit::visit_path(self, path);
         }
 
+        /// A macro call; the list of `generate_handler!` in `run` names the
+        /// command functions.
         fn visit_macro(&mut self, call: &'ast Macro) {
-            self.path(&segments(&call.path), true);
+            let path = segments(&call.path);
+            self.path(&path, true);
             for segment in &call.path.segments {
                 self.visit_path_segment(segment);
             }
+            let lists = self.production() && path.last().is_some_and(|last| last == HANDLER);
+            if lists {
+                let around = self.within.first().cloned().unwrap_or_default();
+                self.handlers.push(around);
+            }
+            self.in_handler = lists && self.file == "lib.rs" && self.within == ["run"];
             self.in_macro += 1;
             self.tokens(call.tokens.clone());
             self.in_macro -= 1;
+            self.in_handler = false;
         }
 
         fn visit_lit(&mut self, literal: &'ast Lit) {
@@ -1791,6 +1992,31 @@ mod tests {
         }
     }
 
+    /// Each path a `use` tree under `prefix` imports (`r#` removed; `*`
+    /// for a glob), and whether it is renamed.
+    fn use_leaves(tree: &UseTree, prefix: &[String]) -> Vec<(Vec<String>, bool)> {
+        let with = |name: &Ident| {
+            let mut path = prefix.to_vec();
+            path.push(name.unraw().to_string());
+            path
+        };
+        match tree {
+            UseTree::Path(path) => use_leaves(&path.tree, &with(&path.ident)),
+            UseTree::Name(name) => vec![(with(&name.ident), false)],
+            UseTree::Rename(rename) => vec![(with(&rename.ident), true)],
+            UseTree::Glob(_) => {
+                let mut path = prefix.to_vec();
+                path.push("*".into());
+                vec![(path, false)]
+            }
+            UseTree::Group(group) => group
+                .items
+                .iter()
+                .flat_map(|tree| use_leaves(tree, prefix))
+                .collect(),
+        }
+    }
+
     /// The path that starts at the identifier `tokens[at]` (`a::b::c`, `r#`
     /// removed) and where the tokens after it start.
     fn path_at(tokens: &[TokenTree], mut at: usize) -> (Vec<String>, usize) {
@@ -1821,6 +2047,16 @@ mod tests {
     /// Whether `token` is the punctuation `c`.
     fn is_punct(token: Option<&TokenTree>, c: char) -> bool {
         matches!(token, Some(TokenTree::Punct(punct)) if punct.as_char() == c)
+    }
+
+    /// Whether the identifier `tokens[at]` follows a `.` (it is a field or
+    /// a method), not a `..` (a range's end, which may be a path).
+    fn is_member(tokens: &[TokenTree], at: usize) -> bool {
+        let Some(before) = at.checked_sub(1) else {
+            return false;
+        };
+        let dot = |i: usize| is_punct(tokens.get(i), '.');
+        dot(before) && !before.checked_sub(1).is_some_and(dot)
     }
 
     /// Whether `tokens` hold the identifier `name`, in a group or not.
@@ -1916,13 +2152,15 @@ mod tests {
             .collect()
     }
 
-    /// D-2026-10-01-gif-sticker-search-3 and -10 (DoD row 3), the source
-    /// guard. [`UserAsked`] guards the GIF state, its source factory and
-    /// the command functions: setup code has no command `Request` to make
-    /// one from. [`KlipyKey`] cannot be printed. Neither stops the app from
-    /// forging an invocation Tauri then dispatches, from making a second
-    /// KLIPY client or a proof in another command, nor from reading the
-    /// key's text where it should not; this does, for the studio's
+    /// D-2026-10-01-gif-sticker-search-3, -10 and -11 (DoD row 3), the
+    /// source guard. [`UserAsked`] guards the GIF state, its source factory
+    /// and the command functions: setup code has no command `Request` to
+    /// make one from. [`KlipyKey`] cannot be printed. Neither stops the app
+    /// from forging an invocation Tauri then dispatches, from making a
+    /// second KLIPY client or a proof in another command, from calling a
+    /// GIF command's function from another command with that command's
+    /// invocation, nor from reading the key's text or the window's
+    /// invocation where it should not; this does, for the studio's
     /// production code. It parses every `.rs` file under `src/` as it runs
     /// (a new file is read too) with `syn` and reads each identifier, `r#`
     /// removed, the tokens of macro calls and attributes included. It
@@ -1930,6 +2168,18 @@ mod tests {
     /// - production code holds none of `FORGERIES`: no invocation handed to
     ///   a webview with the app's invoke key, no script run in the window,
     ///   no page loaded in it (`navigate`);
+    /// - no path names a command function (each free `#[tauri::command]`
+    ///   function, found in the syntax trees; or the macro Tauri makes for
+    ///   it, `__cmd__…`), nor does a `use` import one, but the list of
+    ///   `generate_handler!` in `run`, the one `generate_handler!`: a
+    ///   command is entered only through IPC. Its definition is a name, not
+    ///   a path, and a method or a field of the same name is not a path;
+    /// - the window's invocation (`Request`) is named only in the GIF
+    ///   commands that take it (`search_gifs`, `gif_preview` and
+    ///   `collect_gif`), in `UserAsked::of` and in the imports of their two
+    ///   modules by its own name: no other function takes it, under any
+    ///   spelling (`use … as`, `type … =`, a qualified path, a macro's
+    ///   tokens);
     /// - `KlipyClient::new` is called once, in `klipy_source`, and the type
     ///   is named nowhere else but its import;
     /// - the key's accessor (`KEY_READER`) is named in two places only,
@@ -1940,8 +2190,10 @@ mod tests {
     ///   variable, inside any macro call's tokens, a path, another argument,
     ///   field, function or file) it is refused;
     /// - a function that reads the key's text (those three) calls no macro
-    ///   at all, and the GIF and key modules (`gifs.rs`, `gifs/`) call no
-    ///   print macro and use no logger;
+    ///   at all, and the GIF, key and command modules (`gifs.rs`, `gifs/`,
+    ///   `commands.rs`) call no print or panic macro (`PRINTS`) nor a
+    ///   logger's macro by its bare name, use no logger's path, import no
+    ///   logger and name no output stream;
     /// - `UserAsked::of` is named (called, or taken as a value, a macro's
     ///   tokens included) only in the bodies of the `#[tauri::command]`
     ///   functions `search_gifs`, `gif_preview` and `collect_gif` of
@@ -1973,21 +2225,27 @@ mod tests {
                 Err(why) => problems.push(why),
             }
         }
-        let (mut made, mut reads, mut asked) = (Vec::new(), Vec::new(), Vec::new());
+        let mut built = Vec::new();
         for source in &read {
             problems.extend(source.literals());
             match test_only(source, &read) {
                 Err(why) => problems.push(why),
                 Ok(true) => {}
-                Ok(false) => {
-                    let reader = source.production();
-                    let at = |f: &String| format!("{}: {f}", source.name);
-                    made.extend(reader.made.iter().map(at));
-                    reads.extend(reader.reads.iter().map(at));
-                    asked.extend(reader.asked.iter().map(at));
-                    problems.extend(reader.problems);
-                }
+                Ok(false) => built.push(source),
             }
+        }
+        let commands: Vec<String> = built.iter().flat_map(|s| s.commands()).collect();
+        let (mut made, mut reads, mut asked) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut handled, mut handlers) = (Vec::new(), Vec::new());
+        for source in &built {
+            let reader = source.production(&commands);
+            let at = |f: &String| format!("{}: {f}", source.name);
+            made.extend(reader.made.iter().map(at));
+            reads.extend(reader.reads.iter().map(at));
+            asked.extend(reader.asked.iter().map(at));
+            handlers.extend(reader.handlers.iter().map(at));
+            handled.extend(reader.handled);
+            problems.extend(reader.problems);
         }
         assert!(problems.is_empty(), "{problems:#?}");
         assert_eq!(
@@ -2013,10 +2271,21 @@ mod tests {
             ],
             "a proof is made by the GIF commands that take the window's request"
         );
+        // The commands were found, and the one handler list names each of
+        // them once.
+        assert_eq!(handlers, ["lib.rs: run"], "one `generate_handler!`");
+        assert!(commands.len() >= GIF_COMMANDS.len(), "{commands:?}");
+        for command in GIF_COMMANDS {
+            assert!(commands.iter().any(|c| c == command), "{command}");
+        }
+        let mut commands = commands;
+        commands.sort_unstable();
+        handled.sort_unstable();
+        assert_eq!(handled, commands, "generate_handler! and the commands");
         // The rule read this file's tests as tests, and the GIF files as
         // they are built.
         let lib = read.iter().find(|source| source.name == "lib.rs").unwrap();
-        let functions = lib.production().functions;
+        let functions = lib.production(&[]).functions;
         assert!(functions.iter().any(|f| f == "klipy_source"));
         assert!(
             !functions
@@ -2032,11 +2301,21 @@ mod tests {
         assert!(!role("main.rs"));
     }
 
+    /// The command functions of the studio's `commands.rs`.
+    fn studio_commands() -> Vec<String> {
+        Source::new(COMMAND_MODULE, include_str!("commands.rs"))
+            .unwrap()
+            .commands()
+    }
+
     /// The source guard's findings in the made-up file `name` read as
-    /// production, and the functions around each `KlipyClient::new`.
+    /// production, the studio's commands and its own being the command
+    /// functions, and the functions around each `KlipyClient::new`.
     fn guard(name: &str, text: &str) -> (Vec<String>, Vec<String>) {
         let source = Source::new(name, text).unwrap();
-        let reader = source.production();
+        let mut commands = studio_commands();
+        commands.extend(source.commands());
+        let reader = source.production(&commands);
         let mut problems = source.literals();
         problems.extend(reader.problems);
         (problems, reader.made)
@@ -2071,7 +2350,7 @@ mod read { fn as_production(w: W) { w.invoke_key() } }
 fn after(w: W) { w.on_message(request) }
 "##;
         let source = Source::new("x.rs", file).unwrap();
-        let reader = source.production();
+        let reader = source.production(&[]);
         assert_eq!(
             reader.functions,
             ["before", "kept", "as_production", "after"]
@@ -2310,15 +2589,212 @@ fn after(w: W) { w.on_message(request) }
         ]
     }
 
+    /// A command function entered from Rust, not through IPC
+    /// (D-2026-10-01-gif-sticker-search-11, review W1 and the critic of
+    /// round 2): each is refused.
+    fn commands_called_from_rust() -> Vec<Case> {
+        let named = "names a command function";
+        vec![
+            // The critic's mutant (the reviewer's `cb2`): the command the
+            // window calls at start searches with its own invocation.
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub async fn preferences(request: Request<'_>, \
+                 gifs: State<'_, SharedGifs>, state: State<'_, Shared>) \
+                 -> UiResult<PreferencesDto> { let _ = search_gifs(request, gifs, \
+                 state.clone(), \"gif\".into(), String::new(), 1, None).await; \
+                 Ok(state.preferences()) }"
+                    .into(),
+                "`search_gifs` names a command function",
+            ),
+            // A command calling another one that is not a GIF command.
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub async fn release_screen(state: State<'_, Shared>, \
+                 screen: String) -> UiResult<()> { \
+                 set_brightness(state.clone(), screen.clone(), 0).await?; \
+                 blocking(&state, move |b| b.release_screen(&screen)).await }"
+                    .into(),
+                "`set_brightness` names a command function",
+            ),
+            // From another file: raw and qualified, as a value, imported,
+            // renamed, in a macro's tokens, Tauri's macro for it, a second
+            // handler list.
+            (
+                "lib.rs",
+                "fn setup(app: &App) { let _ = crate::commands::r#gif_preview; }".into(),
+                named,
+            ),
+            ("lib.rs", "use crate::commands::collect_gif;".into(), named),
+            (
+                "lib.rs",
+                "use crate::commands::{search_gifs as warm_up};".into(),
+                named,
+            ),
+            (
+                "lib.rs",
+                "fn setup(h: H) { spawn!(async move { commands::search_gifs(h).await }); }".into(),
+                named,
+            ),
+            (
+                "lib.rs",
+                "fn setup(i: I) { commands::__cmd__search_gifs!(search_gifs, i); }".into(),
+                named,
+            ),
+            (
+                "lib.rs",
+                "fn setup(i: I) { crate::r#__cmd__collect_gif!(collect_gif, i); }".into(),
+                named,
+            ),
+            (
+                COMMAND_MODULE,
+                "fn warm_up(h: H) { let _ = self::search_gifs(h); }".into(),
+                named,
+            ),
+            // The command module renamed, or its names all imported.
+            (
+                "lib.rs",
+                "use crate::commands as c;\nfn setup(h: H) { c::search_gifs(h); }".into(),
+                "the command module renamed",
+            ),
+            (
+                "lib.rs",
+                "use crate::commands::{self as c};".into(),
+                "the command module renamed",
+            ),
+            ("lib.rs", "use crate::commands::*;".into(), "by a glob"),
+            (
+                "lib.rs",
+                "fn setup(b: B) -> B { b.invoke_handler(tauri::generate_handler![\
+                 commands::search_gifs]) }"
+                    .into(),
+                named,
+            ),
+        ]
+    }
+
+    /// The window's invocation taken by a function but the GIF commands
+    /// (D-2026-10-01-gif-sticker-search-11, the critic of round 2): each is
+    /// refused.
+    fn invocations_taken_elsewhere() -> Vec<Case> {
+        let taken = "`Request` (the window's invocation) named outside";
+        vec![
+            // The critic's mutant: the key's command prints the body of its
+            // invocation, the key.
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub async fn save_klipy_key(request: Request<'_>, \
+                 gifs: State<'_, SharedGifs>, state: State<'_, Shared>, key: KlipyKey) \
+                 -> UiResult<KeyDto> { eprintln!(\"{:?}\", request.body()); \
+                 with_gifs(&gifs, &state, move |g, _| g.save_key(key)).await }"
+                    .into(),
+                taken,
+            ),
+            // Without a print, by its full path or raw; renamed, aliased, by
+            // a helper, in another module.
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub async fn save_klipy_key(\
+                 request: tauri::ipc::Request<'_>, key: KlipyKey) -> R { \
+                 let body = request.body(); keep(body, key) }"
+                    .into(),
+                taken,
+            ),
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub async fn klipy_key(\
+                 request: tauri::ipc::r#Request<'_>) -> R { keep(request) }"
+                    .into(),
+                taken,
+            ),
+            (
+                COMMAND_MODULE,
+                "use tauri::ipc::Request as R;\n#[tauri::command]\n\
+                 pub async fn remove_klipy_key(request: R<'_>) -> U { keep(request) }"
+                    .into(),
+                taken,
+            ),
+            (
+                COMMAND_MODULE,
+                "type Invocation<'a> = tauri::ipc::Request<'a>;".into(),
+                taken,
+            ),
+            (
+                COMMAND_MODULE,
+                "fn body_of(request: &Request<'_>) -> Vec<u8> { request.body().to_vec() }".into(),
+                taken,
+            ),
+            (
+                "gifs.rs",
+                "use tauri::ipc::Request;\nfn remember(request: &Request<'_>) {}".into(),
+                taken,
+            ),
+        ]
+    }
+
+    /// A print or a log in the command module
+    /// (D-2026-10-01-gif-sticker-search-11): each is refused.
+    fn prints_in_commands() -> Vec<Case> {
+        let prints = "prints or logs in a GIF, key or command module";
+        let command = |body: &str| {
+            format!("#[tauri::command]\npub fn save_klipy_key(key: KlipyKey) {{ {body} }}")
+        };
+        vec![
+            (
+                COMMAND_MODULE,
+                command("eprintln!(\"bezel-studio: key saved\")"),
+                prints,
+            ),
+            (
+                COMMAND_MODULE,
+                command("tracing::warn!(\"key saved\")"),
+                prints,
+            ),
+            (
+                COMMAND_MODULE,
+                command("::log::info!(\"key saved\")"),
+                prints,
+            ),
+            (COMMAND_MODULE, command("dbg!(&key)"), prints),
+            (
+                COMMAND_MODULE,
+                command("unreachable!(\"key saved\")"),
+                prints,
+            ),
+            // A logger's macro by its bare name, its import, its crate.
+            (COMMAND_MODULE, command("warn!(\"key saved\")"), prints),
+            (
+                COMMAND_MODULE,
+                "use tracing::{self as t};".into(),
+                "a logger imported",
+            ),
+            (
+                COMMAND_MODULE,
+                "extern crate tracing;".into(),
+                "a logger imported",
+            ),
+            // An output stream.
+            (
+                COMMAND_MODULE,
+                command("let _ = writeln!(std::io::stderr(), \"key saved\");"),
+                "`stderr` prints",
+            ),
+        ]
+    }
+
     /// The source guard reads identifiers, not text
-    /// (D-2026-10-01-gif-sticker-search-10): a raw name, a name passed to a
-    /// macro, an alias's import, an escaped literal and each rule's other
-    /// forms are refused in made-up production files, and so are the key's
-    /// text in a macro or a variable ([`key_leaks`]), a proof made outside
-    /// the GIF commands ([`proofs_made_elsewhere`]) and a page loaded in the
-    /// window ([`pages_loaded`]); what the studio does (the source factory,
-    /// the key file, the GIF commands, a print outside the GIF modules) is
-    /// not.
+    /// (D-2026-10-01-gif-sticker-search-10, -11): a raw name, a name passed
+    /// to a macro, an alias's import, an escaped literal and each rule's
+    /// other forms are refused in made-up production files, and so are the
+    /// key's text in a macro or a variable ([`key_leaks`]), a proof made
+    /// outside the GIF commands ([`proofs_made_elsewhere`]), a page loaded
+    /// in the window ([`pages_loaded`]), a command function entered from
+    /// Rust ([`commands_called_from_rust`]), the window's invocation taken
+    /// elsewhere ([`invocations_taken_elsewhere`]) and a print or a log in
+    /// the command module ([`prints_in_commands`]); what the studio does
+    /// (the source factory, the key file, the GIF commands and their
+    /// invocation, the handler list, a method named like a command, a print
+    /// outside the GIF, key and command modules) is not.
     #[test]
     fn the_source_guard_reads_identifiers_not_text() {
         let call = "macro_rules! call { ($w:ident, $m:ident, $s:expr) => { $w.$m($s) } }";
@@ -2379,7 +2855,14 @@ fn after(w: W) { w.on_message(request) }
             ),
             ("lib.rs", "include!(\"elsewhere.rs\");", "classified"),
         ];
-        let more = [key_leaks(), proofs_made_elsewhere(), pages_loaded()];
+        let more = [
+            key_leaks(),
+            proofs_made_elsewhere(),
+            pages_loaded(),
+            commands_called_from_rust(),
+            invocations_taken_elsewhere(),
+            prints_in_commands(),
+        ];
         let more = more.iter().flatten();
         let refused = refused
             .into_iter()
@@ -2398,8 +2881,6 @@ fn after(w: W) { w.on_message(request) }
             guard("lib.rs", factory),
             (Vec::new(), vec!["klipy_source".to_string()])
         );
-        let printed = r##"fn f() { eprintln!("bezel-studio: not a GIF module") }"##;
-        assert_eq!(guard("commands.rs", printed), (Vec::new(), Vec::new()));
         let accepted = [
             (
                 KEY_MODULE,
@@ -2408,15 +2889,36 @@ fn after(w: W) { w.on_message(request) }
                  key: s.key.expose_secret().to_string(), customer_id: s.customer_id.clone() } } }",
             ),
             (
-                "commands.rs",
-                "#[tauri::command]\npub async fn search_gifs(request: Request<'_>) -> R { \
+                COMMAND_MODULE,
+                "use tauri::ipc::{Request, Response};\n#[tauri::command]\n\
+                 pub async fn search_gifs(request: Request<'_>) -> R { \
                  let asked = UserAsked::of(&request); go(&asked) }",
             ),
             (
                 PROOF_MODULE,
-                "#[derive(Debug)]\npub struct UserAsked { _invoked: () }\n\
+                "use tauri::ipc::Request;\n#[derive(Debug)]\n\
+                 pub struct UserAsked { _invoked: () }\n\
                  impl UserAsked { pub fn of(_request: &Request<'_>) -> Self { \
                  Self { _invoked: () } } }",
+            ),
+            // The handler list in `run`; a command's definition, and a
+            // method or a field named like one, in a macro's tokens too.
+            (
+                "lib.rs",
+                "fn run() -> R { tauri::Builder::default().invoke_handler(\
+                 tauri::generate_handler![commands::search_gifs, commands::r#preferences])\
+                 .run(tauri::generate_context!()) }",
+            ),
+            (
+                COMMAND_MODULE,
+                "#[tauri::command]\npub fn preferences(state: State<'_, Shared>) -> P { \
+                 let p = state.preferences(); Prefs { set_language: format!(\"{}\", \
+                 state.set_language), ..p } }",
+            ),
+            // A print outside the GIF, key and command modules.
+            (
+                "lib.rs",
+                r##"fn f() { eprintln!("bezel-studio: not a GIF module") }"##,
             ),
         ];
         for (name, text) in accepted {

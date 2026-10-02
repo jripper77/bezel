@@ -12,7 +12,7 @@ import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { makeDraggable } from './dragdrop.js';
 import { askChoice } from './dialog.js';
-import { errorText } from '../messages.js';
+import { errorMessage, errorText } from '../messages.js';
 import {
   COLLECTION_FILTERS, cleanName, collectionCount, createCollectionList, deleteText, filterCollection, focusAfterRemoval, itemFacts, previewOf, renameKey,
 } from '../collection.js';
@@ -50,10 +50,19 @@ export function createCollectionPanel({ root, t, locale, bridge, canvas, stage, 
   // While the list is drawn again, a field taken away is not a field left.
   let drawing = false;
 
-  /** Says `text` in the status line (again, when it is the same); `''` clears it. */
-  function announce(text) {
+  /**
+   * Says the text of the translation key `key` (with `params`) in the
+   * status line, again when it is the same. It takes a key, never a text.
+   */
+  function announce(key, params) {
     const { status } = parts;
-    status.textContent = text && status.textContent === text ? `${text} ` : text;
+    const text = t(key, params);
+    status.textContent = status.textContent === text ? `${text} ` : text;
+  }
+
+  /** Empties the status line. */
+  function silence() {
+    parts.status.textContent = '';
   }
 
   // ---------------------------------------------------------- problem --
@@ -110,12 +119,12 @@ export function createCollectionPanel({ root, t, locale, bridge, canvas, stage, 
     if (busy.has(item.id)) return;
     busy.add(item.id);
     clearProblem();
-    announce(t('collection.using', { name: item.name }));
+    announce('collection.using', { name: item.name });
     try {
       await use(item, target, at);
-      announce(t(target === 'image' ? 'collection.addedImage' : 'collection.addedBackground', { name: item.name }));
+      announce(target === 'image' ? 'collection.addedImage' : 'collection.addedBackground', { name: item.name });
     } catch (e) {
-      announce('');
+      silence();
       failed(e);
     } finally {
       busy.delete(item.id);
@@ -139,7 +148,7 @@ export function createCollectionPanel({ root, t, locale, bridge, canvas, stage, 
     render();
     if (next) focusAction(next, 'delete');
     else searchButton.focus();
-    announce(t('collection.deleted', { name: item.name }));
+    announce('collection.deleted', { name: item.name });
   }
 
   async function remove(item) {
@@ -177,8 +186,13 @@ export function createCollectionPanel({ root, t, locale, bridge, canvas, stage, 
     if (refocus) focusAction(item.id, 'rename');
   }
 
-  /** The name is refused (empty, or the backend said why): the field says so and keeps the focus. */
-  function refuseName(text) {
+  /**
+   * The name is refused (empty, or the backend said why): the field says so,
+   * with the text of the translation key `key` (and `params`), and keeps the
+   * focus. It takes a key, never a text.
+   */
+  function refuseName(key, params) {
+    const text = t(key, params);
     editing.error = text;
     const row = rows.get(editing.id);
     row.error.textContent = text;
@@ -190,7 +204,7 @@ export function createCollectionPanel({ root, t, locale, bridge, canvas, stage, 
     if (editing?.id !== item.id || editing.saving) return;
     const name = cleanName(editing.value);
     if (!name) {
-      refuseName(t('collection.nameEmpty'));
+      refuseName('collection.nameEmpty');
       return;
     }
     if (name === item.name) {
@@ -202,11 +216,12 @@ export function createCollectionPanel({ root, t, locale, bridge, canvas, stage, 
       const renamed = await bridge.renameCollected(item.id, name);
       list.renamed(renamed);
       stopRename(list.find(item.id) ?? { ...item, name: renamed.name }, true);
-      announce(t('collection.renamed', { old: item.name, name: renamed.name }));
+      announce('collection.renamed', { old: item.name, name: renamed.name });
     } catch (e) {
       if (editing?.id !== item.id) return;
       editing.saving = false;
-      refuseName(errorText(t, e));
+      const why = errorMessage(t, e);
+      refuseName(why.key, why.params);
     }
   }
 

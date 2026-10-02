@@ -5,7 +5,7 @@
 // Nothing here touches the DOM: `ui/gif-search.js` draws the dialog. Nothing
 // here reaches KLIPY either: every call goes through the backend, which
 // names a result by id and answers its preview as a `data:` URL.
-import { errorText } from './messages.js';
+import { errorMessage, errorText } from './messages.js';
 
 /** What KLIPY searches, in the order the dialog offers them. */
 export const GIF_KINDS = Object.freeze(['gif', 'sticker']);
@@ -19,6 +19,10 @@ export const PREVIEWS_AT_ONCE = 6;
 export const PARTNER_PANEL = 'klipyPartnerPanel';
 /** The user guide's page (`open_guide`). */
 export const GUIDE_PAGE = 'gifs-and-stickers';
+/** The key help's steps, in order (translation keys). */
+export const HELP_STEPS = Object.freeze(['gifs.helpStep1', 'gifs.helpStep2', 'gifs.helpStep3', 'gifs.helpStep4']);
+/** What a result's button says while it is added, and once it is in the collection (translation keys). */
+export const TILE_TEXT = Object.freeze({ idle: 'gifs.add', adding: 'gifs.adding', added: 'gifs.inCollection' });
 
 /** What a failed search offers, by its code; anything else offers a retry. */
 const FAILURE_ACTIONS = new Map([
@@ -248,13 +252,14 @@ export function searchFailure(t, error) {
 }
 
 /**
- * Why the key was not saved: the characters the backend takes, or the
- * backend's own reason.
- * @param {(k: string, p?: object) => string} t
+ * Why the key was not saved, as a translation key and params: the
+ * characters the backend takes, or the backend's own reason.
+ * @param {{has: (k: string) => boolean}} t
  * @param {unknown} error
+ * @returns {{key: string, params: Record<string, unknown>}}
  */
 export function keyFailure(t, error) {
-  return error?.code === 'invalidInput' ? t('gifs.keyInvalid') : errorText(t, error);
+  return error?.code === 'invalidInput' ? { key: 'gifs.keyInvalid', params: {} } : errorMessage(t, error);
 }
 
 /**
@@ -270,14 +275,15 @@ export function keyStatus(t, key) {
 }
 
 /**
- * What the live region says when results come: how many, for what (none
- * for trending), or how many more a page added.
- * @param {(k: string, p?: object) => string} t
+ * What the live region says when results come, as a translation key and
+ * params: how many, for what (none for trending), or how many more a page
+ * added.
  * @param {{count: number, text: string, more?: boolean}} result
+ * @returns {{key: string, params: Record<string, unknown>}}
  */
-export function resultsText(t, { count, text, more = false }) {
-  if (more) return count > 0 ? t('gifs.announceMore', { count }) : t('gifs.announceNoMore');
-  if (count === 0) return text ? t('gifs.noResults', { text }) : t('gifs.noTrending');
-  if (!text) return t('gifs.announceTrending', { count });
-  return t(count === 1 ? 'gifs.announceOne' : 'gifs.announce', { count, text });
+export function resultsMessage({ count, text, more = false }) {
+  if (more) return count > 0 ? { key: 'gifs.announceMore', params: { count } } : { key: 'gifs.announceNoMore', params: {} };
+  if (count === 0) return text ? { key: 'gifs.noResults', params: { text } } : { key: 'gifs.noTrending', params: {} };
+  if (!text) return { key: 'gifs.announceTrending', params: { count } };
+  return { key: count === 1 ? 'gifs.announceOne' : 'gifs.announce', params: { count, text } };
 }

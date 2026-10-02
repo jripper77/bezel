@@ -21,17 +21,29 @@ export function warningText(t, w) {
 }
 
 /**
- * The text of a failed command: a backend error `{code, args, message}`
- * translated by its code; anything else (an unknown code, a JS error, a
- * string) with its own message.
+ * The translation key and params of a failed command's text: a backend
+ * error `{code, args, message}` by its code (`error.<code>`, only when the
+ * UI knows it); anything else (an unknown code, a JS error, a string)
+ * `error.unknown` with its own message.
+ * @param {{has: (k: string) => boolean}} t
+ * @param {unknown} e
+ * @returns {{key: string, params: Record<string, unknown>}}
+ */
+export function errorMessage(t, e) {
+  const code = typeof e?.code === 'string' ? e.code : null;
+  if (code && t.has(`error.${code}`)) return { key: `error.${code}`, params: e.args ?? {} };
+  const message = e?.message ?? (typeof e === 'string' ? e : String(e));
+  return { key: 'error.unknown', params: { message } };
+}
+
+/**
+ * The text of a failed command (`errorMessage` translated).
  * @param {(k: string, p?: object) => string} t
  * @param {unknown} e
  */
 export function errorText(t, e) {
-  const code = typeof e?.code === 'string' ? e.code : null;
-  if (code && t.has(`error.${code}`)) return t(`error.${code}`, e.args ?? {});
-  const message = e?.message ?? (typeof e === 'string' ? e : String(e));
-  return t('error.unknown', { message });
+  const { key, params } = errorMessage(t, e);
+  return t(key, params);
 }
 
 /**

@@ -7,14 +7,11 @@
 // KLIPY when it opens. The logic lives in `../gif-search.js`.
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
-import { errorText } from '../messages.js';
+import { errorMessage } from '../messages.js';
 import {
-  GIF_KINDS, GUIDE_PAGE, PARTNER_PANEL, createGifResults, createSearchTrigger, gridMove, keyFailure, keyStatus, queryOf, resultsText, searchFailure,
+  GIF_KINDS, GUIDE_PAGE, HELP_STEPS, PARTNER_PANEL, TILE_TEXT, createGifResults, createSearchTrigger, gridMove, keyFailure, keyStatus, queryOf, resultsMessage,
+  searchFailure,
 } from '../gif-search.js';
-
-const HELP_STEPS = Object.freeze(['gifs.helpStep1', 'gifs.helpStep2', 'gifs.helpStep3', 'gifs.helpStep4']);
-/** What a result's button says while it is added, and once it is in the collection. */
-const TILE_TEXT = Object.freeze({ idle: 'gifs.add', adding: 'gifs.adding', added: 'gifs.inCollection' });
 
 /** Whether `url` is a picture the backend sent (`data:image/…`), the only kind shown. */
 const isPicture = (url) => typeof url === 'string' && url.startsWith('data:image/');
@@ -41,19 +38,31 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
   /** The open dialog: its parts and what it shows; `null` when closed. */
   let ui = null;
 
-  const announce = (text) => {
+  const motionChanged = () => ui?.results.refreshPreviews();
+
+  /**
+   * Says the text of the translation key `key` (with `params`) in the live
+   * region, again when it is the same. It takes a key, never a text.
+   */
+  function announce(key, params) {
+    const text = t(key, params);
     const { live } = ui.parts;
     live.textContent = live.textContent === text ? `${text}\u00a0` : text;
-  };
-  const motionChanged = () => ui?.results.refreshPreviews();
+  }
+
+  /** Says in the live region why a call failed. */
+  function announceFailure(error) {
+    const why = errorMessage(t, error);
+    announce(why.key, why.params);
+  }
 
   // ------------------------------------------------------------ links --
   function openPartnerPanel() {
-    void bridge.openLink(PARTNER_PANEL).catch((e) => announce(errorText(t, e)));
+    void bridge.openLink(PARTNER_PANEL).catch(announceFailure);
   }
 
   function openGuide() {
-    void bridge.openGuide(GUIDE_PAGE, locale()).catch((e) => announce(errorText(t, e)));
+    void bridge.openGuide(GUIDE_PAGE, locale()).catch(announceFailure);
   }
 
   // ------------------------------------------------------------- help --
@@ -71,7 +80,7 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
   function helpPanel() {
     return el('div', { id: 'gif-key-help', class: 'key-help', role: 'group', 'aria-labelledby': 'gif-key-help-title', tabindex: '-1', hidden: true }, [
       el('h3', { id: 'gif-key-help-title', text: t('gifs.helpTitle') }),
-      el('ol', {}, HELP_STEPS.map((key) => el('li', { text: t(key) }))),
+      el('ol', {}, HELP_STEPS.map((step) => el('li', { text: t(step) }))),
       el('p', { class: 'hint', text: t('gifs.helpPrivacy') }),
       el('div', { class: 'button-row' }, [
         el('button', { type: 'button', class: 'text-button', text: t('gifs.partnerPanel'), onclick: openPartnerPanel }),
@@ -103,10 +112,21 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
   }
 
   // -------------------------------------------------------------- key --
-  function keyProblem(text) {
+  /**
+   * Says on the key field why it was not taken: the text of the translation
+   * key `key` (with `params`). It takes a key, never a text.
+   */
+  function keyProblem(key, params) {
     const { keyError, keyInput } = ui.parts;
-    keyError.textContent = text ?? '';
-    keyInput.setAttribute('aria-invalid', String(Boolean(text)));
+    keyError.textContent = t(key, params);
+    keyInput.setAttribute('aria-invalid', 'true');
+  }
+
+  /** The key field has nothing wrong. */
+  function keyFine() {
+    const { keyError, keyInput } = ui.parts;
+    keyError.textContent = '';
+    keyInput.setAttribute('aria-invalid', 'false');
   }
 
   /** The key's line, Remove, and whether searching is possible (it needs a key). */
@@ -125,7 +145,7 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
     const { keyInput } = ui.parts;
     const value = keyInput.value.trim();
     if (!value) {
-      keyProblem(t('gifs.keyEmpty'));
+      keyProblem('gifs.keyEmpty');
       return;
     }
     if (ui.saving) return;
@@ -133,11 +153,12 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
     try {
       ui.key = await bridge.saveKlipyKey(value);
       keyInput.value = '';
-      keyProblem(null);
+      keyFine();
       syncKey();
-      announce(t('gifs.keySavedNow'));
+      announce('gifs.keySavedNow');
     } catch (e) {
-      keyProblem(keyFailure(t, e));
+      const why = keyFailure(t, e);
+      keyProblem(why.key, why.params);
     } finally {
       ui.saving = false;
     }
@@ -147,12 +168,13 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
     try {
       ui.key = await bridge.removeKlipyKey();
       ui.trigger.cancel();
-      keyProblem(null);
+      keyFine();
       syncKey();
-      announce(t('gifs.keyRemoved'));
+      announce('gifs.keyRemoved');
       ui.parts.keyInput.focus();
     } catch (e) {
-      keyProblem(errorText(t, e));
+      const why = errorMessage(t, e);
+      keyProblem(why.key, why.params);
     }
   }
 
@@ -254,7 +276,7 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
       onCollected(added);
       if (ui !== mine) return;
       markTile(tile, 'added');
-      announce(t('gifs.added', { name: added.name }));
+      announce('gifs.added', { name: added.name });
     } catch (e) {
       if (ui !== mine) return;
       markTile(tile, mine.collected.has(item.id) ? 'added' : 'idle');
@@ -302,9 +324,13 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
     grid.append(...shown.map(tileOf));
     setActive(more ? Math.min(ui.active, view.items.length - 1) : 0, false);
     start.hidden = view.items.length > 0;
-    if (!view.items.length) startText.textContent = resultsText(t, { count: 0, text: view.query.text });
+    if (!view.items.length) {
+      const none = resultsMessage({ count: 0, text: view.query.text });
+      startText.textContent = t(none.key, none.params);
+    }
     loadMore.hidden = !view.hasNext;
-    announce(resultsText(t, { count: shown.length, text: view.query.text, more }));
+    const said = resultsMessage({ count: shown.length, text: view.query.text, more });
+    announce(said.key, said.params);
     // "Load more" went away with the last page: its focus goes to the first new result.
     if (more && shown.length && focusLost()) grid.children[firstNew].querySelector('.gif-tile').focus();
     keepFocus();
@@ -425,7 +451,10 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
     });
     ui.trigger = createSearchTrigger({ search: runSearch });
     syncKey();
-    if (keyError) keyProblem(errorText(t, keyError));
+    if (keyError) {
+      const why = errorMessage(t, keyError);
+      keyProblem(why.key, why.params);
+    }
     listen(dialog, opener);
     document.body.append(dialog);
     dialog.showModal();

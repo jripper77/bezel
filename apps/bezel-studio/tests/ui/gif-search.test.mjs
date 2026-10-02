@@ -8,11 +8,17 @@ import assert from 'node:assert/strict';
 import { translator } from '../../src/i18n/index.js';
 import {
   MIN_SEARCH_CHARS, PARTNER_PANEL, SEARCH_DELAY_MS, createGifResults, createSearchTrigger, gridMove, keyFailure, keyStatus, mergeResults, queryOf,
-  resultsText, searchFailure,
+  resultsMessage, searchFailure,
 } from '../../src/gif-search.js';
 
 const pt = translator('pt-BR');
 const en = translator('en');
+
+/** What the live region says of `result` in the language of `t`. */
+const resultsText = (t, result) => {
+  const { key, params } = resultsMessage(result);
+  return t(key, params);
+};
 
 /** A fake clock whose timers run when it is advanced. */
 function fakeClock() {
@@ -224,8 +230,8 @@ test('429 message', async () => {
   assert.equal(keyStatus(pt, { configured: true, last4: 'a1b2' }), 'Chave salva, termina em a1b2');
   assert.equal(keyStatus(en, { configured: false, last4: null }), en('gifs.keyNone'));
   assert.equal(keyStatus(en, null), en('gifs.keyNone'));
-  assert.equal(keyFailure(en, { code: 'invalidInput', args: { detail: 'key' } }), en('gifs.keyInvalid'));
-  assert.equal(keyFailure(pt, { code: 'busy', args: {} }), pt('error.busy'));
+  assert.deepEqual(keyFailure(en, { code: 'invalidInput', args: { detail: 'key' } }), { key: 'gifs.keyInvalid', params: {} });
+  assert.deepEqual(keyFailure(pt, { code: 'busy', args: {} }), { key: 'error.busy', params: {} });
   assert.equal(resultsText(en, { count: 24, text: 'cat' }), '24 results for “cat”.');
   assert.equal(resultsText(pt, { count: 1, text: 'gato' }), '1 resultado para “gato”.');
   assert.equal(resultsText(en, { count: 24, text: '' }), '24 trending results.');

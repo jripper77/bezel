@@ -689,6 +689,7 @@ fn restart_without_dmabuf_renderer() {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeSet, HashMap, HashSet};
     use std::sync::mpsc;
     #[cfg(not(windows))]
     use std::time::Duration;
@@ -1428,7 +1429,7 @@ mod tests {
     /// Crates that speak to the network, open a page or spawn a program,
     /// which the studio does not use: no path, import or `extern crate` of
     /// production code starts with one (in a package's name, `-` is `_`).
-    const WAY_OUT_CRATES: [&str; 21] = [
+    const WAY_OUT_CRATES: [&str; 22] = [
         "attohttpc",
         "curl",
         "duct",
@@ -1444,6 +1445,7 @@ mod tests {
         "surf",
         "tauri_plugin_http",
         "tauri_plugin_shell",
+        "tauri_plugin_updater",
         "tauri_plugin_upload",
         "tauri_plugin_websocket",
         "tokio_tungstenite",
@@ -1451,6 +1453,74 @@ mod tests {
         "ureq",
         "webbrowser",
     ];
+
+    /// Crates that speak to the network: HTTP and WebSocket clients, and
+    /// the Tauri plugins that update the app, fetch, upload, open a socket
+    /// or run a program, as cargo names their packages
+    /// (D-2026-10-01-gif-sticker-search-16). The studio declares none of
+    /// them (normal or build, any target) and is built with none for a
+    /// desktop (its normal and build dependencies, all the way down) but
+    /// [`KLIPY_HTTP`], which only [`KLIPY_ADAPTER`] depends on; and no path
+    /// of its production code names one at any segment (in a path, `-` is
+    /// `_`), so a vendored plugin's re-export (`…::reqwest::Client`) is
+    /// refused too.
+    const NETWORK_CRATES: [&str; 15] = [
+        "tauri-plugin-updater",
+        "tauri-plugin-http",
+        "tauri-plugin-upload",
+        "tauri-plugin-websocket",
+        "tauri-plugin-shell",
+        "reqwest",
+        "hyper",
+        "isahc",
+        "attohttpc",
+        "curl",
+        "surf",
+        "ureq",
+        "minreq",
+        "tungstenite",
+        "tokio-tungstenite",
+    ];
+
+    /// KLIPY's adapter, the one package that may depend on a network
+    /// crate: [`KLIPY_HTTP`], its HTTP client.
+    const KLIPY_ADAPTER: &str = "bezel-klipy";
+
+    /// The one network crate the studio is built with, through
+    /// [`KLIPY_ADAPTER`] only.
+    const KLIPY_HTTP: &str = "ureq";
+
+    /// The updater plugin's API (its extension trait, its accessors, its
+    /// builder), named nowhere in production code
+    /// (D-2026-10-01-gif-sticker-search-16): a copy of the plugin vendored
+    /// under another name is refused too. The HTTP plugin's builder is
+    /// `init()`, as every plugin's; its re-export of `reqwest` is refused
+    /// by [`NETWORK_CRATES`].
+    const UPDATER_API: [&str; 4] = ["updater", "updater_builder", "UpdaterExt", "UpdaterBuilder"];
+
+    /// The desktops the studio is built for, as the `cfg` of a dependency
+    /// reads them: `target_os`, `target_family` (`unix`, `windows`) and
+    /// `target_vendor`. What else a `cfg` asks (the architecture, a
+    /// feature, ...) may hold.
+    const DESKTOPS: [[&str; 3]; 3] = [
+        ["linux", "unix", "unknown"],
+        ["windows", "windows", "pc"],
+        ["macos", "unix", "apple"],
+    ];
+
+    /// The studio's Tauri configuration, which the build reads beside the
+    /// manifest: the one file of its name there (no overlay).
+    const TAURI_CONFIG_FILE: &str = "tauri.conf.json";
+
+    /// The scheme of the app's own pages (`tauri://localhost`), the one a
+    /// window's `url` may name.
+    const APP_SCHEME: &str = "tauri";
+
+    /// What edits the Tauri configuration at run time
+    /// (`Context::config_mut`), named nowhere in production code
+    /// (D-2026-10-01-gif-sticker-search-16): the windows are
+    /// [`TAURI_CONFIG_FILE`]'s, as built.
+    const CONFIG_EDIT: &str = "config_mut";
 
     /// A webview made in Rust, with the page it loads: the studio's one
     /// window is the configuration's, and loads the app's own pages.
@@ -1772,6 +1842,18 @@ mod tests {
                     "`{name}` makes a webview in Rust: the one window is the configuration's"
                 ));
             }
+            if UPDATER_API.contains(&name) {
+                self.refuse(format_args!(
+                    "`{name}` (the updater plugin) in production code: the studio checks for no \
+                     update"
+                ));
+            }
+            if name == CONFIG_EDIT {
+                self.refuse(format_args!(
+                    "`{CONFIG_EDIT}` edits the Tauri configuration at run time: the windows are \
+                     `{TAURI_CONFIG_FILE}`'s"
+                ));
+            }
             let re_exec = self.in_restart() && (self.spawning || name == "CommandExt");
             if SPAWNS.contains(&name) && !re_exec {
                 self.refuse(format_args!(
@@ -1816,6 +1898,32 @@ mod tests {
                 self.refuse(format_args!(
                     "`{path}` is a crate that speaks to the network, opens a page or spawns a \
                      program"
+                ));
+            }
+            let network = |segment: &String| {
+                let segment = segment.replace('_', "-");
+                NETWORK_CRATES.contains(&segment.as_str())
+            };
+            if let Some(network) = segments.iter().find(|segment| network(segment)) {
+                self.refuse(format_args!(
+                    "`{path}` names `{network}`, a crate that speaks to the network (a \
+                     re-export included): the studio does only through `{KLIPY_ADAPTER}`"
+                ));
+            }
+        }
+
+        /// A macro call (`path!`, with `arguments`): `generate_context!`
+        /// with an argument reads another configuration than
+        /// [`TAURI_CONFIG_FILE`], and is refused.
+        fn context_read(&mut self, path: &[String], arguments: Option<&TokenStream>) {
+            let last = path.last().map_or("", String::as_str);
+            if self.production()
+                && last == "generate_context"
+                && arguments.is_some_and(|arguments| !arguments.is_empty())
+            {
+                self.refuse(format_args!(
+                    "`generate_context!` with an argument reads another configuration than \
+                     `{TAURI_CONFIG_FILE}`"
                 ));
             }
         }
@@ -2412,6 +2520,7 @@ mod tests {
                                 Some(TokenTree::Group(group)) => Some(group.stream()),
                                 _ => None,
                             };
+                            self.context_read(&path, arguments.as_ref());
                             self.panics(&path, arguments);
                         }
                         at = next;
@@ -2777,6 +2886,7 @@ mod tests {
         fn visit_macro(&mut self, call: &'ast Macro) {
             let path = segments(&call.path);
             self.path(&path, true);
+            self.context_read(&path, Some(&call.tokens));
             self.panics(&path, Some(call.tokens.clone()));
             if self.in_restart() {
                 self.refuse(format_args!(
@@ -2863,17 +2973,27 @@ mod tests {
         }
     }
 
-    /// Whether `text` is a `javascript:` URL as a browser reads one:
-    /// leading spaces and control characters cut, tabs and newlines
-    /// dropped, the scheme in any case.
+    /// Whether `text` is a `javascript:` URL as a browser reads one
+    /// ([`url_scheme`]).
     fn is_script_url(text: &str) -> bool {
+        url_scheme(text).is_some_and(|scheme| scheme == SCRIPT_SCHEME)
+    }
+
+    /// The scheme of `text` read as a URL, as a browser and Tauri's
+    /// configuration read one (spaces and control characters around it
+    /// cut, tabs and newlines dropped), in lowercase; `None` when it has
+    /// none: it is a path.
+    fn url_scheme(text: &str) -> Option<String> {
         let url: String = text
-            .trim_start_matches(|c: char| c <= ' ')
+            .trim_matches(|c: char| c <= ' ')
             .chars()
             .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
             .collect();
-        url.split_once(':')
-            .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case(SCRIPT_SCHEME))
+        let (scheme, _) = url.split_once(':')?;
+        let mut chars = scheme.chars();
+        let letter = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
+        let valid = letter && chars.all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
+        valid.then(|| scheme.to_ascii_lowercase())
     }
 
     /// The attributes of `item`; none for one `syn` does not parse.
@@ -3336,6 +3456,19 @@ mod tests {
     ///   `open_fixed` is named only at its definition and in the bodies of
     ///   the `#[tauri::command]`s `open_link` and `open_guide`, so a page
     ///   opens only when the window invokes one, on the user's click;
+    /// - nothing else leaves the computer, or loads a page from elsewhere
+    ///   (D-2026-10-01-gif-sticker-search-16): no path names a network
+    ///   crate (`NETWORK_CRATES`, `tauri_plugin_updater` included) at any
+    ///   segment, a vendored plugin's re-export included, nor the updater
+    ///   plugin's API (`UPDATER_API`: `updater()`, `UpdaterExt`, ...);
+    ///   `generate_context!` takes no argument and `config_mut` is named
+    ///   nowhere, so the configuration is `tauri.conf.json` as built; its
+    ///   windows load only the app's own pages, through no proxy, its front
+    ///   end is the app's files and it names no dev server
+    ///   ([`config_problems`]), no overlay is merged into it
+    ///   ([`studio_config_problems`]); and the studio is built, for a
+    ///   desktop, with no network crate but KLIPY's adapter's `ureq`
+    ///   ([`network_problems`]);
     /// - `UserAsked::of` is named (called, or taken as a value, a macro's
     ///   tokens included) only in the bodies of the `#[tauri::command]`
     ///   functions `search_gifs`, `gif_preview` and `collect_gif` of
@@ -3396,9 +3529,14 @@ mod tests {
             handled.extend(reader.handled);
             problems.extend(reader.problems);
         }
-        // What the studio is built with (D-2026-10-01-gif-sticker-search-14).
-        problems.extend(logging_problems(&studio_metadata()));
+        // What the studio is built with (D-2026-10-01-gif-sticker-search-14
+        // and -16), and the windows its configuration makes (-16).
+        let metadata = studio_metadata();
+        problems.extend(logging_problems(&metadata));
+        problems.extend(network_problems(&metadata));
+        problems.extend(studio_config_problems());
         assert!(problems.is_empty(), "{problems:#?}");
+        remote_pages_are_refused();
         assert_eq!(
             hooks,
             ["diag.rs: hook_panics"],
@@ -3481,6 +3619,220 @@ mod tests {
         assert!(!role("main.rs") && !role(DIAG_MODULE));
     }
 
+    /// The studio's Tauri configuration as the build reads it
+    /// (D-2026-10-01-gif-sticker-search-16): what [`config_problems`] finds
+    /// in [`TAURI_CONFIG_FILE`] and, failing closed, each overlay the build
+    /// would merge into it: a file beside it named as one
+    /// ([`is_config_overlay`]: `tauri.linux.conf.json`, `Tauri.toml`, ...),
+    /// and the `TAURI_CONFIG` variable this code was compiled with.
+    fn studio_config_problems() -> Vec<String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut problems = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            if is_config_overlay(&name) {
+                problems.push(format!(
+                    "`{name}`: a Tauri configuration overlay, which the build would merge into \
+                     `{TAURI_CONFIG_FILE}`"
+                ));
+            }
+        }
+        if option_env!("TAURI_CONFIG").is_some() {
+            problems
+                .push("`TAURI_CONFIG` is set: the build merges it into the configuration".into());
+        }
+        let text = std::fs::read_to_string(dir.join(TAURI_CONFIG_FILE)).unwrap();
+        problems.extend(config_problems(&serde_json::from_str(&text).unwrap()));
+        problems
+    }
+
+    /// Whether the file `name`, beside [`TAURI_CONFIG_FILE`], is a Tauri
+    /// configuration the build may merge into it: any `tauri…` file (any
+    /// case) of a configuration format (JSON, JSON5, TOML) but that one.
+    fn is_config_overlay(name: &str) -> bool {
+        let lower = name.to_ascii_lowercase();
+        let format = [".json", ".json5", ".toml"]
+            .iter()
+            .any(|extension| lower.ends_with(extension));
+        lower.starts_with("tauri") && format && name != TAURI_CONFIG_FILE
+    }
+
+    /// What the Tauri configuration `config` holds that loads a page from
+    /// elsewhere (D-2026-10-01-gif-sticker-search-16): a window
+    /// (`app.windows`) whose `url` is not one of the app's own pages (none,
+    /// a path, or [`APP_SCHEME`]`:`; any other scheme, `http:`, `https:`,
+    /// `ws:`, `wss:`, `ftp:`, `file:`, `javascript:`, ..., in any case,
+    /// spaces around it cut, is refused) or that names a proxy; a front end
+    /// (`build.frontendDist`) that is not the app's own files (a path, or a
+    /// list of them); and a dev server (`build.devUrl`): the studio has
+    /// none, it is always built with `custom-protocol`. It fails closed:
+    /// windows that are not a list and a `url` that is not text are
+    /// problems.
+    fn config_problems(config: &serde_json::Value) -> Vec<String> {
+        use serde_json::Value;
+
+        let path = |text: &Value| text.as_str().is_some_and(|text| url_scheme(text).is_none());
+        let app_page = |url: &Value| {
+            let scheme = url.as_str().and_then(url_scheme);
+            url.is_null() || path(url) || scheme.is_some_and(|scheme| scheme == APP_SCHEME)
+        };
+        let mut problems = Vec::new();
+        let windows = match &config["app"]["windows"] {
+            Value::Null => &[][..],
+            Value::Array(windows) => windows.as_slice(),
+            other => {
+                problems.push(format!(
+                    "{TAURI_CONFIG_FILE}: `app.windows` is not a list: {other}"
+                ));
+                &[][..]
+            }
+        };
+        for window in windows {
+            let (label, url) = (&window["label"], &window["url"]);
+            if !app_page(url) {
+                problems.push(format!(
+                    "{TAURI_CONFIG_FILE}: the window {label} loads {url}, not one of the app's own \
+                     pages (a path, or `{APP_SCHEME}:`)"
+                ));
+            }
+            for proxy in ["proxyUrl", "proxy-url"] {
+                if !window[proxy].is_null() {
+                    problems.push(format!(
+                        "{TAURI_CONFIG_FILE}: the window {label} goes through a proxy (`{proxy}`)"
+                    ));
+                }
+            }
+        }
+        let build = &config["build"];
+        for key in ["frontendDist", "frontend-dist"] {
+            let files = match &build[key] {
+                Value::Array(files) => files.iter().all(path),
+                other => other.is_null() || path(other),
+            };
+            if !files {
+                problems.push(format!(
+                    "{TAURI_CONFIG_FILE}: `build.{key}` is {}, not the app's own files",
+                    build[key]
+                ));
+            }
+        }
+        for key in ["devUrl", "dev-url"] {
+            if !build[key].is_null() {
+                problems.push(format!(
+                    "{TAURI_CONFIG_FILE}: `build.{key}` names a dev server ({}): the studio has \
+                     none, it is always built with `custom-protocol`",
+                    build[key]
+                ));
+            }
+        }
+        problems
+    }
+
+    /// An edit of a JSON document: the studio's configuration or metadata.
+    type Edit = Box<dyn Fn(&mut serde_json::Value)>;
+
+    /// The studio's configuration edited to load a page from elsewhere
+    /// (D-2026-10-01-gif-sticker-search-16, the DoD critic of round 3,
+    /// iteration 2: a second window on KLIPY's Partner Panel) is refused,
+    /// whatever the scheme's spelling, and so is each overlay; the app's
+    /// own pages are not.
+    fn remote_pages_are_refused() {
+        use serde_json::{Value, json};
+
+        let text = include_str!("../tauri.conf.json");
+        let real: Value = serde_json::from_str(text).unwrap();
+        let window = |url: Value| -> Edit {
+            Box::new(move |c| {
+                let windows = c["app"]["windows"].as_array_mut().unwrap();
+                windows.push(json!({ "label": "welcome", "url": url.clone() }));
+            })
+        };
+        let set = |key: &'static str, at: &'static str, value: Value| -> Edit {
+            Box::new(move |c| c[key][at] = value.clone())
+        };
+        let script = format!("  {}:go()", SCRIPT_SCHEME.to_uppercase());
+        let mut refused: Vec<(Edit, &str)> = vec![
+            (window(json!("https://partner.klipy.com")), "loads"),
+            (
+                Box::new(|c| c["app"]["windows"][0]["url"] = json!("https://partner.klipy.com")),
+                "the window \"main\" loads",
+            ),
+            (window(json!(42)), "loads 42"),
+            (
+                Box::new(|c| {
+                    c["app"]["windows"][0]["proxyUrl"] = json!("http://proxy.example:3128");
+                }),
+                "goes through a proxy",
+            ),
+            (
+                Box::new(|c| c["app"]["windows"] = json!({ "label": "main" })),
+                "is not a list",
+            ),
+            (
+                set("build", "frontendDist", json!("https://partner.klipy.com")),
+                "not the app's own files",
+            ),
+            (
+                set("build", "frontend-dist", json!(["index.html", "tauri://x"])),
+                "not the app's own files",
+            ),
+            (
+                set("build", "devUrl", json!("http://localhost:1420")),
+                "names a dev server",
+            ),
+            (
+                set("build", "dev-url", json!("https://partner.klipy.com")),
+                "names a dev server",
+            ),
+        ];
+        for url in [
+            "HTTPS://partner.klipy.com",
+            " \u{1}https://partner.klipy.com",
+            "ht\ttps://partner.klipy.com",
+            "http://localhost:1420",
+            "ws://partner.klipy.com",
+            "WSS://partner.klipy.com",
+            "ftp://partner.klipy.com",
+            "file:///etc/passwd",
+            "data:text/html,hi",
+            script.as_str(),
+        ] {
+            refused.push((window(json!(url)), "not one of the app's own pages"));
+        }
+        assert_eq!(config_problems(&real), Vec::<String>::new());
+        for (edit, why) in refused {
+            let mut changed = real.clone();
+            edit(&mut changed);
+            let problems = config_problems(&changed);
+            assert!(
+                problems.iter().any(|p| p.contains(why)),
+                "{changed}: {problems:#?}"
+            );
+        }
+        for url in [
+            json!("index.html"),
+            json!("/settings.html"),
+            json!("tauri://localhost/a.html"),
+        ] {
+            let mut changed = real.clone();
+            window(url)(&mut changed);
+            set("build", "frontendDist", json!(["../src/index.html"]))(&mut changed);
+            assert_eq!(config_problems(&changed), Vec::<String>::new(), "{changed}");
+        }
+        for overlay in [
+            "tauri.linux.conf.json",
+            "tauri.windows.conf.json5",
+            "Tauri.toml",
+            "Tauri.linux.toml",
+            "TAURI.CONF.JSON",
+        ] {
+            assert!(is_config_overlay(overlay), "{overlay}");
+        }
+        for other in [TAURI_CONFIG_FILE, "Cargo.toml", "build.rs", "capabilities"] {
+            assert!(!is_config_overlay(other), "{other}");
+        }
+    }
+
     /// The studio's package and the workspace's resolved graph, as cargo
     /// reads them (`cargo metadata --locked --all-features`): cargo's own
     /// reading of the manifests, so each dependency table (`[dependencies]`,
@@ -3532,33 +3884,14 @@ mod tests {
     /// dependencies, all the way down, for any target). It fails closed: a
     /// graph without the studio is a problem.
     fn logging_problems(metadata: &serde_json::Value) -> Vec<String> {
-        use std::collections::{HashMap, HashSet};
-
-        let empty = Vec::new();
-        let packages = metadata["packages"].as_array().unwrap_or(&empty);
-        let nodes = metadata["resolve"]["nodes"].as_array().unwrap_or(&empty);
-        let names: HashMap<&str, &str> = packages
-            .iter()
-            .filter_map(|p| Some((p["id"].as_str()?, p["name"].as_str()?)))
-            .collect();
-        let by_id: HashMap<&str, &serde_json::Value> = nodes
-            .iter()
-            .filter_map(|node| Some((node["id"].as_str()?, node)))
-            .collect();
-        let studio = packages.iter().find(|p| p["name"] == "bezel-studio");
-        let Some(studio) = studio.filter(|p| by_id.contains_key(p["id"].as_str().unwrap_or("")))
-        else {
-            return vec!["cargo metadata: the studio is not in the resolved graph".into()];
+        let graph = match Graph::of(metadata) {
+            Ok(graph) => graph,
+            Err(why) => return vec![why],
         };
         let mut problems = Vec::new();
-        for dependency in studio["dependencies"].as_array().unwrap_or(&empty) {
+        for dependency in list(&graph.studio["dependencies"]) {
             let name = dependency["name"].as_str().unwrap_or_default();
-            let kind = dependency["kind"].as_str().unwrap_or("normal");
-            let target = dependency["target"].as_str();
-            let as_declared = format!(
-                "{kind}{}",
-                target.map(|t| format!(", `{t}`")).unwrap_or_default()
-            );
+            let as_declared = as_declared(dependency);
             if is_logger_crate(name) {
                 problems.push(format!(
                     "Cargo.toml: depends on `{name}` ({as_declared}), a logger installer"
@@ -3571,35 +3904,18 @@ mod tests {
                 ));
             }
         }
-        for node in nodes {
-            let name = node["id"].as_str().and_then(|id| names.get(id)).copied();
-            let name = name.unwrap_or_default();
+        for node in graph.nodes.values() {
+            let name = graph.name(node["id"].as_str().unwrap_or_default());
             if in_tauri(name) && logs_through_tracing(&node["features"]) {
                 problems.push(format!(
                     "resolved: `{name}` is built with its `{TAURI_LOGS}` feature on"
                 ));
             }
         }
-        let mut built: HashSet<&str> = HashSet::new();
-        let mut next: Vec<&str> = studio["id"].as_str().into_iter().collect();
-        while let Some(id) = next.pop() {
-            if !built.insert(id) {
-                continue;
-            }
-            let deps = by_id.get(id).and_then(|node| node["deps"].as_array());
-            for dep in deps.unwrap_or(&empty) {
-                let kinds = dep["dep_kinds"].as_array().unwrap_or(&empty);
-                let for_the_build = kinds
-                    .iter()
-                    .any(|k| k["kind"].is_null() || k["kind"] == "build");
-                if let Some(pkg) = dep["pkg"].as_str().filter(|_| for_the_build) {
-                    next.push(pkg);
-                }
-            }
-        }
+        let built = graph.reached(graph.studio_id(), for_the_build);
         let mut installers: Vec<&str> = built
             .iter()
-            .filter_map(|id| names.get(id).copied())
+            .map(|id| graph.name(id))
             .filter(|name| is_logger_crate(name))
             .collect();
         installers.sort_unstable();
@@ -3609,6 +3925,231 @@ mod tests {
             ));
         }
         problems
+    }
+
+    /// The items of the JSON list `value`; none when it is not one.
+    fn list(value: &serde_json::Value) -> &[serde_json::Value] {
+        value.as_array().map_or(&[], Vec::as_slice)
+    }
+
+    /// How the manifest declares `dependency` (as cargo metadata prints
+    /// it): its kind and its target.
+    fn as_declared(dependency: &serde_json::Value) -> String {
+        let kind = dependency["kind"].as_str().unwrap_or("normal");
+        let target = dependency["target"].as_str();
+        format!(
+            "{kind}{}",
+            target.map(|t| format!(", `{t}`")).unwrap_or_default()
+        )
+    }
+
+    /// Whether a dependency of `kind` (as cargo metadata prints a declared
+    /// dependency or a resolved edge's kind) is built into the package that
+    /// depends on it: a normal or a build dependency, for any target.
+    fn for_the_build(kind: &serde_json::Value) -> bool {
+        kind["kind"].is_null() || kind["kind"] == "build"
+    }
+
+    /// Whether a dependency of `kind` is built into the package that
+    /// depends on it for a desktop the studio is built for ([`DESKTOPS`]).
+    fn for_a_desktop(kind: &serde_json::Value) -> bool {
+        for_the_build(kind) && on_a_desktop(kind["target"].as_str())
+    }
+
+    /// Whether a dependency for `target` (as cargo metadata prints it: none,
+    /// a `cfg(…)` or a target triple) may be built for one of [`DESKTOPS`]:
+    /// its `cfg` does not fail on every one. It fails closed: a triple, and
+    /// a `cfg` that cannot be read, may.
+    fn on_a_desktop(target: Option<&str>) -> bool {
+        let Some(cfg) = target.filter(|target| target.starts_with("cfg(")) else {
+            return true;
+        };
+        let Ok(cfg) = syn::parse_str::<Meta>(cfg) else {
+            return true;
+        };
+        DESKTOPS
+            .iter()
+            .any(|desktop| holds(&cfg, desktop) != Some(false))
+    }
+
+    /// Whether the `cfg` predicate `meta` holds on `desktop` (one of
+    /// [`DESKTOPS`]); `None` when it may: it asks what the desktop does not
+    /// fix (the architecture, a feature, a name it does not know).
+    fn holds(meta: &Meta, desktop: &[&str; 3]) -> Option<bool> {
+        let [os, family, vendor] = *desktop;
+        match meta {
+            Meta::Path(path) => {
+                let name = path.get_ident()?.to_string();
+                (name == "unix" || name == "windows").then(|| name == family)
+            }
+            Meta::NameValue(pair) => {
+                let Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(value),
+                    ..
+                }) = &pair.value
+                else {
+                    return None;
+                };
+                let fixed = match pair.path.get_ident()?.to_string().as_str() {
+                    "target_os" => os,
+                    "target_family" => family,
+                    "target_vendor" => vendor,
+                    _ => return None,
+                };
+                Some(value.value() == fixed)
+            }
+            Meta::List(list) => {
+                let parts = list
+                    .parse_args_with(Punctuated::<Meta, Comma>::parse_terminated)
+                    .ok()?;
+                let values: Vec<Option<bool>> =
+                    parts.iter().map(|part| holds(part, desktop)).collect();
+                let known = values.iter().all(Option::is_some);
+                match list.path.get_ident()?.to_string().as_str() {
+                    "cfg" | "not" if values.len() != 1 => None,
+                    "cfg" => values[0],
+                    "not" => values[0].map(|value| !value),
+                    "any" if values.contains(&Some(true)) => Some(true),
+                    "any" => known.then_some(false),
+                    "all" if values.contains(&Some(false)) => Some(false),
+                    "all" => known.then_some(true),
+                    _ => None,
+                }
+            }
+        }
+    }
+
+    /// What `metadata` (as [`studio_metadata`] reads it) says that makes
+    /// the studio speak to the network but through KLIPY's adapter
+    /// (D-2026-10-01-gif-sticker-search-16): its manifest declaring one of
+    /// [`NETWORK_CRATES`] (a normal or a build dependency, any target,
+    /// renamed or not); and, as resolved, each edge into one of them in
+    /// what the studio is built with for a desktop ([`for_a_desktop`]: its
+    /// normal and build dependencies, all the way down) but
+    /// [`KLIPY_ADAPTER`]'s on [`KLIPY_HTTP`], named by the studio's
+    /// dependency that pulls it. Tauri's `reqwest`, for Android and iOS
+    /// only, is not built for a desktop. It fails closed: a graph without
+    /// the studio is a problem.
+    fn network_problems(metadata: &serde_json::Value) -> Vec<String> {
+        let graph = match Graph::of(metadata) {
+            Ok(graph) => graph,
+            Err(why) => return vec![why],
+        };
+        let mut problems = Vec::new();
+        for dependency in list(&graph.studio["dependencies"]) {
+            let name = dependency["name"].as_str().unwrap_or_default();
+            if NETWORK_CRATES.contains(&name) && for_the_build(dependency) {
+                problems.push(format!(
+                    "Cargo.toml: depends on `{name}` ({}), a crate that speaks to the network",
+                    as_declared(dependency)
+                ));
+            }
+        }
+        let network = |id: &str| NETWORK_CRATES.contains(&graph.name(id));
+        let mut found = BTreeSet::new();
+        for direct in graph.deps(graph.studio_id(), for_a_desktop) {
+            let name = graph.name(direct);
+            if network(direct) {
+                found.insert(format!(
+                    "resolved: the studio depends on `{name}`, a crate that speaks to the network"
+                ));
+            }
+            for parent in graph.reached(direct, for_a_desktop) {
+                let from = graph.name(parent);
+                for pulled in graph.deps(parent, for_a_desktop) {
+                    let to = graph.name(pulled);
+                    let klipy = from == KLIPY_ADAPTER && to == KLIPY_HTTP;
+                    if !network(pulled) || klipy {
+                        continue;
+                    }
+                    let through = if parent == direct {
+                        String::new()
+                    } else {
+                        format!(" (`{from}` depends on it)")
+                    };
+                    found.insert(format!(
+                        "resolved: the studio's dependency `{name}` pulls `{to}`{through}: the \
+                         studio speaks to the network only through `{KLIPY_ADAPTER}`'s \
+                         `{KLIPY_HTTP}`"
+                    ));
+                }
+            }
+        }
+        problems.extend(found);
+        problems
+    }
+
+    /// The resolved graph of [`studio_metadata`]: each package's name and
+    /// each resolved node by id, and the studio's package.
+    struct Graph<'m> {
+        names: HashMap<&'m str, &'m str>,
+        nodes: HashMap<&'m str, &'m serde_json::Value>,
+        studio: &'m serde_json::Value,
+    }
+
+    impl<'m> Graph<'m> {
+        /// The graph `metadata` holds; why not, failing closed, when the
+        /// studio is not in it.
+        fn of(metadata: &'m serde_json::Value) -> Result<Self, String> {
+            let packages = list(&metadata["packages"]);
+            let names = packages
+                .iter()
+                .filter_map(|p| Some((p["id"].as_str()?, p["name"].as_str()?)))
+                .collect();
+            let nodes: HashMap<&str, &serde_json::Value> = list(&metadata["resolve"]["nodes"])
+                .iter()
+                .filter_map(|node| Some((node["id"].as_str()?, node)))
+                .collect();
+            let studio = packages.iter().find(|p| p["name"] == "bezel-studio");
+            let resolved =
+                |p: &&serde_json::Value| nodes.contains_key(p["id"].as_str().unwrap_or(""));
+            let Some(studio) = studio.filter(resolved) else {
+                return Err("cargo metadata: the studio is not in the resolved graph".into());
+            };
+            Ok(Self {
+                names,
+                nodes,
+                studio,
+            })
+        }
+
+        /// The name of the package `id`.
+        fn name(&self, id: &str) -> &'m str {
+            self.names.get(id).copied().unwrap_or_default()
+        }
+
+        /// The studio's package id.
+        fn studio_id(&self) -> &'m str {
+            self.studio["id"].as_str().unwrap_or_default()
+        }
+
+        /// What the package `id` depends on through an edge one of whose
+        /// kinds `built` accepts.
+        fn deps(&self, id: &str, built: fn(&serde_json::Value) -> bool) -> Vec<&'m str> {
+            let node = self.nodes.get(id).copied();
+            let deps = node.map_or(&[][..], |node| list(&node["deps"]));
+            deps.iter()
+                .filter(|dep| list(&dep["dep_kinds"]).iter().any(built))
+                .filter_map(|dep| dep["pkg"].as_str())
+                .collect()
+        }
+
+        /// `from` and every package it reaches through edges `built`
+        /// accepts, all the way down.
+        fn reached(
+            &self,
+            from: &'m str,
+            built: fn(&serde_json::Value) -> bool,
+        ) -> HashSet<&'m str> {
+            let mut reached = HashSet::new();
+            let mut next = vec![from];
+            while let Some(id) = next.pop() {
+                if reached.insert(id) {
+                    next.extend(self.deps(id, built));
+                }
+            }
+            reached
+        }
     }
 
     /// The studio's metadata edited as a change would leave it
@@ -3811,13 +4352,140 @@ mod tests {
         cases
     }
 
+    /// The edit that makes the edges of the package `from` on `to` (both
+    /// in the graph) hold for `target` (`null`: every target).
+    fn retargets(from: &'static str, to: &'static str, target: serde_json::Value) -> Edit {
+        Box::new(move |m| {
+            let to = m["packages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["name"] == to)
+                .unwrap()["id"]
+                .clone();
+            let deps = resolved(m, from)["deps"].as_array_mut().unwrap();
+            let edge = deps.iter_mut().find(|dep| dep["pkg"] == to).unwrap();
+            for kind in edge["dep_kinds"].as_array_mut().unwrap() {
+                kind["target"] = target.clone();
+            }
+        })
+    }
+
+    /// Changes that make the studio speak to the network but through
+    /// KLIPY's adapter (D-2026-10-01-gif-sticker-search-16, the DoD critic
+    /// of round 3, iteration 2: the updater plugin in the studio): each is
+    /// refused.
+    fn network_built_in() -> Vec<MetadataCase> {
+        let tauri_pulls = "the studio's dependency `tauri` pulls `reqwest`";
+        let mut cases: Vec<MetadataCase> = vec![
+            // Tauri's `reqwest` (Android and iOS only today) built for a
+            // desktop: a feature or a version that turns it on there.
+            (
+                "tauri -> reqwest, every target",
+                retargets("tauri", "reqwest", serde_json::Value::Null),
+                tauri_pulls,
+            ),
+            (
+                "tauri -> reqwest, Linux",
+                retargets("tauri", "reqwest", "cfg(target_os = \"linux\")".into()),
+                tauri_pulls,
+            ),
+            (
+                "tauri -> reqwest, unix",
+                retargets("tauri", "reqwest", "cfg(unix)".into()),
+                tauri_pulls,
+            ),
+            (
+                "tauri -> reqwest, not Android",
+                retargets(
+                    "tauri",
+                    "reqwest",
+                    "cfg(not(target_os = \"android\"))".into(),
+                ),
+                tauri_pulls,
+            ),
+            (
+                "tauri -> reqwest, Android or Windows",
+                retargets(
+                    "tauri",
+                    "reqwest",
+                    "cfg(any(target_os = \"android\", windows))".into(),
+                ),
+                tauri_pulls,
+            ),
+            (
+                "tauri -> reqwest, an architecture",
+                retargets("tauri", "reqwest", "cfg(target_arch = \"x86_64\")".into()),
+                tauri_pulls,
+            ),
+            (
+                "tauri -> reqwest, a Windows triple",
+                retargets("tauri", "reqwest", "x86_64-pc-windows-msvc".into()),
+                tauri_pulls,
+            ),
+            // A network crate pulled by another dependency of the studio,
+            // a build dependency included; `ureq` but by KLIPY's adapter;
+            // KLIPY's adapter pulling another one.
+            (
+                "bezel-media -> reqwest",
+                depends("bezel-media", "reqwest", None),
+                "`bezel-media` pulls `reqwest`",
+            ),
+            (
+                "tauri-build -> hyper (build)",
+                depends("tauri-build", "hyper", Some("build")),
+                "`tauri-build` pulls `hyper`",
+            ),
+            (
+                "the studio -> ureq",
+                depends("bezel-studio", "ureq", None),
+                "the studio depends on `ureq`",
+            ),
+            (
+                "tauri -> ureq",
+                depends("tauri", "ureq", None),
+                "`tauri` pulls `ureq`",
+            ),
+            (
+                "bezel-klipy -> reqwest",
+                depends("bezel-klipy", "reqwest", None),
+                "`bezel-klipy` pulls `reqwest`",
+            ),
+        ];
+        let declared = "a crate that speaks to the network";
+        for name in NETWORK_CRATES {
+            cases.push((
+                "a network crate declared",
+                declares(dependency(name, None, None, None)),
+                declared,
+            ));
+        }
+        for (kind, target, rename) in [
+            (Some("build"), None, None),
+            (None, Some("cfg(unix)"), None),
+            (None, Some("cfg(target_os = \"android\")"), None),
+            (None, None, Some("updates")),
+        ] {
+            cases.push((
+                "tauri-plugin-updater declared",
+                declares(dependency("tauri-plugin-updater", kind, target, rename)),
+                declared,
+            ));
+        }
+        cases
+    }
+
     /// D-2026-10-01-gif-sticker-search-14: the studio installs no logger,
     /// and Tauri does not log. Its real metadata passes; each change of
     /// [`loggers_built_in`], applied to it, is refused; a graph without the
     /// studio fails closed; and what does not reach the studio is not
     /// refused: a logger installer that only the CLI depends on (it does,
     /// for `--verbose`), and one that a dependency of the studio only uses
-    /// in its own tests.
+    /// in its own tests. D-2026-10-01-gif-sticker-search-16, the same way:
+    /// the studio speaks to the network only through KLIPY's adapter
+    /// ([`network_problems`], [`network_built_in`]); Tauri's `reqwest`,
+    /// for Android and iOS, and a network crate used only in tests are not
+    /// refused.
     #[test]
     fn the_studio_installs_no_logger() {
         let real = studio_metadata();
@@ -3852,6 +4520,25 @@ mod tests {
             logging_problems(&without),
             ["cargo metadata: the studio is not in the resolved graph"]
         );
+        assert_eq!(
+            network_problems(&without),
+            ["cargo metadata: the studio is not in the resolved graph"]
+        );
+        assert_eq!(network_problems(&real), Vec::<String>::new());
+        let mut tested = real.clone();
+        depends("bezel-media", "reqwest", Some("dev"))(&mut tested);
+        declares(dependency("reqwest", Some("dev"), None, None))(&mut tested);
+        retargets("tauri", "reqwest", "cfg(target_os = \"ios\")".into())(&mut tested);
+        assert_eq!(network_problems(&tested), Vec::<String>::new());
+        for (what, edit, why) in network_built_in() {
+            let mut changed = real.clone();
+            edit(&mut changed);
+            let problems = network_problems(&changed);
+            assert!(
+                problems.iter().any(|p| p.contains(why)),
+                "{what}: {problems:#?}"
+            );
+        }
     }
 
     /// The command functions of the studio's `commands.rs`.
@@ -4920,6 +5607,57 @@ fn after(w: W) { w.on_message(request) }
             ),
             ("lib.rs", "use webbrowser as w;".into(), crate_out),
             ("lib.rs", "extern crate ureq;".into(), crate_out),
+            // The updater plugin (the DoD critic of round 3, iteration 2),
+            // by its crate, vendored under another name, and a vendored
+            // HTTP plugin's re-export of its client
+            // (D-2026-10-01-gif-sticker-search-16).
+            (
+                "lib.rs",
+                welcome("app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;"),
+                crate_out,
+            ),
+            (
+                "lib.rs",
+                welcome("app.handle().plugin(upd::Builder::new().build())?; app.updater()?.check();"),
+                "`updater` (the updater plugin)",
+            ),
+            (
+                "lib.rs",
+                "use upd::UpdaterExt as _;".into(),
+                "`UpdaterExt` (the updater plugin)",
+            ),
+            (
+                "lib.rs",
+                "fn f(a: A) { spawn!(a.updater_builder().build()) }".into(),
+                "`updater_builder` (the updater plugin)",
+            ),
+            (
+                "lib.rs",
+                "fn f() { let _ = net::reqwest::Client::new(); }".into(),
+                "names `reqwest`, a crate that speaks to the network",
+            ),
+            (
+                "lib.rs",
+                "use vendored::{tokio_tungstenite as t};".into(),
+                "names `tokio_tungstenite`",
+            ),
+            // The configuration read from elsewhere, or edited at run time.
+            (
+                "lib.rs",
+                "fn run() -> R { tauri::Builder::default().run(tauri::generate_context!(\"x.json\")) }"
+                    .into(),
+                "`generate_context!` with an argument",
+            ),
+            (
+                "lib.rs",
+                "fn run() -> R { spawn!(tauri::generate_context!(\"x.json\")) }".into(),
+                "`generate_context!` with an argument",
+            ),
+            (
+                "lib.rs",
+                "fn run(c: &mut C) { c.config_mut().build.frontend_dist = None; }".into(),
+                "`config_mut` edits the Tauri configuration",
+            ),
             (
                 "lib.rs",
                 welcome(

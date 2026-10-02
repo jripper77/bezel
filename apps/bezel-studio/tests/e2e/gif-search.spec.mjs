@@ -6,7 +6,12 @@
 // hidden and shown again (-18); without a key
 // searching waits for one and the "?" discloses how to get it (Esc and a
 // click outside close it, the focus goes back), the Partner Panel and the
-// guide open through the backend; a refused key opens the help; explicit
+// guide open through the backend; a refused key opens the help. Every call
+// that goes out is recorded from the page's start, and after each step it is
+// exactly what the test's clicks and keys asked: the dialog opening asks
+// nothing, with a key or without, nor saving or removing a key; the Partner
+// Panel opens once, on its button; a 429 is not retried; using, renaming or
+// deleting what the collection holds asks KLIPY nothing (-19); explicit
 // results are off at every start and kept while the app runs; typing
 // searches only after a 600 ms pause from the last key, with 2 characters or
 // more, and Enter at once (on the page's clock, which the test holds); a 429
@@ -76,7 +81,7 @@ const IDLE_MS = 60 * MINUTE_MS;
  * the test goes to (before its scripts run), not only the last: like
  * `watchQueries`, from the values each write replaced. Call it before
  * going to the page.
- * @returns {Promise<() => Promise<Record<string, string[]>>>} the values written so far, by OUTSIDE key
+ * @returns {Promise<() => Promise<Record<string, unknown[]>>>} the values written so far, by OUTSIDE key (each query parsed)
  */
 async function recordOutside(page) {
   await page.addInitScript((names) => {
@@ -94,7 +99,7 @@ async function recordOutside(page) {
   }, Object.values(OUTSIDE));
   return async () => {
     const written = await page.evaluate(() => globalThis.demoOutside());
-    return Object.fromEntries(Object.entries(OUTSIDE).map(([what, name]) => [what, written[name]]));
+    return Object.fromEntries(Object.entries(OUTSIDE).map(([what, name]) => [what, what === 'query' ? written[name].map((q) => JSON.parse(q)) : written[name]]));
   };
 }
 
@@ -127,6 +132,24 @@ async function startIdle(page, scenario) {
   expect(await page.evaluate(() => Date.now()) - started).toBeGreaterThanOrEqual(IDLE_MS);
   expect(await outside()).toEqual(NOTHING_OUT);
   return outside;
+}
+
+/** Page 1 of the GIFs (or stickers) for `text`, without explicit results: the query asked of KLIPY. */
+const firstPage = (text, kind = 'gif') => ({ kind, text, page: 1, explicit: false });
+
+/** The ids of the demo's results `from` to `to` (1-based, both in) of a search for `text`, as it names them. */
+const resultIds = (kind, text, from, to) => Array.from({ length: to - from + 1 }, (_, i) => `${kind}-${text || 'trending'}-${from + i}`);
+
+/**
+ * Holds the page's clock (from a pause's length on) while `steps` run, so
+ * typing never waits out the pause after the last key: Enter is the only
+ * search. Then the pause passes twice over, and the clock runs again.
+ */
+async function withClockHeld(page, steps) {
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + PAUSE_MS);
+  await steps();
+  await page.clock.runFor(PAUSE_MS * 2);
+  await page.clock.resume();
 }
 
 /** How many times the window is hidden and shown again before the search opens. */
@@ -183,10 +206,15 @@ test.describe('gif search', () => {
   test('no key: help', async ({ page, t, lang }) => {
     const errors = watchErrors(page);
     // Without a key and without a click: nothing goes out, even after an hour.
-    await startIdle(page, 'gifsNoKey');
+    const outside = await startIdle(page, 'gifsNoKey');
     const dialog = await openDialog(page, t);
     const key = dialog.getByLabel(t('gifs.key'));
     await expect(key).toBeFocused();
+    // Nor when the dialog opens without a key, before any click, even left
+    // open an hour (D-2026-10-01-gif-sticker-search-19).
+    expect(await outside()).toEqual(NOTHING_OUT);
+    await idleAnHour(page);
+    expect(await outside()).toEqual(NOTHING_OUT);
     await expect(key).toHaveAttribute('type', 'password');
     await expect(key).toHaveAttribute('autocomplete', 'off');
     await expect(dialog.getByText(t('gifs.keyNone'))).toBeVisible();
@@ -210,10 +238,16 @@ test.describe('gif search', () => {
     await expect(steps.getByRole('listitem')).toHaveText(['gifs.helpStep1', 'gifs.helpStep2', 'gifs.helpStep3', 'gifs.helpStep4'].map((k) => t(k)));
     await expect(steps).toContainText('100');
     await expectAccessible(page);
+    // Disclosing the steps opens nothing; the Partner Panel opens on its
+    // button, once (one link, not two), and the guide on its own.
+    expect(await outside()).toEqual(NOTHING_OUT);
     await steps.getByRole('button', { name: t('gifs.partnerPanel') }).click();
     await expect(root(page)).toHaveAttribute('data-demo-link', 'klipyPartnerPanel');
+    expect(await outside()).toEqual({ ...NOTHING_OUT, link: ['klipyPartnerPanel'] });
     await steps.getByRole('button', { name: t('gifs.guide') }).click();
     await expect(root(page)).toHaveAttribute('data-demo-guide', `gifs-and-stickers ${lang}`);
+    const opened = { ...NOTHING_OUT, link: ['klipyPartnerPanel'], guide: [`gifs-and-stickers ${lang}`] };
+    expect(await outside()).toEqual(opened);
 
     // Esc closes the help, not the dialog, and the focus goes back to "?".
     await page.keyboard.press('Escape');
@@ -227,6 +261,7 @@ test.describe('gif search', () => {
     await dialog.getByRole('heading', { name: t('gifs.title') }).click();
     await expect(steps).toBeHidden();
     await expect(help).toBeFocused();
+    expect(await outside()).toEqual(opened);
 
     // Saving with the field empty says so on the field, in the UI's language.
     await expect(key).toHaveValue('');
@@ -236,6 +271,7 @@ test.describe('gif search', () => {
     await expect(key).toHaveAttribute('aria-describedby', /\bgif-key-error\b/);
     await expect(dialog.locator('#gif-key-error')).toHaveText(t('gifs.keyEmpty'));
     expect(await lastQuery(page)).toBeNull();
+    expect(await outside()).toEqual(opened);
 
     // A key that is not one; then a key KLIPY refuses at the first search, which opens the help.
     await key.fill('not a key!');
@@ -251,12 +287,20 @@ test.describe('gif search', () => {
     await expect(key).toHaveValue('');
     await expect(dialog.getByText(t('gifs.keyInvalid'))).toBeHidden();
     expect(await lastQuery(page)).toBeNull();
+    // Saving a key asks KLIPY nothing and opens nothing.
+    expect(await outside()).toEqual(opened);
     await expect(field).toBeEnabled();
-    await field.fill('cat');
-    await field.press('Enter');
-    await expect(dialog.getByRole('alert')).toContainText(t('error.klipyKeyRejected'));
-    await expect(steps).toBeVisible();
-    await expect(help).toHaveAttribute('aria-expanded', 'true');
+    // Enter searches at once (the clock held: the pause after typing never
+    // comes), and the refused key opens the help, not a link: one query.
+    await withClockHeld(page, async () => {
+      await field.fill('cat');
+      await field.press('Enter');
+      await expect(dialog.getByRole('alert')).toContainText(t('error.klipyKeyRejected'));
+      await expect(steps).toBeVisible();
+      await expect(help).toHaveAttribute('aria-expanded', 'true');
+    });
+    const asked = { ...opened, query: [firstPage('cat')] };
+    expect(await outside()).toEqual(asked);
     await expectAccessible(page);
 
     // Remove: searching waits for a key again.
@@ -266,11 +310,16 @@ test.describe('gif search', () => {
     await expect(live).toHaveText(t('gifs.keyRemoved'));
     await expect(field).toBeDisabled();
     await expect(key).toBeFocused();
+    // Removing the key asks KLIPY nothing and opens nothing.
+    expect(await outside()).toEqual(asked);
 
     // Esc now closes the dialog, and the focus goes back to its button.
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
     await expect(page.getByRole('button', { name: t('media.searchGifs') })).toBeFocused();
+    // Nothing more goes out, a minute on either.
+    await page.clock.runFor(MINUTE_MS);
+    expect(await outside()).toEqual(asked);
     expect(errors).toEqual([]);
   });
 
@@ -337,9 +386,20 @@ test.describe('gif search', () => {
     await expect(preview).toHaveAttribute('src', /^data:image\/svg/);
     // Each preview asked of KLIPY is recorded too (so the check at start can see one).
     expect((await outside()).preview).toContain('gif-ca-1');
+    // What went out is exactly the three searches and the previews of their
+    // results, nothing more (D-2026-10-01-gif-sticker-search-19).
+    let sent = {
+      ...NOTHING_OUT,
+      query: [gifQuery('cat'), gifQuery('wave'), gifQuery('ca')],
+      preview: [...resultIds('gif', 'cat', 1, 24), ...resultIds('gif', 'wave', 1, 24), ...resultIds('gif', 'ca', 1, 24)],
+    };
+    await expect.poll(outside).toEqual(sent);
     expect(await preview.getAttribute('src')).not.toContain('animate');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await expect(preview).toHaveAttribute('src', /animate/);
+    // Motion allowed: the shown results' previews again, moving; no search.
+    sent = { ...sent, preview: [...sent.preview, ...resultIds('gif', 'ca', 1, 24)] };
+    await expect.poll(outside).toEqual(sent);
     await expectAccessible(page);
 
     // Explicit results on: page 1 again, unfiltered; then stickers.
@@ -354,6 +414,15 @@ test.describe('gif search', () => {
     await dialog.getByRole('button', { name: t('gifs.loadMore') }).click();
     await expect.poll(() => lastQuery(page)).toEqual({ kind: 'sticker', text: 'ca', page: 2, explicit: true });
     await expect(tiles).toHaveCount(46);
+    // One query per step, and the previews of what each one added (page 2
+    // repeats 2 results of page 1: 22 more).
+    sent = {
+      ...sent,
+      query: [...sent.query, { ...gifQuery('ca'), explicit: true }, { kind: 'sticker', text: 'ca', page: 1, explicit: true }, { kind: 'sticker', text: 'ca', page: 2, explicit: true }],
+      preview: [...sent.preview, ...resultIds('gif', 'ca', 1, 24), ...resultIds('sticker', 'ca', 1, 24), ...resultIds('sticker', 'ca', 25, 46)],
+    };
+    await expect.poll(outside).toEqual(sent);
+    expect(await asked()).toEqual(sent.query);
 
     // The keyboard: Left and Right move by one result, Up and Down by a row
     // of the grid as laid out (its columns, counted here on the page),
@@ -390,23 +459,34 @@ test.describe('gif search', () => {
     await expect(dialog.locator('[aria-live="polite"]')).toHaveText(t('gifs.added', { name: 'Heart' }));
     await expect(tiles.nth(1)).toContainText(t('gifs.inCollection'));
     expect((await outside()).collect).toEqual(['sticker-ca-2']);
+    // The keys moved the focus and asked nothing; Enter downloaded the one result.
+    sent = { ...sent, collect: ['sticker-ca-2'] };
+    expect(await outside()).toEqual(sent);
 
-    // Kept while the app runs; nothing asked when the dialog opens again.
+    // Kept while the app runs; nothing asked when the dialog opens again
+    // (not even the last query again, which the last one alone would hide).
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
+    expect(await outside()).toEqual(sent);
     await page.getByRole('button', { name: t('media.searchGifs') }).click();
     await expect(explicit).toBeChecked();
     await expect(stickers).toHaveAttribute('aria-pressed', 'true');
     expect(await lastQuery(page)).toEqual({ kind: 'sticker', text: 'ca', page: 2, explicit: true });
-    // Off again at the next start.
+    expect(await outside()).toEqual(sent);
+    // Off again at the next start, and the dialog opens asking nothing.
     await openSearch(page, t, 'gifs');
     await expect(explicit).not.toBeChecked();
+    expect(await outside()).toEqual(NOTHING_OUT);
     expect(errors).toEqual([]);
   });
 
   test('429: 100 per hour', async ({ page, t }) => {
     const errors = watchErrors(page);
+    // Every call that goes out, from the page's start, on the page's clock.
+    const outside = await recordOutside(page);
+    await page.clock.install();
     const dialog = await openSearch(page, t, 'gifsRateLimited');
+    expect(await outside()).toEqual(NOTHING_OUT);
     await dialog.getByRole('button', { name: t('gifs.trending') }).click();
     await expect.poll(() => lastQuery(page)).toEqual({ kind: 'gif', text: '', page: 1, explicit: false });
     const alert = dialog.getByRole('alert');
@@ -414,39 +494,68 @@ test.describe('gif search', () => {
     await expect(alert).toContainText('100');
     await expect(alert).toContainText(t('gifs.rateLimitedHow'));
     await expect(dialog.getByRole('group', { name: t('gifs.helpTitle') })).toBeHidden();
+    // One query for the click, the 429 not retried (a minute on either) and
+    // no link opened before the Partner Panel's button (D-2026-10-01-gif-sticker-search-19).
+    const asked = { ...NOTHING_OUT, query: [firstPage('')] };
+    expect(await outside()).toEqual(asked);
+    await page.clock.runFor(MINUTE_MS);
+    expect(await outside()).toEqual(asked);
     await expectAccessible(page);
     await alert.getByRole('button', { name: t('gifs.partnerPanel') }).click();
     await expect(root(page)).toHaveAttribute('data-demo-link', 'klipyPartnerPanel');
+    expect(await outside()).toEqual({ ...asked, link: ['klipyPartnerPanel'] });
     expect(errors).toEqual([]);
   });
 });
 
 
-/** Opens the Media tab's Collection. */
+/**
+ * Opens the Media tab's Collection, recording every call that goes out from
+ * the page's start (`recordOutside`): none yet.
+ * @returns {Promise<{panel: import('@playwright/test').Locator, outside: () => Promise<Record<string, unknown[]>>}>}
+ */
 async function openCollection(page, t, scenario) {
+  const outside = await recordOutside(page);
   await page.goto(`/index.html?demo=${scenario}`);
   await expect(page.locator('#theme-name')).toHaveValue('Demo');
   await page.getByRole('tab', { name: t('library.media') }).click();
   await page.getByRole('tab', { name: t('media.collection') }).click();
-  return page.locator('#collection-panel');
+  expect(await outside()).toEqual(NOTHING_OUT);
+  return { panel: page.locator('#collection-panel'), outside };
 }
 
-/** Adds the results at `picks` of a search for `text` to the collection, then closes the dialog. */
-async function collect(page, t, { kind, text, picks }) {
+/**
+ * Adds the results at `picks` of a search for `text` to the collection, then
+ * closes the dialog. What goes out meanwhile is exactly the search's query,
+ * its 24 previews and a download per pick: opening the dialog, choosing the
+ * kind and closing it ask nothing (D-2026-10-01-gif-sticker-search-19).
+ * @returns {Promise<Record<string, unknown[]>>} what went out so far (`outside`)
+ */
+async function collect(page, t, outside, { kind, text, picks }) {
+  const before = await outside();
   await page.getByRole('button', { name: t('media.searchGifs') }).click();
   const dialog = page.getByRole('dialog', { name: t('gifs.title') });
-  await dialog.getByRole('button', { name: t(`gifs.kind.${kind}`), exact: true }).click();
+  const kindButton = dialog.getByRole('button', { name: t(`gifs.kind.${kind}`), exact: true });
+  await kindButton.click();
+  await expect(kindButton).toHaveAttribute('aria-pressed', 'true');
+  expect(await outside()).toEqual(before);
   const field = dialog.getByRole('searchbox', { name: 'Search KLIPY' });
-  await field.fill(text);
-  await field.press('Enter');
   const tiles = dialog.getByRole('list', { name: t('gifs.results') }).getByRole('button');
+  // The text typed at once searches after the pause: one input, one query.
+  await field.fill(text);
   await expect(tiles).toHaveCount(24);
+  const searched = { ...before, query: [...before.query, firstPage(text, kind)], preview: [...before.preview, ...resultIds(kind, text, 1, 24)] };
+  await expect.poll(outside).toEqual(searched);
   for (const n of picks) {
     await tiles.nth(n).click();
     await expect(tiles.nth(n)).toContainText(t('gifs.inCollection'));
   }
+  const collected = { ...searched, collect: [...searched.collect, ...picks.map((n) => resultIds(kind, text, n + 1, n + 1)[0])] };
+  expect(await outside()).toEqual(collected);
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+  expect(await outside()).toEqual(collected);
+  return collected;
 }
 
 /**
@@ -487,7 +596,7 @@ async function expectCenter(page, t, at) {
 test.describe('gif collection', () => {
   test('add, rename, delete', async ({ page, t }) => {
     const errors = watchErrors(page);
-    const panel = await openCollection(page, t, 'gifs');
+    const { panel, outside } = await openCollection(page, t, 'gifs');
     // Empty: it points to the search.
     await expect(panel.getByText(t('collection.empty'))).toBeVisible();
     await expect(panel.getByText(t('collection.emptyHint'))).toBeVisible();
@@ -495,8 +604,8 @@ test.describe('gif collection', () => {
     await expectAccessible(page);
 
     // What the search adds shows up, newest first, with its facts.
-    await collect(page, t, { kind: 'gif', text: 'wave', picks: [0, 1] });
-    await collect(page, t, { kind: 'sticker', text: 'star', picks: [0] });
+    await collect(page, t, outside, { kind: 'gif', text: 'wave', picks: [0, 1] });
+    const sent = await collect(page, t, outside, { kind: 'sticker', text: 'star', picks: [0] });
     const items = itemsOf(panel, t);
     await expect(items).toHaveCount(3);
     await expect(items.nth(0)).toContainText('Star');
@@ -612,13 +721,15 @@ test.describe('gif collection', () => {
       t('collection.deleted', { name: 'Party time' }),
       t('collection.deleted', { name: 'Star' }),
     ]);
+    // Using, renaming and deleting what the collection holds asked KLIPY nothing (D-2026-10-01-gif-sticker-search-19).
+    expect(await outside()).toEqual(sent);
     expect(errors).toEqual([]);
   });
 
   test('vertical and horizontal', async ({ page, t }) => {
     const errors = watchErrors(page);
-    const panel = await openCollection(page, t, 'gifs');
-    await collect(page, t, { kind: 'sticker', text: 'star', picks: [0] });
+    const { panel, outside } = await openCollection(page, t, 'gifs');
+    const sent = await collect(page, t, outside, { kind: 'sticker', text: 'star', picks: [0] });
     const star = itemsOf(panel, t).filter({ hasText: 'Star' });
     const status = panel.getByRole('status');
     const inspector = page.locator('#inspector');
@@ -649,15 +760,17 @@ test.describe('gif collection', () => {
     // Each use copied the item into the theme: "This theme" lists it.
     await page.getByRole('tab', { name: t('media.thisTheme') }).click();
     await expect(page.locator('#media-list')).toContainText('star.gif');
+    // Using what the collection holds, in either orientation, asked KLIPY nothing.
+    expect(await outside()).toEqual(sent);
     expect(errors).toEqual([]);
   });
 
   test('reduced motion: stills', async ({ page, t }) => {
     const errors = watchErrors(page);
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    const panel = await openCollection(page, t, 'gifs');
-    await collect(page, t, { kind: 'gif', text: 'wave', picks: [0] });
-    await collect(page, t, { kind: 'sticker', text: 'star', picks: [0] });
+    const { panel, outside } = await openCollection(page, t, 'gifs');
+    await collect(page, t, outside, { kind: 'gif', text: 'wave', picks: [0] });
+    const sent = await collect(page, t, outside, { kind: 'sticker', text: 'star', picks: [0] });
     const previews = panel.getByRole('list', { name: t('collection.list') }).locator('img');
     await expect(previews).toHaveCount(2);
     for (const preview of await previews.all()) {
@@ -676,6 +789,8 @@ test.describe('gif collection', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(previews.first()).not.toHaveAttribute('src', /animate/);
     await expect(previews.last()).not.toHaveAttribute('src', /animate/);
+    // The collection's previews are its own: motion changes asked KLIPY nothing.
+    expect(await outside()).toEqual(sent);
     expect(errors).toEqual([]);
   });
 });

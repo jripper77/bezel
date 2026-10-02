@@ -291,10 +291,15 @@ struct Start<R: Runtime> {
 /// anything started here (D-2026-10-01-gif-sticker-search-3). The GIF state
 /// makes and searches a source only with a [`UserAsked`], which only a
 /// command Tauri is running has, so a search through it from here does not
-/// compile. Forging an invocation (Tauri's IPC entry or a script run in the
-/// window) or making a second KLIPY client is what the type cannot stop:
-/// the source guard `tests::nothing_in_the_app_forges_an_invocation`
-/// refuses both in production code.
+/// compile. What the type cannot stop is making Tauri dispatch an
+/// invocation the window never sent, or making a second KLIPY client: the
+/// source guard `tests::nothing_in_the_app_forges_an_invocation`
+/// (D-2026-10-01-gif-sticker-search-10) refuses, by identifier in the
+/// studio's production code (raw names and the tokens of macro calls
+/// included), the Tauri APIs that do the first (`eval`, `with_webview`,
+/// `on_message`, `invoke_key`, ...) and any `KlipyClient::new` but the
+/// source factory's. Code written to get past it otherwise is left to code
+/// review.
 fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
     let folders = (start.folders)(app.handle())?;
     let backend: Shared = Arc::new(compose(&folders, start.simulate));

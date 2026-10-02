@@ -6,15 +6,24 @@
 //!
 //! - The key lives in [`KeyFile`] (`<config>/klipy.json`); the window only
 //!   learns whether one is saved and its last 4 characters ([`KeyDto`]).
-//!   Saving it asks nothing of the provider.
+//!   Saving it asks nothing of the provider. From the command on, the key is
+//!   a [`KlipyKey`]: printing or logging it does not compile, and only the
+//!   source factory and the key file read its text (`key.rs`).
 //! - Nothing reaches the provider at start or without a key: the source is
 //!   made on the first search, preview or download after a key is saved,
 //!   and only those commands, each a user action, use it. Making a source
 //!   and each of those operations take a [`UserAsked`], which only a
 //!   command's invocation gives: a request at start through this state
-//!   does not compile. An invocation forged in Rust or by a script run in
-//!   the window, and a second KLIPY client, are refused by the source guard
-//!   instead (`tests::nothing_in_the_app_forges_an_invocation`, `lib.rs`).
+//!   does not compile.
+//! - What the type cannot stop, the source guard
+//!   (`tests::nothing_in_the_app_forges_an_invocation` in `lib.rs`,
+//!   D-2026-10-01-gif-sticker-search-10) refuses by identifier in the
+//!   studio's production code, raw names and the tokens of macro calls
+//!   included: the Tauri APIs that dispatch an invocation the window never
+//!   sent or run a script in it (`eval`, `with_webview`, `on_message`, ...),
+//!   a second `KlipyClient::new`, and print or log macros in this module.
+//!   Code written to get past it otherwise (generated code, another crate)
+//!   is left to code review.
 //! - Pages answered in this session are kept by query (kind, text, filter,
 //!   language, page) and asked once. The window names a result by its id,
 //!   never by an address, and only results of the pages of the last search

@@ -7,7 +7,9 @@
 //!   `Debug` is the same for every key, so printing or logging it does not
 //!   compile, or shows nothing of it. Its text is read by one crate-private
 //!   accessor, [`KlipyKey::expose_secret`], for KLIPY's client (the source
-//!   factory, `klipy_source` in `lib.rs`) and for the key file here.
+//!   factory, `klipy_source` in `lib.rs`) and for the key file here; the
+//!   source guard (`tests::nothing_in_the_app_forges_an_invocation`)
+//!   refuses it anywhere else in production code.
 //! - The key file is `<config>/klipy.json`, next to `settings.json` and not
 //!   inside it, holding the key and the customer id made for it. It is
 //!   replaced atomically (written whole to a temporary file next to it, then
@@ -63,7 +65,8 @@ impl KlipyKey {
     }
 
     /// The key's text: for KLIPY's client, made by the source factory
-    /// (`klipy_source`), and for the key file only.
+    /// (`klipy_source`), and for the key file only. The source guard
+    /// refuses this accessor anywhere else in production code.
     pub(crate) fn expose_secret(&self) -> &str {
         &self.0
     }

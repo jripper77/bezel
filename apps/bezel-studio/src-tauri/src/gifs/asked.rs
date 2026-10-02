@@ -13,13 +13,19 @@
 //!
 //! What the type does not stop is code that makes Tauri dispatch an
 //! invocation the window never sent, which then carries a real
-//! [`Request`]: an `InvokeRequest` handed to `WebviewWindow::on_message`
-//! with `AppHandle::invoke_key`, or a script run in the window (`eval`,
-//! an initialization script) that calls `invoke`. Nor does it stop a second
-//! `KlipyClient` made and asked apart from the GIF state. Both are refused
-//! by the source guard, `tests::nothing_in_the_app_forges_an_invocation`
-//! in `lib.rs`: the studio's production code may not name those APIs, and
-//! calls `KlipyClient::new` once, in the source factory (`klipy_source`).
+//! [`Request`] (an `InvokeRequest` handed to `WebviewWindow::on_message`
+//! with `AppHandle::invoke_key`, or a script run in the window that calls
+//! `invoke` or presses Search), nor a second `KlipyClient` made and asked
+//! apart from the GIF state. The source guard,
+//! `tests::nothing_in_the_app_forges_an_invocation` in `lib.rs`
+//! (D-2026-10-01-gif-sticker-search-10), reads the studio's production code
+//! as a syntax tree and refuses, by identifier (raw names and the tokens of
+//! macro calls included), the APIs that do so: `eval`,
+//! `eval_with_callback`, `with_webview`, `on_message`, `invoke_key`,
+//! `InvokeRequest`, `initialization_script` and `js_init_script`; and it
+//! accepts one `KlipyClient::new`, in the source factory (`klipy_source`).
+//! Code written to get past it otherwise (generated code, another crate
+//! doing the forging) is left to code review.
 
 use tauri::ipc::Request;
 

@@ -23,10 +23,12 @@ pub fn search(source: &dyn GifSource, query: &GifQuery) -> Result<GifPage> {
     Ok(page)
 }
 
-/// The preview of `item`: its small GIF, or its JPEG still for
-/// [`Motion::Still`], read up to 2 MiB; `None` when it has no such
-/// rendition. Bytes that are not in the rendition's format are
-/// `InvalidInput`.
+/// The preview of `item`: its small GIF, or for [`Motion::Still`] its
+/// still (a GIF's JPEG, a sticker's PNG), read up to 2 MiB; `None` when it
+/// has no such rendition. Bytes that are not in the rendition's format are
+/// `InvalidInput`, so the format of what comes back is
+/// `RenditionFormat::of(&bytes)`, its media type
+/// [`RenditionFormat::mime`].
 pub fn preview(source: &dyn GifSource, item: &GifItem, motion: Motion) -> Result<Option<Vec<u8>>> {
     let Some(rendition) = item.preview(motion) else {
         return Ok(None);

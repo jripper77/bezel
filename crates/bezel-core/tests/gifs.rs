@@ -36,6 +36,7 @@ fn rendition(id: &str, tier: Tier, format: RenditionFormat, side: u32, bytes: u6
     let ext = match format {
         RenditionFormat::Gif => "gif",
         RenditionFormat::Jpeg => "jpg",
+        RenditionFormat::Png => "png",
     };
     Rendition {
         tier,
@@ -284,6 +285,33 @@ fn previews_are_small_and_in_their_format() {
     let mut bare = party.clone();
     bare.renditions.retain(|r| r.tier == Tier::Large);
     assert_eq!(gifs::preview(&wrong, &bare, Motion::Animated), Ok(None));
+}
+
+#[test]
+fn a_sticker_still_is_its_png() {
+    use RenditionFormat::{Gif, Png};
+    let mut wave = item("303", "Wave", GifKind::Sticker);
+    wave.renditions = vec![
+        rendition("303", Tier::Medium, Gif, 300, 52_220),
+        rendition("303", Tier::Small, Gif, 200, 36_947),
+        rendition("303", Tier::Small, Png, 200, 6_538),
+    ];
+    let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    let still = location(&wave, Tier::Small, Png);
+    let source = FakeGifSource::new().with_file(&still, png.clone());
+
+    let read = gifs::preview(&source, &wave, Motion::Still).expect("read");
+    assert_eq!(read.as_deref(), Some(png.as_slice()));
+    let format = read.as_deref().and_then(RenditionFormat::of);
+    assert_eq!(format.map(RenditionFormat::mime), Some("image/png"));
+    assert_eq!(source.downloads(), [(still.clone(), PREVIEW_LIMIT)]);
+
+    // A JPEG where the PNG should be is refused.
+    let jpeg = FakeGifSource::new().with_file(&still, vec![0xFF, 0xD8, 0xFF, 0xE0]);
+    assert!(matches!(
+        gifs::preview(&jpeg, &wave, Motion::Still),
+        Err(BezelError::InvalidInput(_))
+    ));
 }
 
 #[test]

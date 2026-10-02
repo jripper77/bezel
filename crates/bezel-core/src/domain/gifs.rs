@@ -149,9 +149,18 @@ impl GifQuery {
 pub enum RenditionFormat {
     /// A GIF (animated or not).
     Gif,
-    /// A JPEG still of the first picture.
+    /// A JPEG still of the first picture: a GIF's still.
     Jpeg,
+    /// A PNG still of the first picture: a sticker's still, transparent
+    /// where the sticker is.
+    Png,
 }
+
+/// The signature every PNG file starts with.
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+/// The signature every JPEG file starts with.
+const JPEG_SIGNATURE: &[u8] = &[0xFF, 0xD8, 0xFF];
 
 impl RenditionFormat {
     /// The format `bytes` are in, from their signature; `None` for anything
@@ -159,10 +168,22 @@ impl RenditionFormat {
     pub fn of(bytes: &[u8]) -> Option<Self> {
         if is_gif(bytes) {
             Some(RenditionFormat::Gif)
-        } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        } else if bytes.starts_with(JPEG_SIGNATURE) {
             Some(RenditionFormat::Jpeg)
+        } else if bytes.starts_with(PNG_SIGNATURE) {
+            Some(RenditionFormat::Png)
         } else {
             None
+        }
+    }
+
+    /// Its media type (`image/gif`, `image/jpeg`, `image/png`): what a
+    /// `data:` URL of a file in this format declares.
+    pub const fn mime(self) -> &'static str {
+        match self {
+            RenditionFormat::Gif => "image/gif",
+            RenditionFormat::Jpeg => "image/jpeg",
+            RenditionFormat::Png => "image/png",
         }
     }
 }
@@ -227,32 +248,46 @@ pub enum Motion {
     /// The small GIF.
     #[default]
     Animated,
-    /// The JPEG still, when motion is reduced.
+    /// A still, when motion is reduced: a GIF's JPEG, a sticker's PNG.
     Still,
 }
 
 impl Motion {
-    /// The format of a preview with this motion.
+    /// The format a preview with this motion is looked for in first: the
+    /// first of [`Motion::formats`].
     pub const fn format(self) -> RenditionFormat {
         match self {
             Motion::Animated => RenditionFormat::Gif,
             Motion::Still => RenditionFormat::Jpeg,
         }
     }
+
+    /// The formats a preview with this motion may be in, the one looked for
+    /// first ahead: a GIF, or a JPEG still else a PNG one (a provider offers
+    /// GIFs with JPEG stills and stickers with PNG ones).
+    pub const fn formats(self) -> &'static [RenditionFormat] {
+        match self {
+            Motion::Animated => &[RenditionFormat::Gif],
+            Motion::Still => &[RenditionFormat::Jpeg, RenditionFormat::Png],
+        }
+    }
 }
 
-/// The rendition an item's preview is read from: the small one in the
-/// format of `motion`, else the smallest one in that format; `None` when
-/// none is in that format with at most [`PREVIEW_LIMIT`] bytes.
+/// The rendition an item's preview is read from: in the first of
+/// `motion`'s [formats](Motion::formats) the item has, the small one, else
+/// the smallest one; `None` when none is in those formats with at most
+/// [`PREVIEW_LIMIT`] bytes.
 pub fn preview_rendition(renditions: &[Rendition], motion: Motion) -> Option<&Rendition> {
-    let fitting = || {
-        renditions
-            .iter()
-            .filter(move |r| r.fits(motion.format(), PREVIEW_LIMIT))
-    };
-    fitting()
-        .find(|r| r.tier == Tier::Small)
-        .or_else(|| fitting().min_by_key(|r| r.area()))
+    motion.formats().iter().find_map(|&format| {
+        let fitting = || {
+            renditions
+                .iter()
+                .filter(move |r| r.fits(format, PREVIEW_LIMIT))
+        };
+        fitting()
+            .find(|r| r.tier == Tier::Small)
+            .or_else(|| fitting().min_by_key(|r| r.area()))
+    })
 }
 
 /// One search result.
@@ -445,6 +480,7 @@ mod tests {
         let ext = match format {
             RenditionFormat::Gif => "gif",
             RenditionFormat::Jpeg => "jpg",
+            RenditionFormat::Png => "png",
         };
         Rendition {
             tier,
@@ -555,6 +591,39 @@ mod tests {
     }
 
     #[test]
+    fn a_sticker_stands_still_as_a_png() {
+        use RenditionFormat::{Gif, Jpeg, Png};
+        // A sticker comes as GIFs and PNG stills, never as a JPEG.
+        let sticker = [
+            rendition(Tier::Large, Gif, 300, Some(52_220)),
+            rendition(Tier::Large, Png, 300, Some(7_899)),
+            rendition(Tier::Small, Gif, 200, Some(36_947)),
+            rendition(Tier::Small, Png, 200, Some(6_538)),
+            rendition(Tier::Tiny, Png, 90, Some(2_470)),
+        ];
+        let still = preview_rendition(&sticker, Motion::Still).map(|r| (r.tier, r.format));
+        assert_eq!(still, Some((Tier::Small, Png)));
+        let moving = preview_rendition(&sticker, Motion::Animated).map(|r| (r.tier, r.format));
+        assert_eq!(moving, Some((Tier::Small, Gif)));
+        assert_eq!(download_rendition(&sticker).map(|r| r.format), Some(Gif));
+
+        // A GIF's still is its JPEG, ahead of a PNG it might also have.
+        let both = [
+            rendition(Tier::Small, Png, 200, Some(40_000)),
+            rendition(Tier::Small, Jpeg, 200, Some(9_000)),
+        ];
+        let still = preview_rendition(&both, Motion::Still).map(|r| r.format);
+        assert_eq!(still, Some(Jpeg));
+        assert_eq!(Motion::Still.formats(), [Jpeg, Png]);
+        assert_eq!(Motion::Still.format(), Jpeg);
+        assert_eq!(Motion::Animated.formats(), [Motion::Animated.format()]);
+
+        // A PNG over 2 MiB is no preview.
+        let heavy = [rendition(Tier::Small, Png, 200, Some(3 * MIB))];
+        assert_eq!(preview_rendition(&heavy, Motion::Still), None);
+    }
+
+    #[test]
     fn queries_are_trimmed_and_paged_from_one() {
         let query = GifQuery::new(
             GifKind::Sticker,
@@ -591,6 +660,21 @@ mod tests {
             Some(RenditionFormat::Jpeg)
         );
         assert_eq!(RenditionFormat::of(b"<html>"), None);
+        let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+        assert_eq!(RenditionFormat::of(png), Some(RenditionFormat::Png));
+        assert_eq!(RenditionFormat::of(&png[..7]), None, "a cut signature");
+    }
+
+    #[test]
+    fn each_format_names_its_media_type() {
+        assert_eq!(RenditionFormat::Gif.mime(), "image/gif");
+        assert_eq!(RenditionFormat::Jpeg.mime(), "image/jpeg");
+        assert_eq!(RenditionFormat::Png.mime(), "image/png");
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0];
+        let mime = |bytes: &[u8]| RenditionFormat::of(bytes).map(RenditionFormat::mime);
+        assert_eq!(mime(PIXEL), Some("image/gif"));
+        assert_eq!(mime(&jpeg), Some("image/jpeg"));
+        assert_eq!(mime(b"\x89PNG\r\n\x1a\n"), Some("image/png"));
     }
 
     #[test]

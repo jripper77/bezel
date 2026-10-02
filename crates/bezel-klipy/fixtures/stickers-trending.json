@@ -3,25 +3,240 @@
   "data": {
     "data": [
       {
-        "id": 3021774409811265,
-        "slug": "party-parrot-Qm3",
-        "title": "Party Parrot",
+        "id": 2894310249445433,
+        "slug": "doraemon-sleeping-sticker",
+        "title": "Doraemon Sleeping Peacefully with Zzzs",
         "file": {
           "hd": {
-            "gif": { "url": "https://static.klipy.com/ii/example/2001/hd.gif", "width": 400, "height": 400, "size": 1802210 },
-            "webp": { "url": "https://static.klipy.com/ii/example/2001/hd.webp", "width": 400, "height": 400, "size": 501882 }
+            "gif": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/Qziwt0XO.gif",
+              "width": 272,
+              "height": 285,
+              "size": 52220
+            },
+            "webp": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/F8gUn8G1.webp",
+              "width": 304,
+              "height": 300,
+              "size": 47848
+            },
+            "webm": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/B4x08yjqcC1YCrw.webm",
+              "width": 272,
+              "height": 286,
+              "size": 96396
+            },
+            "png": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/XkdoBUDkEbzT3.png",
+              "width": 272,
+              "height": 285,
+              "size": 7899
+            }
+          },
+          "md": {
+            "gif": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/Dyu0E3S4.gif",
+              "width": 272,
+              "height": 285,
+              "size": 52220
+            },
+            "webp": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/JNJUteuL.webp",
+              "width": 272,
+              "height": 285,
+              "size": 58214
+            },
+            "webm": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/jeZZJmQdfM9YPojpOu8.webm",
+              "width": 272,
+              "height": 286,
+              "size": 96396
+            },
+            "png": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/8QD9k6qhfhubB27cbAg.png",
+              "width": 272,
+              "height": 285,
+              "size": 7899
+            }
           },
           "sm": {
-            "gif": { "url": "https://static.klipy.com/ii/example/2001/sm.gif", "width": 200, "height": 200, "size": 310442 },
-            "jpg": { "url": "https://static.klipy.com/ii/example/2001/sm.jpg", "width": 200, "height": 200, "size": 9120 }
+            "gif": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/n9ELBB3z.gif",
+              "width": 191,
+              "height": 200,
+              "size": 36947
+            },
+            "webp": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/Zh23FYTp.webp",
+              "width": 200,
+              "height": 197,
+              "size": 42560
+            },
+            "webm": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/aKGJc1TlsTawV0C.webm",
+              "width": 191,
+              "height": 200,
+              "size": 53563
+            },
+            "png": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/ayXrZ3mBEPbcItVaiams.png",
+              "width": 191,
+              "height": 200,
+              "size": 6538
+            }
+          },
+          "xs": {
+            "gif": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/CblG1tpx.gif",
+              "width": 86,
+              "height": 90,
+              "size": 9047
+            },
+            "webp": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/XR2jCiF4.webp",
+              "width": 90,
+              "height": 89,
+              "size": 12722
+            },
+            "webm": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/wQ2av1YLViS6fbsOGB9.webm",
+              "width": 86,
+              "height": 90,
+              "size": 18128
+            },
+            "png": {
+              "url": "https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e6/3f/iW1UnfU11bhJ8fnN.png",
+              "width": 86,
+              "height": 90,
+              "size": 2470
+            }
           }
         },
-        "tags": ["party", "parrot"],
-        "type": "sticker"
+        "tags": [],
+        "type": "sticker",
+        "blur_preview": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAB0AAAAeCAYAAADQBxWhAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAJu0lEQVR4nL2WeZAU1R3Hlxs55FjxADWgmEQSPFGMR/CKVpGQilgeYJFETWl5IMaAUBEjKMbyIEaWiIhRlyMcK7qwLMeyLOzuzM7dMz19X9Nz9PT0HNtz90zfebNg/gCSSqVS/vGr6nqvqj/v+/t9f+/9mmzbbvqu4zsH/q/QYWfF+fb/b9DGz4Zbtj3CsuyRQ9H4Pr32rzCtobVv1897gP8aCCAjTMsaZZjWWN00x4EYD74vMCxrjGHZoxuhm/YYfWj/9NqZAwz/H6AWAFojDcMco+n6xLqqNddU7ZJG1DW9WdWNSZphTlBB1HTzQkU3J4OYVDesCY1DAPDIs1P+H5Q1YOYI0zRG6bp+gVpXJ1eryvRSqTy7UCzPKZTKc0qV6tWVWn1Gta5Nq6j6tGJdvzRf12cU6sb0imZeNAQGis9Wey4QwEzTHGEYDZgGYPULlWr14nKxOEvO5a7PpKS7UknxZ1JKui+Tzd0m54s/yperV8mV2sxspX51uqJ+P1vVrs7XjRlV3ZyigXSfSfOw80KBuuEAOBIoG6uqZ2Cl4sz8YO7H2ZR4hxjlF8VoalmEIJ6JUNRTcZ5/WBTFe6Rsbp4kF68TC5XrkkXlOqlcv3ZQ0b9X0YxmkPZxxmnTDT8f9AxQG1er1aaWy6Ur8/Lg3GwaKEvEfxln6Sc5NLySgnwbcJ/nPSLge5tGwisjDP3rWDz+83hKWhDPyLcl5NJNqZIyR1a0KwF0Kqj3Bea/gQ47o7ABvKhUKs7O5bLzU2JyUSLKP80z1BoWC39AQr7PMbezDXH2tSMux17U791CIPB6mqKe5/joo9Fk6gEhK89PFyvXFhR1hqKZkxtObrSQfVZ6h4FWGNEwi1KrNReKpdmZbPZOQRAe4/nISpamNtIEuoNCQp0A6sC9rgDmdoRQt9OD+NxdaDCwC0fDGymK/EMkGl0iSOm7s4XinHKtflldNyaC1I46x0hDQMMYrQB35kvlWals7vaoICxhIpHXKIraRhJ4J4VjbhpHCAYNx5hwUKRDgRQZ9MfxoJ9Ag34nCkNfEzjyV5alVwhJYdGgLF9fUZTLQIuNB/8/t2UM0xwF+m18oaJMT+byNzFC6mGU5dfAJP13hCC6cYJAaIpMcAyVA2kuRRmyylN4lcWREokEMxjs51DY58YQaB9DYRsS8egToDS3VquVyzVNm2CBsp0DBc09tlxTp6QK5WtIMXu/j0286MDYvzlRqsuPkRhK0RLDsqVohKvHoxE9zkeMKMcYHIVrJBZUUNiTCwcHaAR2dVM4tDkWpZ/NZqSfViqlmZqmTjwvVFG1CaDHLuGyhRs8vPTIUSy6/kCQ+aozSEO9CC1CJFum2IjG87wZi/JWjI9YPEdbDIlYOOLTYai/HPT3CKHASTeOuFt5DnslLQkPlEuFa0DbTQYGHX0OtFxXJ0ml6hWoKN/eRYlP74T4j7a5me5WD80CeL4PY9UQxZkkw9osy9ocS9sMhdsEFrSR0IAZ9J+oBbxH00F/VwgL97dxTPh1SYw9VCzIc+s15WIDdETjGm3cAd++TE1FpT5FKFRm+hODd+/Hki9scvPbNvQyznd76finA3TlGz9lnIJJ248SNoLjNk4AII7YoIZ2eAjao0K+LjkUOE5iiOMIx8AfJAX+SXkwc2elUr4KqG3WG4YyjTFA9ShwtY5sKij1qfF8ZZYrPnjvznDypbf6+c9f7qJdK46Swp+6sGrLybC5xxGyj7mDtjMA21AYsVEMQLEQAPssFHbqCNxXQsP9MRL3OlkG+TIe51ZLkviwnJfnl8vl2aD3p6uq2gyMNQkcYGIDOgVAZwLoglZYfGFtL//pU4dI55Kv0cRT+4OVVe1e4/1Ot93a7bEPOQO2AwrbIRQDijGbJMIgggZJBBSShDIUFcZoBj/CRtjN0Xj8FTGVejSXy91bKBbmAdXXKkp1Vq2mXN5UqqmTksXqFV5Bvn1nWPzd2lORlqUH8J6Fu0P8wu3e0uM7nPryPf3Wnw8O2F/2+O2jvrDtBanGKMqmGdJmGMICII2giRJKE0KYoiCYojtQhvuY4WNr48nkc+lM5nFZHlxYLOTvKhWLtzRVgHvT5dqlITF/cxsqPrG+l3tvaTt2+J4dEPWTz9zy3dsc6uIv+80X21z2+8cC9l4XavchlB2mWJtiG8HYQJ4JkXTdhdMFsBc7FSYhJ0IdA87fRfGxzQD8ppSWXs5lM8sGc9nFTYqmj8tV6tNwqTC3g0gtftfBrfvNAWw/gMI3bvOkb9zqqi743K0/tsdnrjkMW9uchN0VZm2Ijtg4G7GBIttHsFYPwhgHIaq2z0vk93lxoSNAEH0o7QmzfBcfT+wFr1GLJKXWpqXU8iZwP47Ng7qy2dIPjjPSwhY3v+q5w0Trg7vhgZu/gCJzPwsM3voFVPnFnpC6vBPVWxyU2RmOWH4mZqNczA7QvH0CYa29Ptrc4iS1v/TiyqY+vLDDTaSPwUwsyESxSFzoT4riPvCAfARiXZOmG6MbdY3J5VnOaHZBazD+zB97mA8fb8cP3rMb9c3fiTB37ELERW2o/OJhorLJyaidSNQIcAkT4QXLRcfM9hBnbHZS2hvdeH31May6rhsrb3GQ+UMhNhNgwHWSEAJAaQcAbkmJwoYm3TBHVVVtvFSsTodF+eYOMrV4kye2auUJtmXZIfqrh74he371NRFYdhCnV3eR4lYXkz+GRhWIS6hwRND6yFj9H362+s4psvTyEUx+/hCaBWCppZ8QO4JMAmKiFEjvAAC2SSlxo5RKvgYufGvEUIqr9an8YHm2Jz54RzshPfJJQFi+wRl9c3VP5ONXjjN71hwnu987RUC7PFTkJMpmggxfAKkr9qCcvN1Dpd7uwaO/P4JSLx1GkdePY6GtDiJ4JET7Q3SkD7RPuyQmN2ek1BowFDwDRhR7OBgnR1ZVfXyuUpsWAWAomb/lBJd9YD8uPdYaEp7/xMu/8YmL3rLdRbR3+HC3AyboIEYmwIMgdAeJyM4BDNl4Eh144zjata4bP/BhL/HVbg/Zdgqh92AM1xqPxz9Mp8RXB7PpZXIuu+jbR3y4NpRmfbxcrTcLheoVNDBWMJmf5+Az93cRwtJOmFt1OEC09ASQA24IdgdCIcwDhfBub8i/zwl3f9qH7G3pw7YCM23c5aXeASrf9hLsBpqLvC4kEiuAwiVg1rqvVMjfenogOzM9APBoRdXHgVFjcrqsXNIwF5GSbwhEU/c7Sf63fTCx3gnB273+wAm/3+d3eX2Bbpe/9xsntH+nI7yldQB/a7ePfrUjxK7ox9jlMM0tB2PMs2JSWApUPljMy/MqpeIP/wl19VnEzztDVAAAAABJRU5ErkJggg=="
+      },
+      {
+        "id": 6018002173138285,
+        "slug": "emoji-emojis-sticker-10",
+        "title": "Sparkling Pixel Stars Emoji Sticker",
+        "file": {
+          "hd": {
+            "gif": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/cQAy98Ql.gif",
+              "width": 276,
+              "height": 274,
+              "size": 31288
+            },
+            "webp": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/NHXzu8VI.webp",
+              "width": 300,
+              "height": 300,
+              "size": 15880
+            },
+            "webm": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/4vDSYqrj0tFogGHzZ.webm",
+              "width": 276,
+              "height": 274,
+              "size": 53422
+            },
+            "png": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/08MS9fwxh5hsMHOqi3c.png",
+              "width": 276,
+              "height": 274,
+              "size": 10144
+            }
+          },
+          "md": {
+            "gif": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/pKQdmToJ.gif",
+              "width": 276,
+              "height": 274,
+              "size": 31288
+            },
+            "webp": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/HvpvV1u5.webp",
+              "width": 276,
+              "height": 274,
+              "size": 22186
+            },
+            "webm": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/AwvAl7BLM3B7a6iZ9RXF.webm",
+              "width": 276,
+              "height": 274,
+              "size": 53422
+            },
+            "png": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/dgVMxSaJsabmp765cv.png",
+              "width": 276,
+              "height": 274,
+              "size": 10144
+            }
+          },
+          "sm": {
+            "gif": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/7zKtuzk6.gif",
+              "width": 200,
+              "height": 199,
+              "size": 20113
+            },
+            "webp": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/mpNAL3xI.webp",
+              "width": 200,
+              "height": 200,
+              "size": 16106
+            },
+            "webm": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/58f6b267jG45aeG7JYEn.webm",
+              "width": 200,
+              "height": 200,
+              "size": 38784
+            },
+            "png": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/x0v6q5F5V7Lmj.png",
+              "width": 200,
+              "height": 199,
+              "size": 6501
+            }
+          },
+          "xs": {
+            "gif": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/faN2awgA.gif",
+              "width": 90,
+              "height": 89,
+              "size": 5883
+            },
+            "webp": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/E8A49ffz.webp",
+              "width": 90,
+              "height": 90,
+              "size": 6352
+            },
+            "webm": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/ivdl7PqjK9npHgET.webm",
+              "width": 90,
+              "height": 90,
+              "size": 14408
+            },
+            "png": {
+              "url": "https://static.klipy.com/ii/c98c4a4935d23b95805f0befee091d8a/87/f9/jdopLYDutJjTT2k2n3g7.png",
+              "width": 90,
+              "height": 89,
+              "size": 1999
+            }
+          }
+        },
+        "tags": [],
+        "type": "sticker",
+        "blur_preview": "data:image/jpeg;base64,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"
       }
     ],
     "current_page": 1,
-    "per_page": 24,
-    "has_next": false
+    "per_page": 8,
+    "has_next": true,
+    "meta": {
+      "item_min_width": 80,
+      "ad_max_resize_percent": 10
+    }
   }
 }

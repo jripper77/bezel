@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use bezel_core::domain::clock::Language;
 use bezel_core::domain::error::ServiceFailure;
-use bezel_core::domain::gifs::{ContentFilter, GifPage, GifQuery, PAGE_SIZE, Rendition};
+use bezel_core::domain::gifs::{ContentFilter, GifKind, GifPage, GifQuery, PAGE_SIZE, Rendition};
 use bezel_core::domain::storage::MIB;
 use bezel_core::ports::GifSource;
 use bezel_core::{BezelError, Result};
@@ -28,9 +28,6 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Most bytes of an API answer; a page of 24 items is far smaller.
 const ANSWER_LIMIT: u64 = 4 * MIB;
-
-/// The formats asked for: GIFs, and JPEG stills for reduced motion.
-const FORMATS: &str = "gif,jpg";
 
 /// Where the client sends its requests.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,7 +135,7 @@ impl KlipyClient {
             params.push(("locale", locale.to_string()));
         }
         params.push(("content_filter", filter_name(query.filter()).to_string()));
-        params.push(("format_filter", FORMATS.to_string()));
+        params.push(("format_filter", format_filter(query.kind).to_string()));
         params
     }
 
@@ -168,8 +165,11 @@ impl GifSource for KlipyClient {
             .query_pairs(self.page_params(query))
             .call()
             .map_err(|error| failure(&error))?;
-        api_status(response.status().as_u16())?;
-        let body = read_up_to(&mut response, ANSWER_LIMIT).map_err(|error| failure(&error))?;
+        let status = response.status().as_u16();
+        api_status(status)?;
+        let body = read_up_to(&mut response, ANSWER_LIMIT);
+        api_answer(status, body.as_deref().unwrap_or_default())?;
+        let body = body.map_err(|error| failure(&error))?;
         dto::read_page(&body, query.kind, &self.endpoints.files)
             .ok_or_else(|| unavailable("the answer was not a page of results"))
     }
@@ -230,12 +230,27 @@ fn read_up_to(
         .read_to_vec()
 }
 
-/// The API's status: 429 is the rate limit, 401 and 403 a refused key.
+/// What the API's status alone tells: 429 is the rate limit; 401, 403 and
+/// 404 a refused key (KLIPY answers a key it does not know with 404: the key
+/// is the only part of the address that varies). Any other status waits
+/// for the body ([`api_answer`]).
 fn api_status(code: u16) -> Result<()> {
     match code {
-        200..=299 => Ok(()),
         429 => Err(BezelError::Service(ServiceFailure::RateLimited)),
-        401 | 403 => Err(BezelError::Service(ServiceFailure::KeyRejected)),
+        401 | 403 | 404 => Err(BezelError::Service(ServiceFailure::KeyRejected)),
+        _ => Ok(()),
+    }
+}
+
+/// The API's answer once its body is read: a body saying the key is
+/// invalid is a refused key whatever the status, then a status other than
+/// 2xx is unavailable. The body itself never reaches the error.
+fn api_answer(code: u16, body: &[u8]) -> Result<()> {
+    if dto::refuses_the_key(body) {
+        return Err(BezelError::Service(ServiceFailure::KeyRejected));
+    }
+    match code {
+        200..=299 => Ok(()),
         _ => Err(unexpected_status(code)),
     }
 }
@@ -312,6 +327,17 @@ const fn locale(language: Language) -> Option<&'static str> {
     }
 }
 
+/// The formats asked for `kind`: its GIFs and its stills for reduced
+/// motion, JPEG for a GIF and PNG for a sticker. KLIPY keeps only the items
+/// offered in every format named (stickers asked for `gif,jpg` come back
+/// as an empty page), so each kind names its own.
+const fn format_filter(kind: GifKind) -> &'static str {
+    match kind {
+        GifKind::Gif => "gif,jpg",
+        GifKind::Sticker => "gif,png",
+    }
+}
+
 /// KLIPY's name for `filter`.
 const fn filter_name(filter: ContentFilter) -> &'static str {
     match filter {
@@ -346,16 +372,20 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::thread;
 
+    use bezel_core::app;
     use bezel_core::domain::gifs::{
-        Explicit, GifKind, Motion, PREVIEW_LIMIT, RenditionFormat, Tier,
+        Explicit, GifItem, Motion, PREVIEW_LIMIT, RenditionFormat, Tier, is_gif,
     };
 
     use super::*;
 
     const KEY: &str = "test-key";
     const CUSTOMER: &str = "test-customer";
+    /// KLIPY's real answers of 2026-10-01, cut to their first items.
     const GIFS: &str = include_str!("../fixtures/gifs-search.json");
     const STICKERS: &str = include_str!("../fixtures/stickers-trending.json");
+    /// KLIPY's real answer to a key it does not know, sent with HTTP 404.
+    const INVALID_KEY: &str = include_str!("../fixtures/invalid-key-404.json");
 
     /// A one-pixel GIF89a.
     const PIXEL: &[u8] = &[
@@ -363,6 +393,9 @@ mod tests {
         0xFF, 0x00, 0x00, 0x00, 0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2C, 0x00, 0x00,
         0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3B,
     ];
+
+    /// The start of a PNG: its signature and the first chunk's head.
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
 
     /// One answer of the loopback server.
     struct Reply {
@@ -571,9 +604,13 @@ mod tests {
                 Reply::json(&GIFS.replace(FILES_ORIGIN, origin)),
                 Reply::json(&STICKERS.replace(FILES_ORIGIN, origin)),
                 Reply::file(PIXEL),
+                Reply::status(200)
+                    .header("Content-Type: image/png")
+                    .body(PNG),
             ]
         });
         let client = server.client();
+        let files = format!("{}/ii/", server.origin());
 
         let query = GifQuery::new(
             GifKind::Gif,
@@ -587,26 +624,48 @@ mod tests {
         let titles: Vec<&str> = gifs.items.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(
             titles,
-            ["Happy Cat Dance", ""],
-            "no ad, no item without a GIF"
+            [
+                "Goatplaybanjo's Chatty Cat",
+                "Shocked Cat's Surprised Reaction",
+                "Adorable Kitten Meowing and Looking Around",
+            ]
         );
         let preview = gifs.items[0].preview(Motion::Animated).expect("a preview");
-        let small = format!("{}/ii/example/1001/sm.gif", server.origin());
-        assert_eq!(preview.location, small);
+        assert_eq!(
+            (preview.tier, preview.format),
+            (Tier::Small, RenditionFormat::Gif)
+        );
+        assert!(preview.location.starts_with(&files), "{}", preview.location);
+        assert!(preview.location.ends_with("/M7ThMWi7.gif"));
+        let still = gifs.items[0].preview(Motion::Still).map(|r| r.format);
+        assert_eq!(
+            still,
+            Some(RenditionFormat::Jpeg),
+            "a GIF's still is a JPEG"
+        );
 
         let trending = GifQuery::new(GifKind::Sticker, "", 2, Explicit::Shown, Language::English);
         let stickers = client.page(&trending).expect("a page of stickers");
-        assert!(!stickers.has_next);
-        assert_eq!(stickers.items.len(), 1);
-        assert_eq!(stickers.items[0].kind, GifKind::Sticker);
+        assert!(stickers.has_next);
+        assert_eq!(stickers.items.len(), 2);
+        assert!(stickers.items.iter().all(|i| i.kind == GifKind::Sticker));
+        let sticker = &stickers.items[0];
+        let still = sticker.preview(Motion::Still).expect("a sticker's still");
+        assert_eq!(
+            (still.tier, still.format),
+            (Tier::Small, RenditionFormat::Png)
+        );
+        assert!(still.location.ends_with("/ayXrZ3mBEPbcItVaiams.png"));
 
         let bytes = client
             .download(preview, PREVIEW_LIMIT)
             .expect("the preview");
         assert_eq!(bytes, PIXEL);
+        let png = app::gifs::preview(&client, sticker, Motion::Still).expect("the still");
+        assert_eq!(png.as_deref(), Some(PNG));
 
         let heads = server.heads();
-        assert_eq!(heads.len(), 3);
+        assert_eq!(heads.len(), 4);
         assert!(heads.iter().all(|h| h.starts_with("GET ")), "{heads:?}");
         let (path, query) = target(&heads[0]);
         assert_eq!(path, "/api/v1/test-key/gifs/search");
@@ -619,7 +678,7 @@ mod tests {
             ("content_filter", "medium"),
             ("format_filter", "gif,jpg"),
         ];
-        assert_eq!(query, pairs(&expected));
+        assert_eq!(query, pairs(&expected), "GIFs come with JPEG stills");
         let (path, query) = target(&heads[1]);
         assert_eq!(path, "/api/v1/test-key/stickers/trending");
         let expected = [
@@ -627,24 +686,40 @@ mod tests {
             ("per_page", "24"),
             ("customer_id", CUSTOMER),
             ("content_filter", "off"),
-            ("format_filter", "gif,jpg"),
+            ("format_filter", "gif,png"),
         ];
-        assert_eq!(query, pairs(&expected), "no text, no locale in English");
-        assert_eq!(target(&heads[2]).0, "/ii/example/1001/sm.gif");
+        assert_eq!(
+            query,
+            pairs(&expected),
+            "stickers come with PNG stills (KLIPY has no sticker in JPEG); \
+             no text, no locale in English"
+        );
+        assert!(target(&heads[2]).0.ends_with("/M7ThMWi7.gif"));
+        assert!(target(&heads[3]).0.ends_with("/ayXrZ3mBEPbcItVaiams.png"));
     }
 
     #[test]
     fn maps_429_and_refused_keys() {
         let elsewhere = Elsewhere::new();
         let moved = format!("Location: http://{}/api/v1/moved", elsewhere.addr());
+        let invalid = || Reply::json(INVALID_KEY);
         let server = Loopback::serve(|_| {
             vec![
                 Reply::status(429),
                 Reply::status(401),
                 Reply::status(403),
+                // KLIPY's real answer to a key it does not know.
+                Reply::status(404)
+                    .header("Content-Type: application/json")
+                    .body(INVALID_KEY.as_bytes()),
+                Reply::status(404),
+                invalid(),
+                Reply::status(400).body(INVALID_KEY.as_bytes()),
+                Reply::json(r#"{"result": false, "errors": {"message": ["Busy."]}}"#),
                 Reply::status(302).header(&moved),
                 Reply::status(500),
                 Reply::status(429),
+                Reply::status(404),
             ]
         });
         let client = server.client();
@@ -654,16 +729,29 @@ mod tests {
         assert_eq!(client.page(&query), service(ServiceFailure::RateLimited));
         assert_eq!(client.page(&query), service(ServiceFailure::KeyRejected));
         assert_eq!(client.page(&query), service(ServiceFailure::KeyRejected));
+        let real = client.page(&query);
+        assert_eq!(real, service(ServiceFailure::KeyRejected), "real 404");
+        let bare = client.page(&query);
+        assert_eq!(bare, service(ServiceFailure::KeyRejected), "404 alone");
+        let said = client.page(&query);
+        assert_eq!(said, service(ServiceFailure::KeyRejected), "200 + message");
+        let said = client.page(&query);
+        assert_eq!(said, service(ServiceFailure::KeyRejected), "400 + message");
+        let other = unavailable_detail(client.page(&query));
+        assert_eq!(other, "the answer was not a page of results");
         let redirect = unavailable_detail(client.page(&query));
         assert_eq!(redirect, "HTTP 302: a redirect, not followed");
         assert!(elsewhere.untouched(), "the redirect was not followed");
         assert_eq!(unavailable_detail(client.page(&query)), "HTTP 500");
 
+        // The file host never sees the key: its 404 is no refused key.
         let file = rendition(&format!("{}/ii/example/1001/sm.gif", server.origin()));
         let limited = client.download(&file, PREVIEW_LIMIT);
         let rate_limited = BezelError::Service(ServiceFailure::RateLimited);
         assert_eq!(limited, Err(rate_limited));
-        assert_eq!(server.heads().len(), 6);
+        let missing = unavailable_detail(client.download(&file, PREVIEW_LIMIT));
+        assert_eq!(missing, "HTTP 404");
+        assert_eq!(server.heads().len(), 12);
     }
 
     #[test]
@@ -845,12 +933,74 @@ mod tests {
         assert_ne!(one, two);
     }
 
+    /// The production client against KLIPY itself, with the user's key
+    /// read from `BEZEL_KLIPY_KEY` and never printed: five requests (GIF
+    /// trending, a sticker search, a sticker's GIF and PNG still, a GIF's
+    /// JPEG still). Run by hand only:
+    /// `cargo test -p bezel-klipy --lib -- --ignored --exact
+    /// client::tests::real_klipy_answers_with_the_users_key`.
+    #[test]
+    #[ignore = "asks api.klipy.com with the key in BEZEL_KLIPY_KEY"]
+    fn real_klipy_answers_with_the_users_key() {
+        let key = std::env::var("BEZEL_KLIPY_KEY").unwrap_or_default();
+        let key = key.trim();
+        if key.is_empty() {
+            eprintln!("BEZEL_KLIPY_KEY is not set: nothing was asked of KLIPY");
+            return;
+        }
+        let customer = new_customer_id().expect("a customer id");
+        let client = KlipyClient::new(key, &customer);
+
+        let trending = GifQuery::new(GifKind::Gif, "", 1, Explicit::Hidden, Language::English);
+        let gifs = app::gifs::search(&client, &trending).expect("trending GIFs");
+        assert!(!gifs.items.is_empty(), "no trending GIF");
+        assert!(gifs.items.iter().all(|i| i.kind == GifKind::Gif));
+        let gif = &gifs.items[0];
+        let still_of = |i: &GifItem| i.preview(Motion::Still).map(|r| r.format);
+        assert!(
+            gifs.items
+                .iter()
+                .all(|i| still_of(i) == Some(RenditionFormat::Jpeg))
+        );
+
+        let cats = GifQuery::new(
+            GifKind::Sticker,
+            "cat",
+            1,
+            Explicit::Hidden,
+            Language::English,
+        );
+        let stickers = app::gifs::search(&client, &cats).expect("cat stickers");
+        assert!(!stickers.items.is_empty(), "no cat sticker");
+        assert!(stickers.items.iter().all(|i| i.kind == GifKind::Sticker));
+        assert!(
+            stickers
+                .items
+                .iter()
+                .all(|i| still_of(i) == Some(RenditionFormat::Png)),
+            "every sticker stands still as a PNG"
+        );
+        let sticker = &stickers.items[0];
+
+        let moving = app::gifs::preview(&client, sticker, Motion::Animated);
+        let moving = moving.expect("the sticker's GIF").expect("a GIF");
+        assert!(moving.starts_with(b"GIF8") && is_gif(&moving), "GIF magic");
+        let still = app::gifs::preview(&client, sticker, Motion::Still);
+        let still = still.expect("the sticker's still").expect("a still");
+        assert_eq!(RenditionFormat::of(&still), Some(RenditionFormat::Png));
+        let still = app::gifs::preview(&client, gif, Motion::Still);
+        let still = still.expect("the GIF's still").expect("a still");
+        assert_eq!(RenditionFormat::of(&still), Some(RenditionFormat::Jpeg));
+    }
+
     #[test]
     fn locale_and_filter_follow_the_query() {
         assert_eq!(locale(Language::PortugueseBr), Some("BR"));
         assert_eq!(locale(Language::English), None);
         assert_eq!(filter_name(Explicit::Hidden.filter()), "medium");
         assert_eq!(filter_name(Explicit::Shown.filter()), "off");
+        assert_eq!(format_filter(GifKind::Gif), "gif,jpg");
+        assert_eq!(format_filter(GifKind::Sticker), "gif,png");
         assert_eq!(path_segment("Ab0_-"), "Ab0_-");
         assert_eq!(path_segment("é ."), "%C3%A9%20%2E");
     }

@@ -13,13 +13,16 @@
 //! - the query names the page, 24 items, the customer id made once per key
 //!   ([`new_customer_id`]), the locale (`BR` in Portuguese, none in English),
 //!   the content filter (`medium`, or `off` when explicit results are
-//!   shown) and the formats (`gif,jpg`);
+//!   shown) and the formats, per kind because KLIPY keeps only the items
+//!   offered in every format named: `gif,jpg` for GIFs (JPEG stills),
+//!   `gif,png` for stickers (PNG stills; a sticker has no JPEG);
 //! - answers are read tolerantly: unknown fields are ignored, renditions it
 //!   cannot read are skipped and an item without a GIF is dropped;
-//! - HTTP 429 is [`ServiceFailure::RateLimited`], 401 and 403
-//!   [`ServiceFailure::KeyRejected`], anything else
-//!   [`ServiceFailure::Unavailable`] with a fixed text: no error, message or
-//!   `Debug` output carries the key or an address.
+//! - HTTP 429 is [`ServiceFailure::RateLimited`]; 401, 403, 404 (KLIPY's
+//!   answer to a key it does not know) or a `"result": false` body whose
+//!   message speaks of the key is [`ServiceFailure::KeyRejected`]; anything
+//!   else is [`ServiceFailure::Unavailable`] with a fixed text: no error,
+//!   message or `Debug` output carries the key, an address or the body.
 //!
 //! The adapter decides nothing: which rendition is collected or previewed,
 //! and what the switch for explicit results means, are the core's.

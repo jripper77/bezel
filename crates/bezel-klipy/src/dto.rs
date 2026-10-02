@@ -1,11 +1,17 @@
 //! KLIPY's answers, read tolerantly into the core's types.
 //!
-//! A page is `{"result": true, "data": {"data": [item, ...], "has_next":
-//! bool}}`; an item is `{"id", "slug", "title", "file": {"hd"|"md"|"sm"|"xs":
-//! {"gif"|"jpg"|...: {"url", "width", "height", "size"}}}}`. Unknown fields
-//! (tags, blur previews, WebP and MP4 files, ads) are ignored; a rendition
-//! without an address on the file host or without a size in pixels is
-//! skipped; an item without an id or without a GIF is dropped.
+//! A page is `{"result": true, "data": {"data": [item, ...], "current_page",
+//! "per_page", "has_next": bool, "meta"}}`; an item is `{"id": number,
+//! "slug", "title", "file": {"hd"|"md"|"sm"|"xs": {"gif"|"jpg"|"png"|...:
+//! {"url", "width", "height", "size"}}}, "tags", "type", "blur_preview"}`
+//! (as recorded from the real API on 2026-10-01: a GIF comes as GIF, JPEG,
+//! WebP, MP4 and WebM files, a sticker as GIF, PNG, WebP and WebM ones).
+//! Unknown fields (tags, the inline blur preview, the page's meta, WebP,
+//! MP4 and WebM files, ads) are ignored; a rendition without an address on
+//! the file host or without a size in pixels is skipped; an item without an
+//! id or without a GIF is dropped. A refused key is answered with
+//! `{"result": false, "errors": {"message": ["The provided API key is
+//! invalid."]}}`.
 
 use bezel_core::domain::gifs::{
     GifItem, GifKind, GifPage, PAGE_SIZE, Rendition, RenditionFormat, Tier,
@@ -20,10 +26,12 @@ const TIERS: [(&str, Tier); 4] = [
     ("xs", Tier::Tiny),
 ];
 
-/// The formats read; the others (WebP, MP4, WebM) are not used.
-const FORMATS: [(&str, RenditionFormat); 2] = [
+/// The formats read: GIFs, a GIF's JPEG still and a sticker's PNG one; the
+/// others (WebP, MP4, WebM) are not used.
+const FORMATS: [(&str, RenditionFormat); 3] = [
     ("gif", RenditionFormat::Gif),
     ("jpg", RenditionFormat::Jpeg),
+    ("png", RenditionFormat::Png),
 ];
 
 /// KLIPY's site, where an item's page lives under its slug.
@@ -46,6 +54,33 @@ pub(crate) fn read_page(body: &[u8], kind: GifKind, files: &str) -> Option<GifPa
         .collect();
     let has_next = data.get("has_next").and_then(Value::as_bool) == Some(true);
     Some(GifPage { items, has_next })
+}
+
+/// Whether `body` is KLIPY's answer to a key it does not know: `"result":
+/// false` with an error message about the key. Only tells yes or no: the
+/// message itself is never carried further.
+pub(crate) fn refuses_the_key(body: &[u8]) -> bool {
+    let Ok(answer) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
+    if answer.get("result").and_then(Value::as_bool) != Some(false) {
+        return false;
+    }
+    let Some(message) = answer.get("errors").and_then(|e| e.get("message")) else {
+        return false;
+    };
+    let texts: Vec<&str> = match message {
+        Value::String(text) => vec![text.as_str()],
+        Value::Array(texts) => texts.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    texts.into_iter().any(names_the_key)
+}
+
+/// Whether `text` speaks of the key: the word "key", in any case.
+fn names_the_key(text: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word.eq_ignore_ascii_case("key"))
 }
 
 fn read_item(item: &Value, kind: GifKind, host: &str) -> Option<GifItem> {
@@ -138,6 +173,8 @@ pub(crate) const fn section(kind: GifKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use bezel_core::domain::gifs::Motion;
+
     use super::*;
 
     const FILES: &str = "https://static.klipy.com";
@@ -154,61 +191,132 @@ mod tests {
         let ids: Vec<&str> = gifs.items.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["4170656934727386", "8840391275611024"],
-            "no ad, no GIF-less item"
+            ["2484942301552561", "5797057055690732", "9082712784681109"]
         );
         let first = &gifs.items[0];
-        assert_eq!(first.title, "Happy Cat Dance");
+        assert_eq!(first.title, "Goatplaybanjo's Chatty Cat");
+        assert_eq!(first.kind, GifKind::Gif);
         assert_eq!(
             first.page_url.as_deref(),
-            Some("https://klipy.com/gifs/happy-cat-dance-xT4uQ")
+            Some("https://klipy.com/gifs/goatplaybanjo-chat-4--k3UjPXVTp")
         );
-        assert_eq!(first.renditions.len(), 8, "4 sizes x GIF and JPEG");
-        let large = first.download().expect("a GIF to collect");
-        assert_eq!(
-            (large.tier, large.width, large.height),
-            (Tier::Large, 498, 280)
-        );
-        assert_eq!(large.bytes, Some(2_481_220));
-        assert_eq!(
-            large.location,
-            "https://static.klipy.com/ii/example/1001/hd.gif"
-        );
-
-        // A rendition without a size in pixels, or off the file host, is
-        // skipped; the item stays with the rest.
-        let second = &gifs.items[1];
-        assert_eq!(second.title, "", "no title");
-        let tiers: Vec<_> = second
+        let formats: Vec<_> = first
             .renditions
             .iter()
             .map(|r| (r.tier, r.format))
             .collect();
         assert_eq!(
-            tiers,
+            formats,
             [
+                (Tier::Large, RenditionFormat::Gif),
+                (Tier::Large, RenditionFormat::Jpeg),
                 (Tier::Medium, RenditionFormat::Gif),
+                (Tier::Medium, RenditionFormat::Jpeg),
                 (Tier::Small, RenditionFormat::Gif),
                 (Tier::Small, RenditionFormat::Jpeg),
-            ]
+                (Tier::Tiny, RenditionFormat::Gif),
+                (Tier::Tiny, RenditionFormat::Jpeg),
+            ],
+            "4 sizes x GIF and JPEG; WebP, MP4 and WebM left out"
         );
+        let still = first.preview(Motion::Still).expect("a still");
         assert_eq!(
-            second.page_url, None,
-            "a slug that is not one is not linked"
+            (still.tier, still.format, still.bytes),
+            (Tier::Small, RenditionFormat::Jpeg, Some(8291))
         );
+
+        // KLIPY's "md" GIF can be larger than its "hd" one: the largest by
+        // area is collected.
+        let kitten = gifs.items[2].download().expect("a GIF to collect");
+        assert_eq!(
+            (kitten.tier, kitten.width, kitten.height, kitten.bytes),
+            (Tier::Medium, 512, 640, Some(2_525_411))
+        );
+        assert!(kitten.location.starts_with("https://static.klipy.com/ii/"));
 
         let stickers = page(
             include_str!("../fixtures/stickers-trending.json"),
             GifKind::Sticker,
         )
         .expect("a page");
-        assert!(!stickers.has_next);
-        assert_eq!(stickers.items.len(), 1);
-        assert_eq!(stickers.items[0].kind, GifKind::Sticker);
+        assert!(stickers.has_next);
+        assert_eq!(stickers.items.len(), 2);
+        let doraemon = &stickers.items[0];
+        assert_eq!(doraemon.kind, GifKind::Sticker);
+        assert_eq!(doraemon.title, "Doraemon Sleeping Peacefully with Zzzs");
         assert_eq!(
-            stickers.items[0].page_url.as_deref(),
-            Some("https://klipy.com/stickers/party-parrot-Qm3")
+            doraemon.page_url.as_deref(),
+            Some("https://klipy.com/stickers/doraemon-sleeping-sticker")
         );
+        assert!(
+            doraemon
+                .renditions
+                .iter()
+                .all(|r| r.format != RenditionFormat::Jpeg),
+            "a sticker has no JPEG"
+        );
+        let still = doraemon.preview(Motion::Still).expect("a PNG still");
+        assert_eq!(
+            (still.tier, still.format, still.width, still.height),
+            (Tier::Small, RenditionFormat::Png, 191, 200)
+        );
+        let moving = doraemon.preview(Motion::Animated).map(|r| r.format);
+        assert_eq!(moving, Some(RenditionFormat::Gif));
+    }
+
+    #[test]
+    fn skips_what_it_cannot_read() {
+        let json = r#"{"result": true, "data": {"data": [
+            {"type": "ad", "content": "<div></div>", "width": 300, "height": 250},
+            {"id": 11, "slug": "webp-only", "file": {"hd": {"webp":
+                {"url": "https://static.klipy.com/ii/a/1.webp", "width": 9, "height": 9}}}},
+            {"id": "  ", "file": {"sm": {"gif":
+                {"url": "https://static.klipy.com/ii/a/2.gif", "width": 9, "height": 9}}}},
+            {"id": 12, "slug": "Not a slug!", "title": "  ", "file": {
+                "hd": {"gif": {"url": "https://static.klipy.com/ii/a/3.gif", "height": 9}},
+                "md": {"gif": {"url": "https://static.klipy.com/ii/a/4.gif", "width": 9, "height": 9}},
+                "sm": {"png": {"url": "https://cdn.example.com/ii/a/5.png", "width": 9, "height": 9},
+                       "jpg": {"url": "https://static.klipy.com/ii/a/6.jpg", "width": 9, "height": 0}}}}
+        ], "has_next": false, "meta": {"item_min_width": 80}}}"#;
+        let read = page(json, GifKind::Gif).expect("a page");
+        assert_eq!(read.items.len(), 1, "no ad, no GIF-less or id-less item");
+        let item = &read.items[0];
+        assert_eq!((item.id.as_str(), item.title.as_str()), ("12", ""));
+        assert_eq!(item.page_url, None, "a slug that is not one is not linked");
+        let kept: Vec<_> = item
+            .renditions
+            .iter()
+            .map(|r| r.location.as_str())
+            .collect();
+        assert_eq!(
+            kept,
+            ["https://static.klipy.com/ii/a/4.gif"],
+            "no size in pixels, off the file host: skipped"
+        );
+    }
+
+    #[test]
+    fn tells_a_refused_key() {
+        assert!(refuses_the_key(include_bytes!(
+            "../fixtures/invalid-key-404.json"
+        )));
+        assert!(refuses_the_key(
+            br#"{"result": false, "errors": {"message": "Invalid KEY"}}"#
+        ));
+        for other in [
+            &br#"{"result": false, "errors": {"message": ["Too many keywords."]}}"#[..],
+            br#"{"result": true, "errors": {"message": ["The provided API key is invalid."]}}"#,
+            br#"{"result": false, "errors": {"other": ["key"]}}"#,
+            br#"{"result": false}"#,
+            b"<html>key</html>",
+            include_bytes!("../fixtures/gifs-search.json"),
+        ] {
+            assert!(
+                !refuses_the_key(other),
+                "{}",
+                String::from_utf8_lossy(other)
+            );
+        }
     }
 
     #[test]

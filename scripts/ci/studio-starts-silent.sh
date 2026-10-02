@@ -107,7 +107,7 @@ set -euo pipefail
 export LC_ALL=C.UTF-8
 cd "$(dirname "$0")/../.."
 
-me=studio-starts-silent
+me='studio-starts-silent'
 say() { printf '%s: %s\n' "$me" "$*"; }
 cannot() {
   say "cannot check: $*" >&2
@@ -120,17 +120,17 @@ skip() {
   exit 0
 }
 
-[ "$(uname -s)" = Linux ] || cannot "Linux only (LD_PRELOAD and /proc)"
+[[ "$(uname -s)" = Linux ]] || cannot "Linux only (LD_PRELOAD and /proc)"
 kwin=$(command -v kwin_wayland || true)
-[ -n "$kwin" ] || skip 'no kwin_wayland: each run needs a headless compositor of its own (KWin, --virtual)'
+[[ -n "$kwin" ]] || skip 'no kwin_wayland: each run needs a headless compositor of its own (KWin, --virtual)'
 cc=""
 for c in "${CC:-}" cc gcc clang; do
-  if [ -n "$c" ] && command -v "$c" >/dev/null 2>&1; then
+  if [[ -n "$c" ]] && command -v "$c" >/dev/null 2>&1; then
     cc=$c
     break
   fi
 done
-[ -n "$cc" ] || skip 'no C compiler (cc, gcc, clang): the recording shim cannot be built'
+[[ -n "$cc" ]] || skip 'no C compiler (cc, gcc, clang): the recording shim cannot be built'
 for tool in dbus-run-session setsid cargo ps env; do
   command -v "$tool" >/dev/null 2>&1 || cannot "$tool not found"
 done
@@ -138,7 +138,7 @@ envbin=$(command -v env)
 seconds=${SILENT_SECONDS:-12}
 [[ "$seconds" =~ ^[1-9][0-9]{0,2}$ ]] || cannot "SILENT_SECONDS must be 1..999, not '$seconds'"
 identifier=$(sed -n 's/^  "identifier": "\([^"]*\)",$/\1/p' apps/bezel-studio/src-tauri/tauri.conf.json)
-[ -n "$identifier" ] || cannot "no identifier in apps/bezel-studio/src-tauri/tauri.conf.json"
+[[ -n "$identifier" ]] || cannot "no identifier in apps/bezel-studio/src-tauri/tauri.conf.json"
 
 # The user's own session bus and display, which no run may reach.
 user_run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
@@ -152,7 +152,7 @@ user_bus_address=${user_bus_address%%,*}
 # A short folder: unix socket paths (the compositor's, the bus's) must fit
 # in 108 bytes.
 base=${TMPDIR:-/tmp}
-[ "${#base}" -le 40 ] || base=/tmp
+[[ "${#base}" -le 40 ]] || base=/tmp
 tmp=$(mktemp -d "$base/studio-silent.XXXXXX")
 sid=""
 log=/nonexistent
@@ -162,7 +162,7 @@ log=/nonexistent
 # session. Zombies are left out (their parent reaps them).
 members() {
   {
-    if [ -n "$sid" ]; then
+    if [[ -n "$sid" ]]; then
       ps -o pid=,stat= -s "$sid" 2>/dev/null | awk '$2 !~ /^Z/ {print $1}' || true
     fi
     { grep -lzxF "SILENT_LOG=$log" /proc/[0-9]*/environ 2>/dev/null || true; } |
@@ -175,19 +175,19 @@ members() {
 left=""
 stop_run() {
   left=""
-  [ -n "$sid" ] || return 0
+  [[ -n "$sid" ]] || return 0
   kill -TERM -- "-$sid" 2>/dev/null || true
   local i rest=""
   for i in $(seq 50); do
     rest=$(members)
-    [ -z "$rest" ] && break
-    if [ "$i" = 25 ]; then
+    [[ -z "$rest" ]] && break
+    if [[ "$i" = 25 ]]; then
       # shellcheck disable=SC2086 # one pid per word
       kill -TERM $rest 2>/dev/null || true
     fi
     sleep 0.1
   done
-  if [ -n "$rest" ]; then
+  if [[ -n "$rest" ]]; then
     say "killing what did not stop on SIGTERM: $(tr '\n' ' ' <<<"$rest")" >&2
     # shellcheck disable=SC2086 # one pid per word
     kill -KILL $rest 2>/dev/null || true
@@ -200,7 +200,7 @@ stop_run() {
 
 cleanup() {
   stop_run
-  if [ "${SILENT_KEEP:-0}" = 1 ]; then
+  if [[ "${SILENT_KEEP:-0}" = 1 ]]; then
     say "kept $tmp" >&2
   else
     rm -rf "$tmp"
@@ -218,21 +218,27 @@ shim=$tmp/silent-shim.so
 built=$(cargo build -p bezel-studio --locked --message-format=json-render-diagnostics |
   sed -n 's/.*"executable":"\([^"]*\/bezel-studio\)".*/\1/p' | tail -n 1) ||
   cannot "the studio did not build"
-[ -n "$built" ] && [ -x "$built" ] || cannot "cargo built no bezel-studio executable"
+[[ -n "$built" ]] && [[ -x "$built" ]] || cannot "cargo built no bezel-studio executable"
 studio=$(realpath "$built")
 case "$studio$shim$envbin" in
   *[\'\ ]*) cannot "a path with a quote or a space: $studio, $shim, $envbin" ;;
+  *) ;; # none: the session's command line below can quote them
 esac
 webkit="WebKitWebProcess WebKitNetworkProcess WebKitGPUProcess"
+# A Wayland request the studio printed (WAYLAND_DEBUG=client): "[<time>] ...".
+wayland_request='^\[[0-9:.]+\] '
 
 # The verdict on one run's log (tab-separated, see silent-shim.c): `OFFENCE`
 # lines, then one `SUMMARY` line. Program events: `load` (an image the shim
 # entered: exe in $4, command line in $5) and `exec` (a start asked for:
 # caller in $3, program in $5, argv in $6, the shim's verdict in $7).
+# Arguments: KWin's argv as the shim writes it, the run's compositor socket,
+# its test bus socket, its folder and the folders of its sequence.
 verdict() {
+  local kwin_argv=$1 compositor=$2 bus=$3 run_dir=$4 folders=$5
   # KWin's argv through the environment: `-v` would turn its \x20 into spaces.
-  SILENT_KWIN_ARGV=$1 awk -F '\t' -v studio="$studio" -v webkit="$webkit" -v kwin="$kwin" \
-    -v compositor="$2" -v bus="$3" -v dir="$4" -v folders="$5" \
+  SILENT_KWIN_ARGV=$kwin_argv awk -F '\t' -v studio="$studio" -v webkit="$webkit" -v kwin="$kwin" \
+    -v compositor="$compositor" -v bus="$bus" -v dir="$run_dir" -v folders="$folders" \
     -v user_run="$user_run" -v user_bus="$user_bus" -v user_bus_address="$user_bus_address" '
   function base(p) { sub(/.*\//, "", p); return p }
   function args(argv) { sub(/^[^ ]* ?/, "", argv); return argv }
@@ -354,12 +360,12 @@ unrecorded() {
   local kwin_pid pid cmd tab=$'\t' candidates=()
   kwin_pid=$(awk -F '\t' -v k="$kwin" '$1 == "exec" && $5 == k {print $2; exit}' "$log")
   for pid in $(members); do
-    [ "$pid" = "$kwin_pid" ] || grep -q "^load${tab}$pid${tab}" "$log" || candidates+=("$pid")
+    [[ "$pid" = "$kwin_pid" ]] || grep -q "^load${tab}$pid${tab}" "$log" || candidates+=("$pid")
   done
-  [ "${#candidates[@]}" -gt 0 ] || return 0
+  [[ "${#candidates[@]}" -gt 0 ]] || return 0
   sleep 0.3
   for pid in "${candidates[@]}"; do
-    [ -d "/proc/$pid" ] || continue
+    [[ -d "/proc/$pid" ]] || continue
     grep -q "^load${tab}$pid${tab}" "$log" && continue
     cmd=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)
     printf 'pid %s (%s)\n' "$pid" "${cmd:-unreadable}"
@@ -370,8 +376,9 @@ unrecorded() {
 # WAYLAND_DEBUG=client it prints each Wayland request) in what the run
 # printed from byte $1 up to byte $2 (to the end when there is no $2).
 mapped() {
+  local from=$1 to=${2:-}
   grep -boE -- '-> xdg_surface[@#][0-9]+\.get_toplevel\(' "$out" 2>/dev/null |
-    awk -F: -v from="$1" -v to="${2:-}" '$1 >= from && (to == "" || $1 < to) {found = 1} END {exit !found}'
+    awk -F: -v from="$from" -v to="$to" '$1 >= from && (to == "" || $1 < to) {found = 1} END {exit !found}'
 }
 
 # Whether the window has run: the studio asked for the video tools probe.
@@ -395,7 +402,7 @@ show_again() {
   local first second since t0 took status=0 at var i early="" environ=()
   at=$((SECONDS - began))
   first=$(awk -F '\t' -v s="$studio" '$1 == "load" && $4 == s {print $2; exit}' "$log")
-  if [ -z "$first" ] || [ "$(readlink "/proc/$first/exe" 2>/dev/null)" != "$studio" ]; then
+  if [[ -z "$first" ]] || [[ "$(readlink "/proc/$first/exe" 2>/dev/null)" != "$studio" ]]; then
     failures+=("the window was not shown again: the studio was gone before the second launch")
     return
   fi
@@ -405,9 +412,9 @@ show_again() {
     failures+=("the hidden start showed its window before anything asked for it: the studio mapped it (an xdg_toplevel) before the second launch")
   fi
   while IFS= read -r -d '' var; do
-    [ "$var" = WEBKIT_DISABLE_DMABUF_RENDERER=1 ] || environ+=("$var")
+    [[ "$var" = WEBKIT_DISABLE_DMABUF_RENDERER=1 ]] || environ+=("$var")
   done 2>/dev/null <"/proc/$first/environ"
-  if [ "${#environ[@]}" -eq 0 ]; then
+  if [[ "${#environ[@]}" -eq 0 ]]; then
     failures+=("the window was not shown again: the running studio's environment could not be read")
     return
   fi
@@ -425,16 +432,16 @@ show_again() {
     return
   fi
   wait "$second" || status=$?
-  if [ "$status" != 0 ]; then
+  if [[ "$status" != 0 ]]; then
     failures+=("the window was not shown again: the second launch exited with status $status after $took (handing over to the running studio exits 0)")
     return
   fi
-  if [ "$(readlink "/proc/$first/exe" 2>/dev/null)" != "$studio" ]; then
+  if [[ "$(readlink "/proc/$first/exe" 2>/dev/null)" != "$studio" ]]; then
     failures+=("the window was not shown again: the running studio (pid $first) did not outlive the second launch")
     return
   fi
   # A window already mapped is not mapped again: that start failed above.
-  [ -z "$early" ] || return 0
+  [[ -z "$early" ]] || return 0
   for i in $(seq 50); do
     mapped "$since" && break
     sleep 0.1
@@ -450,9 +457,10 @@ show_again() {
 # config, data, cache and state folders; for `key`, with a saved, fake
 # KLIPY key in them.
 new_folders() {
-  local folders=$tmp/$1
+  local sequence=$1
+  local folders=$tmp/$sequence
   mkdir -p "$folders/home" "$folders/config/$identifier" "$folders/data" "$folders/cache" "$folders/state"
-  [ "$1" = key ] || return 0
+  [[ "$sequence" = key ]] || return 0
   # A saved key (fake): the start of a user who has set KLIPY up.
   (
     umask 077
@@ -468,7 +476,7 @@ run_once() {
   local n=$1 key=$2 mode=$3 label dir folders out sock compositor session allow sockets
   local kwin_args kwin_argv began watched ready="" ended="" deadline status lost report line
   local kept window="" asked="" failures=()
-  label="$([ "$key" = key ] && echo 'saved key' || echo 'no key'), $mode"
+  label="$([[ "$key" = key ]] && echo 'saved key' || echo 'no key'), $mode"
   dir=$tmp/$n
   folders=$tmp/$key
   log=$dir/events.log
@@ -476,8 +484,8 @@ run_once() {
   mkdir -p "$dir"
   mkdir -m 700 "$dir/rt"
   kept=$(find "$folders" -type f | wc -l)
-  kept="$kept file$([ "$kept" = 1 ] || echo s)"
-  if [ "$mode" = hidden ]; then kept="new ($kept)"; else kept="those run $((n - 1)) left ($kept)"; fi
+  kept="$kept file$([[ "$kept" = 1 ]] || echo s)"
+  if [[ "$mode" = hidden ]]; then kept="new ($kept)"; else kept="those run $((n - 1)) left ($kept)"; fi
   # The test bus: a session bus with no service folder, so it starts nothing.
   cat >"$dir/bus.conf" <<EOF
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
@@ -497,7 +505,7 @@ EOF
   sock=bezel-silent-$$-$n
   compositor=$dir/rt/$sock
   session="$envbin LD_PRELOAD='$shim' WAYLAND_DEBUG=client WAYLAND_DISPLAY='$sock' '$studio'"
-  [ "$mode" = hidden ] && session+=" --hidden"
+  [[ "$mode" = hidden ]] && session+=" --hidden"
   kwin_args=(--virtual --socket="$sock" --width 1280 --height 800
     --no-lockscreen --no-global-shortcuts --no-kactivities --exit-with-session "$session")
   # As the shim writes it: arguments joined by spaces, a space inside one as \x20.
@@ -519,17 +527,17 @@ EOF
 
   # The compositor first: the window is counted once its socket is up.
   deadline=$((SECONDS + 30))
-  while [ "$SECONDS" -lt "$deadline" ] && kill -0 "$sid" 2>/dev/null; do
-    if [ -S "$compositor" ]; then
+  while [[ "$SECONDS" -lt "$deadline" ]] && kill -0 "$sid" 2>/dev/null; do
+    if [[ -S "$compositor" ]]; then
       ready=1
       break
     fi
     sleep 0.1
   done
-  if [ -n "$ready" ]; then
+  if [[ -n "$ready" ]]; then
     watched=$SECONDS
     deadline=$((SECONDS + seconds))
-    while [ "$SECONDS" -lt "$deadline" ]; do
+    while [[ "$SECONDS" -lt "$deadline" ]]; do
       if ! kill -0 "$sid" 2>/dev/null; then
         status=0
         wait "$sid" || status=$?
@@ -538,10 +546,10 @@ EOF
       fi
       # A hidden window is shown again once it has run, then watched on to
       # the window's end, and at least half of it after the second launch.
-      if [ "$mode" = hidden ] && [ -z "$asked" ] && probed; then
+      if [[ "$mode" = hidden ]] && [[ -z "$asked" ]] && probed; then
         asked=1
         show_again
-        [ "$deadline" -ge $((SECONDS + (seconds + 1) / 2)) ] || deadline=$((SECONDS + (seconds + 1) / 2))
+        [[ "$deadline" -ge $((SECONDS + (seconds + 1) / 2)) ]] || deadline=$((SECONDS + (seconds + 1) / 2))
       fi
       sleep 0.5
     done
@@ -553,40 +561,40 @@ EOF
   stop_run
   touch "$log"
 
-  if [ -n "$ready" ] && [ "$mode" = shown ]; then
+  if [[ -n "$ready" ]] && [[ "$mode" = shown ]]; then
     if mapped 0; then
       window="shown at start (mapped)"
     else
       failures+=("the shown start never showed its window: the studio mapped none (no xdg_toplevel)")
     fi
-  elif [ -n "$ready" ] && [ -z "$asked" ]; then
+  elif [[ -n "$ready" ]] && [[ -z "$asked" ]]; then
     failures+=("the window was not shown again: it never ran, so it was never launched a second time")
   fi
   report=$(verdict "$kwin_argv" "$compositor" "$dir/bus" "$dir" "$folders")
   while IFS= read -r line; do
     failures+=("${line#OFFENCE }")
   done < <(grep '^OFFENCE ' <<<"$report" || true)
-  [ -z "$ended" ] || failures+=("$ended")
+  [[ -z "$ended" ]] || failures+=("$ended")
   if grep -sq 'panicked' "$out" "$dir/second.out"; then
     failures+=("the studio panicked: $(grep -shm1 'panicked' "$out" "$dir/second.out" | head -n 1)")
   fi
   while IFS= read -r line; do
-    [ -z "$line" ] || failures+=("a process the shim did not record ran in the run: $line")
+    [[ -z "$line" ]] || failures+=("a process the shim did not record ran in the run: $line")
   done <<<"$lost"
-  [ -z "$left" ] || failures+=("left running after the run, even after SIGKILL: $left")
+  [[ -z "$left" ]] || failures+=("left running after the run, even after SIGKILL: $left")
 
-  line="run $n/4 ($label): $([ "${#failures[@]}" -eq 0 ] && echo OK || echo FAIL) in $((SECONDS - began))s: folders: $kept; window: ${window:-not shown as asked}; $(sed -n 's/^SUMMARY //p' <<<"$report")"
+  line="run $n/4 ($label): $([[ "${#failures[@]}" -eq 0 ]] && echo OK || echo FAIL) in $((SECONDS - began))s: folders: $kept; window: ${window:-not shown as asked}; $(sed -n 's/^SUMMARY //p' <<<"$report")"
   say "$line"
-  [ "${#failures[@]}" -gt 0 ] || return 0
+  [[ "${#failures[@]}" -gt 0 ]] || return 0
   for line in "${failures[@]}"; do say "FAIL ($label): $line" >&2; done
   # What the studio and KWin said, less the Wayland requests.
-  if grep -sqvE '^\[[0-9:.]+\] ' "$out"; then
+  if grep -sqvE "$wayland_request" "$out"; then
     say "last lines printed in the run ($label):" >&2
-    { grep -vE '^\[[0-9:.]+\] ' "$out" || true; } | tail -n 15 | sed 's/^/    /' >&2
+    { grep -vE "$wayland_request" "$out" || true; } | tail -n 15 | sed 's/^/    /' >&2
   fi
-  if grep -sqvE '^\[[0-9:.]+\] ' "$dir/second.out"; then
+  if grep -sqvE "$wayland_request" "$dir/second.out"; then
     say "last lines printed by the second launch ($label):" >&2
-    { grep -vE '^\[[0-9:.]+\] ' "$dir/second.out" || true; } | tail -n 15 | sed 's/^/    /' >&2
+    { grep -vE "$wayland_request" "$dir/second.out" || true; } | tail -n 15 | sed 's/^/    /' >&2
   fi
   return 1
 }
@@ -602,7 +610,7 @@ for key in key none; do
     run_once "$n" "$key" "$mode" || failed=$((failed + 1))
   done
 done
-if [ "$failed" -gt 0 ]; then
+if [[ "$failed" -gt 0 ]]; then
   say "$failed of 4 runs failed (see FAIL above)" >&2
   exit 1
 fi

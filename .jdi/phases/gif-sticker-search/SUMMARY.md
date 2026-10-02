@@ -41,6 +41,8 @@
   lida como argumento direto do cliente e na gravação do arquivo, nunca dentro de macro; `UserAsked::of` só nos 3
   comandos de GIF (renomear ou embrulhar também falha); `navigate` e literais `javascript:` recusados.
 - Rodada 2, iter 3 (D-11): `a603c45` — comandos só via IPC, `Request` só nos 3 comandos de GIF, sem print em `commands.rs`.
+- Rodada 2, iter 4 (D-12): `1b66167` — logs só pelo módulo `diag` (38 códigos fixos; os textos de erro saem dos logs),
+  sem `payload`/`Invoke`, sem panic com valor; variável local com nome de comando aceita.
 
 ## Blocked tasks
 - nenhuma
@@ -55,7 +57,7 @@
 - `docs/user/{,pt-BR/}{gifs-and-stickers,README}.md`, `scripts/ci/check-docs.sh`, `CHANGELOG.md`, `README.md`
 
 ## Tests
-- `cargo test --workspace --locked`: 939 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
+- `cargo test --workspace --locked`: 942 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
 - DoD 1–6: OK no branch combinado a cada iteração; DoD 7: `rust-windows` verde (iter 3: 153 testes do studio no Windows)
 - UI: 231 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc` sem studio e klipy: o `ring` não compila

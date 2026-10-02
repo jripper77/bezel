@@ -3,9 +3,12 @@
 // test by name ("<describe> › <title>", as Playwright prints it) and
 // requires, in EVERY project the config declares (read from the report,
 // never counted here), a run that passed (not skipped, not parked by
-// `test.fixme`, not flaky, not expected to fail) and that recorded the axe check: `expectAccessible`
-// annotates the run with `axe`. A test of the run that failed, named or not,
-// fails it too.
+// `test.fixme`, not flaky, not expected to fail) and that recorded the axe
+// check: `expectAccessible` annotates the run with `axe`. A test of the run
+// that failed, named or not, fails it too. The projects must cover light
+// and dark in pt-BR and in en: the JSON report drops a project's `use`, so
+// the config copies its `colorScheme` and `locale` into the project's
+// `metadata`, which the report keeps, and this reads them there.
 //
 //   node scripts/e2e-passed.mjs [--grep <pattern>] [--report <report.json>] "<describe> › <title>"...
 //
@@ -30,6 +33,10 @@ export const AXE = 'axe';
 export const OK = 'ok';
 /** The verdict of a run parked by `test.fixme` (Playwright's annotation type too). */
 export const PARKED = 'fixme';
+/** The colour schemes whose every combination with {@link LOCALES} a project must run. */
+export const SCHEMES = ['light', 'dark'];
+/** The UI's locales; a project's locale counts for its language ("en-US" is "en"). */
+export const LOCALES = ['pt-BR', 'en'];
 
 const USAGE = 'usage: node scripts/e2e-passed.mjs [--grep <pattern>] [--report <report.json>] "<describe> › <title>"...';
 const OPTIONS = { grep: { type: 'string' }, report: { type: 'string' } };
@@ -87,6 +94,16 @@ export function projectsOf(report) {
   return (report.config?.projects ?? []).map((project) => project.name);
 }
 
+/** Whether `locale` is `wanted` or one of its regions. */
+const speaks = (locale, wanted) => locale === wanted || (typeof locale === 'string' && locale.startsWith(`${wanted}-`));
+
+/** Each "<scheme> × <locale>" no project of the report runs in (read from its metadata). */
+export function uncovered(report) {
+  const settings = (report.config?.projects ?? []).map((project) => project.metadata ?? {});
+  const runsIn = (scheme, locale) => settings.some((s) => s.colorScheme === scheme && speaks(s.locale, locale));
+  return LOCALES.flatMap((locale) => SCHEMES.filter((scheme) => !runsIn(scheme, locale)).map((scheme) => `${scheme} × ${locale}`));
+}
+
 const has = (annotations, type) => (annotations ?? []).some((a) => a.type === type);
 
 /** What one run (a JSON report's test in one project) proves: `ok`, or why not. */
@@ -120,7 +137,8 @@ export function checkReport(report, required) {
     cells.flatMap((cell, i) => (cell === OK ? [] : [`${name} [${projects[i]}]: ${cell}`])),
   );
   if (projects.length === 0) problems.push('the report declares no project');
-  return { projects, rows, problems: [...problems, ...othersFailed(runs, required)] };
+  const lacking = uncovered(report).map((combination) => `no project runs in ${combination}`);
+  return { projects, rows, problems: [...problems, ...lacking, ...othersFailed(runs, required)] };
 }
 
 /** The rows as a fixed-width table, under a header naming the projects. */

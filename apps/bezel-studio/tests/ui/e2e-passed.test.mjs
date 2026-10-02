@@ -2,8 +2,9 @@
 // synthetic Playwright JSON reports: every named test must have, in every
 // project the report declares, a run that passed and recorded the axe
 // check; a skipped run (or one parked by `test.fixme`), a flaky, failed or
-// missing run, a run without axe, or another test that failed in the run
-// makes it fail, naming why.
+// missing run, a run without axe, another test that failed in the run, or
+// projects that leave out light or dark in pt-BR or en make it fail, naming
+// why.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -12,10 +13,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  AXE, OK, PARKED, checkReport, formatTable, formatVerdict, grepFor, projectsOf, readArgs, runsByName, testName, verdictOf,
+  AXE, OK, PARKED, checkReport, formatTable, formatVerdict, grepFor, projectsOf, readArgs, runsByName, testName, uncovered,
+  verdictOf,
 } from '../../scripts/e2e-passed.mjs';
 
 const PROJECTS = ['light-pt', 'dark-pt', 'light-en', 'dark-en'];
+/** Each project's colour scheme and locale, as playwright.config.mjs puts them in its metadata. */
+const SETTINGS = {
+  'light-pt': { colorScheme: 'light', locale: 'pt-BR' },
+  'dark-pt': { colorScheme: 'dark', locale: 'pt-BR' },
+  'light-en': { colorScheme: 'light', locale: 'en-US' },
+  'dark-en': { colorScheme: 'dark', locale: 'en-US' },
+  'light-gb': { colorScheme: 'light', locale: 'en-GB' },
+  'dark-pt-pt': { colorScheme: 'dark', locale: 'pt-PT' },
+};
 const axe = { type: AXE, description: '40 rules passed, no serious or critical violation' };
 
 /** A run in `projectName` that passed with the axe check, with `changes`. */
@@ -36,7 +47,7 @@ const spec = (title, changed = {}, projects = PROJECTS) => ({
 
 /** A report of one file with one describe, `gif search`, holding `specs`. */
 const report = (specs, projects = PROJECTS) => ({
-  config: { projects: projects.map((name) => ({ name })) },
+  config: { projects: projects.map((name) => ({ name, metadata: SETTINGS[name] ?? {} })) },
   suites: [{ title: 'gif-search.spec.mjs', specs: [], suites: [{ title: 'gif search', specs }] }],
 });
 
@@ -88,11 +99,44 @@ test('a project without a run of the test: missing there', () => {
 });
 
 test('the projects come from the report, whatever their number', () => {
-  const three = ['a', 'b', 'c'];
-  const result = checkReport(report([spec('no key: help', {}, three)], three), [HELP]);
-  assert.deepEqual(projectsOf(report([], three)), three);
-  assert.deepEqual(result.rows, [{ name: HELP, cells: [OK, OK, OK] }]);
-  assert.deepEqual(checkReport({ suites: [] }, [HELP]).problems, ['the report declares no project']);
+  const five = [...PROJECTS, 'light-gb'];
+  const result = checkReport(report([spec('no key: help', {}, five)], five), [HELP]);
+  assert.deepEqual(projectsOf(report([], five)), five);
+  assert.deepEqual(result.rows, [{ name: HELP, cells: [OK, OK, OK, OK, OK] }]);
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(checkReport({ suites: [] }, [HELP]).problems, [
+    'the report declares no project',
+    'no project runs in light × pt-BR',
+    'no project runs in dark × pt-BR',
+    'no project runs in light × en',
+    'no project runs in dark × en',
+  ]);
+});
+
+test('a report of one project: fails, naming each colour scheme × locale it lacks', () => {
+  const one = ['light-pt'];
+  const result = checkReport(report([spec('no key: help', {}, one)], one), [HELP]);
+  assert.deepEqual(result.rows, [{ name: HELP, cells: [OK] }]);
+  assert.deepEqual(result.problems, [
+    'no project runs in dark × pt-BR',
+    'no project runs in light × en',
+    'no project runs in dark × en',
+  ]);
+  assert.match(formatVerdict(result), /^FAIL: 3 problem\(s\)/);
+});
+
+test('without the dark projects: fails, naming dark in each locale', () => {
+  const light = ['light-pt', 'light-en'];
+  const result = checkReport(report([spec('no key: help', {}, light)], light), [HELP]);
+  assert.deepEqual(result.problems, ['no project runs in dark × pt-BR', 'no project runs in dark × en']);
+});
+
+test('uncovered: all four combinations are ok; a region counts for its language only', () => {
+  assert.deepEqual(uncovered(report([])), []);
+  assert.deepEqual(uncovered(report([], ['light-pt', 'dark-pt', 'light-gb', 'dark-en'])), []);
+  assert.deepEqual(uncovered(report([], ['light-pt', 'dark-pt-pt', 'light-en', 'dark-en'])), ['dark × pt-BR']);
+  // Names prove nothing: a project without settings covers nothing.
+  assert.equal(uncovered({ config: { projects: PROJECTS.map((name) => ({ name })) } }).length, 4);
 });
 
 test('another test that failed in the run fails the check too', () => {
@@ -163,6 +207,12 @@ test('the command on a report file: exit 0 and the table; 1 naming the problem; 
     const failed = cli(bad, HELP, RATE);
     assert.equal(failed.status, 1);
     assert.match(failed.stdout, /429: 100 per hour \[light-en\]: skipped/);
+
+    const single = join(dir, 'single.json');
+    writeFileSync(single, JSON.stringify(report([spec('no key: help', {}, ['dark-en'])], ['dark-en'])));
+    const narrow = cli(single, HELP);
+    assert.equal(narrow.status, 1);
+    assert.match(narrow.stdout, /no project runs in light × pt-BR/);
 
     assert.equal(cli(join(dir, 'none.json'), HELP).status, 1);
     assert.equal(cli(good).status, 2);

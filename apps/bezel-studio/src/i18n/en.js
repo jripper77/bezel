@@ -81,6 +81,7 @@ export default {
   'error.brightnessRange': 'The brightness goes from 0 to 100.',
   'error.busy': 'The screen is busy with another storage operation. Wait for it or cancel it.',
   'error.cancelled': 'Cancelled.',
+  'error.collectionUnavailable': 'Bezel cannot keep the collection in {folder} ({reason}), so nothing can be added to it. Make sure the folder can be written, then try again.',
   'error.fileError': 'Could not use {file}: {reason}',
   'error.fileTooLarge': '{file} has {size} MiB; the limit is {limit} MiB.',
   'error.gifNotInResults': 'This item is not among the last search results. Search again.',

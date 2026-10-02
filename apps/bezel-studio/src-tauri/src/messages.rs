@@ -97,6 +97,8 @@ error_codes! {
     KlipyUnavailable = "klipyUnavailable" => "KLIPY is unavailable: {detail}",
     GifNotInResults = "gifNotInResults" => "{item} is not among the last search's results",
     NotInCollection = "notInCollection" => "{item} is not in the collection",
+    CollectionUnavailable = "collectionUnavailable"
+        => "the collection cannot be kept in {folder}: {reason}",
 }
 
 impl ErrorCode {

@@ -17,6 +17,10 @@
 //! - Previews reach the window as `data:` URLs, so the CSP stays as it is.
 //! - No request runs under a lock: a result's files are read before the
 //!   collection is locked to keep them.
+//! - A collection whose folder cannot be used is never replaced by one kept
+//!   in memory: every use of it is `collectionUnavailable`, naming the
+//!   folder (the Collection panel shows it), adding to it is refused before
+//!   anything is read, and the next use opens it again.
 //! - Using a collected item copies it into the theme through today's paths:
 //!   [`Backend::add_image_bytes`] for an image element (an animated GIF
 //!   stays an image, with its transparency), [`Backend::add_media`] of a copy
@@ -68,8 +72,42 @@ pub struct Provider {
     pub customer_id: fn() -> Result<String>,
 }
 
+/// Opens the user's collection: `collectionUnavailable` while its folder
+/// cannot be used.
+pub type CollectionOpener = Box<dyn Fn() -> UiResult<Box<dyn GifCollection>> + Send + Sync>;
+
+/// Opens, with `open` (the composition root's adapter), the collection kept
+/// in `folder`; a folder that cannot be used is `collectionUnavailable`,
+/// naming it.
+pub fn collection_in<C: GifCollection + 'static>(
+    folder: PathBuf,
+    open: fn(&Path) -> Result<C>,
+) -> CollectionOpener {
+    Box::new(move || match open(&folder) {
+        Ok(collection) => Ok(Box::new(collection)),
+        Err(e) => Err(collection_unavailable(&folder, &e)),
+    })
+}
+
+/// The collection in `folder` cannot be used, because of `error`.
+fn collection_unavailable(folder: &Path, error: &BezelError) -> UiError {
+    let reason = match error {
+        BezelError::Transport(detail) => detail.clone(),
+        other => other.to_string(),
+    };
+    UiError::new(ErrorCode::CollectionUnavailable)
+        .arg("folder", folder.display())
+        .arg("reason", reason)
+}
+
 /// State managed by Tauri for the GIF commands.
 pub type SharedGifs = Arc<Gifs>;
+
+/// The user's collection, and how to open it again while it is not open.
+struct Shelf {
+    open: CollectionOpener,
+    opened: Option<Box<dyn GifCollection>>,
+}
 
 /// The GIF search and the collection.
 pub struct Gifs {
@@ -78,7 +116,7 @@ pub struct Gifs {
     /// The source for the saved key, made when first needed.
     source: Mutex<Option<Arc<dyn GifSource>>>,
     searches: Mutex<Searches>,
-    collection: Mutex<Box<dyn GifCollection>>,
+    collection: Mutex<Shelf>,
     /// Where a collected GIF is copied to be added as a background.
     scratch: PathBuf,
 }
@@ -194,20 +232,19 @@ pub fn query(
 
 impl Gifs {
     /// The search and the collection: the key in `key`, sources from
-    /// `provider`, the GIFs kept in `collection`, a background's copy made in
+    /// `provider`, the GIFs kept in the collection `open` opens (now, and
+    /// again at each use while it cannot be), a background's copy made in
     /// `scratch`. Nothing is read nor asked here.
-    pub fn new(
-        key: KeyFile,
-        provider: Provider,
-        collection: Box<dyn GifCollection>,
-        scratch: PathBuf,
-    ) -> Self {
+    pub fn new(key: KeyFile, provider: Provider, open: CollectionOpener, scratch: PathBuf) -> Self {
+        // A folder that cannot be used now is said by each use, which tries
+        // it again.
+        let opened = open().ok();
         Self {
             key,
             provider,
             source: Mutex::default(),
             searches: Mutex::default(),
-            collection: Mutex::new(collection),
+            collection: Mutex::new(Shelf { open, opened }),
             scratch,
         }
     }
@@ -216,10 +253,24 @@ impl Gifs {
         self.searches.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn collection(&self) -> MutexGuard<'_, Box<dyn GifCollection>> {
-        self.collection
+    /// Runs `act` on the collection, under its lock, opening it first when
+    /// it is not open: `collectionUnavailable` while its folder cannot be
+    /// used.
+    fn with_collection<T>(
+        &self,
+        act: impl FnOnce(&mut dyn GifCollection) -> UiResult<T>,
+    ) -> UiResult<T> {
+        let mut shelf = self
+            .collection
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut collection = match shelf.opened.take() {
+            Some(collection) => collection,
+            None => (shelf.open)()?,
+        };
+        let done = act(collection.as_mut());
+        shelf.opened = Some(collection);
+        done
     }
 
     // ---------------------------------------------------------------- key --
@@ -329,26 +380,28 @@ impl Gifs {
 
     // --------------------------------------------------------- collection --
 
-    /// Adds the result `id` of the last search to the collection: its files
-    /// are read first, then kept (once per content) under the collection's
-    /// lock.
+    /// Adds the result `id` of the last search to the collection: refused
+    /// before anything is read when the collection cannot be used; its
+    /// files are read first, then kept (once per content) under the
+    /// collection's lock.
     pub fn collect(&self, id: &str) -> UiResult<CollectedDto> {
+        self.with_collection(|_| Ok(()))?;
         let source = self.source()?;
         let (item, preview) = {
             let searches = self.searches();
             (searches.item(id)?, searches.preview(id, Motion::Animated))
         };
         let fetched = Fetched::read(source.as_ref(), &item, preview.is_none())?;
-        let collected = {
-            let mut collection = self.collection();
-            use_cases::add_to_collection(
+        let collected = self.with_collection(|collection| {
+            let added = use_cases::add_to_collection(
                 &fetched,
-                &mut **collection,
+                collection,
                 &item,
                 preview.as_deref(),
                 unix_seconds(),
-            )?
-        };
+            );
+            Ok(added?)
+        })?;
         self.dto(&collected, Motion::Animated)
     }
 
@@ -359,26 +412,25 @@ impl Gifs {
         } else {
             Motion::Animated
         };
-        let mut collection = self.collection();
-        let index = collection.load()?;
-        index
-            .items()
-            .iter()
-            .rev()
-            .map(|item| {
-                let preview = collection.read_preview(&item.content)?;
-                Ok(CollectedDto::of(item, preview_data_url(preview, motion)))
-            })
-            .collect()
+        self.with_collection(|collection| {
+            let index = collection.load()?;
+            index
+                .items()
+                .iter()
+                .rev()
+                .map(|item| {
+                    let preview = collection.read_preview(&item.content)?;
+                    Ok(CollectedDto::of(item, preview_data_url(preview, motion)))
+                })
+                .collect()
+        })
     }
 
     /// Renames the item `id` to `name` (trimmed, not empty).
     pub fn rename(&self, id: &str, name: &str) -> UiResult<CollectedDto> {
         let content = content_of(id)?;
-        let renamed = {
-            let mut collection = self.collection();
-            use_cases::rename(&mut **collection, &content, name)?
-        };
+        let renamed =
+            self.with_collection(|collection| Ok(use_cases::rename(collection, &content, name)?))?;
         let renamed = renamed.ok_or_else(|| not_in_collection(id))?;
         self.dto(&renamed, Motion::Animated)
     }
@@ -388,10 +440,11 @@ impl Gifs {
     /// own copy.
     pub fn delete(&self, id: &str, confirm: Confirm) -> UiResult<()> {
         let content = content_of(id)?;
-        let mut collection = self.collection();
-        use_cases::delete(&mut **collection, &content, confirm)?
-            .map(drop)
-            .ok_or_else(|| not_in_collection(id))
+        self.with_collection(|collection| {
+            use_cases::delete(collection, &content, confirm)?
+                .map(drop)
+                .ok_or_else(|| not_in_collection(id))
+        })
     }
 
     /// The user's themes, and whether the open one, that hold the bytes of
@@ -472,7 +525,7 @@ impl Gifs {
     /// The collected item `id`.
     fn collected(&self, id: &str) -> UiResult<CollectedGif> {
         let content = content_of(id)?;
-        let index = self.collection().load()?;
+        let index = self.with_collection(|collection| Ok(collection.load()?))?;
         index
             .get(&content)
             .cloned()
@@ -483,15 +536,15 @@ impl Gifs {
     fn item(&self, id: &str) -> UiResult<(CollectedGif, Vec<u8>)> {
         let item = self.collected(id)?;
         let bytes = self
-            .collection()
-            .read(&item.content)?
+            .with_collection(|collection| Ok(collection.read(&item.content)?))?
             .ok_or_else(|| not_in_collection(id))?;
         Ok((item, bytes))
     }
 
     /// `item` as the window gets it, with its kept preview.
     fn dto(&self, item: &CollectedGif, motion: Motion) -> UiResult<CollectedDto> {
-        let preview = self.collection().read_preview(&item.content)?;
+        let preview =
+            self.with_collection(|collection| Ok(collection.read_preview(&item.content)?))?;
         Ok(CollectedDto::of(item, preview_data_url(preview, motion)))
     }
 }

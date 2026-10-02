@@ -100,26 +100,8 @@ fn fixture(name: &str, source: FakeGifSource) -> Fixture {
         Copies::in_memory(MemoryArchive::new()),
     );
     let made = Arc::new(Mutex::new(Vec::new()));
-    let factory: SourceFactory = {
-        let source = source.clone();
-        let made = Arc::clone(&made);
-        Arc::new(move |key: &str, customer: &str| -> Arc<dyn GifSource> {
-            made.lock()
-                .unwrap()
-                .push((key.to_string(), customer.to_string()));
-            Arc::new(source.clone())
-        })
-    };
     let root = studio.root.clone();
-    let gifs = Gifs::new(
-        KeyFile::new(root.join("config").join(KEY_FILE)),
-        Provider {
-            source: factory,
-            customer_id: bezel_klipy::new_customer_id,
-        },
-        Box::new(DiskCollection::open(collection_dir(&root.join("data"))).unwrap()),
-        root.join("cache").join("collection"),
-    );
+    let gifs = gifs_in(&root, &root.join("data"), &source, &made);
     Fixture {
         studio,
         gifs,
@@ -127,6 +109,36 @@ fn fixture(name: &str, source: FakeGifSource) -> Fixture {
         made,
         posters,
     }
+}
+
+/// The GIF state as the app composes it, its key in `root` and its
+/// collection in the data folder `data` (on disk, as the app opens it),
+/// over `source`; the sources made are recorded in `made`.
+fn gifs_in(
+    root: &Path,
+    data: &Path,
+    source: &FakeGifSource,
+    made: &Arc<Mutex<Vec<(String, String)>>>,
+) -> Gifs {
+    let factory: SourceFactory = {
+        let source = source.clone();
+        let made = Arc::clone(made);
+        Arc::new(move |key: &str, customer: &str| -> Arc<dyn GifSource> {
+            made.lock()
+                .unwrap()
+                .push((key.to_string(), customer.to_string()));
+            Arc::new(source.clone())
+        })
+    };
+    Gifs::new(
+        KeyFile::new(root.join("config").join(KEY_FILE)),
+        Provider {
+            source: factory,
+            customer_id: bezel_klipy::new_customer_id,
+        },
+        collection_in(collection_dir(data), |dir| DiskCollection::open(dir)),
+        root.join("cache").join("collection"),
+    )
 }
 
 fn rendition(tier: Tier, format: RenditionFormat, location: String, side: u32) -> Rendition {
@@ -574,7 +586,7 @@ fn a_late_answer_does_not_replace_a_newer_search() {
             source: Arc::new(move |_: &str, _: &str| -> Arc<dyn GifSource> { late.clone() }),
             customer_id: bezel_klipy::new_customer_id,
         },
-        Box::new(DiskCollection::open(root.join("collection")).unwrap()),
+        collection_in(root.join("collection"), |dir| DiskCollection::open(dir)),
         root.join("scratch"),
     ));
     cell.set(Arc::downgrade(&gifs)).unwrap();
@@ -954,6 +966,66 @@ fn queries_failures_and_files_that_are_not_gifs() {
     let unreadable = f.gifs.key_status().unwrap_err();
     assert_eq!(unreadable.code(), "fileError");
     assert!(!unreadable.to_string().contains("bad key"), "{unreadable}");
+}
+
+/// Review W2: a collection whose folder cannot be used is an error naming
+/// the folder (the Collection panel shows it), never a collection kept in
+/// memory that vanishes on quit: adding is refused before anything is
+/// downloaded, every use says why, and the collection opens once its
+/// folder can be used, keeping what is added from then on.
+#[test]
+fn a_collection_folder_that_cannot_be_used_is_said_not_lost() {
+    let source = with_results(
+        FakeGifSource::new(),
+        GifKind::Gif,
+        "cat",
+        1,
+        &[("a1", "Cat", gif(2))],
+        false,
+    );
+    let f = fixture("unusable", source);
+    // A file where the collection's folder goes: it cannot be made.
+    let data = f.studio.root.join("unusable-data");
+    let folder = collection_dir(&data);
+    std::fs::create_dir_all(folder.parent().unwrap()).unwrap();
+    std::fs::write(&folder, b"not a folder").unwrap();
+    let gifs = gifs_in(&f.studio.root, &data, &f.source, &f.made);
+    gifs.save_key(KEY).unwrap();
+
+    let unusable = |error: UiError| {
+        assert_eq!(error.code(), "collectionUnavailable", "{error}");
+        let text = error.to_string();
+        assert!(text.contains(&folder.display().to_string()), "{text}");
+    };
+    unusable(gifs.list(false).unwrap_err());
+    // The search is not the collection's: it works.
+    let cat = query("gif", "cat", 1, false, Language::English).unwrap();
+    assert_eq!(gifs.search(&cat).unwrap().items.len(), 1);
+    unusable(gifs.collect("a1").unwrap_err());
+    assert!(
+        f.source.downloads().is_empty(),
+        "refused before anything is downloaded"
+    );
+    let id = content_id(&gif(2)).to_string();
+    unusable(gifs.rename(&id, "Cat").unwrap_err());
+    unusable(gifs.delete(&id, Confirm::Yes).unwrap_err());
+    unusable(gifs.users(f.backend(), &id).unwrap_err());
+    unusable(
+        gifs.use_in_theme(f.backend(), &id, Target::Image)
+            .unwrap_err(),
+    );
+
+    // Once the folder can be used, the collection opens and keeps the item.
+    std::fs::remove_file(&folder).unwrap();
+    assert!(gifs.list(false).unwrap().is_empty());
+    let kept = gifs.collect("a1").unwrap();
+    assert_eq!(kept.id, id);
+    let on_disk = DiskCollection::open(&folder).unwrap().load().unwrap();
+    assert_eq!(
+        on_disk.items().len(),
+        1,
+        "kept in the folder, not in memory"
+    );
 }
 
 /// The HTTP client prints request paths, which hold the key, only at the

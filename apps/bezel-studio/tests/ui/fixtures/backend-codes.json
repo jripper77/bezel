@@ -7,6 +7,10 @@
     "brightnessRange": [],
     "busy": [],
     "cancelled": [],
+    "collectionUnavailable": [
+      "folder",
+      "reason"
+    ],
     "fileError": [
       "file",
       "reason"

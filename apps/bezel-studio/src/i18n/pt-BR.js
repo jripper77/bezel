@@ -81,6 +81,7 @@ export default {
   'error.brightnessRange': 'O brilho vai de 0 a 100.',
   'error.busy': 'A tela está ocupada com outra operação de armazenamento. Espere terminar ou cancele.',
   'error.cancelled': 'Cancelado.',
+  'error.collectionUnavailable': 'O Bezel não consegue guardar a coleção em {folder} ({reason}), então nada pode ser adicionado a ela. Verifique se a pasta pode ser gravada e tente de novo.',
   'error.fileError': 'Não foi possível usar {file}: {reason}',
   'error.fileTooLarge': '{file} tem {size} MiB; o limite é {limit} MiB.',
   'error.gifNotInResults': 'Este item não está entre os resultados da última busca. Busque de novo.',

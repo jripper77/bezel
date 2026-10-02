@@ -36,13 +36,13 @@ use std::time::Instant;
 use bezel_core::domain::catalog::model_by_id;
 use bezel_core::domain::geometry::{Orientation, Size};
 use bezel_core::domain::theme::Theme;
-use bezel_core::ports::{DesktopModeHid, DeviceBus, GifCollection, GifSource, ScreenConnector};
+use bezel_core::ports::{DesktopModeHid, DeviceBus, GifSource, ScreenConnector};
 use bezel_devices::fake::FakeStorage;
 use bezel_devices::{FakeBus, FakeConnector, FakeHid, SystemBus, SystemConnector, SystemHid};
 use bezel_klipy::KlipyClient;
 use bezel_media::FfmpegTranscoder;
 use bezel_media::archive::{DiskArchive, MemoryArchive, storage_dir};
-use bezel_media::collection::{DiskCollection, MemoryCollection, collection_dir};
+use bezel_media::collection::{DiskCollection, collection_dir};
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
@@ -52,7 +52,7 @@ use crate::backend::{
     Backend, DEFAULT_MODEL, SensorFactory, Session, default_orientation, sleep_until,
 };
 use crate::commands::{Shared, Unsaved};
-use crate::gifs::{Gifs, KEY_FILE, KeyFile, Provider, SharedGifs, SourceFactory};
+use crate::gifs::{Gifs, KEY_FILE, KeyFile, Provider, SharedGifs, SourceFactory, collection_in};
 use crate::library::ThemeLibrary;
 use crate::manager::Copies;
 use crate::settings::SettingsFile;
@@ -491,18 +491,10 @@ fn klipy_source() -> SourceFactory {
 /// The GIF search and the collection (D-2026-10-01-gif-sticker-search-3,
 /// -5): sources from `source` for the KLIPY key in `<config>/klipy.json`,
 /// the collection in `<data>/bezel/collection` shared with the CLI's data
-/// folder (in memory for this run when that folder cannot be made), a
-/// background's copy in `<cache>/collection`. Nothing is read from KLIPY
-/// here.
+/// folder (a folder that cannot be used is said, never replaced by one in
+/// memory: review W2), a background's copy in `<cache>/collection`.
+/// Nothing is read from KLIPY here.
 fn gifs(folders: &Folders, source: SourceFactory) -> Gifs {
-    let collection: Box<dyn GifCollection> =
-        match DiskCollection::open(collection_dir(&folders.data)) {
-            Ok(disk) => Box::new(disk),
-            Err(e) => {
-                tracing::error!("the GIF collection is kept for this run only: {e}");
-                Box::new(MemoryCollection::new())
-            }
-        };
     let provider = Provider {
         source,
         customer_id: bezel_klipy::new_customer_id,
@@ -510,7 +502,9 @@ fn gifs(folders: &Folders, source: SourceFactory) -> Gifs {
     Gifs::new(
         KeyFile::new(folders.config.join(KEY_FILE)),
         provider,
-        collection,
+        collection_in(collection_dir(&folders.data), |dir| {
+            DiskCollection::open(dir)
+        }),
         folders.cache.join("collection"),
     )
 }
@@ -721,6 +715,28 @@ mod tests {
         assert!(went_round, "the setup started the refresh loop");
         assert!(!asked, "a GIF source was made at start");
         assert!(source.calls().is_empty(), "KLIPY was asked at start");
+    }
+
+    /// Review W2: the app's collection lives in its folder: one that cannot
+    /// be used is said (`collectionUnavailable`), never replaced by one kept
+    /// in memory, and the collection opens once it can be.
+    #[test]
+    fn the_app_never_keeps_the_collection_in_memory() {
+        let root = temp_root("collection");
+        let folders = Folders::under(&root);
+        let folder = collection_dir(&folders.data);
+        std::fs::create_dir_all(folder.parent().unwrap()).unwrap();
+        std::fs::write(&folder, b"not a folder").unwrap();
+        let (made, made_rx) = mpsc::channel();
+        let gifs = gifs(&folders, counting(&FakeGifSource::new(), made));
+        let unusable = gifs.list(false).unwrap_err();
+        assert_eq!(unusable.code(), "collectionUnavailable", "{unusable}");
+
+        std::fs::remove_file(&folder).unwrap();
+        assert!(gifs.list(false).unwrap().is_empty());
+        assert!(folder.join("files").is_dir(), "opened in its folder");
+        assert!(made_rx.try_recv().is_err(), "the collection is local");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

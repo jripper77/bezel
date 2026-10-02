@@ -16,18 +16,18 @@ GIFs/stickers do KLIPY, com a chave do usuário, numa coleção local gerenciáv
 - Card: pedido de 2026-10-01; `D-2026-10-01-gif-sticker-search-{1..15}`; docs.klipy.com
 
 ## Out of scope
-- CLI, arquivos locais, WebP/MP4, Share/Report, desfazer, keyring: `.jdi/todos/2026-10-01-gif-sticker-search.md`.
+- CLI, arquivos locais, WebP/MP4, Share/Report, desfazer, keyring: todos da fase.
 
 ## Definition of Done
 
 ### Auto-verifiable
 - [ ] Core: filtro, GIF ≤ 25 MiB, cópia única, não-GIF recusado; sem KLIPY/HTTP
-      **Verify:** `cargo test -p bezel-core --locked --lib -- --exact domain::gifs::tests::explicit_maps_to_the_filter domain::gifs::tests::picks_the_largest_gif_under_25_mib 2>&1 | grep -q 'ok. 2 passed' && cargo test -p bezel-core --locked --test gifs -- --exact keeps_one_copy_per_content refuses_a_download_that_is_not_a_gif renames_and_deletes_items 2>&1 | grep -q 'ok. 3 passed' && ! grep -rqiE 'klipy|TcpStream|UdpSocket|TcpListener|net::' crates/bezel-core && [ "$(cargo tree -p bezel-core --locked -e normal --depth 1 --prefix none | sed 1d | cut -d' ' -f1 | sort -u)" = thiserror ] && echo OK`
+      **Verify:** `cargo test -p bezel-core --locked --lib -- --exact domain::gifs::tests::explicit_maps_to_the_filter domain::gifs::tests::picks_the_largest_gif_under_25_mib 2>&1 | grep -q 'ok. 2 passed' && cargo test -p bezel-core --locked --test gifs -- --exact keeps_one_copy_per_content refuses_a_download_that_is_not_a_gif renames_and_deletes_items 2>&1 | grep -q 'ok. 3 passed' && ! grep -rqi klipy crates/bezel-core && ! grep -rqE '\bCommand\b|process::|\bfs::|thread::|TcpStream|UdpSocket|TcpListener|\bnet::' crates/bezel-core/src && [ "$(cargo tree -p bezel-core --locked -e normal --depth 1 --prefix none | sed 1d | cut -d' ' -f1 | sort -u)" = thiserror ] && echo OK`
       **Source:** CONTEXT
 - [ ] `KlipyClient` contra servidor HTTP loopback com JSON gravado
       **Verify:** `cargo test -p bezel-klipy --locked --lib -- --exact client::tests::searches_over_loopback_http client::tests::maps_429_and_refused_keys client::tests::stops_at_the_byte_limit client::tests::files_only_from_klipy_without_key client::tests::errors_hide_the_key client::tests::production_is_https_api_klipy_com 2>&1 | grep -q 'ok. 6 passed' && echo OK`
       **Source:** CONTEXT
-- [ ] Studio e disco: nada sai sem chave/no início, chave privada, itens só da última busca, alpha, fundo animado, excluir nomeia temas; CSP igual
+- [ ] Studio: nada sai sem chave/no início, chave privada, só itens da última busca, alpha, fundo animado, excluir nomeia temas; CSP igual
       **Verify:** `cargo test -p bezel-studio --locked --lib -- --exact gifs::tests::no_request_at_start_or_without_key gifs::tests::key_never_reaches_the_window gifs::tests::only_items_of_the_last_search gifs::tests::sticker_alpha_shows_the_background gifs::tests::animated_gif_background_as_today gifs::tests::delete_names_themes_using_it backend::tests::partner_panel_is_the_only_new_link tests::every_command_is_allowed_by_name tests::the_app_setup_sends_nothing_at_start tests::nothing_in_the_app_forges_an_invocation tests::the_studio_installs_no_logger diag::tests::a_panic_says_where_never_what 2>&1 | grep -q 'ok. 12 passed' && cargo test -p bezel-media --locked --lib -- --exact collection::tests::saves_atomically_by_content collection::tests::unreadable_index_is_an_error 2>&1 | grep -q 'ok. 2 passed' && cd apps/bezel-studio/src-tauri && [ "$(grep '"csp"' tauri.conf.json)" = "$(git show origin/main:./tauri.conf.json | grep '"csp"')" ] && [ -z "$(git ls-files | grep -iE '^tauri.*\.(json5?|toml)$' | grep -vx tauri.conf.json)" ] && ! grep -qE '"(opener|http):' capabilities/*.json && echo OK`
       **Source:** CONTEXT
 - [ ] `Cargo.lock` só ganha pacotes; `ureq` só via `bezel-klipy`; CLI sem `ureq`/`rustls`
@@ -47,10 +47,7 @@ GIFs/stickers do KLIPY, com a chave do usuário, numa coleção local gerenciáv
 - _(none)_
 
 ## Deferred to PR review
-- Uso real com a chave do usuário (feito; SUMMARY).
+- Uso real com a chave do usuário (feito).
 - Termos do KLIPY sobre guardar downloads.
 - Visual: Coleção, diálogo e popover.
 - Sticker na 8.8" real com transparência.
-
-## Notes
-- DoD 1, 3, 4, 5 apertadas após o crítico.

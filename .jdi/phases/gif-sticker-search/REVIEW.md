@@ -2,123 +2,181 @@
 
 **Verdict:** APPROVED_WITH_WARNINGS
 
-> Revisão em modo `verify`, rodada 3, iteração 1 (11ª no total, depois do AUTO-RESET 2) do loop autônomo
-> (`/jdi-issue`). Branch `jdi/gif-sticker-search`, `HEAD` = `b90b347`, igual ao remoto do início ao fim (conferido de
-> novo, com `git fetch`, antes da linha 7). Escopo: `git diff origin/main...HEAD` inteiro (105 arquivos, 63 commits),
+> Revisão em modo `verify`, rodada 3, iteração 2 (12ª no total, depois do AUTO-RESET 2) do loop autônomo
+> (`/jdi-issue`). Branch `jdi/gif-sticker-search`, `HEAD` = `ef26a83`, igual ao remoto do início ao fim (conferido de
+> novo, com `git fetch`, antes da linha 7). Escopo: `git diff origin/main...HEAD` inteiro (106 arquivos, 66 commits),
 > com atenção aos commits da iteração:
-> - `c05f5b1` (`fix(gif-sticker-search): no logger in the studio; panics say no message`):
->   - a guarda lê `cargo metadata --locked --all-features` (`studio_metadata`, `logging_problems`);
->   - recusa no código `LOG_INSTALLERS`, caminhos com raiz em `LOGGER_CRATES`, `set_hook` fora de
->     `diag::hook_panics`, `take_hook`/`update_hook` e um `main` cuja primeira instrução não é `diag::hook_panics()`;
->   - teste novo `tests::the_studio_installs_no_logger`;
->   - panic hook `diag::hook_panics` e teste `diag::tests::a_panic_says_where_never_what`, que roda a si mesmo como
->     processo filho;
->   - `NoWindow` e `SetupFailed` removidos (45 códigos);
-> - `86f5c99`: tabela "The app does not open" / "O aplicativo não abre" do `troubleshooting.md` refeita;
-> - `b90b347`: linha 3 do DoD com 12 testes, e o SUMMARY.
+> - `90db1a1` (orquestrador): D-15 e a linha 1 do DoD, que agora também recusa `TcpStream|UdpSocket|TcpListener|net::`
+>   em `crates/bezel-core`;
+> - `0bfa420` (`fix(gif-sticker-search): guard fences sockets, programs and opener`):
+>   - a guarda de fonte do studio recusa sockets (`SOCKETS`), caminhos por `net` e crates de saída (`WAY_OUT_CRATES`);
+>   - recusa também webviews feitos em Rust (`WEBVIEWS`);
+>   - aceita `Command`/`CommandExt` só em `restart_without_dmabuf_renderer`, como o único
+>     `std::process::Command::new` do nome ligado uma vez a `std::env::current_exe()`, sem macro;
+>   - aceita o opener (`OPENER`) só em `open_fixed` de `commands.rs` e no `use tauri_plugin_opener::OpenerExt as _;`
+>     do topo;
+>   - `open_fixed` só pode ser citado na definição e por `open_link`/`open_guide`;
+>   - `the_source_guard_reads_identifiers_not_text` ganhou 49 casos recusados (31 em `sockets_and_programs`, 18 em
+>     `pages_opened`) e 3 aceitos (o re-exec, os dois comandos com o helper e `commands.rs` inteiro);
+>   - em `commands.rs` e no re-exec, só mudaram comentários;
+> - `ef26a83`: o SUMMARY.
 >
-> Li D-1..D-14, PROJECT, CONTEXT, PLAN, SUMMARY, LOOP e o REVIEW da rodada 2 iter 5, inclusive a seção do crítico.
+> Li D-1..D-15, PROJECT, CONTEXT, PLAN, SUMMARY, LOOP e o REVIEW da rodada 3 iter 1, inclusive a seção do crítico.
 > `npx -y jdi-cli render` rodou antes e não mudou nenhum arquivo versionado.
 >
 > - **Números:** todos vêm das minhas execuções (`CARGO_TARGET_DIR=target/review`, `cargo llvm-cov clean --workspace`
 >   antes da cobertura). Nenhum veio do SUMMARY. Extraí os `Verify:` do Markdown por script, sem editar, e rodei
 >   cada um com `bash`.
 > - **Rede e hardware:** nada tocou `/dev/ttyACM*`, o app instalado, os servidores do KLIPY nem o arquivo da chave.
->   Playwright com `BEZEL_E2E_PORT=1442`. A única execução do app foi a do build de revisão
->   (`target/review/debug/bezel-studio`, copiado para o scratchpad), com `env -i`, sem `DISPLAY`/D-Bus e com
->   `HOME`/`XDG_*` temporários. Ele cai na criação do loop de eventos do GTK, antes de qualquer plugin ou pasta.
-> - **Mutações:** em cópias por `git archive` de `b90b347` no scratchpad (`rev11/mut/<mutante>`). Cada cópia tem um
->   `git init` próprio, com `origin/main` = `e527240` buscado do repositório, para a linha 3 rodar como está escrita,
->   e um `CARGO_TARGET_DIR` próprio (`target/rev11mut/<mutante>`). Nos mutantes de manifesto, o `Cargo.lock` foi
->   atualizado só com `cargo metadata --offline`, como faria quem comete a mudança: só ganha linhas. O repositório
->   não foi alterado. Controle sem mutação (`ctl`): a linha 3 dá `OK`.
+>   Playwright com `BEZEL_E2E_PORT=1442`.
+>   - A única execução do app foi a do build de revisão (`target/review/debug/bezel-studio`), com `env -i`, sem
+>     `DISPLAY`/D-Bus, com `HOME`/`XDG_*` temporários e um shim `LD_PRELOAD` que só anota os `exec*`. O app cai na
+>     criação do loop de eventos do GTK, antes de qualquer plugin ou pasta.
+>   - O mutante `cfgwin` (abaixo) só foi compilado e testado, nunca executado.
+> - **Mutações:** em cópias por `git archive` de `ef26a83` no scratchpad (`rev12/mut/<mutante>`).
+>   - Cada cópia tem um `git init` próprio, com `origin/main` = `e527240` buscado do repositório, para as linhas
+>     rodarem como estão escritas.
+>   - Cada cópia tem um `CARGO_TARGET_DIR` próprio (`target/rev12mut/<mutante>`, semeado por cópia reflink de
+>     `target/review`).
+>   - O repositório não foi alterado (`git status`: só o `LOOP.md` não versionado, como no início).
+>   - Controle sem mutação (`ctl`): as linhas 1 e 3 dão `OK`.
 
 ## Gates
 | Gate | Status | Details |
 |---|---|---|
 | Build | PASS | `cargo build --workspace --locked`: exit 0 |
-| Tests | PASS | **945 passed, 0 failed, 12 ignored (hardware, ffmpeg real, KLIPY real)**, em 39 binários. São 2 a mais que na iter anterior (943): `tests::the_studio_installs_no_logger` e `diag::tests::a_panic_says_where_never_what`. Studio lib: **165** no Linux. Bate com o SUMMARY (945) |
-| Coverage | PASS | **94.84%** de linhas (TOTAL, sem `main.rs`/`build.rs`), exit 0. Pelo comando do DoD do PROJECT: **94.78%**. Studio: `diag.rs` 98.84% (o hook roda no processo filho e conta), `lib.rs` 94.53%, `gifs.rs` 96.87%, `gifs/key.rs` 92.13%, `gifs/asked.rs` 50.00%, `commands.rs` 10.72% (invólucros finos, como antes) |
+| Tests | PASS | **945 passed, 0 failed, 12 ignored (hardware, ffmpeg real, KLIPY real)**, em 39 binários. É o mesmo total da iter anterior: os 52 casos novos estão dentro de `the_source_guard_reads_identifiers_not_text`, e nenhum teste saiu. Studio lib: **165** no Linux. Bate com o SUMMARY (945) |
+| Coverage | PASS | **94.88%** de linhas (TOTAL, sem `main.rs`/`build.rs`), exit 0. Pelo comando do DoD do PROJECT: **94.83%**. Studio: `lib.rs` 95.17% (antes 94.53%), `diag.rs` 98.84%, `gifs.rs` 96.87%, `gifs/key.rs` 92.13%, `gifs/asked.rs` 50.00%, `commands.rs` 10.72% (invólucros finos, como antes) |
 | Lint | PASS | `cargo fmt --all --check` e `cargo clippy --workspace --all-targets --locked -- -D warnings`: exit 0. Clippy local com `--target x86_64-pc-windows-msvc`, sem `bezel-studio`/`bezel-klipy`: exit 0. No CI, o `rust-windows` passou `clippy --all-targets --all-features`. Nenhum `allow` novo: os 4 de `rtss.rs` são anteriores à fase e têm `reason =` |
-| Hexagonal/Safety/Protocol/Hygiene | PASS | 5.1–5.11 sem achado novo. A iteração só mexe no studio e nas docs. 5.5: `unsafe` só em `rtss.rs` (anterior), e o studio tem `#![forbid(unsafe_code)]`. 5.6: os `unwrap`/`panic!` novos estão em `diag.rs:421-451`, dentro de `#[cfg(test)]`; o hook usa `unwrap_or_default`. 5.10: nenhum comando novo. `cargo audit`: exit 0 (620 crates). Nenhum segredo. `Cargo.toml` e `Cargo.lock` sem mudança desde `87d710c` |
-| Consistency | PASS | 63 commits: 62 com escopo `gif-sticker-search` e 1 `chore(jdi)`. `c05f5b1` implementa a D-14 como escrita: manifesto e features resolvidas pelo `cargo metadata`, nenhum instalador no código, um panic hook primeiro no `main` com `DiagCode::Panicked` e o lugar, e o guia com o que aparece. Não contradiz D-10, D-11 nem D-12. Ver W1 sobre o texto da D-13 |
-| UI Validation | PASS | `npm ci` ok. `npm run test:unit`: **231/231**, 99.94% de linhas. Playwright completo: **208/208** (claro/escuro × pt-BR/en, axe, `watchErrors`). A iteração não mudou a UI (`git diff 87d710c..HEAD -- apps/bezel-studio/src apps/bezel-studio/tests` vazio) |
+| Hexagonal/Safety/Protocol/Hygiene | PASS | 5.1–5.11 sem achado novo. 5.2 e 5.9: as ocorrências no core são comentários e testes anteriores à fase, e nenhuma linha `+` do diff do core casa. 5.5: `unsafe` só em `rtss.rs` (anterior); studio com `#![forbid(unsafe_code)]`. 5.6: todo o código novo de `lib.rs` está dentro de `mod tests`. 5.10: nenhum comando novo. `cargo audit`: exit 0 (620 crates). Nenhum segredo. Ver W3 sobre o alcance do 5.2 |
+| Consistency | PASS | 66 commits: 65 com escopo `gif-sticker-search` e 1 `chore(jdi)`. `0bfa420` só toca `lib.rs` e `commands.rs` (arquivos da T-4). Implementa a D-15 como escrita (sockets, `Command` só no re-exec, opener só no helper de `open_link`/`open_guide`) e vai além dela (`WAY_OUT_CRATES`, `WEBVIEWS`, sockets Unix). Não contradiz D-10..D-14. A D-15 emenda a D-13 por escrito ("amends D-13's list of start-failure codes"), e o `DECISIONS.md` renderizado a traz |
+| UI Validation | PASS | `npm ci` ok. `npm run test:unit`: **231/231**, 99.94% de linhas. Playwright completo: **208/208** (claro/escuro × pt-BR/en, axe, `watchErrors`). A iteração não mudou a UI |
 | DoD | PASS | As 10 linhas Auto passam. A linha 7 rodou depois que o CI do `HEAD` terminou. As 2 Manual são da release |
 
-## Itens da rodada 2, iter 5
+## Itens da rodada 3, iter 1
 | Item | Estado | Evidência |
 |---|---|---|
-| Crítico: o logger `--verbose` da CLI copiado para o studio (feature `tracing` do tauri + `tracing-subscriber`, já no lock) passava a linha 3, e o Tauri gravava o corpo de cada IPC | **CLEARED** | Reapliquei o mutante (`crit`). No manifesto do studio, `tauri` com `"tracing"` e `tracing-subscriber` igual ao da CLI. Em `run()`, `tracing_subscriber::fmt().with_env_filter("trace").with_writer(std::io::stderr).init()` atrás de `BEZEL_VERBOSE`. O lock ganha 4 linhas. Resultado: linha 3 **exit 1**, com 7 achados. Entre eles: `Cargo.toml: turns tauri's tracing feature on`, `depends on tracing-subscriber`, `resolved: tauri / tauri-macros / tauri-runtime-wry / wry is built with its tracing feature on` e, no código, `tracing_subscriber::fmt is a logger installer's crate` e `stderr names an output stream outside diag.rs`. Cada parte sozinha também reprova (tabela abaixo) |
-| W1 (revisor): `NoWindow`/`SetupFailed` nunca saíam no terminal, e o guia descrevia linhas que o usuário não via | **CLEARED** | Os dois códigos saíram: `git grep` não acha `NoWindow`, `SetupFailed`, `its setup failed` nem `could not be made` fora de `.jdi`. As linhas do guia agora existem. No build de revisão sem sessão gráfica, a saída inteira é `bezel-studio: the app panicked at tao-0.37.1/src/platform_impl/linux/event_loop.rs:217:53`, com exit **101**, igual à primeira linha da tabela. A falha de setup cai em `panic!("Failed to setup app: {e}")` de `tauri-2.12.0/src/app.rs:1444`, que o hook imprime como `tauri-2.12.0/src/app.rs:1444:…`, e é isso que as linhas de pastas, bandeja e janela descrevem. en e pt-BR têm as mesmas linhas, e o `check-docs.sh` passa |
+| W1 (revisor): a D-13 listava "no window, setup" entre os `DiagCode`s de início, e a D-14 não a emendava | **CLEARED** | `D-2026-10-01-gif-sticker-search-15.md:1`: "amends D-13's list of start-failure codes, which D-14 replaced by the panic line". O `DECISIONS.md` renderizado tem a D-15. O código não mudou nesse ponto: `diag.rs` sem `NoWindow`/`SetupFailed` |
+| Crítico, linha 1: um GET escrito à mão no core com `use std::{…, net::TcpStream}` passava | **CLEARED** | Reapliquei (`crit1`): `fetch_trending` em `domain/gifs.rs` com `use std::{io::{Read, Write}, net::TcpStream}` e `TcpStream::connect((host, 80))`. Compila. Resultado: linha 1 **exit 1**. O grep acha `gifs.rs:721 net::TcpStream` e `gifs.rs:723 TcpStream::connect`. O gate 5.2 continua sem achar (ver W3) |
+| Crítico, linha 3: um passo de boas-vindas no `setup` que, sem chave, abre `partner.klipy.com` no navegador do sistema passava | **CLEARED** | Reapliquei as duas formas:<br>• `crit3a`: `try_state::<tauri_plugin_opener::Opener<R>>()` + `open_url`;<br>• `crit3b`: `use tauri_plugin_opener::OpenerExt as _;` + `app.opener().open_url`.<br>Ambas ficam atrás de `!folders.config.join(KEY_FILE).exists()` e `link_url("klipyPartnerPanel")`. As duas compilam, e a linha 3 dá **exit 1** nas duas. Quem pega é `nothing_in_the_app_forges_an_invocation`, com `Opener`/`OpenerExt`/`opener`/`open_url` "(the system opener) outside `open_fixed` in `commands.rs`". `the_app_setup_sends_nothing_at_start` continua passando com o mutante (o runtime mock não registra o opener): a guarda é quem prova |
 
-## Mutações (linha 3 como está escrita)
-| Mutante | O que muda | Linha 3 | Quem pega |
-|---|---|---|---|
-| `ctl` | nada | `OK` | controle |
-| `crit` | o do crítico: feature `tracing` do tauri + `tracing-subscriber` + instalação em `run()` | exit 1 | `the_studio_installs_no_logger` e a guarda (7 achados) |
-| `feat` | só `"tracing"` nas features do `tauri` do studio | exit 1 | declarado e resolvido (`tauri`, `tauri-macros`, `tauri-runtime-wry`, `wry`) |
-| `dep` | só `tracing-subscriber` no `[dependencies]` do studio, sem código | exit 1 | `depends on tracing-subscriber` e `resolved: the studio is built with tracing-subscriber` |
-| `ws` | o logger movido para `bezel-media` (`pub fn verbose_logs()`, dependência normal), chamado por `run()` | exit 1 | grafo resolvido: `the studio is built with tracing-subscriber` |
-| `hookmsg` | o hook imprime também o payload `&str` | exit 1 | `a_panic_says_where_never_what` (a linha sai com `fake-KLIPY_key-…`) e a guarda (`payload` em código de produção) |
-| `hookexit` | o hook chama `std::process::exit(0)` depois da linha (um panic deixaria de falhar o app) | exit 1 | `a_panic_says_where_never_what` (o filho sai no 1º panic: 1 linha em vez de 5) e a guarda (`std::process::exit` em `diag.rs`) |
+## Mutações
+| Mutante | O que muda | Linha | Resultado | Quem pega |
+|---|---|---|---|---|
+| `ctl` | nada | 1 e 3 | `OK` / `OK` | controle |
+| `crit1` | GET à mão no core por `std::{…, net::TcpStream}` | 1 | exit 1 | grep `net::`/`TcpStream` da linha 1 |
+| `crit3a` | `setup` sem chave abre o Painel por `try_state::<Opener>` | 3 | exit 1 | guarda (4 achados) |
+| `crit3b` | `setup` sem chave abre o Painel por `OpenerExt` | 3 | exit 1 | guarda (3 achados) |
+| `curl1` | core roda `curl` por `use std::{process::Command}` | 1 | **`OK`** | ninguém: nem a linha 1 nem o gate 5.2 (W3) |
+| `js2` | `app.js` abre o Painel na partida quando não há chave (2 linhas) | 5 (e 3) | **`OK`** | ninguém. Um spec descartável na cópia mostra `data-demo-link="klipyPartnerPanel"` logo ao carregar `?demo=gifsNoKey`, e no controle o atributo é `null` (W1) |
+| `cfgwin` | segunda janela em `tauri.conf.json` com `"url": "https://partner.klipy.com"` | 3 | **`OK`** | ninguém (W2) |
 
-## Panic hook: regressões
-- **O app ainda sai com código diferente de zero num panic.** O hook só imprime e volta, e o unwinding segue como
-  antes:
-  - panic na thread principal: exit **101**, conferido no binário;
-  - no Linux, o `Ready` do Tauri (onde cai o setup) é chamado pelo laço Rust de `run_return` do tao
-    (`event_loop.rs:1040-1130`), e não por um callback C, então o panic sobe até o `main`;
-  - nenhum mutante que troque isso passa (`hookexit`).
-- **Panics em threads de fundo continuam aparecendo**, agora como uma linha com o lugar e sem a mensagem. O hook é do
-  processo. O teste novo faz 5 panics em threads próprias, e saem 5 linhas no Linux e no Windows (CI). Como antes, a
-  thread morre e o app segue.
-- **O `cargo metadata` do teste falha fechado** (rodei o binário de teste direto):
-  - sem `CARGO`, usa o `cargo` do `PATH`: passa;
-  - com `CARGO_NET_OFFLINE=true` e o cache local: passa (1,3 s);
-  - com `CARGO=/bin/false`: falha (`assert` em `lib.rs:3103`);
-  - com `CARGO` inexistente: falha (`unwrap` em `lib.rs:3101`);
-  - com `CARGO_HOME` vazio e offline: falha (`no matching package named thiserror`);
-  - um grafo sem o studio é um problema (testado).
+Sonda da guarda: o próprio `guard()` dos testes, numa cópia, sobre trechos soltos:
+- **Recusados:**
+  - `crate::commands::open_link(...)` chamado do `setup` (regra da D-11);
+  - o opener em `tray.rs`;
+  - `use std::os::unix::{net as u}` + `UnixStream`;
+  - `open_fixed` chamado por outro comando de `commands.rs`.
+- **Aceitos:**
+  - `use tauri_plugin_updater::UpdaterExt as _;` + `updater().check()` no `setup`, e `.plugin(tauri_plugin_updater::Builder::new().build())`;
+  - `nix::unistd::execvp`;
+  - `app.restart()`;
+  - `app.emit("open-partner", ())` (ver W1).
 
-  No CI, `the_studio_installs_no_logger` e `nothing_in_the_app_forges_an_invocation` passaram no Linux e no Windows,
-  sob `cargo llvm-cov`.
-- **Nenhum texto do erro vaza.** O hook não lê o payload. O lugar sai cortado da pasta do crate em diante
-  (`tao-0.37.1/src/…`, `src-tauri/src/diag.rs`), com `/` e `\` tratados. O teste confere isso no Windows também.
+## Guarda nova: falsos positivos, re-exec e links
+- **Árvore real, sem falso positivo.** `nothing_in_the_app_forges_an_invocation` passa no Linux (local e CI) e no
+  Windows (CI). A guarda acha exatamente:
+  - `spawns = ["lib.rs: restart_without_dmabuf_renderer"]`;
+  - `opens = ["commands.rs: open_fixed"]`;
+  - `helpers = ["commands.rs: open_guide", "commands.rs: open_link"]`.
+
+  `commands.rs` inteiro (`include_str!`) está entre os casos aceitos. No Windows o re-exec é `cfg(linux)`, mas a guarda
+  lê o texto, e a asserção vale lá também. Nenhum arquivo de `src/` tem hoje um identificador `Command`, `opener`,
+  de socket ou um caminho por `net` fora desses pontos.
+- **Falsos positivos possíveis, por identificador** (sonda): um campo chamado `opener`, uma variante de enum `Command`
+  e um módulo próprio chamado `net` (`net::x()`) são recusados. Hoje nada disso existe. É o custo esperado de uma
+  guarda por nome (D-10), mas um módulo `net` para sensores de rede ou um menu com `Command` vão esbarrar nela. Fica
+  como observação.
+- **Re-exec sem DMA-BUF, igual a antes.** O corpo da função não mudou nesta iteração (só o comentário). Contra o
+  `main`, a única troca continua sendo o `eprintln!` → `diag::report(restart_failure(&error))` da D-12. No binário de
+  revisão, com o shim que anota `exec*`:
+  - **sem a variável:** o processo inicia com `switch=(unset)`, faz um `execvp` de `target/review/debug/bezel-studio`
+    com `WEBKIT_DISABLE_DMABUF_RENDERER=1` (mesmo pid) e reinicia com `switch=1`. Não há segundo `exec`. A saída é
+    `bezel-studio: the app panicked at tao-0.37.1/src/platform_impl/linux/event_loop.rs:217:53`, com exit **101**;
+  - **com `WEBKIT_DISABLE_DMABUF_RENDERER=0`** (escolha do usuário): nenhum `exec` do studio;
+  - **com o arquivo do programa apagado** (executado por `/proc/self/fd/3`): o `execvp` de `… (deleted)` falha, sai
+    `bezel-studio: could not restart with the DMA-BUF renderer off: the app's program file is gone`
+    (`DmabufRestartNoFile`) e o app segue até o mesmo panic do GTK.
+- **`open_link`/`open_guide`, iguais a antes.** `open_fixed` já existia em `b90b347`; `0bfa420` só documenta.
+  - `open_guide` faz `guide_url(&page, &language)?` e depois `spawn_blocking(move || app.opener().open_url(url, None))`,
+    com os mesmos dois `map_err(UiError::system)`. É o mesmo corpo do `main`, só que movido para o helper.
+  - `open_link` passa por `link_url` (lista fixa, `partner_panel_is_the_only_new_link` na linha 3).
+  - O plugin continua com `open_js_links_on_click(false)`, e as capabilities não têm `opener:`.
+  - No e2e, os dois botões do popover passam nos 4 projetos (`data-demo-link`, `data-demo-guide`).
+  - Não abri o navegador real de propósito: isso iria ao KLIPY.
 
 ## Blockers
 - nenhum
 
 ## Warnings
-- **W1 — A D-13 ainda lista "no window, setup" entre os `DiagCode`s de falha de início, e a D-14 não a emenda.**
-  - **Onde:** `.jdi/decisions/D-2026-10-01-gif-sticker-search-13.md:1` ("Start failures are told apart by fixed
-    `DiagCode`s (no window, setup, plugin, folders, tray, …)") contra `apps/bezel-studio/src-tauri/src/diag.rs:41-56`
-    e `lib.rs:140-145`. Nesses pontos, `NoWindow`/`SetupFailed` não existem mais, e essas falhas saem como
-    `Panicked` + lugar.
-  - **Por quê:** a mudança está certa (era o W1 anterior, opção (b)) e está no commit e no guia. Mas a D-14 diz só
-    "completes D-12", e o registro travado da D-13 continua descrevendo códigos que o código não tem. É o mesmo tipo
-    de deriva do W2 da rodada 2, iter 2 (D-10 desatualizada).
-  - **Gravidade:** baixa. Não há comportamento errado: as falhas de janela e de setup continuam se distinguindo, por
-    `Panicked` e pelo lugar, sem texto do erro.
-  - **Correção:** uma linha na D-14 (ou numa D-15): "amends D-13: Tauri 2.12 panics on window and setup failures, so
-    `NoWindow`/`SetupFailed` are removed and those failures are told by `DiagCode::Panicked` and the place".
+- **W1 — A UI pode abrir o Painel do KLIPY na partida, sem clique, e as linhas 3 e 5 passam.**
+  - **Onde:** em `apps/bezel-studio/src/app.js:37`, duas linhas depois de `applyTranslations` (mutante `js2`):
+    `bridge.klipyKey().then((k) => (k?.configured ? null : bridge.openLink(PARTNER_PANEL)))`.
+  - **Por que passa:**
+    - a guarda aceita, porque `open_link` é invocado por IPC e chama `open_fixed`;
+    - `e2e/gif-search.spec.mjs:64-93` (`no key: help`) só confere `data-demo-link` depois do clique no botão e nunca
+      confere que ele está vazio antes;
+    - nenhum teste de unidade olha isso.
+  - **Por que importa:** a D-15 diz "so a page opens only on the user's click", e a D-11 diz que o lado da UI é
+    provado pela linha 5, mas só para chamadas de GIF. É o mesmo engano realista do crítico da iter 1 (boas-vindas
+    que abrem o Painel sem chave), escrito em JS em vez de Rust. Também passa um `emit` do `setup` que a janela
+    transforma em `openLink` (sonda).
+  - **Correção sugerida:**
+    - no e2e `no key: help` (e num cenário com chave), conferir que `data-demo-link` e `data-demo-guide` estão
+      ausentes ao carregar, ao abrir a Coleção e ao abrir o diálogo, até o clique;
+    - ou registrar na demo cada chamada de `openLink`/`openGuide` com o gesto que a causou.
+- **W2 — Uma janela de config com URL externa abre o KLIPY na partida, e a linha 3 passa.**
+  - **Onde:** em `apps/bezel-studio/src-tauri/tauri.conf.json:11-22` (`app.windows`), uma segunda janela
+    `{"label": "welcome", "url": "https://partner.klipy.com"}` (mutante `cfgwin`).
+  - **Por que passa:** compila, e a linha 3 dá `OK`. O Tauri cria as janelas da config na partida (`create` é `true`
+    por padrão), e o CSP da config não vale para uma página externa. A linha 3 só compara a linha `"csp"`, as
+    sobreposições e as capabilities. A guarda só lê Rust e recusa `WebviewUrl`/`WebviewWindowBuilder` em código, não
+    em JSON.
+  - **Ainda fora da cerca da D-15:** um plugin que faz HTTP sem ser nomeado em `WAY_OUT_CRATES`. Exemplo:
+    `tauri_plugin_updater` com `updater().check()` no `setup`; ele usa `reqwest` por dentro, e a linha 4 só olha
+    `ureq`. A D-15 diz "every way out of the computer is named and fenced" e "HTTP leaves only through
+    `bezel-klipy`".
+  - **Correção sugerida:**
+    - na linha 3: `app.windows` com exatamente uma janela, `main`, sem `url` externa;
+    - na guarda: ler o grafo resolvido (o `cargo metadata` da D-14 já está lá) e recusar `reqwest`/`hyper`/`isahc`/
+      `curl` construídos para o studio em desktop, em vez de uma lista de nomes no código.
+- **W3 — O core pode rodar `curl` (`use std::{process::Command}`), e a linha 1 e o gate 5.2 passam.**
+  - **Onde:** mutante `curl1`, em `crates/bezel-core/src/domain/gifs.rs`.
+  - **Por que passa:** a linha 1 (`CONTEXT.md:25`) só recusa `klipy|TcpStream|UdpSocket|TcpListener|net::`. O
+    regex do 5.2 (`std::(fs|process|net|thread)\b`) não casa um import agrupado, a mesma brecha que o crítico usou
+    com `net`.
+  - **Gravidade:** baixa. A árvore real está limpa (nenhum `use std::{` no core), e "a core spawning curl" é menos
+    provável que o GET do crítico.
+  - **Correção sugerida:** a linha 1 também recusar `process::`, `fs::`, `thread::` e `\bCommand\b` (sensível a
+    maiúsculas) em `crates/bezel-core/src`.
 
 ## DoD Checklist (gate 8)
 | # | Criterion | Source | Type | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | Core: filtro, GIF ≤ 25 MiB, cópia única, não-GIF recusado; sem KLIPY/HTTP | CONTEXT | Auto | PASS | `OK` (`HEAD` = `b90b347`) |
+| 1 | Core: filtro, GIF ≤ 25 MiB, cópia única, não-GIF recusado; sem KLIPY/HTTP | CONTEXT | Auto | PASS | `OK` (`HEAD` = `ef26a83`). Controle `ctl`: `OK`; `crit1`: exit 1; `curl1`: `OK` (W3) |
 | 2 | `KlipyClient` contra servidor HTTP loopback com JSON gravado | CONTEXT | Auto | PASS | `OK` |
-| 3 | Studio e disco: nada sai sem chave/no início, chave privada, itens só da última busca, alpha, fundo animado, excluir nomeia temas; CSP igual | CONTEXT | Auto | PASS | `OK` (12 testes). Controle `ctl`: `OK`. `crit`, `feat`, `dep`, `ws`, `hookmsg` e `hookexit`: todos exit 1 |
+| 3 | Studio e disco: nada sai sem chave/no início, chave privada, itens só da última busca, alpha, fundo animado, excluir nomeia temas; CSP igual | CONTEXT | Auto | PASS | `OK` (12 testes). `ctl`: `OK`; `crit3a` e `crit3b`: exit 1; `cfgwin`: `OK` (W2) |
 | 4 | `Cargo.lock` só ganha pacotes; `ureq` só via `bezel-klipy`; CLI sem `ureq`/`rustls` | CONTEXT | Auto | PASS | `OK` |
-| 5 | UI: lógica (debounce, setas, carregar mais, 429), i18n e os 6 testes nomeados nos 4 projetos com axe | CONTEXT | Auto | PASS | `OK` (`# pass 4`, `test:unit` ok, `6 tests × 4 projects, 24/24 runs passed with axe`) |
-| 6 | Guia en/pt-BR com Privacidade, check-docs e CHANGELOG | CONTEXT | Auto | PASS | `OK` (o `check-docs.sh` passa com a tabela nova do `troubleshooting.md`) |
-| 7 | CI do Windows verde no HEAD do PR | CONTEXT | Auto | PASS | Esperei o run 37025240721 terminar (`gh run watch --exit-status`: exit 0; `conclusion=success`). Depois rodei a linha como está escrita, com `HEAD` = remoto = `b90b347`: `OK` (`rust-windows` = `success`, **162** testes do studio no Windows) |
+| 5 | UI: lógica (debounce, setas, carregar mais, 429), i18n e os 6 testes nomeados nos 4 projetos com axe | CONTEXT | Auto | PASS | `OK` (`# pass 4`, `test:unit` ok, `6 tests × 4 projects, 24/24 runs passed with axe`). `js2`: `OK` (W1) |
+| 6 | Guia en/pt-BR com Privacidade, check-docs e CHANGELOG | CONTEXT | Auto | PASS | `OK` |
+| 7 | CI do Windows verde no HEAD do PR | CONTEXT | Auto | PASS | Esperei o run 37030664822 terminar (`gh run watch --exit-status`: exit 0; `conclusion=success`). Depois rodei a linha como está escrita, com `HEAD` = remoto = `ef26a83`: `OK` (`rust-windows` = `success`, **162** testes do studio no Windows) |
 | 8 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | `OK`; 945/0/12 |
-| 9 | Coverage >= 80% of lines | PROJECT | Auto | PASS | `OK`; TOTAL 94.78% |
+| 9 | Coverage >= 80% of lines | PROJECT | Auto | PASS | `OK`; TOTAL 94.83% |
 | 10 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | `OK` |
 | 11 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED (release) | `[Unreleased]` cita KLIPY. Evidência sugerida: `## [x.y.z] - <data>` no corte de release |
 | 12 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED (release) | O README cita a busca e o guia. Evidência sugerida: diff do README revisado no PR |
 
-## CI (run 37025240721, `b90b347`)
+## CI (run 37030664822, `ef26a83`)
 - **Jobs:** `conclusion=success`.
   - success: `rust-windows`, `rust-linux`, `node-ui`, CodeQL (actions, rust, javascript-typescript), Varreduras,
     Versao e `Portao`;
@@ -126,69 +184,62 @@
 - **`rust-windows`:**
   - `cargo fmt --all -- --check` e `cargo clippy --all-targets --all-features -- -D warnings` ok;
   - testes (`cargo llvm-cov`): **874 passed, 0 failed, 12 ignored**;
-  - unittests do studio: **`162 passed; 0 failed`**. São os 160 da iter anterior mais `the_studio_installs_no_logger`
-    e `a_panic_says_where_never_what`;
-  - nos dois testes novos, o `cargo metadata` rodou dentro do teste no Windows, e o processo filho do panic também
-    (com `current_exe`, sob `llvm-cov`, com caminhos `\` cortados para `src-tauri/src/diag.rs`). Também passaram
-    `nothing_in_the_app_forges_an_invocation` e `key_never_reaches_the_window`.
+  - unittests do studio: **`162 passed; 0 failed`**, o mesmo número da iter anterior, porque os casos novos estão
+    dentro de testes que já existiam;
+  - passaram `nothing_in_the_app_forges_an_invocation`, `the_source_guard_reads_identifiers_not_text`,
+    `the_studio_installs_no_logger` e `a_panic_says_where_never_what`.
 - **`rust-linux`:** **944/0/12**, com 165 no studio. Localmente deram 945: o doctest `compile_fail` de `diag.rs` roda
   no `cargo test`, não no `llvm-cov` do CI. Linux (165) − Windows (162) = os 3 testes de mock runtime que só rodam
   fora do Windows (D-8).
 
 ## Observações (sem aviso)
-- **O hook tira o nome da thread e o backtrace.** `RUST_BACKTRACE` deixa de valer, porque o hook padrão é
-  substituído. É de propósito (D-14), e nenhuma doc manda usar `RUST_BACKTRACE`. Para depurar, ainda dá para ler o
-  lugar exato do panic.
-- **Corte do caminho, caso teórico.** Um arquivo fora de qualquer `src/` cujo caminho tenha uma pasta-mãe chamada
-  `src` sairia com as pastas acima. Exemplo: código incluído de `OUT_DIR` num build feito em `~/src/…`, que imprimiria
-  `<usuário>/src/…/out/x.rs`. O studio usa `generate_context!` no próprio `lib.rs` (sem `include!` de `OUT_DIR`; a
-  guarda recusa `include!`), e builds de release vêm do runner. Não achei caminho real.
-- **O canal "log" do `diag` agora nunca tem destino.** 34 dos 45 códigos (32 avisos, 1 erro, 1 notícia) vão para o
-  `tracing`. A D-14 proíbe instalar um subscriber, então ninguém os lê, e os docs de `diag.rs:1,33,293` ainda falam em
-  "the log". Já era assim antes da fase, sem subscriber, mas agora é permanente. Sugestão de backlog: mover os que
-  importam para o terminal ou registrar a escolha.
-- **O teste de metadata resolve todos os alvos.** Na primeira execução sem cache completo, ele precisa de rede para
-  baixar os manifestos. Sem rede, falha fechado, como deve.
+- **`spawns_itself` exige o nome ligado por `let Ok(name) = std::env::current_exe() else { … };`.** Qualquer
+  refatoração do re-exec (`match`, `?`, um helper) vai ser recusada até a guarda acompanhar. É o comportamento
+  pedido pela D-15, e o comentário em `lib.rs:668-671` avisa.
+- **`nix::unistd::execvp` e crates de processo fora da lista passam a guarda** (sonda). Precisam de uma dependência
+  nova e de intenção. Ficam com a revisão de código (D-10).
 - **Continuam valendo as observações das iters anteriores:**
+  - o hook sem nome de thread nem backtrace;
+  - o corte do caminho no caso teórico de `OUT_DIR`;
+  - o canal "log" do `diag` sem destino;
+  - o teste de metadata, que precisa de rede no primeiro cache;
   - o timeout de 10 s;
   - `collected_users` lendo a biblioteca;
   - os nomes reservados do Windows;
   - `klipy.json` sem nova tentativa;
   - o proxy;
   - a raiz temporária de teste;
-  - o limite declarado da D-12 (arquivo/evento);
+  - o limite declarado da D-12;
   - o IPC do Tauri guardando o argumento como `serde_json::Value`;
   - a cobertura de `commands.rs` (10.72%).
 
 ## Recommendation
-Os itens da rodada 2, iter 5 estão resolvidos:
-- **Crítico (logger da CLI no studio):** reaplicado, ele reprova a linha 3. Também reprovam cada uma das partes
-  sozinha (feature, dependência) e o logger movido para outro crate do workspace.
-- **W1:** os dois códigos inalcançáveis saíram, e as linhas do guia agora existem. A do tao foi conferida no binário,
-  e a do setup confere com `tauri-2.12.0/src/app.rs:1444`.
+Os itens da rodada 3, iter 1 estão resolvidos:
+- **W1 (D-13):** a D-15 a emenda por escrito.
+- **Crítico, linha 1:** reaplicado, o GET por `std::{…, net::TcpStream}` reprova a linha 1.
+- **Crítico, linha 3:** reaplicado nas duas formas (`Opener` e `OpenerExt`), o mutante reprova a linha 3 pela guarda.
 
-O panic hook não regride:
-- o app sai com 101;
-- panics em threads de fundo aparecem;
-- o payload nunca sai;
-- o `cargo metadata` falha fechado e passa no Linux e no Windows.
+A guarda nova não tem falso positivo na árvore real (Linux e Windows). O re-exec sem DMA-BUF e `open_link`/`open_guide`
+se comportam como antes, e isso foi conferido no binário. Os gates 1–8 passam. O CI do `HEAD` está verde, com 162
+testes do studio no Windows.
 
-Os gates 1–8 passam. O CI do `HEAD` está verde, com 162 testes do studio no Windows.
-
-Antes de fechar a fase:
-1. **W1:** registrar na D-14 (ou numa D-15) que ela emenda a D-13, com `NoWindow`/`SetupFailed` removidos e essas
-   falhas ditas por `Panicked` + lugar.
+Antes de fechar a fase, para não abrir outra rodada pelo mesmo motivo:
+1. **W1:** provar na UI que nenhuma página abre sem o clique. É a forma em JS do achado do crítico, e hoje passa nas
+   linhas 3 e 5.
+2. **W2:** fechar `app.windows` em `tauri.conf.json` na linha 3, e levar a cerca de HTTP ao grafo resolvido.
+3. **W3:** estender o grep da linha 1 a `process::`/`fs::`/`thread::`/`Command`.
 
 No PR, fazer os itens de "Deferred to PR review": T-8 na 8.8", termos do KLIPY e visual.
 
 ## DoD Critic (enhanced)
 
-- DoD row «1 | Core … sem KLIPY/HTTP»: oca e objetiva — um GET escrito à mão com `std::{…, net::TcpStream}` no core
-  passa (o Verify prova "nenhuma crate HTTP", não "nenhum HTTP").
-- DoD row «3 | Studio e disco … nada sai … no início»: oca e objetiva — engano realista: um passo de boas-vindas no
-  `setup` que, sem chave, abre `partner.klipy.com` no navegador do sistema (`try_state::<Opener>` + `open_url`) passa;
-  o teste do `setup` só roda com chave salva e a guarda só conhece as APIs da janela. O logger da iteração anterior
-  agora falha.
-- Demais linhas: provam o critério.
+- DoD row «1 | Core … sem KLIPY/HTTP»: oca e objetiva — `std::{process::Command}` + `Command::new("curl")` no core passa
+  (a linha só recusa sockets).
+- DoD row «3 | Studio e disco … nada sai … no início»: oca e objetiva — uma segunda janela em `tauri.conf.json` com
+  `url` do KLIPY e o `app.js` abrindo o Painel ao iniciar sem chave passam (a guarda só lê Rust; o e2e só confere o
+  link depois do clique). O updater no `setup` não foi demonstrado.
+- DoD row «10 | No TODO/FIXME …» (PROJECT): oca e objetiva — `test.fixme('…')` sem issue passa, porque o `sed` apaga
+  o token antes da busca.
+- Demais linhas: provam o critério; as mutações da iteração anterior falham.
 
 **Verdict:** BLOCKED

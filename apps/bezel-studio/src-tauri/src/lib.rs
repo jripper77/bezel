@@ -596,22 +596,29 @@ fn restart_without_dmabuf_renderer() {
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
+    #[cfg(not(windows))]
     use std::time::Duration;
 
     use super::*;
     use bezel_core::app::discover_screens;
     use bezel_media::collection::FakeGifSource;
+    #[cfg(not(windows))]
     use tauri::RunEvent;
+    #[cfg(not(windows))]
     use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
+    #[cfg(not(windows))]
     use tauri::utils::config::WindowConfig;
 
+    #[cfg(not(windows))]
     use crate::gifs::SavedKey;
 
     /// An obvious fake KLIPY key.
+    #[cfg(not(windows))]
     const KEY: &str = "fake-KLIPY_key-0123456789abcdef";
 
     /// How long the started app idles, after its refresh loop's first
     /// round, for anything it started to ask KLIPY.
+    #[cfg(not(windows))]
     const IDLE: Duration = Duration::from_millis(1500);
 
     /// An empty temporary folder for the test `name`.
@@ -651,6 +658,12 @@ mod tests {
     /// more. Only the folders (temporary), the GIF source (counted), the
     /// screen (simulated) and the tray (none: it needs the desktop's) are
     /// the test's.
+    ///
+    /// Not built on Windows (D-2026-10-01-gif-sticker-search-8): the mock
+    /// runtime's `test` feature makes the Windows test binary fail to load
+    /// without the Common Controls v6 manifest; what it proves does not
+    /// depend on the platform.
+    #[cfg(not(windows))]
     #[test]
     fn the_app_setup_sends_nothing_at_start() {
         let root = temp_root("setup");

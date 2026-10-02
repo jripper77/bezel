@@ -49,5 +49,9 @@ sys-locale = "0.3.2"
 base64 = "0.22.1"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
 
+[dev-dependencies]
+# Tauri's mock runtime (`tauri::test`), to run the app's own setup in a test.
+tauri = { version = "2.12.0", features = ["test"] }
+
 [lints]
 workspace = true

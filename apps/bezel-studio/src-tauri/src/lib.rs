@@ -4,7 +4,9 @@
 //! about screens, sensors and themes lives in the core and its adapters.
 //! [`run`] is the composition root: it picks real or simulated adapters,
 //! starts the refresh loop that samples sensors and feeds the live screen,
-//! and keeps the app in the tray while a screen is live.
+//! and keeps the app in the tray while a screen is live. What it composes
+//! once the runtime is up is `setup`, which a test runs on Tauri's mock
+//! runtime.
 
 #![forbid(unsafe_code)]
 
@@ -44,18 +46,19 @@ use bezel_media::collection::{DiskCollection, MemoryCollection, collection_dir};
 use bezel_render::{SkiaRenderer, SystemFonts, font_files};
 use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
-use tauri::{AppHandle, Emitter as _, Manager, WindowEvent};
+use tauri::{App, AppHandle, Emitter as _, Manager, Runtime, WindowEvent};
 
 use crate::backend::{
     Backend, DEFAULT_MODEL, SensorFactory, Session, default_orientation, sleep_until,
 };
 use crate::commands::{Shared, Unsaved};
-use crate::gifs::{Gifs, KEY_FILE, KeyFile, Provider, SharedGifs};
+use crate::gifs::{Gifs, KEY_FILE, KeyFile, Provider, SharedGifs, SourceFactory};
 use crate::library::ThemeLibrary;
 use crate::manager::Copies;
 use crate::settings::SettingsFile;
 use crate::storage::{MediaSetup, StorageState};
 use crate::studio::Studio;
+use crate::texts::Texts;
 use crate::thumbnails::Thumbnails;
 use crate::udev_help::UdevHelp;
 
@@ -129,8 +132,13 @@ pub fn run() -> Result<(), tauri::Error> {
     #[cfg(target_os = "linux")]
     restart_without_dmabuf_renderer();
 
-    let simulate = switch_on(std::env::var_os(SIMULATION_SWITCH).as_deref());
-    let hidden = std::env::args().any(|a| a == HIDDEN_ARG);
+    let start: Start<tauri::Wry> = Start {
+        simulate: switch_on(std::env::var_os(SIMULATION_SWITCH).as_deref()),
+        hidden: std::env::args().any(|a| a == HIDDEN_ARG),
+        folders: Box::new(|app: &AppHandle| Folders::of(app)),
+        gif_source: klipy_source(),
+        tray: Box::new(add_tray),
+    };
     tauri::Builder::default()
         // First plugin: a second launch shows this window and exits.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -149,26 +157,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 .args([HIDDEN_ARG])
                 .build(),
         )
-        .setup(move |app| {
-            let backend: Shared = Arc::new(compose(app.handle(), simulate)?);
-            // Before the window asks for it: the last theme, or a blank one
-            // for the connected screen.
-            backend.restore_theme();
-            app.manage(Arc::clone(&backend));
-            // Its own state, which asks nothing of KLIPY until a search.
-            let gifs: SharedGifs = Arc::new(gifs(app.handle())?);
-            app.manage(gifs);
-            app.manage(Unsaved::default());
-            let live = backend.studio().live_key().is_some();
-            let tray = tray::create(app.handle(), live, &backend.texts())?;
-            app.manage(tray.live().clone());
-            app.manage(tray.clone());
-            start_refresh_loop(backend, tray.live().clone());
-            if !hidden {
-                show_main_window(app.handle());
-            }
-            Ok(())
-        })
+        .setup(move |app| setup(app, start))
         .on_window_event(|window, event| {
             let WindowEvent::CloseRequested { api, .. } = event else {
                 return;
@@ -269,8 +258,66 @@ pub fn run() -> Result<(), tauri::Error> {
         .run(tauri::generate_context!())
 }
 
+/// Keeps the tray's live item in step with whether a screen is live.
+type LiveSync = Box<dyn Fn(bool) + Send>;
+
+/// Finds where the app keeps its files, once Tauri knows its paths.
+type FindFolders<R> = Box<dyn FnOnce(&AppHandle<R>) -> tauri::Result<Folders> + Send>;
+
+/// Adds the tray icon with its menu, given whether a screen is live and
+/// the labels; answers what keeps its live item in step.
+type AddTray<R> = Box<dyn FnOnce(&AppHandle<R>, bool, &Texts) -> tauri::Result<LiveSync> + Send>;
+
+/// What [`setup`] gets from [`run`]: the start's switches, where the files
+/// are, the GIF provider and the tray. A test of the setup gives temporary
+/// folders, a fake GIF source and no tray icon.
+struct Start<R: Runtime> {
+    /// Simulated screen and sensors ([`SIMULATION_SWITCH`]).
+    simulate: bool,
+    /// Started at login ([`HIDDEN_ARG`]): the window stays hidden.
+    hidden: bool,
+    folders: FindFolders<R>,
+    /// Makes the GIF source for a saved key: KLIPY's client.
+    gif_source: SourceFactory,
+    tray: AddTray<R>,
+}
+
+/// The app's start, once the runtime is up (Tauri's `setup`): the backend
+/// and the GIF state composed and kept as the app's state, the tray, the
+/// refresh loop and the window. Nothing is asked of KLIPY here, nor by
+/// anything started here (D-2026-10-01-gif-sticker-search-3).
+fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
+    let folders = (start.folders)(app.handle())?;
+    let backend: Shared = Arc::new(compose(&folders, start.simulate));
+    // Before the window asks for it: the last theme, or a blank one for the
+    // connected screen.
+    backend.restore_theme();
+    app.manage(Arc::clone(&backend));
+    // Its own state, which asks nothing of KLIPY until a search.
+    let gifs: SharedGifs = Arc::new(gifs(&folders, start.gif_source));
+    app.manage(gifs);
+    app.manage(Unsaved::default());
+    let live = backend.studio().live_key().is_some();
+    let live_item = (start.tray)(app.handle(), live, &backend.texts())?;
+    start_refresh_loop(backend, live_item);
+    if !start.hidden {
+        show_main_window(app.handle());
+    }
+    Ok(())
+}
+
+/// Adds the tray icon and keeps its menu as the app's state, for the
+/// commands that relabel it or follow live mode.
+fn add_tray(app: &AppHandle, live: bool, text: &Texts) -> tauri::Result<LiveSync> {
+    let tray = tray::create(app, live, text)?;
+    app.manage(tray.live().clone());
+    app.manage(tray.clone());
+    let item = tray.live().clone();
+    Ok(Box::new(move |live| item.sync(live)))
+}
+
 /// Shows, restores and focuses the main window.
-pub(crate) fn show_main_window(app: &AppHandle) {
+pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         // Best effort for each step: the window manager may refuse focus or
         // unminimizing, and there is nothing better to do than try the rest.
@@ -321,13 +368,42 @@ fn starting_theme() -> Theme {
     }
 }
 
+/// Where the app keeps its files.
+struct Folders {
+    /// The app's config folder: `settings.json`, `klipy.json`.
+    config: PathBuf,
+    /// The user's data folder: `<data>/bezel` is shared with the CLI (the
+    /// local copies, the collection) and holds the themes
+    /// `install-local.sh` installs.
+    data: PathBuf,
+    /// The app's data folder: the user's themes.
+    app_data: PathBuf,
+    /// The app's cache folder.
+    cache: PathBuf,
+    /// The installed app's resources (the bundled themes), when known.
+    resources: Option<PathBuf>,
+}
+
+impl Folders {
+    /// The folders Tauri finds for the app on this system.
+    fn of<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Self> {
+        let path = app.path();
+        Ok(Self {
+            config: path.app_config_dir()?,
+            data: path.data_dir()?,
+            app_data: path.app_data_dir()?,
+            cache: path.app_cache_dir()?,
+            resources: path.resource_dir().ok(),
+        })
+    }
+}
+
 /// Folders of the themes that ship with Bezel: next to the installed app
 /// (packages) and in the user's data folder (`install-local.sh`).
-fn bundled_theme_dirs(app: &AppHandle) -> Vec<PathBuf> {
-    let path = app.path();
+fn bundled_theme_dirs(folders: &Folders) -> Vec<PathBuf> {
     [
-        path.resource_dir().ok().map(|d| d.join("themes")),
-        path.data_dir().ok().map(|d| d.join("bezel").join("themes")),
+        folders.resources.as_ref().map(|d| d.join("themes")),
+        Some(folders.data.join("bezel").join("themes")),
     ]
     .into_iter()
     .flatten()
@@ -335,7 +411,7 @@ fn bundled_theme_dirs(app: &AppHandle) -> Vec<PathBuf> {
     .collect()
 }
 
-fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
+fn compose(folders: &Folders, simulate: bool) -> Backend {
     let Adapters {
         bus,
         connector,
@@ -343,25 +419,24 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         sensors,
     } = adapters(simulate);
     // The bundled themes' fonts first, so previews match every machine.
-    let bundled_dirs = bundled_theme_dirs(app);
+    let bundled_dirs = bundled_theme_dirs(folders);
     let bundled_fonts = bundled_dirs
         .iter()
         .flat_map(|dir| font_files(&dir.join("fonts")))
         .collect();
     let renderer = SkiaRenderer::with_fonts(bundled_fonts, SystemFonts::Load);
     let fonts = renderer.font_families();
-    let path = app.path();
-    let settings = SettingsFile::new(path.app_config_dir()?.join("settings.json"));
+    let settings = SettingsFile::new(folders.config.join("settings.json"));
     let system_language = clock::language();
     let language = settings.load().language().unwrap_or(system_language);
     let ffmpeg = settings.load().ffmpeg_path.map(PathBuf::from);
-    let cache = path.app_cache_dir()?;
+    let cache = &folders.cache;
     let copies = if simulate {
         // The simulated 8.8" is keyed like a real one: never in the
         // user's catalog.
         Copies::in_memory(MemoryArchive::new())
     } else {
-        copies(&path.data_dir()?)
+        copies(&folders.data)
     };
     let storage = StorageState::new(
         Box::new(FfmpegTranscoder::new(ffmpeg)),
@@ -373,12 +448,12 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
     let measured = sensors(settings.load().sensor_options());
     let studio = Studio::new(measured, Box::new(renderer), language, starting_theme())
         .with_host_decoding(storage.shared_media(), cache.join("playing"));
-    Ok(Backend {
+    Backend {
         bus,
         connector,
         hid,
         store: Arc::new(FsThemeStore),
-        library: ThemeLibrary::new(path.app_data_dir()?.join("themes"), bundled_theme_dirs(app)),
+        library: ThemeLibrary::new(folders.app_data.join("themes"), bundled_theme_dirs(folders)),
         settings,
         system_language,
         make_sensors: sensors,
@@ -389,7 +464,7 @@ fn compose(app: &AppHandle, simulate: bool) -> tauri::Result<Backend> {
         studio: Session::new(studio),
         storage,
         thumbnails: thumbnails(&bundled_dirs, cache.join("thumbnails")),
-    })
+    }
 }
 
 /// The local copies of what the studio sends, in `<data>/bezel/storage`
@@ -405,15 +480,23 @@ fn copies(data: &Path) -> Copies {
     }
 }
 
+/// KLIPY's client for a saved key (D-2026-10-01-gif-sticker-search-2):
+/// making one asks nothing.
+fn klipy_source() -> SourceFactory {
+    Arc::new(|key: &str, customer: &str| -> Arc<dyn GifSource> {
+        Arc::new(KlipyClient::new(key, customer))
+    })
+}
+
 /// The GIF search and the collection (D-2026-10-01-gif-sticker-search-3,
-/// -5): the KLIPY key in `<config>/klipy.json`, the collection in
-/// `<data>/bezel/collection` shared with the CLI's data folder (in memory for
-/// this run when that folder cannot be made), a background's copy in
-/// `<cache>/collection`. Nothing is read from KLIPY here.
-fn gifs(app: &AppHandle) -> tauri::Result<Gifs> {
-    let path = app.path();
+/// -5): sources from `source` for the KLIPY key in `<config>/klipy.json`,
+/// the collection in `<data>/bezel/collection` shared with the CLI's data
+/// folder (in memory for this run when that folder cannot be made), a
+/// background's copy in `<cache>/collection`. Nothing is read from KLIPY
+/// here.
+fn gifs(folders: &Folders, source: SourceFactory) -> Gifs {
     let collection: Box<dyn GifCollection> =
-        match DiskCollection::open(collection_dir(&path.data_dir()?)) {
+        match DiskCollection::open(collection_dir(&folders.data)) {
             Ok(disk) => Box::new(disk),
             Err(e) => {
                 tracing::error!("the GIF collection is kept for this run only: {e}");
@@ -421,17 +504,15 @@ fn gifs(app: &AppHandle) -> tauri::Result<Gifs> {
             }
         };
     let provider = Provider {
-        source: Arc::new(|key: &str, customer: &str| -> Arc<dyn GifSource> {
-            Arc::new(KlipyClient::new(key, customer))
-        }),
+        source,
         customer_id: bezel_klipy::new_customer_id,
     };
-    Ok(Gifs::new(
-        KeyFile::new(path.app_config_dir()?.join(KEY_FILE)),
+    Gifs::new(
+        KeyFile::new(folders.config.join(KEY_FILE)),
         provider,
         collection,
-        path.app_cache_dir()?.join("collection"),
-    ))
+        folders.cache.join("collection"),
+    )
 }
 
 /// The library's thumbnails, kept in `dir`: drawn with the bundled themes'
@@ -470,7 +551,7 @@ impl MediaSetup for FfmpegTranscoder {
 /// screen when the session says (the theme's refresh, a visible GIF's
 /// frames, an attempt to connect a failed screen again), on its own thread
 /// for the life of the app. The tray's live item follows.
-fn start_refresh_loop(backend: Shared, live_item: tray::LiveItem) {
+fn start_refresh_loop(backend: Shared, live_item: LiveSync) {
     let spawned = std::thread::Builder::new()
         .name("bezel-refresh".into())
         .spawn(move || {
@@ -483,7 +564,7 @@ fn start_refresh_loop(backend: Shared, live_item: tray::LiveItem) {
                 // Not under the session's lock: the menu waits for the main
                 // thread.
                 let live = backend.studio().live_key().is_some();
-                live_item.sync(live);
+                live_item(live);
                 std::thread::sleep(sleep_until(due, Instant::now()));
             }
         });
@@ -520,8 +601,127 @@ fn restart_without_dmabuf_renderer() {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
     use super::*;
     use bezel_core::app::discover_screens;
+    use bezel_media::collection::FakeGifSource;
+    use tauri::RunEvent;
+    use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
+    use tauri::utils::config::WindowConfig;
+
+    use crate::gifs::SavedKey;
+
+    /// An obvious fake KLIPY key.
+    const KEY: &str = "fake-KLIPY_key-0123456789abcdef";
+
+    /// How long the started app idles, after its refresh loop's first
+    /// round, for anything it started to ask KLIPY.
+    const IDLE: Duration = Duration::from_millis(1500);
+
+    /// An empty temporary folder for the test `name`.
+    fn temp_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("bezel-app-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        root
+    }
+
+    impl Folders {
+        /// The app's folders, all inside `root`.
+        fn under(root: &Path) -> Self {
+            Self {
+                config: root.join("config"),
+                data: root.join("data"),
+                app_data: root.join("app-data"),
+                cache: root.join("cache"),
+                resources: None,
+            }
+        }
+    }
+
+    /// A GIF source factory over `source` that says on `made` each source
+    /// it makes.
+    fn counting(source: &FakeGifSource, made: mpsc::Sender<()>) -> SourceFactory {
+        let source = source.clone();
+        Arc::new(move |_: &str, _: &str| -> Arc<dyn GifSource> {
+            let _ = made.send(());
+            Arc::new(source.clone())
+        })
+    }
+
+    /// D-2026-10-01-gif-sticker-search-3 (DoD critic, row 3): the app's own
+    /// setup, run by Tauri's runtime (the mock one) with a KLIPY key saved,
+    /// asks nothing of KLIPY. The GIF source is never made, so never asked,
+    /// while the app idles: its refresh loop goes round once, then a while
+    /// more. Only the folders (temporary), the GIF source (counted), the
+    /// screen (simulated) and the tray (none: it needs the desktop's) are
+    /// the test's.
+    #[test]
+    fn the_app_setup_sends_nothing_at_start() {
+        let root = temp_root("setup");
+        let folders = Folders::under(&root);
+        let saved = SavedKey::new(KEY, "customer-0001");
+        KeyFile::new(folders.config.join(KEY_FILE))
+            .save(&saved)
+            .unwrap();
+        let source = FakeGifSource::new();
+        let (made, made_rx) = mpsc::channel();
+        let (round, rounds) = mpsc::channel();
+        let start = Start {
+            simulate: true,
+            hidden: false,
+            folders: Box::new(move |_: &AppHandle<MockRuntime>| Ok(folders)),
+            gif_source: counting(&source, made),
+            tray: Box::new(move |_: &AppHandle<MockRuntime>, _, _: &Texts| {
+                // The refresh loop syncs the live item after each round.
+                let synced: LiveSync = Box::new(move |_| {
+                    let _ = round.send(());
+                });
+                Ok(synced)
+            }),
+        };
+        let mut context = mock_context(noop_assets());
+        // The window as `tauri.conf.json` has it, made before the setup.
+        context.config_mut().app.windows.push(WindowConfig {
+            label: MAIN_WINDOW.into(),
+            visible: false,
+            ..WindowConfig::default()
+        });
+        let app = mock_builder()
+            .setup(move |app| setup(app, start))
+            .build(context)
+            .unwrap();
+
+        let (seen, seen_rx) = mpsc::channel();
+        app.run_return(move |app, event| {
+            if !matches!(event, RunEvent::Ready) {
+                return;
+            }
+            let went_round = rounds.recv_timeout(Duration::from_secs(60)).is_ok();
+            let asked = made_rx.recv_timeout(IDLE).is_ok();
+            let composed =
+                app.try_state::<Shared>().is_some() && app.try_state::<Unsaved>().is_some();
+            let key_saved = app
+                .try_state::<SharedGifs>()
+                .is_some_and(|gifs| gifs.key_status().is_ok_and(|key| key.configured));
+            seen.send((went_round, asked, composed, key_saved)).unwrap();
+            // The window closes: the app ends.
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                window.destroy().unwrap();
+            }
+        });
+        let (went_round, asked, composed, key_saved) = seen_rx.recv().unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            composed,
+            "the setup kept the backend and the session's state"
+        );
+        assert!(key_saved, "the app's GIF state has the saved key");
+        assert!(went_round, "the setup started the refresh loop");
+        assert!(!asked, "a GIF source was made at start");
+        assert!(source.calls().is_empty(), "KLIPY was asked at start");
+    }
 
     #[test]
     fn only_one_turns_the_simulation_on() {

@@ -41,15 +41,20 @@
   `e2e-passed.mjs` exige claro e escuro em pt-BR e en (W1).
 - Iter 4 (crítico da iter 3: linhas 3, 4, 5 e 10 ocas e objetivas → BLOCKED): D-9 (o orquestrador reescreveu a linha de
   TODO do PROJECT — todo arquivo versionado, só tokens do Playwright e `TODO(#N)` saem — e apertou as linhas 3, sem
-  overlays de config do Tauri, e 4, sem `source`/`checksum` removidos); `a82fcc3` (só uma invocação de comando chega
+  overlays de config do Tauri, e 4, sem `source`/`checksum` removidos); `d8d17d9` (só uma invocação de comando chega
   ao KLIPY: o token `UserAsked` nasce de `tauri::ipc::Request`, que o app não fabrica; um aquecimento no `setup`, já ou
-  atrasado, não compila), `4beeaac` (o e2e prova o debounce pela UI: 1 caractere não busca, "cat" busca uma vez após a
+  atrasado, não compila), `832e861` (o e2e prova o debounce pela UI: 1 caractere não busca, "cat" busca uma vez após a
   pausa, Enter busca na hora).
 - Iter 5 (crítico da iter 4: linha 3 — invocação IPC forjada, drible deliberado; linha 5 — texto fixo via helper e
-  setas no eixo errado → BLOCKED): `310c987` (guarda de fonte `tests::nothing_in_the_app_forges_an_invocation`: o código
+  setas no eixo errado → BLOCKED): `ce4ade5` (guarda de fonte `tests::nothing_in_the_app_forges_an_invocation`: o código
   de produção do studio não usa `on_message`/`invoke_key`/`eval`/`__TAURI` e cria o cliente do KLIPY num só lugar; na
-  linha 3 do DoD), `c85de43` (a varredura de i18n reprova qualquer frase fixa no código da UI), `e280b14` (o e2e prova
+  linha 3 do DoD), `8793841` (a varredura de i18n reprova qualquer frase fixa no código da UI), `3e1d1ae` (o e2e prova
   as setas pelas colunas reais e a mensagem de chave vazia no idioma).
+- --- AUTO-RESET 1 (teto de 5 iterações; o crítico da iter 5 achou a chave num `eprintln!` e um anúncio com texto
+  solto) --- Rodada 2, iter 1: D-10; `KlipyKey` (sem `Display`, `Debug` mascarado, um só leitor: imprimir a chave não
+  compila), a guarda de fonte lê identificadores com `syn` (pega `r#eval`, macros, `with_webview`), os helpers da UI só
+  aceitam chaves de i18n (texto solto = chave desconhecida) e o e2e confere `keySavedNow`, `keyRemoved` e
+  `collection.using` no idioma.
 
 ## Blocked tasks
 - nenhuma
@@ -64,9 +69,9 @@
 - `docs/user/{,pt-BR/}{gifs-and-stickers,README}.md`, `scripts/ci/check-docs.sh`, `CHANGELOG.md`, `README.md`
 
 ## Tests
-- `cargo test --workspace --locked`: 936 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
+- `cargo test --workspace --locked`: 939 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
 - DoD 1–6: OK no branch combinado a cada iteração; DoD 7: `rust-windows` verde (iter 3: 153 testes do studio no Windows)
-- UI: 228 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
+- UI: 231 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc` sem studio e klipy: o `ring` não compila
   para MSVC aqui; o `rust-windows` do CI cobre), `check-docs.sh`, `check-packaging.sh`, `cargo audit`
 - Cobertura: `bezel-klipy` 97%, studio `gifs.rs` 96,87%, `collection.js` 100%

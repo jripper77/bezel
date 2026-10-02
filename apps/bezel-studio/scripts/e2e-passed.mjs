@@ -2,8 +2,8 @@
 // tell: a `test.fixme` plus any other test keeps the count. This takes each
 // test by name ("<describe> › <title>", as Playwright prints it) and
 // requires, in EVERY project the config declares (read from the report,
-// never counted here), a run that passed (not skipped, not fixme, not flaky,
-// not expected to fail) and that recorded the axe check: `expectAccessible`
+// never counted here), a run that passed (not skipped, not parked by
+// `test.fixme`, not flaky, not expected to fail) and that recorded the axe check: `expectAccessible`
 // annotates the run with `axe`. A test of the run that failed, named or not,
 // fails it too.
 //
@@ -28,6 +28,8 @@ export const SEPARATOR = ' › ';
 export const AXE = 'axe';
 /** The verdict of a run that proves its test. */
 export const OK = 'ok';
+/** The verdict of a run parked by `test.fixme` (Playwright's annotation type too). */
+export const PARKED = 'fixme';
 
 const USAGE = 'usage: node scripts/e2e-passed.mjs [--grep <pattern>] [--report <report.json>] "<describe> › <title>"...';
 const OPTIONS = { grep: { type: 'string' }, report: { type: 'string' } };
@@ -89,7 +91,7 @@ const has = (annotations, type) => (annotations ?? []).some((a) => a.type === ty
 
 /** What one run (a JSON report's test in one project) proves: `ok`, or why not. */
 export function verdictOf(run) {
-  if (has(run.annotations, 'fixme')) return 'fixme';
+  if (has(run.annotations, PARKED)) return PARKED;
   if (run.status === 'skipped' || run.status === 'flaky') return run.status;
   const last = run.results?.at(-1);
   if (run.status !== 'expected' || run.expectedStatus !== 'passed' || last?.status !== 'passed') return 'failed';

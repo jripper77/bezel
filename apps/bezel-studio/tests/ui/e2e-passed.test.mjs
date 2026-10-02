@@ -1,8 +1,9 @@
 // The proof that named e2e tests passed (scripts/e2e-passed.mjs), on small
 // synthetic Playwright JSON reports: every named test must have, in every
 // project the report declares, a run that passed and recorded the axe
-// check; a skipped, fixme, flaky, failed or missing run, a run without axe,
-// or another test that failed in the run makes it fail, naming why.
+// check; a skipped run (or one parked by `test.fixme`), a flaky, failed or
+// missing run, a run without axe, or another test that failed in the run
+// makes it fail, naming why.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -11,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  AXE, OK, checkReport, formatTable, formatVerdict, grepFor, projectsOf, readArgs, runsByName, testName, verdictOf,
+  AXE, OK, PARKED, checkReport, formatTable, formatVerdict, grepFor, projectsOf, readArgs, runsByName, testName, verdictOf,
 } from '../../scripts/e2e-passed.mjs';
 
 const PROJECTS = ['light-pt', 'dark-pt', 'light-en', 'dark-en'];
@@ -61,12 +62,12 @@ test('one project skipped: fails, naming the test and the project', () => {
   assert.deepEqual(result.problems, [`${RATE} [dark-en]: skipped`]);
 });
 
-test('a fixme test: fails in every project, even with another test passing beside it', () => {
-  const fixme = { annotations: [{ type: 'fixme' }], status: 'skipped', expectedStatus: 'skipped', results: [] };
-  const changed = Object.fromEntries(PROJECTS.map((project) => [project, fixme]));
+test('a test parked by test.fixme: fails in every project, even with another test passing beside it', () => {
+  const parked = { annotations: [{ type: 'fixme' }], status: 'skipped', expectedStatus: 'skipped', results: [] };
+  const changed = Object.fromEntries(PROJECTS.map((project) => [project, parked]));
   const result = checkReport(report([spec('no key: help'), spec('429: 100 per hour', changed), spec('unrelated')]), [HELP, RATE]);
   assert.deepEqual(result.rows[1].cells, ['fixme', 'fixme', 'fixme', 'fixme']);
-  assert.deepEqual(result.problems, PROJECTS.map((project) => `${RATE} [${project}]: fixme`));
+  assert.deepEqual(result.problems, PROJECTS.map((project) => `${RATE} [${project}]: ${PARKED}`));
 });
 
 test('a run without the axe annotation: fails', () => {

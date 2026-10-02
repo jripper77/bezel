@@ -673,7 +673,7 @@ mod tests {
     use syn::{
         Arm, AttrStyle, Attribute, BinOp, Block, Expr, ExprCall, ExprClosure, ExprForLoop, ExprIf,
         ExprMethodCall, ExprStruct, ExprWhile, Fields, FnArg, ImplItem, ImplItemFn, ImplItemType,
-        Item, ItemExternCrate, ItemFn, ItemImpl, ItemType, ItemUse, Lit, Macro, Member, Meta, Pat,
+        Item, ItemExternCrate, ItemFn, ItemImpl, ItemType, ItemUse, Lit, Macro, Meta, Pat,
         PatIdent, QSelf, ReturnType, Signature, Stmt, TraitItemFn, Type, UseName, UseRename,
         UseTree,
     };
@@ -1231,6 +1231,14 @@ mod tests {
     /// [`KEY_MODULE`].
     const KEY_READER: &str = "expose_secret";
 
+    /// The key file's serializer in [`KEY_MODULE`], the accessor's one
+    /// reader there: serde calls it, through the attribute of the file
+    /// JSON's `key`, and no code names it but its definition.
+    const KEY_WRITER: &str = "write_key";
+
+    /// The one call of [`KEY_WRITER`] that takes the key's text.
+    const KEY_WRITE: &str = "serialize_str";
+
     /// The key's module: its type, its accessor, its file.
     const KEY_MODULE: &str = "gifs/key.rs";
 
@@ -1756,6 +1764,12 @@ mod tests {
             if name == KEY_READER {
                 self.key_reader();
             }
+            if name == KEY_WRITER && !(self.file == KEY_MODULE && self.within == [KEY_WRITER]) {
+                self.refuse(format_args!(
+                    "`{KEY_WRITER}`, the key file's serializer, named outside its definition: \
+                     serde calls it, for the key file's `key` only"
+                ));
+            }
             if name == PROOF && self.in_macro > 0 && !self.in_gif_command() {
                 self.refuse(format_args!(
                     "`{PROOF}` inside a macro call outside the GIF commands"
@@ -1852,7 +1866,8 @@ mod tests {
             } else {
                 self.refuse(format_args!(
                     "`{KEY_READER}` reads the KLIPY key outside its two uses: an argument of \
-                     `KlipyClient::new` in `klipy_source`, the key file's `key` field"
+                     `KlipyClient::new` in `klipy_source`, and of `{KEY_WRITE}` in \
+                     `{KEY_WRITER}`, the key file's serializer"
                 ));
             }
         }
@@ -2097,10 +2112,30 @@ mod tests {
         }
 
         /// A method call: one that panics printing what it holds is
-        /// refused outside [`DIAG_MODULE`].
+        /// refused outside [`DIAG_MODULE`]. In the key file's serializer
+        /// ([`KEY_WRITER`]), the key's text as the one argument of
+        /// [`KEY_WRITE`] is accepted, its key read as an expression.
         fn visit_expr_method_call(&mut self, call: &'ast ExprMethodCall) {
-            self.panics_printing(&call.method.unraw().to_string());
-            visit::visit_expr_method_call(self, call);
+            let method = call.method.unraw().to_string();
+            self.panics_printing(&method);
+            let writes_the_key = self.production()
+                && self.file == KEY_MODULE
+                && self.within == [KEY_WRITER]
+                && method == KEY_WRITE
+                && call.turbofish.is_none()
+                && call.args.len() == 1;
+            let key = call.args.first().and_then(key_text);
+            let Some(key) = key.filter(|_| writes_the_key) else {
+                visit::visit_expr_method_call(self, call);
+                return;
+            };
+            for attribute in &call.attrs {
+                self.visit_attribute(attribute);
+            }
+            self.visit_expr(&call.receiver);
+            self.visit_ident(&call.method);
+            self.read_key();
+            self.visit_expr(key);
         }
 
         fn visit_attribute(&mut self, attribute: &'ast Attribute) {
@@ -2155,9 +2190,7 @@ mod tests {
             }
         }
 
-        /// A struct literal; in `KeyFile::save`, the key's text as the
-        /// `key` field of the key file's JSON is accepted, its key read as
-        /// an expression. A literal in the proof's module makes a proof:
+        /// A struct literal: one in the proof's module makes a proof, which
         /// only `UserAsked::of` may.
         fn visit_expr_struct(&mut self, literal: &'ast ExprStruct) {
             if self.production() && self.file == PROOF_MODULE && self.outer() != Some("of") {
@@ -2166,35 +2199,7 @@ mod tests {
                      made another way"
                 ));
             }
-            let writes_the_key = self.production()
-                && self.file == KEY_MODULE
-                && self.outer() == Some("save")
-                && literal.qself.is_none()
-                && literal.path.is_ident("KeyJson");
-            if !writes_the_key {
-                visit::visit_expr_struct(self, literal);
-                return;
-            }
-            for attribute in &literal.attrs {
-                self.visit_attribute(attribute);
-            }
-            self.visit_path(&literal.path);
-            for field in &literal.fields {
-                let named_key = matches!(&field.member, Member::Named(name) if name == "key");
-                match receiver(&field.expr, "to_string").and_then(key_text) {
-                    Some(key) if named_key => {
-                        self.read_key();
-                        for attribute in &field.attrs {
-                            self.visit_attribute(attribute);
-                        }
-                        self.visit_expr(key);
-                    }
-                    _ => self.visit_field_value(field),
-                }
-            }
-            if let Some(rest) = &literal.rest {
-                self.visit_expr(rest);
-            }
+            visit::visit_expr_struct(self, literal);
         }
 
         fn visit_item_impl(&mut self, item: &'ast ItemImpl) {
@@ -2700,11 +2705,14 @@ mod tests {
     ///   is named nowhere else but its import;
     /// - the key's accessor (`KEY_READER`) is named in two places only,
     ///   besides its definition in `gifs/key.rs`: as `key.expose_secret()`,
-    ///   a direct argument of `KlipyClient::new` in `klipy_source`, and as
-    ///   `key.expose_secret().to_string()`, the `key` field of the
-    ///   `KeyJson` literal in `KeyFile::save`. Anywhere else (bound to a
+    ///   a direct argument of `KlipyClient::new` in `klipy_source`, and the
+    ///   one argument of `serialize_str` in `write_key` (`KEY_WRITER`), the
+    ///   key file's serializer in `gifs/key.rs`. Anywhere else (bound to a
     ///   variable, inside any macro call's tokens, a path, another argument,
-    ///   field, function or file) it is refused;
+    ///   method, field, function or file, the `KeyJson` literal of
+    ///   `KeyFile::save` included) it is refused, and `write_key` is named
+    ///   nowhere but at its definition: serde calls it, through the
+    ///   attribute of the key file JSON's `key`, which is a `KlipyKey`;
     /// - a function that reads the key's text (those three) calls no macro
     ///   at all;
     /// - nothing prints or logs but `diag.rs`
@@ -2794,7 +2802,7 @@ mod tests {
             reads,
             [
                 "gifs/key.rs: expose_secret",
-                "gifs/key.rs: save",
+                "gifs/key.rs: write_key",
                 "lib.rs: klipy_source"
             ],
             "the key's text is read by its accessor, for the key file and KLIPY's client"
@@ -2920,10 +2928,10 @@ fn after(w: W) { w.on_message(request) }
             )
         };
         let made = "Arc::new(KlipyClient::new(key.expose_secret(), c))";
-        let save = |key: &str, more: &str| {
+        let write = |more: &str, text: &str| {
             format!(
-                "fn save(s: &SavedKey, o: &mut W) -> J {{ {more} KeyJson {{ key: {key}, \
-                 customer_id: s.customer_id.clone() }} }}"
+                "fn write_key<S: Serializer>(key: &KlipyKey, s: S) -> Result<S::Ok, S::Error> \
+                 {{ {more} s.serialize_str({text}) }}"
             )
         };
         vec![
@@ -2974,24 +2982,70 @@ fn after(w: W) { w.on_message(request) }
                 "fn warm_up(key: &KlipyKey) { KlipyClient::new(key.expose_secret(), c); }".into(),
                 "outside its two uses",
             ),
-            // The key file: formatted, another field, a macro in `save`.
+            // The key file's serializer: formatted, bound, a macro there.
             (
                 KEY_MODULE,
-                save("format!(\"{}\", s.key.expose_secret())", ""),
+                write("", "&format!(\"{}\", key.expose_secret())"),
                 "inside a macro call",
             ),
             (
                 KEY_MODULE,
-                save("k", "let c = s.key.expose_secret().to_string();"),
+                write("let k = key.expose_secret();", "k"),
                 "outside its two uses",
             ),
             (
                 KEY_MODULE,
-                save(
-                    "s.key.expose_secret().to_string()",
-                    "let _ = writeln!(o, \"saving\");",
+                write(
+                    "let _ = writeln!(std::io::sink(), \"saving\");",
+                    "key.expose_secret()",
                 ),
-                "`writeln!` in `save`, which reads the KLIPY key",
+                "`writeln!` in `write_key`, which reads the KLIPY key",
+            ),
+            // The critic of round 2, iter 4: the key file's JSON held the
+            // key as a `String`, which an error could quote. The literal
+            // that made it is refused now; the JSON holds a `KlipyKey`.
+            (
+                KEY_MODULE,
+                "fn save(s: &SavedKey) -> J { KeyJson { key: s.key.expose_secret().to_string(), \
+                 customer_id: s.customer_id.clone() } }"
+                    .into(),
+                "outside its two uses",
+            ),
+            // Another method of the serializer, the serializer elsewhere,
+            // or called by code (with any serializer: to a `String`, a
+            // file) rather than by serde for the key file.
+            (
+                KEY_MODULE,
+                write("", "&key.expose_secret().to_owned()"),
+                "outside its two uses",
+            ),
+            (
+                KEY_MODULE,
+                "fn write_key<S: Serializer>(key: &KlipyKey, s: S) -> R { \
+                 s.collect_str(key.expose_secret()) }"
+                    .into(),
+                "outside its two uses",
+            ),
+            (
+                "lib.rs",
+                "fn write_key<S: Serializer>(key: &KlipyKey, s: S) -> R { \
+                 s.serialize_str(key.expose_secret()) }"
+                    .into(),
+                "outside its two uses",
+            ),
+            (
+                KEY_MODULE,
+                "fn found(k: &KlipyKey) -> String { let mut out = Vec::new(); \
+                 let _ = write_key(k, &mut serde_json::Serializer::new(&mut out)); \
+                 String::from_utf8_lossy(&out).into_owned() }"
+                    .into(),
+                "the key file's serializer, named outside its definition",
+            ),
+            (
+                "gifs.rs",
+                "fn found(k: &KlipyKey) -> String { serde_json::to_string(&Wrap(k, key::write_key)) }"
+                    .into(),
+                "the key file's serializer, named outside its definition",
             ),
             // A command logging it.
             (
@@ -3728,8 +3782,13 @@ fn after(w: W) { w.on_message(request) }
             (
                 KEY_MODULE,
                 "impl KlipyKey { pub(crate) fn expose_secret(&self) -> &str { &self.0 } }\n\
+                 #[derive(Serialize, Deserialize)]\nstruct KeyJson { \
+                 #[serde(serialize_with = \"write_key\", deserialize_with = \"read_key\")] \
+                 key: KlipyKey, customer_id: String }\n\
+                 fn write_key<S: Serializer>(key: &KlipyKey, serializer: S) -> \
+                 Result<S::Ok, S::Error> { serializer.serialize_str(key.expose_secret()) }\n\
                  impl KeyFile { fn save(&self, s: &SavedKey) -> J { KeyJson { \
-                 key: s.key.expose_secret().to_string(), customer_id: s.customer_id.clone() } } }",
+                 key: s.key.clone(), customer_id: s.customer_id.clone() } } }",
             ),
             (
                 COMMAND_MODULE,

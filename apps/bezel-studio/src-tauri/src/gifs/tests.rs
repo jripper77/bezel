@@ -346,11 +346,90 @@ fn no_request_at_start_or_without_key() {
     assert_eq!(f.source.calls().len(), 1, "nothing once removed");
 }
 
+/// What the window gets from a GIF command, an answer or an error, as the
+/// IPC sends it.
+fn answer<T: serde::Serialize>(got: UiResult<T>) -> String {
+    match got {
+        Ok(value) => json(&value),
+        Err(error) => json(&error),
+    }
+}
+
+/// The first part of `key` longer than its last 4 characters (any 5 of its
+/// characters in a row) that `answer` shows, `root` (a folder the answer
+/// may name) left out.
+fn shown_of(answer: &str, key: &str, root: &Path) -> Option<String> {
+    let root = root.display().to_string();
+    let escaped = json(&root);
+    let answer = answer
+        .replace(escaped.trim_matches('"'), "")
+        .replace(&root, "");
+    let characters: Vec<char> = key.chars().collect();
+    characters
+        .windows(5)
+        .map(|part| part.iter().collect::<String>())
+        .find(|part| answer.contains(part.as_str()))
+}
+
+/// Key files that cannot be used, each with the key text it holds: written
+/// by hand or damaged, they reach the window only as errors (the critic of
+/// round 2, iter 4), which must quote nothing of that text. `customer` is a
+/// customer id that can be one.
+fn unusable_key_files(customer: &str) -> Vec<(String, &'static str)> {
+    // Characters no path, code or message here holds five of in a row.
+    const HELD: &str = "Zq7Xw2Vb9Nm4Lk8Jh3Gf6Dd1";
+    const DIGITS: &str = "7351902846";
+    vec![
+        // A key that can be one, its customer id not.
+        (
+            format!(r#"{{"key": "{HELD}", "customerId": "not an id!"}}"#),
+            HELD,
+        ),
+        (format!(r#"{{"key": "{HELD}", "customerId": 42}}"#), HELD),
+        (format!(r#"{{"key": "{HELD}"}}"#), HELD),
+        // A key with a space or a line break after it, or before it.
+        (
+            format!(r#"{{"key": "{HELD} ", "customerId": "{customer}"}}"#),
+            HELD,
+        ),
+        (
+            format!(r#"{{"key": "{HELD}\n", "customerId": "{customer}"}}"#),
+            HELD,
+        ),
+        (
+            format!(r#"{{"key": "\r\n{HELD}", "customerId": "{customer}"}}"#),
+            HELD,
+        ),
+        // A key that is not a string.
+        (
+            format!(r#"{{"key": {DIGITS}, "customerId": "{customer}"}}"#),
+            DIGITS,
+        ),
+        (
+            format!(r#"{{"key": ["{HELD}"], "customerId": "{customer}"}}"#),
+            HELD,
+        ),
+        (
+            format!(r#"{{"key": {{"text": "{HELD}"}}, "customerId": "{customer}"}}"#),
+            HELD,
+        ),
+        // Cut short: after the key, inside it, a line of it.
+        (
+            format!(r#"{{"key": "{HELD}", "customerId": "{customer}""#),
+            HELD,
+        ),
+        (format!(r#"{{"key": "{HELD}"#), HELD),
+        (format!("{HELD}\n"), HELD),
+    ]
+}
+
 /// D-2026-10-01-gif-sticker-search-3: the key goes to the file (0600 on
 /// Unix) and to the source, nowhere else: not in any answer the window
 /// gets, errors included, nor in a `Debug` output; the window sees its last
 /// 4 characters. A new key gets a new customer id; removing deletes the
-/// file.
+/// file. A key file that cannot be used (the critic of round 2, iter 4)
+/// gets every key command and GIF command an answer that quotes nothing of
+/// the key text it holds beyond its last 4 characters.
 #[test]
 fn key_never_reaches_the_window() {
     let source = with_results(
@@ -461,6 +540,35 @@ fn key_never_reaches_the_window() {
     assert!(!f.key_path().exists());
     assert!(!f.gifs.key_status().unwrap().configured);
     f.gifs.remove_key().unwrap();
+
+    // Key files that cannot be used: what the window gets from `klipy_key`,
+    // `search_gifs`, `gif_preview`, `collect_gif`, `save_klipy_key` and
+    // `remove_klipy_key`, the file being that one each time.
+    let star = query("sticker", "star", 1, false, Language::English).unwrap();
+    let asked = f.source.calls().len();
+    for (file, held) in &unusable_key_files(&customer) {
+        let write = || std::fs::write(f.key_path(), file).unwrap();
+        write();
+        let status = f.gifs.key_status();
+        assert_eq!(status.as_ref().err().map(UiError::code), Some("fileError"));
+        let mut window = vec![answer(status)];
+        window.push(answer(f.gifs.search(&ASKED, &star)));
+        window.push(answer(f.gifs.preview(&ASKED, "s1", false)));
+        window.push(answer(f.gifs.preview(&ASKED, "s1", true)));
+        window.push(answer(f.gifs.collect(&ASKED, "s1")));
+        window.push(answer(f.gifs.save_key(klipy(KEY))));
+        write();
+        window.push(answer(f.gifs.remove_key()));
+        for got in &window {
+            assert_eq!(shown_of(got, held, &f.studio.root), None, "{file}: {got}");
+        }
+        assert_eq!(window.iter().filter(|a| a.contains("fileError")).count(), 5);
+    }
+    assert_eq!(
+        f.source.calls().len(),
+        asked,
+        "nothing asked with those files"
+    );
 }
 
 /// D-2026-10-01-gif-sticker-search-10: a [`KlipyKey`]'s `Debug`, plain or

@@ -7,9 +7,10 @@
 //! - The key lives in [`KeyFile`] (`<config>/klipy.json`); the window only
 //!   learns whether one is saved and its last 4 characters ([`KeyDto`]).
 //!   Saving it asks nothing of the provider. From the command on, the key is
-//!   a [`KlipyKey`]: printing or logging it does not compile, and its text
-//!   is read in two places only, as an argument of `KlipyClient::new` in
-//!   the source factory and as the key file's `key` field (`key.rs`).
+//!   a [`KlipyKey`], in the key file's JSON too: printing or logging it
+//!   does not compile, no `String` of it is made, and its text is read in
+//!   two places only, as an argument of `KlipyClient::new` in the source
+//!   factory and by the key file's serializer (`write_key` in `key.rs`).
 //! - Nothing reaches the provider at start or without a key: the source is
 //!   made on the first search, preview or download after a key is saved,
 //!   and only those commands, each a user action, use it. Making a source
@@ -31,8 +32,9 @@
 //!     (`use … as`, `type … =`, `<UserAsked>::`, a macro's tokens, an
 //!     `impl` outside `asked.rs`);
 //!   - `expose_secret` but as `KlipyClient::new`'s argument in the source
-//!     factory and as the key file's `key` field: never bound to a
-//!     variable, never inside a macro call; and any macro in a function
+//!     factory and as `serialize_str`'s in the key file's serializer
+//!     (`write_key`, which serde calls and no code names): never bound to
+//!     a variable, never inside a macro call; and any macro in a function
 //!     that reads the key's text;
 //!   - a second `KlipyClient::new`; a print or a log macro, as anywhere but
 //!     `diag` (D-2026-10-01-gif-sticker-search-12), and any panic or

@@ -1173,10 +1173,15 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     dropped.set(source, item.bytes);
     return addMedia(source);
   }
-  /** The user's saved themes, and whether the edited one, that use one of `refs`. */
+  /**
+   * The user's saved themes that use one of `refs`, and whether the open
+   * one holds one of them among its assets (like the backend, which looks
+   * for the same bytes in the session's assets, used or not yet).
+   */
   const themesUsing = (refs) => {
     const uses = (t) => refs.some((ref) => JSON.stringify(t).includes(JSON.stringify(ref)));
-    return { themes: saved.filter((s) => !s.bundled && uses(s.theme)).map((s) => s.theme.name), openTheme: uses(theme) };
+    const held = taken();
+    return { themes: saved.filter((s) => !s.bundled && uses(s.theme)).map((s) => s.theme.name), openTheme: refs.some((ref) => held.has(ref)) };
   };
   const gifs = createDemoGifs(chosen.klipy ?? {}, {
     now,

@@ -12,6 +12,7 @@ import { ICONS } from './ui/icons.js';
 import { askChoice } from './ui/dialog.js';
 import { createPreferences } from './ui/preferences.js';
 import { createGifSearch } from './ui/gif-search.js';
+import { createCollectionPanel } from './ui/collection.js';
 import { showAccessHelp } from './ui/udev.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
@@ -108,9 +109,20 @@ const canvasView = createCanvasView({
   onFrameRequest: () => setFramingMode(true),
 });
 
-// "Search GIFs and stickers", opened from the Media tab's Collection
-// (D-2026-10-01-gif-sticker-search-4).
-const gifSearch = createGifSearch({ t, bridge, locale: () => locale });
+// The Media tab's Collection (D-2026-10-01-gif-sticker-search-5), and
+// "Search GIFs and stickers", opened from it (-4): what the search adds
+// shows up in the collection.
+const collection = createCollectionPanel({
+  root: $('collection-panel'),
+  t,
+  locale: () => locale,
+  bridge,
+  canvas: canvasView,
+  stage: $('stage'),
+  searchButton: $('gif-search-open'),
+  use: (item, target, at) => useCollected(item, target, at),
+});
+const gifSearch = createGifSearch({ t, bridge, locale: () => locale, onCollected: () => void collection.refresh() });
 
 const library = createLibrary({
   store,
@@ -127,6 +139,9 @@ const library = createLibrary({
     addImage: () => addImage(),
     addVideo: () => addMedia(),
     searchGifs: () => void gifSearch.open(),
+    mediaSubtab: (name) => {
+      if (name === 'collection') void collection.show();
+    },
     setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).then(() => { state.brightness[screen] = percent; }).catch((e) => fail(e)),
     release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => fail(e)),
     setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => fail(e)),
@@ -689,6 +704,39 @@ async function addMedia(source = null, { asBackground = false } = {}) {
   }
 }
 
+/** The middle of the canvas, in the theme's own orientation. */
+function canvasCenter() {
+  const { width, height } = store.getState().theme.canvas;
+  return { x: width / 2, y: height / 2 };
+}
+
+/**
+ * Copies a collection item into the theme under its name
+ * (D-2026-10-01-gif-sticker-search-5): an image element where it was
+ * dropped, else in the middle of the canvas (one undo step), or the theme's
+ * background, like an animated GIF added with "Add video…". The item then
+ * shows in "This theme" too.
+ * @param {{id: string, name: string}} item
+ * @param {'image'|'background'} target
+ * @param {{x: number, y: number}|null} at
+ */
+async function useCollected(item, target, at) {
+  const added = await bridge.useCollected(item.id, target);
+  await refreshAssets();
+  if (target === 'background') {
+    store.dispatch('setTheme', { patch: { background: backgroundOf(added) } });
+    if (added.kind === 'video' && !added.poster) await refreshTools();
+    if (added.posterError) toast(addedText(added));
+    return added;
+  }
+  const { x, y } = at ?? canvasCenter();
+  store.beginGesture();
+  store.dispatch('add', { widget: 'image', x, y, name: item.name });
+  store.dispatch('update', { id: store.getState().selection[0], patch: { kind: { asset: added.ref } } });
+  store.endGesture();
+  return added;
+}
+
 /** Picks a picture in the native dialog and makes it the background. */
 async function useImage() {
   try {
@@ -856,6 +904,7 @@ function setLocale(next) {
   library.setCatalog(labelledCatalog());
   library.retranslate();
   storage.retranslate();
+  collection.retranslate();
   if (canvasView.framing()) $('overlay').setAttribute('aria-label', t('framing.surface'));
   refreshChrome('select');
   renderScreenSelect();

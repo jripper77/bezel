@@ -645,6 +645,7 @@ test('the demo collection: rename, the themes using an item, use and delete', as
   assert.deepEqual(await demo.collectedUsers(item.id), { themes: [], openTheme: false });
   const image = await demo.useCollected(item.id, 'image');
   assert.deepEqual(image, { ref: 'assets/ol.gif', kind: 'image', poster: null, bytes: item.bytes, durationMs: null, posterError: null });
+  assert.deepEqual(await demo.collectedUsers(item.id), { themes: [], openTheme: true }, 'the open theme holds it once copied, saved or not');
   const background = await demo.useCollected(item.id, 'background');
   assert.deepEqual([background.ref, background.kind, background.bytes], ['assets/ol-2.gif', 'video', item.bytes]);
   assert.ok((await demo.assets()).some((a) => a.ref === image.ref));

@@ -492,6 +492,40 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
 .gif-more { justify-self: center; }
 .gif-attribution { margin: 0; text-align: end; color: var(--muted); font-size: 0.8rem; font-weight: 600; }
 
+/* ------------------------------------------- the collection (Media tab) -- */
+#media-collection > .hint { margin: 8px 0 12px; }
+.collection > * + * { margin-top: 8px; }
+.collection > .collection-status:empty, .collection > .collection-problem:empty { margin-top: 0; }
+.collection .hint, .collection p { margin-bottom: 0; }
+.collection-filter { display: flex; }
+.collection-filter button { flex: 1 1 0; min-height: 30px; padding: 4px 6px; color: var(--muted); font-weight: 600; }
+.collection-filter button + button { border-left: 1px solid var(--border); }
+.collection-filter button[aria-pressed="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.collection-filter button:focus-visible { outline-offset: -3px; }
+.collection-problem p { margin: 0 0 6px; }
+.collection-list { list-style: none; margin-bottom: 0; padding: 0; display: grid; gap: 8px; }
+.collection-item { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 10px; align-items: center; padding: 8px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-2); }
+.collection-thumb { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 6px; overflow: hidden; background: var(--surface-3); color: var(--muted); cursor: grab; touch-action: none; user-select: none; }
+/* A sticker is transparent: a checkerboard shows through it. */
+.collection-thumb[data-kind="sticker"] { background: repeating-conic-gradient(var(--surface-3) 0 25%, var(--surface) 0 50%) 0 0 / 12px 12px; }
+.collection-thumb img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.collection-thumb svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.collection-info { display: grid; gap: 2px; min-width: 0; }
+.collection-name { overflow-wrap: anywhere; }
+.collection-facts { color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere; }
+.collection-rename { display: grid; gap: 2px; }
+.collection-rename input { width: 100%; min-width: 0; min-height: 32px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); }
+.collection-rename .hint { margin: 0; font-size: 0.8rem; }
+.collection-rename .field-error:empty { display: none; }
+.collection-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.collection-actions .text-button { padding: 4px 8px; font-size: 0.85rem; line-height: 1.2; text-align: center; }
+.collection-actions .collection-image { touch-action: none; }
+.collection-actions .collection-delete { color: var(--danger); }
+.collection-empty { display: grid; justify-items: center; gap: 6px; padding: 16px 8px; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--muted); text-align: center; }
+.collection-empty svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.collection-empty p { margin: 0; }
+.collection-empty p:first-of-type { color: var(--text); font-weight: 600; }
+
 /* Narrow windows (the app allows 960 px): the brand and the orientation
    labels go, the orientation names stay for screen readers and in tooltips. */
 @media (max-width: 1180px) {
@@ -506,6 +540,7 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
   .theme-card .thumb-screen[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
   .gif-frame[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
   .gif-tile { transition: border-color 120ms ease; }
+  .collection-filter button { transition: color 120ms ease, box-shadow 120ms ease; }
 }
 
 @keyframes thumb-wait { from { opacity: 0.55; } to { opacity: 1; } }

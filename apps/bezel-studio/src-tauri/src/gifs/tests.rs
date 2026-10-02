@@ -31,6 +31,10 @@ use crate::studio::Motion as Playback;
 /// An obvious fake key: long enough for its last 4 characters to show.
 const KEY: &str = "fake-KLIPY_key-0123456789abcdef";
 
+/// The user's action behind each search, preview and collect of these
+/// tests: what a command the window invoked gives the GIF state.
+const ASKED: UserAsked = UserAsked::in_a_test();
+
 /// A theme's background color under the sticker.
 const BLUE: Rgba = Rgba::opaque(0, 0, 255);
 
@@ -77,13 +81,13 @@ impl Fixture {
     /// Saves the key and searches `text` among `kind`, page `page`.
     fn search(&self, kind: &str, text: &str, page: u32) -> GifPageDto {
         let query = query(kind, text, page, false, Language::English).unwrap();
-        self.gifs.search(&query).unwrap()
+        self.gifs.search(&ASKED, &query).unwrap()
     }
 
     /// Searches `text` among `kind` and collects its first result.
     fn collect_first(&self, kind: &str, text: &str) -> CollectedDto {
         let page = self.search(kind, text, 1);
-        self.gifs.collect(&page.items[0].id).unwrap()
+        self.gifs.collect(&ASKED, &page.items[0].id).unwrap()
     }
 }
 
@@ -123,12 +127,14 @@ fn gifs_in(
     let factory: SourceFactory = {
         let source = source.clone();
         let made = Arc::clone(made);
-        Arc::new(move |key: &str, customer: &str| -> Arc<dyn GifSource> {
-            made.lock()
-                .unwrap()
-                .push((key.to_string(), customer.to_string()));
-            Arc::new(source.clone())
-        })
+        Arc::new(
+            move |_: &UserAsked, key: &str, customer: &str| -> Arc<dyn GifSource> {
+                made.lock()
+                    .unwrap()
+                    .push((key.to_string(), customer.to_string()));
+                Arc::new(source.clone())
+            },
+        )
     };
     Gifs::new(
         KeyFile::new(root.join("config").join(KEY_FILE)),
@@ -296,12 +302,18 @@ fn no_request_at_start_or_without_key() {
     );
 
     let cat = query("gif", "cat", 1, false, Language::English).unwrap();
-    assert_eq!(f.gifs.search(&cat).unwrap_err().code(), "klipyNoKey");
     assert_eq!(
-        f.gifs.preview("a1", false).unwrap_err().code(),
+        f.gifs.search(&ASKED, &cat).unwrap_err().code(),
         "klipyNoKey"
     );
-    assert_eq!(f.gifs.collect("a1").unwrap_err().code(), "klipyNoKey");
+    assert_eq!(
+        f.gifs.preview(&ASKED, "a1", false).unwrap_err().code(),
+        "klipyNoKey"
+    );
+    assert_eq!(
+        f.gifs.collect(&ASKED, "a1").unwrap_err().code(),
+        "klipyNoKey"
+    );
     assert!(
         f.gifs.list(false).unwrap().is_empty(),
         "the collection is local"
@@ -318,9 +330,12 @@ fn no_request_at_start_or_without_key() {
     assert_eq!(f.made().len(), 1);
 
     f.gifs.remove_key().unwrap();
-    assert_eq!(f.gifs.search(&cat).unwrap_err().code(), "klipyNoKey");
     assert_eq!(
-        f.gifs.preview("a1", false).unwrap_err().code(),
+        f.gifs.search(&ASKED, &cat).unwrap_err().code(),
+        "klipyNoKey"
+    );
+    assert_eq!(
+        f.gifs.preview(&ASKED, "a1", false).unwrap_err().code(),
         "klipyNoKey"
     );
     assert_eq!(f.source.calls().len(), 1, "nothing once removed");
@@ -352,9 +367,9 @@ fn key_never_reaches_the_window() {
     );
 
     let page = f.search("sticker", "star", 1);
-    let preview = f.gifs.preview("s1", false).unwrap();
-    let still = f.gifs.preview("s1", true).unwrap();
-    let collected = f.gifs.collect("s1").unwrap();
+    let preview = f.gifs.preview(&ASKED, "s1", false).unwrap();
+    let still = f.gifs.preview(&ASKED, "s1", true).unwrap();
+    let collected = f.gifs.collect(&ASKED, "s1").unwrap();
     let mut window = vec![
         json(&saved),
         json(&f.gifs.key_status().unwrap()),
@@ -365,7 +380,7 @@ fn key_never_reaches_the_window() {
         json(&f.gifs.list(true).unwrap()),
         json(&f.gifs.rename(&collected.id, "Mine").unwrap()),
         json(&f.gifs.users(f.backend(), &collected.id).unwrap()),
-        json(&f.gifs.preview("s9", false).unwrap_err()),
+        json(&f.gifs.preview(&ASKED, "s9", false).unwrap_err()),
         json(&f.gifs.save_key("not a key!").unwrap_err()),
         json(&f.gifs.save_key(&format!("{KEY}/x")).unwrap_err()),
     ];
@@ -382,7 +397,7 @@ fn key_never_reaches_the_window() {
         );
         failing.gifs.save_key(KEY).unwrap();
         let star = query("sticker", "star", 1, false, Language::English).unwrap();
-        window.push(json(&failing.gifs.search(&star).unwrap_err()));
+        window.push(json(&failing.gifs.search(&ASKED, &star).unwrap_err()));
     }
     window.push(format!("{:?}", f.gifs));
     window.push(format!("{:?}", f.gifs.key.load().unwrap()));
@@ -486,7 +501,7 @@ fn only_items_of_the_last_search() {
     assert_eq!((first.items[0].width, first.items[0].height), (480, 240));
     assert_eq!(f.search("gif", "cat", 2).items[0].id, "a3");
     for id in ["a1", "a3"] {
-        let url = f.gifs.preview(id, false).unwrap().unwrap();
+        let url = f.gifs.preview(&ASKED, id, false).unwrap().unwrap();
         assert!(url.starts_with("data:image/gif;base64,"), "{url}");
     }
 
@@ -494,16 +509,16 @@ fn only_items_of_the_last_search() {
     let asked = f.source.calls().len();
     for id in ["a1", "a3", "zz"] {
         for error in [
-            f.gifs.preview(id, false).unwrap_err(),
-            f.gifs.collect(id).unwrap_err(),
+            f.gifs.preview(&ASKED, id, false).unwrap_err(),
+            f.gifs.collect(&ASKED, id).unwrap_err(),
         ] {
             assert_eq!(error.code(), "gifNotInResults", "{id}");
             assert_eq!(error.value("item"), Some(id));
         }
     }
     assert_eq!(f.source.calls().len(), asked, "nothing asked for them");
-    assert!(f.gifs.preview("b1", false).unwrap().is_some());
-    assert_eq!(f.gifs.collect("b1").unwrap().source.id, "b1");
+    assert!(f.gifs.preview(&ASKED, "b1", false).unwrap().is_some());
+    assert_eq!(f.gifs.collect(&ASKED, "b1").unwrap().source.id, "b1");
 
     // Back to the first search: answered already, not asked again; its
     // results are the last search's again, and a preview read is kept.
@@ -511,17 +526,17 @@ fn only_items_of_the_last_search() {
     assert_eq!(f.search("gif", "cat", 1).items.len(), 2);
     assert_eq!(f.pages_asked(), pages);
     let asked = f.source.calls().len();
-    assert!(f.gifs.preview("a1", false).unwrap().is_some());
+    assert!(f.gifs.preview(&ASKED, "a1", false).unwrap().is_some());
     assert_eq!(
-        f.gifs.preview("b1", false).unwrap_err().code(),
+        f.gifs.preview(&ASKED, "b1", false).unwrap_err().code(),
         "gifNotInResults"
     );
     assert_eq!(
-        f.gifs.preview("a3", false).unwrap_err().code(),
+        f.gifs.preview(&ASKED, "a3", false).unwrap_err().code(),
         "gifNotInResults"
     );
     assert_eq!(f.source.calls().len(), asked + 1, "only a1's preview");
-    assert!(f.gifs.preview("a1", false).unwrap().is_some());
+    assert!(f.gifs.preview(&ASKED, "a1", false).unwrap().is_some());
     assert_eq!(f.source.calls().len(), asked + 1, "a1's preview kept");
 }
 
@@ -543,7 +558,7 @@ impl GifSource for Late {
             && let Some(gifs) = self.gifs.get().and_then(std::sync::Weak::upgrade)
         {
             let cat = super::query("gif", "cat", 1, false, Language::English).unwrap();
-            gifs.search(&cat).unwrap();
+            gifs.search(&ASKED, &cat).unwrap();
         }
         self.inner.page(query)
     }
@@ -583,7 +598,9 @@ fn a_late_answer_does_not_replace_a_newer_search() {
     let gifs = Arc::new(Gifs::new(
         KeyFile::new(root.join(KEY_FILE)),
         Provider {
-            source: Arc::new(move |_: &str, _: &str| -> Arc<dyn GifSource> { late.clone() }),
+            source: Arc::new(
+                move |_: &UserAsked, _: &str, _: &str| -> Arc<dyn GifSource> { late.clone() },
+            ),
             customer_id: bezel_klipy::new_customer_id,
         },
         collection_in(root.join("collection"), |dir| DiskCollection::open(dir)),
@@ -594,16 +611,16 @@ fn a_late_answer_does_not_replace_a_newer_search() {
 
     let ca = query("gif", "ca", 1, false, Language::English).unwrap();
     assert_eq!(
-        gifs.search(&ca).unwrap().items[0].id,
+        gifs.search(&ASKED, &ca).unwrap().items[0].id,
         "c0",
         "still answered"
     );
     assert!(
-        gifs.preview("c1", false).unwrap().is_some(),
+        gifs.preview(&ASKED, "c1", false).unwrap().is_some(),
         "cat's results"
     );
     assert_eq!(
-        gifs.preview("c0", false).unwrap_err().code(),
+        gifs.preview(&ASKED, "c0", false).unwrap_err().code(),
         "gifNotInResults"
     );
 }
@@ -767,8 +784,8 @@ fn delete_names_themes_using_it() {
     let f = fixture("delete", source);
     f.gifs.save_key(KEY).unwrap();
     f.search("gif", "party", 1);
-    let used = f.gifs.collect("p1").unwrap();
-    let unused = f.gifs.collect("p2").unwrap();
+    let used = f.gifs.collect(&ASKED, "p1").unwrap();
+    let unused = f.gifs.collect(&ASKED, "p2").unwrap();
     let backend = f.backend();
 
     backend
@@ -844,10 +861,10 @@ fn the_collection_lists_renames_and_shows_stills() {
     f.gifs.save_key(KEY).unwrap();
     let trending = f.search("gif", "", 1);
     assert_eq!(trending.text, "");
-    let still = f.gifs.preview("t1", true).unwrap().unwrap();
+    let still = f.gifs.preview(&ASKED, "t1", true).unwrap().unwrap();
     assert!(still.starts_with("data:image/jpeg;base64,"), "{still}");
-    let first = f.gifs.collect("t1").unwrap();
-    let second = f.gifs.collect("t2").unwrap();
+    let first = f.gifs.collect(&ASKED, "t1").unwrap();
+    let second = f.gifs.collect(&ASKED, "t2").unwrap();
     assert_eq!(second.name, "t2", "a blank title names it by id");
     assert_eq!(
         (first.width, first.height, first.bytes),
@@ -861,7 +878,7 @@ fn the_collection_lists_renames_and_shows_stills() {
     );
     assert!(first.preview.unwrap().starts_with("data:image/gif;base64,"));
     // The same bytes again: the item already there.
-    assert_eq!(f.gifs.collect("t1").unwrap().id, first.id);
+    assert_eq!(f.gifs.collect(&ASKED, "t1").unwrap().id, first.id);
 
     let listed = f.gifs.list(true).unwrap();
     let names: Vec<&str> = listed.iter().map(|i| i.name.as_str()).collect();
@@ -905,9 +922,9 @@ fn stills_take_the_media_type_of_their_bytes() {
         ("sticker", "s1", "data:image/png;base64,"),
     ] {
         f.search(kind, "wave", 1);
-        let url = f.gifs.preview(id, true).unwrap().unwrap();
+        let url = f.gifs.preview(&ASKED, id, true).unwrap().unwrap();
         assert!(url.starts_with(still), "{url}");
-        let moving = f.gifs.preview(id, false).unwrap().unwrap();
+        let moving = f.gifs.preview(&ASKED, id, false).unwrap().unwrap();
         assert!(moving.starts_with("data:image/gif;base64,"), "{moving}");
     }
 }
@@ -940,7 +957,7 @@ fn queries_failures_and_files_that_are_not_gifs() {
     limited.gifs.save_key(KEY).unwrap();
     let any = query("gif", "x", 1, false, english).unwrap();
     assert_eq!(
-        limited.gifs.search(&any).unwrap_err().code(),
+        limited.gifs.search(&ASKED, &any).unwrap_err().code(),
         "klipyRateLimited"
     );
 
@@ -955,10 +972,13 @@ fn queries_failures_and_files_that_are_not_gifs() {
     let f = fixture("not-gif", source);
     f.gifs.save_key(KEY).unwrap();
     f.search("gif", "html", 1);
-    assert_eq!(f.gifs.collect("h1").unwrap_err().code(), "invalidInput");
+    assert_eq!(
+        f.gifs.collect(&ASKED, "h1").unwrap_err().code(),
+        "invalidInput"
+    );
     assert!(f.gifs.list(false).unwrap().is_empty());
     assert_eq!(
-        f.gifs.preview("h1", false).unwrap_err().code(),
+        f.gifs.preview(&ASKED, "h1", false).unwrap_err().code(),
         "invalidInput"
     );
 
@@ -1000,8 +1020,8 @@ fn a_collection_folder_that_cannot_be_used_is_said_not_lost() {
     unusable(gifs.list(false).unwrap_err());
     // The search is not the collection's: it works.
     let cat = query("gif", "cat", 1, false, Language::English).unwrap();
-    assert_eq!(gifs.search(&cat).unwrap().items.len(), 1);
-    unusable(gifs.collect("a1").unwrap_err());
+    assert_eq!(gifs.search(&ASKED, &cat).unwrap().items.len(), 1);
+    unusable(gifs.collect(&ASKED, "a1").unwrap_err());
     assert!(
         f.source.downloads().is_empty(),
         "refused before anything is downloaded"
@@ -1018,7 +1038,7 @@ fn a_collection_folder_that_cannot_be_used_is_said_not_lost() {
     // Once the folder can be used, the collection opens and keeps the item.
     std::fs::remove_file(&folder).unwrap();
     assert!(gifs.list(false).unwrap().is_empty());
-    let kept = gifs.collect("a1").unwrap();
+    let kept = gifs.collect(&ASKED, "a1").unwrap();
     assert_eq!(kept.id, id);
     let on_disk = DiskCollection::open(&folder).unwrap().load().unwrap();
     assert_eq!(

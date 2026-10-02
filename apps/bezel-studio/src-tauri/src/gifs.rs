@@ -9,7 +9,9 @@
 //!   Saving it asks nothing of the provider.
 //! - Nothing reaches the provider at start or without a key: the source is
 //!   made on the first search, preview or download after a key is saved,
-//!   and only those commands, each a user action, use it.
+//!   and only those commands, each a user action, use it. Making a source
+//!   and each of those operations take a [`UserAsked`], which only a
+//!   command's invocation gives: a request at start does not compile.
 //! - Pages answered in this session are kept by query (kind, text, filter,
 //!   language, page) and asked once. The window names a result by its id,
 //!   never by an address, and only results of the pages of the last search
@@ -27,6 +29,7 @@
 //!   in `<cache>/collection` for a background (an animated GIF becomes a
 //!   video background with its poster).
 
+mod asked;
 mod key;
 #[cfg(test)]
 mod tests;
@@ -54,15 +57,16 @@ use bezel_core::{BezelError, Result};
 use bezel_media::archive::content_id;
 use image::ImageFormat;
 
+pub use self::asked::UserAsked;
 pub use self::key::{KEY_FILE, KeyFile, SavedKey, is_valid_key};
 use crate::backend::Backend;
 use crate::clock::unix_seconds;
 use crate::dto::{AddedMediaDto, CollectedDto, CollectedUsersDto, GifPageDto, KeyDto};
 use crate::messages::{ErrorCode, UiError, UiResult};
 
-/// Makes the source for a saved key and its customer id. Making one asks
-/// nothing of the provider.
-pub type SourceFactory = Arc<dyn Fn(&str, &str) -> Arc<dyn GifSource> + Send + Sync>;
+/// Makes the source for a saved key and its customer id, when the user
+/// asked for something it serves. Making one asks nothing of the provider.
+pub type SourceFactory = Arc<dyn Fn(&UserAsked, &str, &str) -> Arc<dyn GifSource> + Send + Sync>;
 
 /// The GIF provider: its sources, and the customer id each new key gets.
 pub struct Provider {
@@ -312,8 +316,9 @@ impl Gifs {
         *self.searches() = Searches::default();
     }
 
-    /// The source for the saved key: `klipyNoKey` without one.
-    fn source(&self) -> UiResult<Arc<dyn GifSource>> {
+    /// The source for the saved key, for what the user `asked`:
+    /// `klipyNoKey` without one.
+    fn source(&self, asked: &UserAsked) -> UiResult<Arc<dyn GifSource>> {
         let mut source = self.source.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(source) = source.as_ref() {
             return Ok(Arc::clone(source));
@@ -322,17 +327,18 @@ impl Gifs {
             .key
             .load()?
             .ok_or_else(|| UiError::new(ErrorCode::KlipyNoKey))?;
-        let made = (self.provider.source)(saved.key(), saved.customer_id());
+        let made = (self.provider.source)(asked, saved.key(), saved.customer_id());
         *source = Some(Arc::clone(&made));
         Ok(made)
     }
 
     // ------------------------------------------------------------- search --
 
-    /// The page `query` asks for: from this session's answers, else asked
-    /// of the provider. Its results become the last search's.
-    pub fn search(&self, query: &GifQuery) -> UiResult<GifPageDto> {
-        let source = self.source()?;
+    /// The page `query` asks for, as the user `asked`: from this session's
+    /// answers, else asked of the provider. Its results become the last
+    /// search's.
+    pub fn search(&self, asked: &UserAsked, query: &GifQuery) -> UiResult<GifPageDto> {
+        let source = self.source(asked)?;
         let (known, ticket) = {
             let mut searches = self.searches();
             searches.asked += 1;
@@ -352,11 +358,12 @@ impl Gifs {
         Ok(GifPageDto::of(query, &page))
     }
 
-    /// The preview of the result `id` of the last search, as a `data:` URL
-    /// of its bytes' media type: its small GIF, or when `still` its still (a
-    /// GIF's JPEG, a sticker's PNG); `None` when it has no such file.
-    pub fn preview(&self, id: &str, still: bool) -> UiResult<Option<String>> {
-        let source = self.source()?;
+    /// The preview of the result `id` of the last search, as the user
+    /// `asked`, as a `data:` URL of its bytes' media type: its small GIF,
+    /// or when `still` its still (a GIF's JPEG, a sticker's PNG); `None`
+    /// when it has no such file.
+    pub fn preview(&self, asked: &UserAsked, id: &str, still: bool) -> UiResult<Option<String>> {
+        let source = self.source(asked)?;
         let motion = if still {
             Motion::Still
         } else {
@@ -380,13 +387,13 @@ impl Gifs {
 
     // --------------------------------------------------------- collection --
 
-    /// Adds the result `id` of the last search to the collection: refused
-    /// before anything is read when the collection cannot be used; its
-    /// files are read first, then kept (once per content) under the
-    /// collection's lock.
-    pub fn collect(&self, id: &str) -> UiResult<CollectedDto> {
+    /// Adds the result `id` of the last search to the collection, as the
+    /// user `asked`: refused before anything is read when the collection
+    /// cannot be used; its files are read first, then kept (once per
+    /// content) under the collection's lock.
+    pub fn collect(&self, asked: &UserAsked, id: &str) -> UiResult<CollectedDto> {
         self.with_collection(|_| Ok(()))?;
-        let source = self.source()?;
+        let source = self.source(asked)?;
         let (item, preview) = {
             let searches = self.searches();
             (searches.item(id)?, searches.preview(id, Motion::Animated))

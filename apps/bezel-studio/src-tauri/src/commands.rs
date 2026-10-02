@@ -11,7 +11,7 @@ use bezel_core::domain::screen::Confirm;
 use bezel_core::ports::ThemeLocation;
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::native::EXTENSION;
-use tauri::ipc::Response;
+use tauri::ipc::{Request, Response};
 use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, State, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
@@ -25,7 +25,7 @@ use crate::dto::{
     ProgressDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, StorageDto,
     ThemeEntryDto, VideoAutoDto, parse_orientation,
 };
-use crate::gifs::{Gifs, SharedGifs, Target};
+use crate::gifs::{Gifs, SharedGifs, Target, UserAsked};
 use crate::manager::{
     Ask, CacheDto, CandidatesDto, ClearedDto, ConfirmedFileDto, DeleteReportDto, ManagedFileDto,
     ManagerOverviewDto, PlanDto, RunDto,
@@ -866,9 +866,11 @@ pub async fn remove_klipy_key(
 
 /// A page of GIFs or stickers (`kind`) for `text` (empty: the trending
 /// ones), explicit results shown only with `explicit`, in the app's
-/// language.
+/// language. The window's invocation (`request`) is the proof the user
+/// asked: none, no request to the provider.
 #[tauri::command]
 pub async fn search_gifs(
+    request: Request<'_>,
     gifs: State<'_, SharedGifs>,
     state: State<'_, Shared>,
     kind: String,
@@ -876,42 +878,44 @@ pub async fn search_gifs(
     page: u32,
     explicit: Option<bool>,
 ) -> UiResult<GifPageDto> {
+    let asked = UserAsked::of(&request);
     with_gifs(&gifs, &state, move |g, b| {
         let explicit = explicit.unwrap_or(false);
-        g.search(&crate::gifs::query(
-            &kind,
-            &text,
-            page,
-            explicit,
-            b.language(),
-        )?)
+        let query = crate::gifs::query(&kind, &text, page, explicit, b.language())?;
+        g.search(&asked, &query)
     })
     .await
 }
 
 /// The preview of a result of the last search as a `data:` URL (its still
-/// with `still`: a GIF's JPEG, a sticker's PNG), or `None`.
+/// with `still`: a GIF's JPEG, a sticker's PNG), or `None`; the window's
+/// invocation (`request`) is the proof the user asked.
 #[tauri::command]
 pub async fn gif_preview(
+    request: Request<'_>,
     gifs: State<'_, SharedGifs>,
     state: State<'_, Shared>,
     id: String,
     still: Option<bool>,
 ) -> UiResult<Option<String>> {
+    let asked = UserAsked::of(&request);
     with_gifs(&gifs, &state, move |g, _| {
-        g.preview(&id, still.unwrap_or(false))
+        g.preview(&asked, &id, still.unwrap_or(false))
     })
     .await
 }
 
-/// Adds a result of the last search to the collection.
+/// Adds a result of the last search to the collection; the window's
+/// invocation (`request`) is the proof the user asked.
 #[tauri::command]
 pub async fn collect_gif(
+    request: Request<'_>,
     gifs: State<'_, SharedGifs>,
     state: State<'_, Shared>,
     id: String,
 ) -> UiResult<CollectedDto> {
-    with_gifs(&gifs, &state, move |g, _| g.collect(&id)).await
+    let asked = UserAsked::of(&request);
+    with_gifs(&gifs, &state, move |g, _| g.collect(&asked, &id)).await
 }
 
 /// The collection, the last added first, previews still with `still`.

@@ -52,7 +52,9 @@ use crate::backend::{
     Backend, DEFAULT_MODEL, SensorFactory, Session, default_orientation, sleep_until,
 };
 use crate::commands::{Shared, Unsaved};
-use crate::gifs::{Gifs, KEY_FILE, KeyFile, Provider, SharedGifs, SourceFactory, collection_in};
+use crate::gifs::{
+    Gifs, KEY_FILE, KeyFile, Provider, SharedGifs, SourceFactory, UserAsked, collection_in,
+};
 use crate::library::ThemeLibrary;
 use crate::manager::Copies;
 use crate::settings::SettingsFile;
@@ -285,7 +287,9 @@ struct Start<R: Runtime> {
 /// The app's start, once the runtime is up (Tauri's `setup`): the backend
 /// and the GIF state composed and kept as the app's state, the tray, the
 /// refresh loop and the window. Nothing is asked of KLIPY here, nor by
-/// anything started here (D-2026-10-01-gif-sticker-search-3).
+/// anything started here (D-2026-10-01-gif-sticker-search-3): a GIF source
+/// is made, and searched, only with a [`UserAsked`], which only a command
+/// the window invoked has.
 fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
     let folders = (start.folders)(app.handle())?;
     let backend: Shared = Arc::new(compose(&folders, start.simulate));
@@ -480,12 +484,14 @@ fn copies(data: &Path) -> Copies {
     }
 }
 
-/// KLIPY's client for a saved key (D-2026-10-01-gif-sticker-search-2):
-/// making one asks nothing.
+/// KLIPY's client for a saved key (D-2026-10-01-gif-sticker-search-2),
+/// made only for a user action ([`UserAsked`]): making one asks nothing.
 fn klipy_source() -> SourceFactory {
-    Arc::new(|key: &str, customer: &str| -> Arc<dyn GifSource> {
-        Arc::new(KlipyClient::new(key, customer))
-    })
+    Arc::new(
+        |_: &UserAsked, key: &str, customer: &str| -> Arc<dyn GifSource> {
+            Arc::new(KlipyClient::new(key, customer))
+        },
+    )
 }
 
 /// The GIF search and the collection (D-2026-10-01-gif-sticker-search-3,
@@ -601,13 +607,25 @@ mod tests {
 
     use super::*;
     use bezel_core::app::discover_screens;
+    #[cfg(not(windows))]
+    use bezel_core::domain::gifs::{GifItem, GifKind, GifPage, Rendition, RenditionFormat, Tier};
     use bezel_media::collection::FakeGifSource;
+    #[cfg(not(windows))]
+    use bezel_media::collection::GifCall;
+    #[cfg(not(windows))]
+    use serde_json::{Value, json};
     #[cfg(not(windows))]
     use tauri::RunEvent;
     #[cfg(not(windows))]
-    use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
+    use tauri::ipc::{CallbackFn, InvokeBody};
+    #[cfg(not(windows))]
+    use tauri::test::{
+        INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
+    };
     #[cfg(not(windows))]
     use tauri::utils::config::WindowConfig;
+    #[cfg(not(windows))]
+    use tauri::webview::{InvokeRequest, WebviewWindow};
 
     #[cfg(not(windows))]
     use crate::gifs::SavedKey;
@@ -645,10 +663,12 @@ mod tests {
     /// it makes.
     fn counting(source: &FakeGifSource, made: mpsc::Sender<()>) -> SourceFactory {
         let source = source.clone();
-        Arc::new(move |_: &str, _: &str| -> Arc<dyn GifSource> {
-            let _ = made.send(());
-            Arc::new(source.clone())
-        })
+        Arc::new(
+            move |_: &UserAsked, _: &str, _: &str| -> Arc<dyn GifSource> {
+                let _ = made.send(());
+                Arc::new(source.clone())
+            },
+        )
     }
 
     /// D-2026-10-01-gif-sticker-search-3 (DoD critic, row 3): the app's own
@@ -688,16 +708,9 @@ mod tests {
                 Ok(synced)
             }),
         };
-        let mut context = mock_context(noop_assets());
-        // The window as `tauri.conf.json` has it, made before the setup.
-        context.config_mut().app.windows.push(WindowConfig {
-            label: MAIN_WINDOW.into(),
-            visible: false,
-            ..WindowConfig::default()
-        });
         let app = mock_builder()
             .setup(move |app| setup(app, start))
-            .build(context)
+            .build(context_with_the_window())
             .unwrap();
 
         let (seen, seen_rx) = mpsc::channel();
@@ -728,6 +741,141 @@ mod tests {
         assert!(went_round, "the setup started the refresh loop");
         assert!(!asked, "a GIF source was made at start");
         assert!(source.calls().is_empty(), "KLIPY was asked at start");
+    }
+
+    /// A mock context with the window as `tauri.conf.json` has it, made
+    /// before the setup.
+    #[cfg(not(windows))]
+    fn context_with_the_window() -> tauri::Context<MockRuntime> {
+        let mut context = mock_context(noop_assets());
+        context.config_mut().app.windows.push(WindowConfig {
+            label: MAIN_WINDOW.into(),
+            visible: false,
+            ..WindowConfig::default()
+        });
+        context
+    }
+
+    /// The window invokes `command` with `args` through Tauri's IPC, as
+    /// `bridge.js` does: its answer, or the error it was rejected with.
+    #[cfg(not(windows))]
+    fn invoke(
+        window: &WebviewWindow<MockRuntime>,
+        command: &str,
+        args: Value,
+    ) -> Result<Value, Value> {
+        let request = InvokeRequest {
+            cmd: command.into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: InvokeBody::from(args),
+            headers: tauri::http::HeaderMap::default(),
+            invoke_key: INVOKE_KEY.into(),
+        };
+        get_ipc_response(window, request).map(|body| body.deserialize().unwrap())
+    }
+
+    /// D-2026-10-01-gif-sticker-search-3: what lets the GIF state ask KLIPY
+    /// is a command the window invoked. Through Tauri's IPC (the mock
+    /// runtime's), with the arguments the UI sends (`bridge.js`, unchanged),
+    /// `search_gifs`, `gif_preview` and `collect_gif` reach the source,
+    /// made on the first of them and not by the setup.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_windows_gif_commands_reach_the_source() {
+        let root = temp_root("ipc");
+        let folders = Folders::under(&root);
+        KeyFile::new(folders.config.join(KEY_FILE))
+            .save(&SavedKey::new(KEY, "customer-0001"))
+            .unwrap();
+        let cat = GifItem {
+            id: "a1".into(),
+            title: "Cat".into(),
+            kind: GifKind::Gif,
+            page_url: None,
+            renditions: vec![Rendition {
+                tier: Tier::Small,
+                format: RenditionFormat::Gif,
+                location: "f/a1.gif".into(),
+                width: 2,
+                height: 2,
+                bytes: None,
+            }],
+        };
+        let page = GifPage {
+            items: vec![cat],
+            has_next: false,
+        };
+        let source = FakeGifSource::new()
+            .with_page(GifKind::Gif, "cat", 1, page)
+            .with_file("f/a1.gif", crate::media::tests::gif(2));
+        let (made, made_rx) = mpsc::channel();
+        let start = Start {
+            simulate: true,
+            hidden: true,
+            folders: Box::new(move |_: &AppHandle<MockRuntime>| Ok(folders)),
+            gif_source: counting(&source, made),
+            tray: Box::new(|_: &AppHandle<MockRuntime>, _, _: &Texts| {
+                let synced: LiveSync = Box::new(|_| {});
+                Ok(synced)
+            }),
+        };
+        let app = mock_builder()
+            .setup(move |app| setup(app, start))
+            .invoke_handler(tauri::generate_handler![
+                commands::search_gifs,
+                commands::gif_preview,
+                commands::collect_gif,
+            ])
+            .build(context_with_the_window())
+            .unwrap();
+
+        let (seen, seen_rx) = mpsc::channel();
+        app.run_return(move |app, event| {
+            if !matches!(event, RunEvent::Ready) {
+                return;
+            }
+            let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+                return;
+            };
+            let at_start = made_rx.try_iter().count();
+            let search = json!({"kind": "gif", "text": "cat", "page": 1, "explicit": false});
+            let answers = [
+                invoke(&window, "search_gifs", search),
+                invoke(&window, "gif_preview", json!({"id": "a1", "still": false})),
+                invoke(&window, "collect_gif", json!({"id": "a1"})),
+            ];
+            let made = made_rx.try_iter().count();
+            seen.send((at_start, answers, made)).unwrap();
+            // The window closes: the app ends.
+            window.destroy().unwrap();
+        });
+        let (at_start, [found, preview, collected], made) = seen_rx.recv().unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(at_start, 0, "a GIF source was made at start");
+        let found = found.unwrap();
+        assert_eq!(found["items"][0]["id"], "a1", "{found}");
+        let preview = preview.unwrap();
+        let preview = preview.as_str().unwrap_or_default();
+        assert!(preview.starts_with("data:image/gif;base64,"), "{preview}");
+        let collected = collected.unwrap();
+        assert_eq!(collected["source"]["id"], "a1", "{collected}");
+        assert_eq!(made, 1, "one source, made for the first command");
+        // The search, the preview's file, the collected file.
+        let calls = source.calls();
+        let asked = match &calls[..] {
+            [
+                GifCall::Page(query),
+                GifCall::Download {
+                    location: shown, ..
+                },
+                GifCall::Download { location: kept, .. },
+            ] => Some((query.text.as_str(), shown.as_str(), kept.as_str())),
+            _ => None,
+        };
+        assert_eq!(asked, Some(("cat", "f/a1.gif", "f/a1.gif")), "{calls:?}");
     }
 
     /// Review W2: the app's collection lives in its folder: one that cannot

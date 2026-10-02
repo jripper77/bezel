@@ -572,6 +572,8 @@ test('the demo KLIPY key: nothing asked without one, checked when saved, shown b
   assert.deepEqual(await demo.saveKlipyKey('abc_DEF-123x'), { configured: true, last4: '123x' });
   assert.deepEqual(await demo.klipyKey(), { configured: true, last4: '123x' });
   assert.deepEqual(seen.queries, [], 'saving sends nothing');
+  assert.deepEqual(await demo.saveKlipyKey('short-1'), { configured: true, last4: null }, 'like the backend: a short key shows no ending');
+  assert.deepEqual(await demo.saveKlipyKey('nine-char'), { configured: true, last4: 'char' });
   assert.deepEqual(await demo.removeKlipyKey(), { configured: false, last4: null });
   assert.deepEqual(await createDemoBackend('turing88').klipyKey(), { configured: false, last4: null }, 'a fresh install has none');
   assert.deepEqual(await createDemoBackend('gifs').klipyKey(), { configured: true, last4: DEMO_KLIPY_KEY.slice(-4) });

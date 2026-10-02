@@ -89,8 +89,11 @@ export function demoGifPreview({ id, width, height, kind = 'gif' }, still) {
   return `data:image/svg+xml,${encodeURIComponent(svg).replaceAll('(', '%28').replaceAll(')', '%29')}`;
 }
 
-/** What `klipy_key` answers for `key`: whether one is saved and its last 4 characters. */
-const keyDto = (key) => ({ configured: key !== null, last4: key === null ? null : [...key].slice(-4).join('') });
+/** Characters of a key of which the backend shows the last 4 (a shorter key would show most of itself). */
+const SHOWN_FROM_CHARS = 9;
+
+/** What `klipy_key` answers for `key`: whether one is saved and, for a long enough key, its last 4 characters. */
+const keyDto = (key) => ({ configured: key !== null, last4: key !== null && key.length >= SHOWN_FROM_CHARS ? key.slice(-4) : null });
 
 /** Checks a query like the backend's command. */
 function checkQuery({ kind, text, page, explicit }) {

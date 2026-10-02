@@ -180,6 +180,7 @@ export default {
   'gifs.keyRemoved': 'A chave foi removida deste computador.',
   'gifs.keySave': 'Salvar',
   'gifs.keySaved': 'Chave salva, termina em {last4}',
+  'gifs.keySavedNoEnding': 'Chave salva',
   'gifs.keySavedNow': 'Chave salva; as buscas passam a usá-la.',
   'gifs.kind.gif': 'GIFs',
   'gifs.kind.sticker': 'Stickers',

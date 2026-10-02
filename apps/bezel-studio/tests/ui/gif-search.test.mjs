@@ -253,3 +253,12 @@ test('429 message', async () => {
   await results.retry();
   assert.equal(calls, 3, 'nothing to retry once it worked');
 });
+
+test('a short saved key shows no ending', () => {
+  // The backend keeps the ending of a key of 8 characters or fewer (`last4: null`): the field says it is saved, and no more.
+  assert.equal(keyStatus(en, { configured: true, last4: null }), 'Saved key');
+  assert.equal(keyStatus(pt, { configured: true, last4: null }), 'Chave salva');
+  assert.equal(keyStatus(en, { configured: true, last4: '' }), en('gifs.keySavedNoEnding'));
+  for (const t of [en, pt]) assert.ok(!keyStatus(t, { configured: true, last4: null }).includes('{'), 'no placeholder left');
+  assert.equal(keyStatus(en, { configured: true, last4: 'a1b2' }), 'Saved key ending in a1b2', 'a long key still shows its ending');
+});

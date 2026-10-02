@@ -259,12 +259,14 @@ export function keyFailure(t, error) {
 
 /**
  * What the key field says of the saved key (`klipy_key`): its last 4
- * characters, never the key.
+ * characters, never the key; a short key, whose ending the backend keeps
+ * (`last4: null`), is just saved.
  * @param {(k: string, p?: object) => string} t
  * @param {{configured: boolean, last4: string|null}|null} key
  */
 export function keyStatus(t, key) {
-  return key?.configured ? t('gifs.keySaved', { last4: key.last4 ?? '' }) : t('gifs.keyNone');
+  if (!key?.configured) return t('gifs.keyNone');
+  return key.last4 ? t('gifs.keySaved', { last4: key.last4 }) : t('gifs.keySavedNoEnding');
 }
 
 /**

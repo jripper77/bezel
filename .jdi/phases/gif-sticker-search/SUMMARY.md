@@ -47,6 +47,9 @@
   com prova de que a janela rodou e só os sockets da sessão de teste; `8f437e1` — só o `bridge.js` fala com o backend e só a
   UI de GIF chama o KLIPY ou abre o Painel; esconder/mostrar a janela não dispara nada. Semgrep (valor de websocket de teste) e linha de TODO
   ajustados pelo orquestrador.
+- Rodada 3, iter 5 (D-19, última permitida): `2a3924a` (a janela oculta é reexibida e os inícios dividem o estado salvo),
+  `bde9027` (`index.html` só com os módulos do app), `e90b6a4` (cada passo dos testes nomeados exige exatamente as chamadas
+  que pede); `.semgrepignore` com `.jdi/` e grafias raras de TODO pelo orquestrador.
 
 ## Blocked tasks
 - nenhuma
@@ -64,7 +67,7 @@
 ## Tests
 - `cargo test --workspace --locked`: 945 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
 - DoD 1–6: OK no branch combinado a cada iteração; DoD 7: `rust-windows` verde (162 testes do studio no Windows)
-- UI: 233 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
+- UI: 235 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc` sem studio e klipy: o `ring` não compila
   para MSVC aqui; o `rust-windows` do CI cobre), `check-docs.sh`, `check-packaging.sh`, `cargo audit`
 - Cobertura: `bezel-klipy` 97%, studio `gifs.rs` 96,87%, `collection.js` 100%

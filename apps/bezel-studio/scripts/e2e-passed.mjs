@@ -1,9 +1,9 @@
 // Did the named Playwright tests really pass? A count of passed tests cannot
-// tell: a `test.fixme` plus any other test keeps the count. This takes each
+// tell: one parked test plus any other test keeps the count. This takes each
 // test by name ("<describe> › <title>", as Playwright prints it) and
 // requires, in EVERY project the config declares (read from the report,
-// never counted here), a run that passed (not skipped, not parked by
-// `test.fixme`, not flaky, not expected to fail) and that recorded the axe
+// never counted here), a run that passed (not skipped, not in Playwright's
+// parked state, not flaky, not expected to fail) and that recorded the axe
 // check: `expectAccessible` annotates the run with `axe`. A test of the run
 // that failed, named or not, fails it too. The projects must cover light
 // and dark in pt-BR and in en: the JSON report drops a project's `use`, so
@@ -14,14 +14,16 @@
 //
 // Without --report it runs `playwright test` (by default on the named tests'
 // outer describes) with the JSON reporter into a temporary file; the port is
-// BEZEL_E2E_PORT's, as for every run. Exit: 0 every run proves its test, 1
-// something is missing (each problem named), 2 bad arguments.
+// BEZEL_E2E_PORT's, as for every run. A --report file is taken relative to
+// the app folder and must lie in it or in the temporary directory; any other
+// is refused. Exit: 0 every run proves its test, 1 something is missing
+// (each problem named), 2 bad arguments.
 
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -31,7 +33,7 @@ export const SEPARATOR = ' › ';
 export const AXE = 'axe';
 /** The verdict of a run that proves its test. */
 export const OK = 'ok';
-/** The verdict of a run parked by `test.fixme` (Playwright's annotation type too). */
+/** The verdict of a run Playwright parked; the annotation type it gives such a run too. */
 export const PARKED = 'fixme';
 /** The colour schemes whose every combination with {@link LOCALES} a project must run. */
 export const SCHEMES = ['light', 'dark'];
@@ -40,7 +42,20 @@ export const LOCALES = ['pt-BR', 'en'];
 
 const USAGE = 'usage: node scripts/e2e-passed.mjs [--grep <pattern>] [--report <report.json>] "<describe> › <title>"...';
 const OPTIONS = { grep: { type: 'string' }, report: { type: 'string' } };
-const APP = fileURLToPath(new URL('..', import.meta.url));
+const APP = resolve(fileURLToPath(new URL('..', import.meta.url)));
+/** The folders a `--report` file may lie in: the temporary directory and the app folder. */
+export const REPORT_FOLDERS = [resolve(tmpdir()), APP];
+
+/**
+ * The `--report` file `arg` names, resolved against the app folder, or
+ * `null` when it lies outside {@link REPORT_FOLDERS} (`../` included).
+ */
+export function reportFile(arg) {
+  const file = resolve(APP, arg);
+  const [temporary, app] = REPORT_FOLDERS;
+  if (file.startsWith(temporary + sep) || file.startsWith(app + sep)) return file;
+  return null;
+}
 
 /** `text` as Playwright names a test: its parts split on "›", trimmed, joined by " › ". */
 export function testName(text) {
@@ -59,13 +74,18 @@ function parse(argv) {
   }
 }
 
-/** The options and the required test names in `argv`, or `{ error }`. */
+/** The options (`report` resolved by {@link reportFile}) and the required test names in `argv`, or `{ error }`. */
 export function readArgs(argv) {
   const parsed = parse(argv);
   if (parsed.error) return parsed;
   const required = [...new Set(parsed.positionals.map(testName).filter(Boolean))];
   if (required.length === 0) return { error: 'no test named' };
-  return { ...parsed.values, required };
+  const { grep, report } = parsed.values;
+  const args = grep === undefined ? { required } : { grep, required };
+  if (report === undefined) return args;
+  const file = reportFile(report);
+  if (file === null) return { error: `--report ${report}: not in ${REPORT_FOLDERS.join(' or ')}` };
+  return { ...args, report: file };
 }
 
 /** A Playwright `--grep` matching, literally, the outer describe (or the title) of each name. */

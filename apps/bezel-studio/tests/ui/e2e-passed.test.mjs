@@ -1,21 +1,28 @@
 // The proof that named e2e tests passed (scripts/e2e-passed.mjs), on small
 // synthetic Playwright JSON reports: every named test must have, in every
 // project the report declares, a run that passed and recorded the axe
-// check; a skipped run (or one parked by `test.fixme`), a flaky, failed or
-// missing run, a run without axe, another test that failed in the run, or
-// projects that leave out light or dark in pt-BR or en make it fail, naming
-// why.
+// check; a skipped run (or one in Playwright's parked state), a flaky,
+// failed or missing run, a run without axe, another test that failed in the
+// run, or projects that leave out light or dark in pt-BR or en make it fail,
+// naming why. A --report file outside the app folder and the temporary
+// directory is refused.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  AXE, OK, PARKED, checkReport, formatTable, formatVerdict, grepFor, projectsOf, readArgs, runsByName, testName, uncovered,
-  verdictOf,
+  AXE, OK, PARKED, REPORT_FOLDERS, checkReport, formatTable, formatVerdict, grepFor, projectsOf, readArgs, reportFile,
+  runsByName, testName, uncovered, verdictOf,
 } from '../../scripts/e2e-passed.mjs';
+
+/** The app folder, which a relative --report file is taken from. */
+const APP = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const TEMPORARY = resolve(tmpdir());
+/** A path that climbs with `../` from the app folder up to the root, then into /etc. */
+const CLIMB = `${'../'.repeat(APP.split(sep).length)}etc/report.json`;
 
 const PROJECTS = ['light-pt', 'dark-pt', 'light-en', 'dark-en'];
 /** Each project's colour scheme and locale, as playwright.config.mjs puts them in its metadata. */
@@ -168,10 +175,26 @@ test('runsByName: describes and title, without the file; tests at the top of a f
 test('testName and readArgs: names as Playwright prints them; options; errors', () => {
   assert.equal(testName('gif search›no key: help'), HELP);
   assert.equal(testName('  gif search  ›  no key: help '), HELP);
-  assert.deepEqual(readArgs(['--report', 'r.json', HELP, 'gif search › no key: help']), { report: 'r.json', required: [HELP] });
+  assert.deepEqual(readArgs(['--report', 'r.json', HELP, 'gif search › no key: help']), {
+    report: join(APP, 'r.json'),
+    required: [HELP],
+  });
   assert.deepEqual(readArgs(['--grep=gif', HELP]), { grep: 'gif', required: [HELP] });
   assert.deepEqual(readArgs(['--report', 'r.json']), { error: 'no test named' });
   assert.match(readArgs(['--nope', HELP]).error, /nope/);
+});
+
+test('reportFile: in the app folder or the temporary directory only; a `../` out of them is refused', () => {
+  assert.deepEqual(REPORT_FOLDERS, [TEMPORARY, APP]);
+  assert.equal(reportFile('r.json'), join(APP, 'r.json'));
+  assert.equal(reportFile('test-results/../r.json'), join(APP, 'r.json'));
+  assert.equal(reportFile(join(TEMPORARY, 'e2e', 'r.json')), join(TEMPORARY, 'e2e', 'r.json'));
+  assert.equal(reportFile(CLIMB), null);
+  assert.equal(reportFile(join(TEMPORARY, 'e2e', '..', '..', 'etc', 'r.json')), null);
+  // A folder whose name merely starts like an allowed one is outside it.
+  assert.equal(reportFile(`${TEMPORARY}-other${sep}r.json`), null);
+  assert.equal(reportFile(TEMPORARY), null);
+  assert.deepEqual(readArgs(['--report', CLIMB, HELP]), { error: `--report ${CLIMB}: not in ${TEMPORARY} or ${APP}` });
 });
 
 test('grepFor: each outer describe once, matched literally', () => {
@@ -191,7 +214,7 @@ test('formatTable: a header with the projects, a row per test, aligned', () => {
   );
 });
 
-test('the command on a report file: exit 0 and the table; 1 naming the problem; 2 without a test', () => {
+test('the command on a report file: exit 0 and the table; 1 naming the problem; 2 without a test or out of its folders', () => {
   const dir = mkdtempSync(join(tmpdir(), 'e2e-passed-'));
   const script = fileURLToPath(new URL('../../scripts/e2e-passed.mjs', import.meta.url));
   const cli = (file, ...names) => spawnSync(process.execPath, [script, '--report', file, ...names], { encoding: 'utf8' });
@@ -216,6 +239,11 @@ test('the command on a report file: exit 0 and the table; 1 naming the problem; 
 
     assert.equal(cli(join(dir, 'none.json'), HELP).status, 1);
     assert.equal(cli(good).status, 2);
+
+    const refused = cli(CLIMB, HELP);
+    assert.equal(refused.status, 2);
+    assert.equal(refused.stdout, '');
+    assert.match(refused.stderr, /^--report (\.\.\/)+etc\/report\.json: not in .+ or .+\nusage: /);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

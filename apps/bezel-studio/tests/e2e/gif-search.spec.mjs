@@ -2,7 +2,8 @@
 // -4, -6), in demo mode, in pt-BR and en, light and dark: the dialog opens
 // from the Media tab's Collection and asks nothing of KLIPY; without a click
 // nothing goes out, with a key or without, even after an hour idle on the
-// page's clock (D-2026-10-01-gif-sticker-search-16); without a key
+// page's clock (D-2026-10-01-gif-sticker-search-16), nor when the window is
+// hidden and shown again (-18); without a key
 // searching waits for one and the "?" discloses how to get it (Esc and a
 // click outside close it, the focus goes back), the Partner Panel and the
 // guide open through the backend; a refused key opens the help; explicit
@@ -128,6 +129,39 @@ async function startIdle(page, scenario) {
   return outside;
 }
 
+/** How many times the window is hidden and shown again before the search opens. */
+const HIDDEN_AND_SHOWN = 3;
+
+/**
+ * Hides the window and shows it again `times` times, a minute each way on
+ * the page's clock, as the tray and an autostart do: the page reads
+ * `document.hidden` and `document.visibilityState` as the window left them,
+ * and hears the `visibilitychange` (and the window's `blur` and `focus`) of
+ * each change. The sensor list, which must be open, proves the page heard
+ * them: hidden, the app is told the list shows no sensor; shown, its
+ * sensors again (D-2026-10-01-gif-sticker-search-18).
+ */
+async function hideAndShow(page, times) {
+  for (let n = 0; n < times; n += 1) {
+    for (const hidden of [true, false]) {
+      await page.evaluate((now) => {
+        const shown = (globalThis.demoWindow ??= { hidden: false, faked: false });
+        if (!shown.faked) {
+          Object.defineProperty(document, 'hidden', { configurable: true, get: () => shown.hidden });
+          Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (shown.hidden ? 'hidden' : 'visible') });
+          shown.faked = true;
+        }
+        shown.hidden = now;
+        document.dispatchEvent(new Event('visibilitychange'));
+        globalThis.dispatchEvent(new Event(now ? 'blur' : 'focus'));
+      }, hidden);
+      await expect(root(page)).toHaveAttribute('data-demo-sensors', hidden ? '' : /^cpu\.usage /);
+      await page.clock.runFor(MINUTE_MS);
+    }
+  }
+  expect(await page.evaluate(() => document.visibilityState)).toBe('visible');
+}
+
 async function openSearch(page, t, scenario) {
   await page.goto(`/index.html?demo=${scenario}`);
   await expect(page.locator('#theme-name')).toHaveValue('Demo');
@@ -244,8 +278,13 @@ test.describe('gif search', () => {
     const errors = watchErrors(page);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     // With a key and without a click: nothing goes out, even after an hour;
-    // nor when the dialog opens.
+    // nor when the window is hidden and shown again (the sensor list open
+    // shows the page heard it), a minute each way; nor when the dialog opens.
     const outside = await startIdle(page, 'gifs');
+    await page.getByRole('tab', { name: t('library.sensors') }).click();
+    await expect(root(page)).toHaveAttribute('data-demo-sensors', /^cpu\.usage /);
+    await hideAndShow(page, HIDDEN_AND_SHOWN);
+    expect(await outside()).toEqual(NOTHING_OUT);
     const dialog = await openDialog(page, t);
     await expect(dialog.getByText(t('gifs.keySaved', { last4: 'a1b2' }))).toBeVisible();
     const field = dialog.getByRole('searchbox', { name: 'Search KLIPY' });

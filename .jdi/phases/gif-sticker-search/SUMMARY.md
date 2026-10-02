@@ -43,6 +43,8 @@
 - Rodada 2, iter 3 (D-11): `a603c45` — comandos só via IPC, `Request` só nos 3 comandos de GIF, sem print em `commands.rs`.
 - Rodada 2, iter 4 (D-12): `1b66167` — logs só pelo módulo `diag` (38 códigos fixos; os textos de erro saem dos logs),
   sem `payload`/`Invoke`, sem panic com valor; variável local com nome de comando aceita.
+- Rodada 2, iter 5 (D-13): `6f4afe0` — o arquivo da chave guarda `KlipyKey` (nenhuma `String` com a chave), 12 arquivos
+  danificados testados; `2d1272d` — códigos fixos dizem por que o app não abriu (guia de problemas).
 
 ## Blocked tasks
 - nenhuma
@@ -51,13 +53,14 @@
 - `crates/bezel-core/src/{domain/{gifs,clock,mod},ports/mod,app/{gifs,mod},error}.rs`, `crates/bezel-core/tests/gifs.rs`
 - `crates/bezel-klipy/**` (novo, com `fixtures/`), `Cargo.toml`, `Cargo.lock`
 - `crates/bezel-media/src/{lib.rs,collection/**,archive/{mod,disk}.rs}`
-- `apps/bezel-studio/src-tauri/{Cargo.toml,build.rs,capabilities/default.json,src/{gifs,gifs/*,commands,lib,backend,dto,messages}.rs}`
+- `apps/bezel-studio/src-tauri/{Cargo.toml,build.rs,capabilities/default.json}`, `src-tauri/src/**` (gifs, `gifs/{key,asked,tests}`,
+  `diag`, commands, lib, backend, dto, messages e os módulos que passaram a logar pelo `diag`)
 - `apps/bezel-studio/src/{gif-search,collection,demo-gifs,demo-backend,demo-data,bridge,app}.js`,
   `src/ui/{gif-search,collection,library}.js`, `index.html`, `styles.css`, `i18n/{en,pt-BR}.js`, `tests/**`
-- `docs/user/{,pt-BR/}{gifs-and-stickers,README}.md`, `scripts/ci/check-docs.sh`, `CHANGELOG.md`, `README.md`
+- `docs/user/{,pt-BR/}{gifs-and-stickers,README,troubleshooting}.md`, `scripts/ci/check-docs.sh`, `CHANGELOG.md`, `README.md`
 
 ## Tests
-- `cargo test --workspace --locked`: 942 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
+- `cargo test --workspace --locked`: 943 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
 - DoD 1–6: OK no branch combinado a cada iteração; DoD 7: `rust-windows` verde (iter 3: 153 testes do studio no Windows)
 - UI: 231 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc` sem studio e klipy: o `ring` não compila

@@ -11,7 +11,10 @@
 //!   made on the first search, preview or download after a key is saved,
 //!   and only those commands, each a user action, use it. Making a source
 //!   and each of those operations take a [`UserAsked`], which only a
-//!   command's invocation gives: a request at start does not compile.
+//!   command's invocation gives: a request at start through this state
+//!   does not compile. An invocation forged in Rust or by a script run in
+//!   the window, and a second KLIPY client, are refused by the source guard
+//!   instead (`tests::nothing_in_the_app_forges_an_invocation`, `lib.rs`).
 //! - Pages answered in this session are kept by query (kind, text, filter,
 //!   language, page) and asked once. The window names a result by its id,
 //!   never by an address, and only results of the pages of the last search

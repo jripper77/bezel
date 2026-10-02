@@ -287,9 +287,13 @@ struct Start<R: Runtime> {
 /// The app's start, once the runtime is up (Tauri's `setup`): the backend
 /// and the GIF state composed and kept as the app's state, the tray, the
 /// refresh loop and the window. Nothing is asked of KLIPY here, nor by
-/// anything started here (D-2026-10-01-gif-sticker-search-3): a GIF source
-/// is made, and searched, only with a [`UserAsked`], which only a command
-/// the window invoked has.
+/// anything started here (D-2026-10-01-gif-sticker-search-3). The GIF state
+/// makes and searches a source only with a [`UserAsked`], which only a
+/// command Tauri is running has, so a search through it from here does not
+/// compile. Forging an invocation (Tauri's IPC entry or a script run in the
+/// window) or making a second KLIPY client is what the type cannot stop:
+/// the source guard `tests::nothing_in_the_app_forges_an_invocation`
+/// refuses both in production code.
 fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
     let folders = (start.folders)(app.handle())?;
     let backend: Shared = Arc::new(compose(&folders, start.simulate));
@@ -601,6 +605,7 @@ fn restart_without_dmabuf_renderer() {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
     use std::sync::mpsc;
     #[cfg(not(windows))]
     use std::time::Duration;
@@ -1003,5 +1008,506 @@ mod tests {
         assert_eq!(theme.canvas, Size::new(1920, 480));
         assert_eq!(theme.orientation, Orientation::Landscape);
         assert!(theme.elements.is_empty());
+    }
+
+    /// What the studio's production code must not hold, matched with its
+    /// comments set aside and its whitespace removed: each lets the app
+    /// forge a user action (D-2026-10-01-gif-sticker-search-3).
+    const FORGERIES: [&str; 9] = [
+        // An invocation handed to a webview as if the window sent it, the
+        // invoke key it must carry, and the invocation itself.
+        "on_message",
+        "invoke_key",
+        "InvokeRequest",
+        // A script run in the window (it can invoke a command, or press
+        // Search): as a method, as a path or a function taken, with a
+        // callback, naming the window's IPC, or injected at load.
+        ".eval(",
+        "::eval",
+        "eval_with_callback",
+        "__TAURI",
+        "initialization_script",
+        "js_init_script",
+    ];
+
+    /// What makes production code impossible to classify: a module read
+    /// from another path, or code included from another file.
+    const UNCLASSIFIABLE: [&str; 2] = ["#[path", "include!("];
+
+    /// A comment or a literal of Rust source.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Span {
+        Comment,
+        Literal,
+    }
+
+    /// A Rust file of the studio, as the source guard reads it.
+    struct Source {
+        /// Its path under `src/`, `/`-separated.
+        name: String,
+        /// The whole file.
+        text: String,
+        /// `text` with its comments and literals blanked: only code.
+        skeleton: String,
+        /// `text` with its comments blanked: code and literals.
+        code: String,
+        /// Its inline test modules, as offsets in all three.
+        tests: Vec<Range<usize>>,
+    }
+
+    impl Source {
+        /// Reads `text` as the file `name`; why it cannot be classified
+        /// when one of its comments, literals or test modules never closes.
+        fn new(name: &str, text: &str) -> Result<Self, String> {
+            let spans =
+                spans(text).ok_or_else(|| format!("{name}: a comment or literal never closes"))?;
+            let skeleton = blank(text, &spans, &[Span::Comment, Span::Literal]);
+            let tests = test_modules(&skeleton)
+                .ok_or_else(|| format!("{name}: a test module never closes"))?;
+            Ok(Self {
+                name: name.into(),
+                text: text.into(),
+                code: blank(text, &spans, &[Span::Comment]),
+                skeleton,
+                tests,
+            })
+        }
+
+        /// Its code without the inline test modules (each leaves a line
+        /// break, so no name is made across one).
+        fn production(&self) -> String {
+            let mut kept = String::new();
+            let mut from = 0;
+            for module in &self.tests {
+                kept.push_str(&self.code[from..module.start]);
+                kept.push('\n');
+                from = module.end;
+            }
+            kept.push_str(&self.code[from..]);
+            kept
+        }
+
+        /// The code of its production function `name`, whitespace removed:
+        /// empty when it has none.
+        fn function(&self, name: &str) -> String {
+            let header = format!("fn {name}(");
+            let start = self
+                .skeleton
+                .match_indices(&header)
+                .map(|(at, _)| at)
+                .find(|at| !self.tests.iter().any(|module| module.contains(at)));
+            let body = start.and_then(|at| {
+                let open = at + self.skeleton[at..].find('{')?;
+                Some(open..block_end(&self.skeleton, open)?)
+            });
+            body.map(|body| squeezed(&self.code[body]))
+                .unwrap_or_default()
+        }
+    }
+
+    /// `text` without whitespace: a name split by spaces or lines is whole.
+    fn squeezed(text: &str) -> String {
+        text.split_whitespace().collect()
+    }
+
+    /// The length of the block comment `rest` starts with, nested ones
+    /// included: `None` when it never closes.
+    fn block_comment_len(rest: &str) -> Option<usize> {
+        let mut depth = 0_usize;
+        let mut at = 0;
+        while at < rest.len() {
+            if rest[at..].starts_with("/*") {
+                depth += 1;
+                at += 2;
+            } else if rest[at..].starts_with("*/") {
+                depth = depth.checked_sub(1)?;
+                at += 2;
+                if depth == 0 {
+                    return Some(at);
+                }
+            } else {
+                at += rest[at..].chars().next()?.len_utf8();
+            }
+        }
+        None
+    }
+
+    /// The length of the string `rest` starts with (at its quote), escapes
+    /// included: `None` when it never closes.
+    fn string_len(rest: &str) -> Option<usize> {
+        let mut escaped = false;
+        for (at, c) in rest.char_indices().skip(1) {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => return Some(at + 1),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The length of the char literal `rest` starts with (at its quote):
+    /// `None` when the quote starts a lifetime or a label instead.
+    fn char_len(rest: &str) -> Option<usize> {
+        let mut chars = rest.char_indices().skip(1);
+        let (_, first) = chars.next()?;
+        let (at, next) = chars.next()?;
+        if first == '\\' {
+            // An escape: through the quote after the escaped character.
+            let after = at + next.len_utf8();
+            return rest[after..].find('\'').map(|end| after + end + 1);
+        }
+        (next == '\'').then_some(at + 1)
+    }
+
+    /// The length of the raw string `rest` starts with, its prefix being
+    /// the `word` (`r`, `br` or `cr`) then `#`s and a quote: `None` when
+    /// none starts there (a word, or a raw identifier), `Some(None)` when
+    /// it never closes.
+    fn raw_string_len(rest: &str, word: usize) -> Option<Option<usize>> {
+        if !matches!(&rest[..word], "r" | "br" | "cr") {
+            return None;
+        }
+        let hashes = rest[word..].len() - rest[word..].trim_start_matches('#').len();
+        let quote = word + hashes;
+        if !rest[quote..].starts_with('"') {
+            return None;
+        }
+        let close = format!("\"{}", "#".repeat(hashes));
+        Some(
+            rest[quote + 1..]
+                .find(&close)
+                .map(|end| quote + 1 + end + close.len()),
+        )
+    }
+
+    /// The comments and literals of Rust `code`, in order: `None` when one
+    /// of them never closes.
+    fn spans(code: &str) -> Option<Vec<(Range<usize>, Span)>> {
+        let mut found = Vec::new();
+        let mut at = 0;
+        while let Some(c) = code[at..].chars().next() {
+            let rest = &code[at..];
+            let word = rest
+                .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .unwrap_or(rest.len());
+            let span = if rest.starts_with("//") {
+                Some((rest.find('\n').unwrap_or(rest.len()), Span::Comment))
+            } else if rest.starts_with("/*") {
+                Some((block_comment_len(rest)?, Span::Comment))
+            } else if c == '"' {
+                Some((string_len(rest)?, Span::Literal))
+            } else if c == '\'' {
+                char_len(rest).map(|len| (len, Span::Literal))
+            } else if word > 0 {
+                let Some(len) = raw_string_len(rest, word) else {
+                    // A whole word: never a raw string's `r` inside one.
+                    at += word;
+                    continue;
+                };
+                Some((len?, Span::Literal))
+            } else {
+                None
+            };
+            let len = span.map_or(c.len_utf8(), |(len, kind)| {
+                found.push((at..at + len, kind));
+                len
+            });
+            at += len;
+        }
+        Some(found)
+    }
+
+    /// `code` with the bytes of its `spans` of the `blanked` kinds turned
+    /// into spaces (line breaks kept): offsets and lines stay where they
+    /// were.
+    fn blank(code: &str, spans: &[(Range<usize>, Span)], blanked: &[Span]) -> String {
+        let mut bytes = code.as_bytes().to_vec();
+        for (range, _) in spans.iter().filter(|(_, kind)| blanked.contains(kind)) {
+            for byte in &mut bytes[range.clone()] {
+                if *byte != b'\n' {
+                    *byte = b' ';
+                }
+            }
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    /// The end (past its brace) of the block opened at `open` in
+    /// `skeleton`: `None` when it never closes.
+    fn block_end(skeleton: &str, open: usize) -> Option<usize> {
+        let mut depth = 0_usize;
+        for (at, byte) in skeleton.bytes().enumerate().skip(open) {
+            match byte {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(at + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The lines of `text` that hold something, each with its offset.
+    fn filled_lines(text: &str) -> Vec<(usize, &str)> {
+        let mut at = 0;
+        text.split_inclusive('\n')
+            .map(|line| {
+                let start = at;
+                at += line.len();
+                (start, line)
+            })
+            .filter(|(_, line)| !line.trim().is_empty())
+            .collect()
+    }
+
+    /// The module `line` declares (`[pub[(…)] ]mod NAME`) and what follows
+    /// its name (`;`, or `{` and the rest of the line), if it declares one.
+    fn module_item(line: &str) -> Option<(&str, &str)> {
+        let (visibility, item) = line.trim().split_once("mod ")?;
+        let visible = visibility.is_empty()
+            || visibility == "pub "
+            || (visibility.starts_with("pub(")
+                && visibility.ends_with(") ")
+                && !visibility.contains(['{', ';']));
+        let name = item
+            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(item.len());
+        (visible && name > 0).then(|| (&item[..name], item[name..].trim()))
+    }
+
+    /// The inline test modules of `skeleton`: from a `#[cfg(test)]` line
+    /// whose next line opens a `mod` block, through the brace that closes
+    /// it. `None` when that brace is missing.
+    fn test_modules(skeleton: &str) -> Option<Vec<Range<usize>>> {
+        let lines = filled_lines(skeleton);
+        let mut found: Vec<Range<usize>> = Vec::new();
+        for pair in lines.windows(2) {
+            let [(start, attribute), (next, header)] = pair else {
+                continue;
+            };
+            let inside = found.last().is_some_and(|module| module.end > *start);
+            let opens = module_item(header).is_some_and(|(_, rest)| rest.starts_with('{'));
+            if inside || attribute.trim() != "#[cfg(test)]" || !opens {
+                continue;
+            }
+            let open = next + header.find('{')?;
+            found.push(*start..block_end(skeleton, open)?);
+        }
+        Some(found)
+    }
+
+    /// For each `mod {module};` line of `parent`, whether the line before
+    /// it (blank lines and comments aside) is `#[cfg(test)]`.
+    fn declarations(parent: &Source, module: &str) -> Vec<bool> {
+        let lines = filled_lines(&parent.skeleton);
+        lines
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, line))| module_item(line) == Some((module, ";")))
+            .map(|(at, _)| at > 0 && lines[at - 1].1.trim() == "#[cfg(test)]")
+            .collect()
+    }
+
+    /// Whether `source` is built for tests only: every declaration of its
+    /// module (in its parent file among `sources`) comes right under a
+    /// `#[cfg(test)]` line, or is made by a test-only parent. Why it cannot
+    /// be classified when nothing declares it.
+    fn test_only(source: &Source, sources: &[Source]) -> Result<bool, String> {
+        let (dir, file) = source.name.rsplit_once('/').unwrap_or(("", &source.name));
+        if dir.is_empty() && matches!(file, "lib.rs" | "main.rs") {
+            return Ok(false);
+        }
+        let stem = file.trim_end_matches(".rs");
+        // `a/mod.rs` is the module `a`, declared where `a.rs` would be.
+        let (dir, module) = if stem == "mod" {
+            dir.rsplit_once('/').unwrap_or(("", dir))
+        } else {
+            (dir, stem)
+        };
+        let parents = if dir.is_empty() {
+            ["lib.rs".to_string(), "main.rs".to_string()]
+        } else {
+            [format!("{dir}.rs"), format!("{dir}/mod.rs")]
+        };
+        let mut declared = Vec::new();
+        for parent in sources.iter().filter(|s| parents.contains(&s.name)) {
+            let found = declarations(parent, module);
+            if !found.is_empty() && test_only(parent, sources)? {
+                declared.extend(found.iter().map(|_| true));
+            } else {
+                declared.extend(found);
+            }
+        }
+        if declared.is_empty() {
+            return Err(format!("{}: no `mod {module};` declares it", source.name));
+        }
+        Ok(declared.iter().all(|&under_test| under_test))
+    }
+
+    /// What the production `code` of the file `name` holds that it must
+    /// not, or that makes it impossible to classify.
+    fn forgeries(name: &str, code: &str) -> Vec<String> {
+        let code = squeezed(code);
+        let mut found: Vec<String> = FORGERIES
+            .iter()
+            .chain(&UNCLASSIFIABLE)
+            .filter(|token| code.contains(*token))
+            .map(|token| format!("{name}: `{token}` in production code"))
+            .collect();
+        let moved = code.match_indices("cfg_attr(").any(|(at, _)| {
+            code[at..]
+                .split(']')
+                .next()
+                .is_some_and(|attribute| attribute.contains("path"))
+        });
+        if moved {
+            found.push(format!("{name}: a module path set by `cfg_attr`"));
+        }
+        for (at, _) in code.match_indices("KlipyClient") {
+            let made = code[at..].starts_with("KlipyClient::new(");
+            let imported =
+                code[..at].ends_with("usebezel_klipy::") && code[at..].starts_with("KlipyClient;");
+            if !made && !imported {
+                found.push(format!("{name}: KLIPY's client named outside its import"));
+            }
+        }
+        found
+    }
+
+    /// Every `.rs` file under `src/`, found when the test runs (a file
+    /// added later is read too), or why one cannot be read.
+    fn studio_sources() -> Vec<Result<Source, String>> {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut dirs = vec![src.clone()];
+        let mut files = Vec::new();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension() == Some(OsStr::new("rs")) {
+                    files.push(path);
+                }
+            }
+        }
+        files.sort();
+        files
+            .iter()
+            .map(|path| {
+                let parts = path.strip_prefix(&src).unwrap().components();
+                let parts: Vec<_> = parts
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect();
+                let name = parts.join("/");
+                let text = std::fs::read_to_string(path)
+                    .map_err(|e| format!("{name}: cannot be read: {e}"))?;
+                Source::new(&name, &text)
+            })
+            .collect()
+    }
+
+    /// D-2026-10-01-gif-sticker-search-3 (DoD critic, row 3), the source
+    /// guard. [`UserAsked`] guards the GIF state, its source factory and
+    /// the command functions: setup code has no command `Request` to make
+    /// one from. It cannot stop the app from forging an invocation Tauri
+    /// then dispatches, nor from making a second KLIPY client; this does.
+    /// It reads every `.rs` file under `src/` as it runs (a new file is read
+    /// too) and checks that:
+    /// - production code holds none of `FORGERIES`: no invocation handed to
+    ///   a webview with the app's invoke key, no script run in the window;
+    /// - `KlipyClient::new` is called once, in `klipy_source`, and the type
+    ///   is named nowhere else but its import;
+    /// - KLIPY's API and file hosts are named nowhere in the studio, tests
+    ///   included: they are `bezel-klipy`'s.
+    ///
+    /// Test code is left out by one rule, and only it:
+    /// - a file whose module is declared only right under a `#[cfg(test)]`
+    ///   line (`mod tests;`), or by such a file;
+    /// - in the other files, an inline module right under a `#[cfg(test)]`
+    ///   line (`mod tests {`), through the brace that closes it, found
+    ///   with comments and literals set aside.
+    ///
+    /// Anything else marked `#[cfg(test)]` is read as production. Comments
+    /// are not code; literals are. The rule fails closed: a file nothing
+    /// declares, a comment, literal or test module that never closes, and
+    /// production code that reads a module from another path or includes
+    /// another file's code cannot be classified, and fail the test.
+    #[test]
+    fn nothing_in_the_app_forges_an_invocation() {
+        let mut read = Vec::new();
+        let mut problems = Vec::new();
+        for source in studio_sources() {
+            match source {
+                Ok(source) => read.push(source),
+                Err(why) => problems.push(why),
+            }
+        }
+        let hosts = ["api", "static"].map(|host| format!("{host}.klipy.com"));
+        let mut made = 0;
+        for source in &read {
+            for host in hosts
+                .iter()
+                .filter(|host| source.text.contains(host.as_str()))
+            {
+                problems.push(format!("{}: names {host}", source.name));
+            }
+            match test_only(source, &read) {
+                Err(why) => problems.push(why),
+                Ok(true) => {}
+                Ok(false) => {
+                    let code = source.production();
+                    made += squeezed(&code).matches("KlipyClient::new(").count();
+                    problems.extend(forgeries(&source.name, &code));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{problems:#?}");
+        assert_eq!(made, 1, "KLIPY's client is made once in production");
+        let lib = read.iter().find(|source| source.name == "lib.rs").unwrap();
+        let factory = lib.function("klipy_source");
+        assert!(factory.contains("KlipyClient::new("), "{factory}");
+        // The rule read this file's tests as tests, and the GIF files as
+        // they are built.
+        assert!(!lib.production().contains("fn nothing_in_the_app_forges"));
+        let role = |name: &str| {
+            let source = read.iter().find(|source| source.name == name).unwrap();
+            test_only(source, &read).unwrap()
+        };
+        assert!(role("gifs/tests.rs") && role("manager/tests.rs") && role("storage/tests.rs"));
+        assert!(!role("gifs/asked.rs") && !role("gifs.rs") && !role("main.rs"));
+    }
+
+    /// The source guard's rule on made-up files: an inline test module ends
+    /// at its own closing brace whatever its comments and literals hold, so
+    /// code after it is production; one that never closes, or a literal
+    /// that never closes, cannot be classified.
+    #[test]
+    fn the_source_guard_cuts_only_test_modules() {
+        let file = r##"fn before() {}
+#[cfg(test)]
+mod tests {
+    const C: [char; 3] = ['{', '\'', '"'];
+    const S: &str = r#"}"#; // }
+    /* } /* } */ */
+    fn inside<'a>(_: &'a str) -> &'a str { "}\"" }
+}
+fn after() { window.on_message(request) }
+"##;
+        let source = Source::new("x.rs", file).unwrap();
+        let code = source.production();
+        assert!(
+            code.contains("fn before()") && code.contains("fn after()"),
+            "{code}"
+        );
+        assert!(!code.contains("fn inside"), "{code}");
+        assert_eq!(forgeries("x.rs", &code).len(), 1, "{code}");
+        assert!(Source::new("y.rs", "#[cfg(test)]\nmod tests {\n").is_err());
+        assert!(Source::new("z.rs", "const S: &str = \"open;\n").is_err());
     }
 }

@@ -155,41 +155,70 @@ Ainda não há chave: salve uma antes ([Salve a chave no Bezel](#2-salve-a-chave
 
 ### Privacidade
 
-**Quando.** Nada chega ao KLIPY quando o Bezel abre, nem nunca sem uma chave.
-Salvar a chave não envia nada. O Bezel só se conecta quando você age: uma busca
-(ou **Em alta**), **Carregar mais**, as prévias dos resultados na tela e
-**Adicionar à coleção**.
+**Quando.** Nada é enviado sem uma chave. Nada é enviado quando o Bezel abre,
+nem quando você abre a janela de busca ou salva a chave. O Bezel só se conecta
+ao KLIPY quando você age: uma busca (ou **Em alta**), **Carregar mais**, as
+prévias dos resultados que ela mostra e **Adicionar à coleção**. Abrir a
+coleção e usar os itens dela nos temas não envia nada: eles estão neste
+computador.
 
-**O quê, e para quem.** Tudo vai para o KLIPY, por HTTPS, e para mais ninguém:
+**O quê, e para quem.** Tudo vai para o KLIPY, só por HTTPS, e para nenhum
+outro servidor: o Bezel nunca segue um redirecionamento.
 
-- Para `api.klipy.com`, a cada página de resultados: a sua chave (dentro do
-  endereço da requisição), o texto que você digitou (nada em **Em alta**), GIFs
-  ou stickers, o número da página e 24 resultados por página, o filtro de
-  conteúdo escolhido por **Mostrar resultados explícitos**, os formatos que o
-  Bezel quer (GIF, e imagens paradas em JPEG), `BR` como região quando o Bezel
-  está em português, e um identificador de cliente: um número aleatório que o
-  Bezel criou quando você salvou a chave, que não diz nada sobre você. Essas
-  requisições nunca seguem um redirecionamento, então a chave não vai para
-  nenhum outro servidor.
-- Para `static.klipy.com`, sem a sua chave: as prévias dos resultados
-  mostrados e o GIF que você adiciona à coleção.
+- Para `api.klipy.com`, uma vez a cada página de resultados. A sua chave vai
+  dentro do endereço da requisição (`/api/v1/<sua chave>/gifs/search`, com
+  `stickers` para stickers e `trending` para **Em alta**), seguida de:
+  - `q`: o texto que você digitou (fica de fora em **Em alta**);
+  - `page` e `per_page`: o número da página, e 24 resultados por página;
+  - `customer_id`: um número aleatório (128 bits) que o Bezel criou quando
+    você salvou a chave e guarda com ela; ele não diz nada sobre você nem
+    sobre este computador;
+  - `locale`: `BR` quando o Bezel está em português (fica de fora em inglês);
+  - `content_filter`: `medium`, ou `off` enquanto **Mostrar resultados
+    explícitos** está ligado;
+  - `format_filter`: `gif,jpg` para GIFs e `gif,png` para stickers: um GIF
+    vem com imagens paradas em JPEG, um sticker com imagens paradas em PNG.
+- Para `static.klipy.com`, sem a sua chave nem o identificador de cliente: a
+  prévia de cada resultado mostrado (o GIF pequeno dele ou, com movimento
+  reduzido, a imagem parada: JPEG para um GIF, PNG para um sticker) e, em
+  **Adicionar à coleção**, o maior GIF do item que tenha no máximo 25 MiB, com
+  o GIF pequeno dele, a não ser que o Bezel já o tenha da prévia.
+- Cada requisição leva só os cabeçalhos HTTP de costume, que nomeiam a
+  biblioteca que o Bezel usa para isso (`ureq`) e nada sobre você. Um proxy
+  configurado no ambiente (`ALL_PROXY`, `HTTPS_PROXY` ou `HTTP_PROXY`) leva as
+  requisições: ele vê a qual servidor o Bezel chega, não a chave nem o que é
+  pedido.
 - Como qualquer servidor da web, o KLIPY vê o seu endereço IP e quando cada
   requisição chega; a política de privacidade dele diz o que ele faz com isso.
+
+**As prévias passam pelo Bezel.** A janela nunca se conecta ao KLIPY: o Bezel
+baixa cada prévia e a entrega à janela. As imagens paradas que a coleção
+mostra com movimento reduzido são feitas neste computador, a partir das
+prévias que ela guarda.
 
 Nada mais é enviado: sem anúncios, sem estatísticas de uso, e o Bezel não usa
 os recursos de compartilhar ou denunciar do KLIPY.
 
-**Onde fica a sua chave.** Só neste computador, em `klipy.json` na pasta de
-configuração do Bezel, ao lado das preferências:
+**Onde fica a sua chave.** Só neste computador, com o identificador de
+cliente dela, em `klipy.json` na pasta de configuração do Bezel, ao lado das
+preferências:
 
 - Linux: `~/.config/io.github.slipalison.bezel/klipy.json` (ou dentro de
   `$XDG_CONFIG_HOME`);
 - Windows: `%APPDATA%\io.github.slipalison.bezel\klipy.json`.
 
-Só o seu usuário consegue ler o arquivo (no Linux, as permissões dele são
-`0600`). A chave fica nele em texto simples, não no chaveiro do sistema. A
-janela do Bezel nunca a recebe de volta (só os 4 últimos caracteres), e ela
-nunca aparece nas mensagens nem nos registros (logs) do Bezel.
+O Bezel grava o arquivo inteiro a cada vez, legível só pelo seu usuário: no
+Linux, as permissões dele são `0600`, e no Windows as permissões da pasta do
+seu perfil o protegem. A chave fica nele em texto simples, não no chaveiro do
+sistema. Ela só vai para `api.klipy.com`, dentro do endereço da requisição. A
+janela do Bezel nunca a recebe de volta, só os 4 últimos caracteres (e nada
+de uma chave de 8 caracteres ou menos), e ela nunca aparece nas mensagens nem
+nos registros (logs) do Bezel.
+
+**Remover**, ao lado do campo da chave, apaga o `klipy.json`, e com ele a
+chave e o identificador de cliente dela. Uma chave salva depois disso, ou uma
+chave diferente salva por cima da antiga, ganha um novo identificador de
+cliente.
 
 **Onde fica a sua coleção.** Na sua pasta de dados, ao lado das
 [cópias locais](storage-and-video.md#as-cópias-locais-do-bezel) do Bezel:
@@ -197,10 +226,10 @@ nunca aparece nas mensagens nem nos registros (logs) do Bezel.
 - Linux: `~/.local/share/bezel/collection` (ou `$XDG_DATA_HOME/bezel/collection`);
 - Windows: `%APPDATA%\bezel\collection`.
 
-`collection.json` lista o nome de cada item, o tipo, o tamanho, quando você o
-adicionou e de onde ele veio (o id do KLIPY e o endereço da página); `files/`
-guarda os GIFs e `previews/` as prévias. Um tema que usa um item tem a própria
-cópia dentro do tema.
+`collection.json` lista o nome de cada item, o tipo, o tamanho em pixels e em
+bytes, quando você o adicionou e de onde ele veio (o id do KLIPY e a página do
+item em klipy.com); `files/` guarda os GIFs e `previews/` os GIFs pequenos
+deles. Um tema que usa um item tem a própria cópia dentro do tema.
 
 **Guardar os downloads.** O Bezel guarda o que você adiciona até você excluir.
 Os termos da API do KLIPY dizem se, e por quanto tempo, GIFs baixados podem ser
@@ -210,8 +239,7 @@ guardar.
 ### Remover a chave e a coleção
 
 - **Remover**, ao lado do campo da chave, apaga o `klipy.json`; a busca fica
-  desativada até você salvar uma chave de novo, que ganha um novo identificador
-  de cliente.
+  desativada até você salvar uma chave de novo.
 - Para revogar a própria chave, exclua-a no Painel de Parceiros.
 - **Excluir…** tira um item da coleção. Para remover a coleção inteira, feche o
   Bezel e apague a pasta `collection` acima. Os temas guardam as próprias cópias

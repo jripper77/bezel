@@ -131,11 +131,14 @@ const DMABUF_SWITCH: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
 
 /// What the terminal says when the app did not start: which part failed,
 /// told by the variant of Tauri's `error`, never by its text
-/// (D-2026-10-01-gif-sticker-search-12, review W1 of round 2, iter 4).
+/// (D-2026-10-01-gif-sticker-search-12, review W1 of round 2, iter 4). Only
+/// what `Builder::run` returns reaches here (a plugin, or another cause):
+/// a failure in the setup (the folders, the tray, the window and its web
+/// view) and a desktop without a graphical session panic in Tauri or tao
+/// (review W1 of round 2, iter 5), and the panic hook says
+/// [`DiagCode::Panicked`] with the place.
 pub fn start_failure(error: &tauri::Error) -> DiagCode {
     match error {
-        tauri::Error::Runtime(_) => DiagCode::NoWindow,
-        tauri::Error::Setup(_) => DiagCode::SetupFailed,
         tauri::Error::PluginInitialization(..) => DiagCode::PluginNotStarted,
         _ => DiagCode::NotStarted,
     }
@@ -1036,14 +1039,16 @@ mod tests {
 
     /// Review W1 of round 2, iter 4: a start that failed says which part
     /// failed, by the variant of Tauri's error or the kind of the I/O
-    /// error, never by its text.
+    /// error, never by its text. The runtime's and the setup's errors never
+    /// reach `main` in Tauri 2.12 (review W1 of round 2, iter 5): they say
+    /// what any other cause says.
     #[test]
     fn a_failed_start_says_which_part_failed() {
         let runtime = serde_json::from_str::<u8>("x").unwrap_err();
         let setup: Box<dyn std::error::Error> = "the folders were not found".into();
         for (error, code) in [
-            (tauri::Error::Runtime(runtime.into()), DiagCode::NoWindow),
-            (tauri::Error::Setup(setup.into()), DiagCode::SetupFailed),
+            (tauri::Error::Runtime(runtime.into()), DiagCode::NotStarted),
+            (tauri::Error::Setup(setup.into()), DiagCode::NotStarted),
             (
                 tauri::Error::PluginInitialization("dialog".into(), "no portal".into()),
                 DiagCode::PluginNotStarted,
@@ -1246,11 +1251,12 @@ mod tests {
     /// [`DIAG_MODULE`].
     const PRINT_MACROS: [&str; 5] = ["println", "eprintln", "print", "eprint", "dbg"];
 
-    /// Macros that panic with the message they are given, which the panic
-    /// hook prints: nowhere but in [`DIAG_MODULE`] with a message that is
-    /// more than one string literal without a placeholder. One is spelled
-    /// in two parts, so that the repository's check for unfinished-work
-    /// markers does not read it as one.
+    /// Macros that panic with the message they are given, which Rust's
+    /// default panic hook prints (the studio's, [`HOOK_FUNCTION`], does not):
+    /// nowhere but in [`DIAG_MODULE`] with a message that is more than one
+    /// string literal without a placeholder. One is spelled in two parts, so
+    /// that the repository's check for unfinished-work markers does not read
+    /// it as one.
     const PANICS: [&str; 4] = ["panic", "unreachable", concat!("to", "do"), "unimplemented"];
 
     /// Assertions whose message follows the condition.
@@ -1276,6 +1282,58 @@ mod tests {
     /// The loggers' macros, which no module but [`DIAG_MODULE`] calls by
     /// their bare names either (imported, or by `#[macro_use]`).
     const LOG_MACROS: [&str; 7] = ["trace", "debug", "info", "warn", "error", "event", "log"];
+
+    /// What installs a logger or a tracing subscriber, named nowhere in the
+    /// studio's production code, [`DIAG_MODULE`] included
+    /// (D-2026-10-01-gif-sticker-search-14): `tracing`'s global and scoped
+    /// defaults, `log`'s logger. Nothing installed, `tracing` and `log`
+    /// records go nowhere, Tauri's included.
+    const LOG_INSTALLERS: [&str; 6] = [
+        "set_global_default",
+        "set_default",
+        "with_default",
+        "set_logger",
+        "set_logger_racy",
+        "set_boxed_logger",
+    ];
+
+    /// Crates that install a logger or a tracing subscriber, as Rust names
+    /// them (D-2026-10-01-gif-sticker-search-14): no path of the studio's
+    /// production code starts with one, and the studio neither depends on
+    /// one (its manifest, any kind, any target) nor is built with one (what
+    /// it depends on, built for it); in a package's name, `-` is `_`.
+    const LOGGER_CRATES: [&str; 8] = [
+        "tracing_subscriber",
+        "tracing_appender",
+        "env_logger",
+        "simplelog",
+        "fern",
+        "log4rs",
+        "flexi_logger",
+        "pretty_env_logger",
+    ];
+
+    /// Tauri's feature that makes it, its runtime and its webview log
+    /// through `tracing`: each invocation's body (the KLIPY key included) in
+    /// the span `ipc::request` (D-2026-10-01-gif-sticker-search-14). On in
+    /// no package of the Tauri family, as declared and as resolved.
+    const TAURI_LOGS: &str = "tracing";
+
+    /// The process's panic hook, set once, by [`HOOK_FUNCTION`] in
+    /// [`DIAG_MODULE`] (D-2026-10-01-gif-sticker-search-14).
+    const PANIC_HOOK: &str = "set_hook";
+
+    /// The function of [`DIAG_MODULE`] that sets the panic hook: `main`'s
+    /// first statement.
+    const HOOK_FUNCTION: &str = "hook_panics";
+
+    /// What restores Rust's default panic hook, which prints the message,
+    /// or changes the hook: named nowhere.
+    const HOOK_CHANGES: [&str; 2] = ["take_hook", "update_hook"];
+
+    /// The paths [`HOOK_FUNCTION`] uses, beside `tracing` and
+    /// [`DIAG_MODULE`]'s own items.
+    const HOOK_PATHS: [&[&str]; 2] = [&["std", "panic", PANIC_HOOK], &["Box", "new"]];
 
     /// The process's output streams, which no module but [`DIAG_MODULE`]
     /// names (`writeln!(std::io::stderr(), …)` prints), whatever the case
@@ -1482,6 +1540,8 @@ mod tests {
         in_code_impl: bool,
         /// The functions [`DIAG_MODULE`] defines.
         diag_functions: Vec<String>,
+        /// The outermost function around each [`PANIC_HOOK`] named.
+        hooks: Vec<String>,
         /// What it holds that it must not, or that cannot be classified.
         problems: Vec<String>,
     }
@@ -1511,6 +1571,7 @@ mod tests {
                 own_types: Vec::new(),
                 in_code_impl: false,
                 diag_functions: Vec::new(),
+                hooks: Vec::new(),
                 problems: Vec::new(),
             }
         }
@@ -1532,6 +1593,22 @@ mod tests {
         /// Whether the file is [`DIAG_MODULE`], the one that prints and logs.
         fn in_diag(&self) -> bool {
             self.file == DIAG_MODULE
+        }
+
+        /// Whether what is read is [`HOOK_FUNCTION`] in [`DIAG_MODULE`], the
+        /// one place that sets the panic hook.
+        fn sets_the_hook(&self) -> bool {
+            self.in_diag() && self.within == [HOOK_FUNCTION]
+        }
+
+        /// A path (or an import, an `extern crate`) that starts with
+        /// `first`: refused when it is a logger installer's crate.
+        fn logger_crate(&mut self, first: &str, path: &str) {
+            if self.production() && is_logger_crate(first) {
+                self.refuse(format_args!(
+                    "`{path}` is a logger installer's crate: the studio installs no logger"
+                ));
+            }
         }
 
         /// Whether production code outside [`DIAG_MODULE`] is read: the
@@ -1709,13 +1786,18 @@ mod tests {
 
         /// A path in [`DIAG_MODULE`]: one of two or more names starts with
         /// `tracing`, `Self` or an enum of its own, never another module of
-        /// the app (`crate`, `super`) or the standard library's I/O.
+        /// the app (`crate`, `super`) or the standard library's I/O; but in
+        /// [`HOOK_FUNCTION`], the panic hook's [`HOOK_PATHS`].
         fn diag_path(&mut self, segments: &[String]) {
             let Some(first) = segments.first().filter(|_| segments.len() > 1) else {
                 return;
             };
             let own = first == "Self" || self.own_types.contains(first);
-            if !own && !LOGGERS.contains(&first.as_str()) {
+            let hook = self.sets_the_hook()
+                && HOOK_PATHS
+                    .iter()
+                    .any(|path| segments.iter().map(String::as_str).eq(path.iter().copied()));
+            if !own && !hook && !LOGGERS.contains(&first.as_str()) {
                 self.refuse(format_args!(
                     "`{}` in `{DIAG_MODULE}`: it uses only a logger and its own items",
                     segments.join("::")
@@ -1840,6 +1922,26 @@ mod tests {
                      reads one"
                 ));
             }
+            if LOG_INSTALLERS.contains(&name) {
+                self.refuse(format_args!(
+                    "`{name}` installs a logger or a tracing subscriber: the studio installs none"
+                ));
+            }
+            if name == PANIC_HOOK {
+                self.hooks
+                    .push(self.outer().unwrap_or_default().to_string());
+                if !self.sets_the_hook() {
+                    self.refuse(format_args!(
+                        "`{PANIC_HOOK}` outside `diag::{HOOK_FUNCTION}`: the one panic hook says \
+                         a fixed line"
+                    ));
+                }
+            }
+            if HOOK_CHANGES.contains(&name) {
+                self.refuse(format_args!(
+                    "`{name}` changes the panic hook: Rust's default one prints the message"
+                ));
+            }
             if name == "KlipyClient" {
                 self.klipy_named += 1;
             }
@@ -1919,6 +2021,7 @@ mod tests {
             if !self.production() {
                 return;
             }
+            self.logger_crate(path.first().map_or("", String::as_str), &path.join("::"));
             let last = path.last().map_or("", String::as_str);
             let module = path.len() > 1 && path[path.len() - 2] == "commands";
             if renamed && (last == "commands" || (last == "self" && module)) {
@@ -1983,6 +2086,9 @@ mod tests {
             }
             if called && last == "include" {
                 self.refuse("`include!` in production code: it cannot be classified");
+            }
+            if segments.len() > 1 {
+                self.logger_crate(&segments[0], &segments.join("::"));
             }
             let logs = segments.len() > 1 && LOGGERS.contains(&segments[0].as_str());
             let prints = called && (PRINT_MACROS.contains(&last) || LOG_MACROS.contains(&last));
@@ -2096,6 +2202,12 @@ mod tests {
             let main = self.file == "main.rs" && item.sig.ident == "main";
             if self.production() && main && returns_a_result(&item.sig.output) {
                 self.refuse("`main` returns a `Result`: its error is printed when it fails");
+            }
+            if self.production() && main && !hooks_first(&item.block) {
+                self.refuse(format_args!(
+                    "`main` does not call `diag::{HOOK_FUNCTION}()` first: a panic before it prints \
+                     its message"
+                ));
             }
             self.function(&item.sig.ident, command, |reader| {
                 reader.body(&item.sig.inputs, |reader| {
@@ -2337,6 +2449,8 @@ mod tests {
         }
 
         fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
+            let name = item.ident.unraw().to_string();
+            self.logger_crate(&name, &name);
             let logs = LOGGERS.iter().any(|logger| item.ident.unraw() == logger);
             if self.silent() && logs {
                 self.refuse(format_args!("a logger imported outside `{DIAG_MODULE}`"));
@@ -2636,6 +2750,22 @@ mod tests {
         }
     }
 
+    /// Whether `body` starts with the call `diag::hook_panics();`.
+    fn hooks_first(body: &Block) -> bool {
+        matches!(body.stmts.first(), Some(Stmt::Expr(Expr::Call(call), Some(_)))
+            if call.attrs.is_empty()
+                && call.args.is_empty()
+                && matches!(&*call.func, Expr::Path(called)
+                    if called.qself.is_none() && ends_with(&called.path, ["diag", HOOK_FUNCTION])))
+    }
+
+    /// Whether the crate or package `name` installs a logger
+    /// ([`LOGGER_CRATES`], `-` read as `_`).
+    fn is_logger_crate(name: &str) -> bool {
+        let name = name.replace('-', "_");
+        LOGGER_CRATES.contains(&name.as_str())
+    }
+
     /// The names `pattern` binds, added to `names`.
     fn bindings(pattern: &Pat, names: &mut Vec<String>) {
         struct Bindings<'n>(&'n mut Vec<String>);
@@ -2813,7 +2943,19 @@ mod tests {
     ///   closed (no variant holds data), and it holds no `static`, type that
     ///   holds data, trait, other `impl`, macro of its own, module, nor an
     ///   import or a path of two names or more but of a logger or its own
-    ///   items: it says only what it is given;
+    ///   items (and, in `hook_panics`, `std::panic::set_hook` and
+    ///   `Box::new`): it says only what it is given;
+    /// - nothing installs a logger or a tracing subscriber, nor changes the
+    ///   panic hook (D-2026-10-01-gif-sticker-search-14): production code,
+    ///   `diag.rs` included, names none of `LOG_INSTALLERS`
+    ///   (`set_global_default`, `set_logger`, ...), no path or import starts
+    ///   with a logger installer's crate (`LOGGER_CRATES`), `set_hook` is
+    ///   named once, in `diag::hook_panics`, which `main` calls first, and
+    ///   `take_hook`/`update_hook` nowhere; and the studio's metadata
+    ///   ([`studio_metadata`], [`logging_problems`]) shows no logger
+    ///   installer declared (any kind, any target) or built for it, and no
+    ///   package of the Tauri family with its `tracing` feature on, as
+    ///   declared or as resolved;
     /// - `UserAsked::of` is named (called, or taken as a value, a macro's
     ///   tokens included) only in the bodies of the `#[tauri::command]`
     ///   functions `search_gifs`, `gif_preview` and `collect_gif` of
@@ -2857,10 +2999,11 @@ mod tests {
         let commands: Vec<String> = built.iter().flat_map(|s| s.commands()).collect();
         let (mut made, mut reads, mut asked) = (Vec::new(), Vec::new(), Vec::new());
         let (mut handled, mut handlers) = (Vec::new(), Vec::new());
-        let mut diag_functions = Vec::new();
+        let (mut diag_functions, mut hooks) = (Vec::new(), Vec::new());
         for source in &built {
             let reader = source.production(&commands);
             let at = |f: &String| format!("{}: {f}", source.name);
+            hooks.extend(reader.hooks.iter().map(at));
             made.extend(reader.made.iter().map(at));
             reads.extend(reader.reads.iter().map(at));
             asked.extend(reader.asked.iter().map(at));
@@ -2869,7 +3012,14 @@ mod tests {
             handled.extend(reader.handled);
             problems.extend(reader.problems);
         }
+        // What the studio is built with (D-2026-10-01-gif-sticker-search-14).
+        problems.extend(logging_problems(&studio_metadata()));
         assert!(problems.is_empty(), "{problems:#?}");
+        assert_eq!(
+            hooks,
+            ["diag.rs: hook_panics"],
+            "one panic hook, set by `diag::hook_panics`"
+        );
         // The one module that prints is built, and its functions were read.
         assert!(
             diag_functions.iter().any(|f| f == "diag.rs: report"),
@@ -2926,6 +3076,379 @@ mod tests {
         assert!(role("gifs/tests.rs") && role("manager/tests.rs") && role("storage/tests.rs"));
         assert!(!role("gifs/asked.rs") && !role("gifs/key.rs") && !role("gifs.rs"));
         assert!(!role("main.rs") && !role(DIAG_MODULE));
+    }
+
+    /// The studio's package and the workspace's resolved graph, as cargo
+    /// reads them (`cargo metadata --locked --all-features`): cargo's own
+    /// reading of the manifests, so each dependency table (`[dependencies]`,
+    /// `[dev-dependencies]`, `[build-dependencies]`, under `[target.…]` too),
+    /// `workspace = true`, `package = …` and each feature that turns a
+    /// dependency's feature on, in any member, is read as cargo builds it.
+    fn studio_metadata() -> serde_json::Value {
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let read = std::process::Command::new(cargo)
+            .args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--locked",
+                "--all-features",
+            ])
+            .arg("--manifest-path")
+            .arg(&manifest)
+            .output()
+            .unwrap();
+        let why = String::from_utf8_lossy(&read.stderr);
+        assert!(read.status.success(), "cargo metadata: {why}");
+        serde_json::from_slice(&read.stdout).unwrap()
+    }
+
+    /// Whether `name` is a package of the Tauri family, whose `tracing`
+    /// feature ([`TAURI_LOGS`]) logs what Tauri does: Tauri, its crates and
+    /// plugins, its webview and its windows.
+    fn in_tauri(name: &str) -> bool {
+        name == "tauri" || name.starts_with("tauri-") || name == "wry" || name == "tao"
+    }
+
+    /// Whether the feature list `features` turns [`TAURI_LOGS`] on.
+    fn logs_through_tracing(features: &serde_json::Value) -> bool {
+        features
+            .as_array()
+            .is_some_and(|features| features.iter().any(|f| f == TAURI_LOGS))
+    }
+
+    /// What `metadata` (as [`studio_metadata`] reads it) says that makes
+    /// the studio install a logger or Tauri log
+    /// (D-2026-10-01-gif-sticker-search-14): its manifest depending on a
+    /// logger installer ([`LOGGER_CRATES`]), whatever the kind (normal, dev,
+    /// build), the target or the name it is renamed to, or turning a Tauri
+    /// package's `tracing` feature on; any package of the Tauri family
+    /// resolved with that feature on, whoever turned it on; and a logger
+    /// installer among what the studio is built with (its normal and build
+    /// dependencies, all the way down, for any target). It fails closed: a
+    /// graph without the studio is a problem.
+    fn logging_problems(metadata: &serde_json::Value) -> Vec<String> {
+        use std::collections::{HashMap, HashSet};
+
+        let empty = Vec::new();
+        let packages = metadata["packages"].as_array().unwrap_or(&empty);
+        let nodes = metadata["resolve"]["nodes"].as_array().unwrap_or(&empty);
+        let names: HashMap<&str, &str> = packages
+            .iter()
+            .filter_map(|p| Some((p["id"].as_str()?, p["name"].as_str()?)))
+            .collect();
+        let by_id: HashMap<&str, &serde_json::Value> = nodes
+            .iter()
+            .filter_map(|node| Some((node["id"].as_str()?, node)))
+            .collect();
+        let studio = packages.iter().find(|p| p["name"] == "bezel-studio");
+        let Some(studio) = studio.filter(|p| by_id.contains_key(p["id"].as_str().unwrap_or("")))
+        else {
+            return vec!["cargo metadata: the studio is not in the resolved graph".into()];
+        };
+        let mut problems = Vec::new();
+        for dependency in studio["dependencies"].as_array().unwrap_or(&empty) {
+            let name = dependency["name"].as_str().unwrap_or_default();
+            let kind = dependency["kind"].as_str().unwrap_or("normal");
+            let target = dependency["target"].as_str();
+            let as_declared = format!(
+                "{kind}{}",
+                target.map(|t| format!(", `{t}`")).unwrap_or_default()
+            );
+            if is_logger_crate(name) {
+                problems.push(format!(
+                    "Cargo.toml: depends on `{name}` ({as_declared}), a logger installer"
+                ));
+            }
+            if in_tauri(name) && logs_through_tracing(&dependency["features"]) {
+                problems.push(format!(
+                    "Cargo.toml: turns `{name}`'s `{TAURI_LOGS}` feature on ({as_declared}): \
+                     Tauri then logs each invocation's body"
+                ));
+            }
+        }
+        for node in nodes {
+            let name = node["id"].as_str().and_then(|id| names.get(id)).copied();
+            let name = name.unwrap_or_default();
+            if in_tauri(name) && logs_through_tracing(&node["features"]) {
+                problems.push(format!(
+                    "resolved: `{name}` is built with its `{TAURI_LOGS}` feature on"
+                ));
+            }
+        }
+        let mut built: HashSet<&str> = HashSet::new();
+        let mut next: Vec<&str> = studio["id"].as_str().into_iter().collect();
+        while let Some(id) = next.pop() {
+            if !built.insert(id) {
+                continue;
+            }
+            let deps = by_id.get(id).and_then(|node| node["deps"].as_array());
+            for dep in deps.unwrap_or(&empty) {
+                let kinds = dep["dep_kinds"].as_array().unwrap_or(&empty);
+                let for_the_build = kinds
+                    .iter()
+                    .any(|k| k["kind"].is_null() || k["kind"] == "build");
+                if let Some(pkg) = dep["pkg"].as_str().filter(|_| for_the_build) {
+                    next.push(pkg);
+                }
+            }
+        }
+        let mut installers: Vec<&str> = built
+            .iter()
+            .filter_map(|id| names.get(id).copied())
+            .filter(|name| is_logger_crate(name))
+            .collect();
+        installers.sort_unstable();
+        for name in installers {
+            problems.push(format!(
+                "resolved: the studio is built with `{name}`, a logger installer"
+            ));
+        }
+        problems
+    }
+
+    /// The studio's metadata edited as a change would leave it
+    /// (D-2026-10-01-gif-sticker-search-14): what the change is, the edit,
+    /// and what one of the findings says.
+    type MetadataCase = (
+        &'static str,
+        Box<dyn Fn(&mut serde_json::Value)>,
+        &'static str,
+    );
+
+    /// The studio's dependency `name` declared as `kind` (`null` for a
+    /// normal one) in the metadata `m`.
+    fn declared<'m>(
+        m: &'m mut serde_json::Value,
+        name: &str,
+        kind: &serde_json::Value,
+    ) -> &'m mut serde_json::Value {
+        let studio = m["packages"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|p| p["name"] == "bezel-studio")
+            .unwrap();
+        studio["dependencies"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|d| d["name"] == name && d["kind"] == *kind)
+            .unwrap()
+    }
+
+    /// The resolved node of the package `name` in the metadata `m`.
+    fn resolved<'m>(m: &'m mut serde_json::Value, name: &str) -> &'m mut serde_json::Value {
+        let id = m["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap()["id"]
+            .clone();
+        m["resolve"]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|n| n["id"] == id)
+            .unwrap()
+    }
+
+    /// A dependency of the studio's manifest on `name`, as cargo reads one.
+    fn dependency(
+        name: &str,
+        kind: Option<&str>,
+        target: Option<&str>,
+        rename: Option<&str>,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "name": name, "source": "registry+https://github.com/rust-lang/crates.io-index",
+            "req": "^0.3", "kind": kind, "rename": rename, "optional": false,
+            "uses_default_features": true, "features": [], "target": target,
+            "registry": null
+        })
+    }
+
+    /// The edit that adds `dependency` to the studio's manifest.
+    fn declares(dependency: serde_json::Value) -> Box<dyn Fn(&mut serde_json::Value)> {
+        Box::new(move |m| {
+            let studio = m["packages"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|p| p["name"] == "bezel-studio")
+                .unwrap();
+            studio["dependencies"]
+                .as_array_mut()
+                .unwrap()
+                .push(dependency.clone());
+        })
+    }
+
+    /// The edit that makes the package `from` depend on `to` (both in the
+    /// graph), as `kind` (`null` for a normal dependency).
+    fn depends(
+        from: &'static str,
+        to: &'static str,
+        kind: Option<&'static str>,
+    ) -> Box<dyn Fn(&mut serde_json::Value)> {
+        Box::new(move |m| {
+            let to = m["packages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["name"] == to)
+                .unwrap()["id"]
+                .clone();
+            let edge = serde_json::json!({
+                "name": "added", "pkg": to,
+                "dep_kinds": [{"kind": kind, "target": null}]
+            });
+            resolved(m, from)["deps"].as_array_mut().unwrap().push(edge);
+        })
+    }
+
+    /// Changes that make the studio install a logger or Tauri log
+    /// (D-2026-10-01-gif-sticker-search-14, the DoD critic of round 2,
+    /// iteration 5: the CLI's `--verbose` logger copied into the studio):
+    /// each is refused.
+    fn loggers_built_in() -> Vec<MetadataCase> {
+        let on = |kind: serde_json::Value| -> Box<dyn Fn(&mut serde_json::Value)> {
+            Box::new(move |m| {
+                declared(m, "tauri", &kind)["features"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(TAURI_LOGS.into());
+            })
+        };
+        let turned_on = |name: &'static str| -> Box<dyn Fn(&mut serde_json::Value)> {
+            Box::new(move |m| {
+                resolved(m, name)["features"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(TAURI_LOGS.into());
+            })
+        };
+        let declared_logger = "a logger installer";
+        let mut cases: Vec<MetadataCase> = vec![
+            // Tauri's feature, in `[dependencies]` and in the test-only
+            // `[target.'cfg(not(windows))'.dev-dependencies]`.
+            (
+                "tauri features += tracing",
+                on(serde_json::Value::Null),
+                "turns `tauri`'s `tracing` feature on (normal)",
+            ),
+            (
+                "the mock runtime's tauri += tracing",
+                on("dev".into()),
+                "(dev, `cfg(not(windows))`)",
+            ),
+            // Turned on elsewhere: another member, a feature of the studio,
+            // a plugin: the package as resolved.
+            (
+                "tauri resolved with tracing",
+                turned_on("tauri"),
+                "resolved: `tauri` is built with its `tracing` feature on",
+            ),
+            (
+                "tauri-runtime-wry resolved with tracing",
+                turned_on("tauri-runtime-wry"),
+                "resolved: `tauri-runtime-wry`",
+            ),
+            (
+                "wry resolved with tracing",
+                turned_on("wry"),
+                "resolved: `wry`",
+            ),
+            // A logger installer reached through another crate, built for
+            // the studio (normal or build), not as its dev-dependency.
+            (
+                "bezel-media -> tracing-subscriber",
+                depends("bezel-media", "tracing-subscriber", None),
+                "resolved: the studio is built with `tracing-subscriber`",
+            ),
+            (
+                "tauri-build -> tracing-subscriber",
+                depends("tauri-build", "tracing-subscriber", Some("build")),
+                "resolved: the studio is built with `tracing-subscriber`",
+            ),
+        ];
+        // Each logger installer, as a dependency of any kind and target,
+        // renamed or not.
+        for name in [
+            "tracing-subscriber",
+            "tracing-appender",
+            "env_logger",
+            "simplelog",
+            "fern",
+            "log4rs",
+            "flexi_logger",
+            "pretty_env_logger",
+        ] {
+            cases.push((
+                "a logger installer",
+                declares(dependency(name, None, None, None)),
+                declared_logger,
+            ));
+        }
+        for (kind, target, rename) in [
+            (Some("dev"), None, None),
+            (Some("build"), None, None),
+            (None, Some("cfg(unix)"), None),
+            (Some("dev"), Some("cfg(not(windows))"), None),
+            (None, None, Some("logs")),
+        ] {
+            cases.push((
+                "tracing-subscriber declared",
+                declares(dependency("tracing-subscriber", kind, target, rename)),
+                declared_logger,
+            ));
+        }
+        cases
+    }
+
+    /// D-2026-10-01-gif-sticker-search-14: the studio installs no logger,
+    /// and Tauri does not log. Its real metadata passes; each change of
+    /// [`loggers_built_in`], applied to it, is refused; a graph without the
+    /// studio fails closed; and what does not reach the studio is not
+    /// refused: a logger installer that only the CLI depends on (it does,
+    /// for `--verbose`), and one that a dependency of the studio only uses
+    /// in its own tests.
+    #[test]
+    fn the_studio_installs_no_logger() {
+        let real = studio_metadata();
+        assert_eq!(logging_problems(&real), Vec::<String>::new());
+        let cli = real["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == "bezel")
+            .unwrap();
+        let cli_logs = cli["dependencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["name"] == "tracing-subscriber");
+        assert!(cli_logs, "the CLI's `--verbose` logger is in the graph");
+        let mut tested = real.clone();
+        depends("bezel-media", "tracing-subscriber", Some("dev"))(&mut tested);
+        assert_eq!(logging_problems(&tested), Vec::<String>::new());
+        for (what, edit, why) in loggers_built_in() {
+            let mut changed = real.clone();
+            edit(&mut changed);
+            let problems = logging_problems(&changed);
+            assert!(
+                problems.iter().any(|p| p.contains(why)),
+                "{what}: {problems:#?}"
+            );
+        }
+        let mut without = real.clone();
+        without["resolve"] = serde_json::Value::Null;
+        assert_eq!(
+            logging_problems(&without),
+            ["cargo metadata: the studio is not in the resolved graph"]
+        );
     }
 
     /// The command functions of the studio's `commands.rs`.
@@ -3697,6 +4220,98 @@ fn after(w: W) { w.on_message(request) }
         ]
     }
 
+    /// A logger installed, or a panic hook other than `diag::hook_panics`
+    /// first in `main` (D-2026-10-01-gif-sticker-search-14): each is
+    /// refused, in `diag.rs` too.
+    fn loggers_and_hooks() -> Vec<Case> {
+        let installer = "a logger installer's crate";
+        let installs = "installs a logger or a tracing subscriber";
+        let hook = "`set_hook` outside `diag::hook_panics`";
+        let first = "`main` does not call `diag::hook_panics()` first";
+        vec![
+            // The DoD critic of round 2, iteration 5: the CLI's `--verbose`
+            // logger in `run`, behind a switch.
+            (
+                "lib.rs",
+                "pub fn run() -> R { if switch_on(std::env::var_os(\"BEZEL_VERBOSE\").as_deref()) { \
+                 tracing_subscriber::fmt().with_max_level(tracing::Level::TRACE).init(); } \
+                 tauri::Builder::default().run(tauri::generate_context!()) }"
+                    .into(),
+                installer,
+            ),
+            ("lib.rs", "use tracing_subscriber::fmt;".into(), installer),
+            ("lib.rs", "use ::r#fern as f;".into(), installer),
+            ("lib.rs", "extern crate env_logger;".into(), installer),
+            ("lib.rs", "fn f() { ::pretty_env_logger::init() }".into(), installer),
+            (
+                "lib.rs",
+                "fn f() { spawn!(simplelog::SimpleLogger::init(L, C)) }".into(),
+                installer,
+            ),
+            (
+                DIAG_MODULE,
+                "pub fn report(code: DiagCode) { let _ = log4rs::init_file(\"x\", D); }".into(),
+                installer,
+            ),
+            // Installed through `tracing` or `log` themselves.
+            (
+                DIAG_MODULE,
+                "pub fn report(code: DiagCode) { \
+                 let _ = tracing::subscriber::set_global_default(S); }"
+                    .into(),
+                installs,
+            ),
+            (
+                "lib.rs",
+                "fn f(s: S) { tracing::subscriber::with_default(s, run) }".into(),
+                installs,
+            ),
+            (
+                "studio.rs",
+                "fn f(s: S) { let _guard = tracing::dispatcher::set_default(&s); }".into(),
+                installs,
+            ),
+            (
+                "lib.rs",
+                "fn f() { let _ = log::set_boxed_logger(Box::new(L)); }".into(),
+                installs,
+            ),
+            ("tray.rs", "fn f() { let _ = r#set_logger(&L); }".into(), installs),
+            // Another panic hook, or the default one back.
+            (
+                "lib.rs",
+                "pub fn run() { std::panic::set_hook(Box::new(|_| {})); }".into(),
+                hook,
+            ),
+            (
+                DIAG_MODULE,
+                "pub fn report(code: DiagCode) { std::panic::set_hook(Box::new(|_| {})); }".into(),
+                hook,
+            ),
+            ("main.rs", "use std::panic::set_hook;".into(), hook),
+            (
+                "lib.rs",
+                "fn f() { let _ = std::panic::take_hook(); }".into(),
+                "`take_hook` changes the panic hook",
+            ),
+            // `main` without the hook first.
+            (
+                "main.rs",
+                "fn main() -> ExitCode { match bezel_studio::run() { Ok(()) => ExitCode::SUCCESS, \
+                 Err(_) => ExitCode::FAILURE } }"
+                    .into(),
+                first,
+            ),
+            (
+                "main.rs",
+                "fn main() -> ExitCode { let r = bezel_studio::run(); diag::hook_panics(); \
+                 exit(r) }"
+                    .into(),
+                first,
+            ),
+        ]
+    }
+
     /// A command function named where a local of the same name is not
     /// bound (review W1 of round 2): before the binding, in its own value,
     /// after its scope, with a path: each is refused.
@@ -3765,12 +4380,13 @@ fn after(w: W) { w.on_message(request) }
     /// taken elsewhere ([`invocations_taken_elsewhere`]), a print, a log or
     /// a panic in the command module ([`prints_in_commands`]), a print, a
     /// log, a formatted panic or an invocation's parts outside `diag.rs`
-    /// ([`prints_outside_diag`]) and `diag.rs` made to say a value
-    /// ([`diag_says_a_value`]); what the studio does (the source factory,
+    /// ([`prints_outside_diag`]), `diag.rs` made to say a value
+    /// ([`diag_says_a_value`]), and a logger installed or another panic
+    /// hook ([`loggers_and_hooks`]); what the studio does (the source factory,
     /// the key file, the GIF commands and their invocation, the handler
     /// list, a method named like a command, a local named like one in
     /// `commands.rs` (review W1 of round 2), a panic with fixed text, what
-    /// `diag.rs` is and its calls) is not.
+    /// `diag.rs` and `main.rs` are and the calls of `diag`) is not.
     #[test]
     fn the_source_guard_reads_identifiers_not_text() {
         let call = "macro_rules! call { ($w:ident, $m:ident, $s:expr) => { $w.$m($s) } }";
@@ -3841,6 +4457,7 @@ fn after(w: W) { w.on_message(request) }
             prints_in_commands(),
             prints_outside_diag(),
             diag_says_a_value(),
+            loggers_and_hooks(),
         ];
         let more = more.iter().flatten();
         let refused = refused
@@ -3948,9 +4565,11 @@ fn after(w: W) { w.on_message(request) }
                 "fn f(s: S) -> Dto { let video_auto = s.video_auto(); \
                  let preferences = format!(\"{}\", video_auto); Dto { video_auto, preferences } }",
             ),
-            // `diag.rs` as it is, its codes said, panics with fixed text,
-            // `write!` to a formatter, a lint's `expect` attribute.
+            // `diag.rs` and `main.rs` as they are (the panic hook, set first),
+            // its codes said, panics with fixed text, `write!` to a
+            // formatter, a lint's `expect` attribute.
             (DIAG_MODULE, include_str!("diag.rs")),
+            ("main.rs", include_str!("main.rs")),
             (
                 DIAG_MODULE,
                 "pub fn note(code: DiagCode, text: &'static str) { \

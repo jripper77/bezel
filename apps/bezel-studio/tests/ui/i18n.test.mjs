@@ -144,6 +144,82 @@ test('no text is written in the UI code: everything goes through t()', () => {
   assert.deepEqual(found, []);
 });
 
+/**
+ * The UI's code, as paths under src/: every module but the translations
+ * (i18n/) and demo mode (demo-*.js: the stand-in backend and its data, whose
+ * messages are a backend's English `message`, like the real one's).
+ */
+function uiFiles(dir = src, prefix = '') {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
+    if (d.isDirectory()) return d.name === 'i18n' ? [] : uiFiles(new URL(`${d.name}/`, dir), `${prefix}${d.name}/`);
+    return d.name.endsWith('.js') && !d.name.startsWith('demo-') ? [`${prefix}${d.name}`] : [];
+  });
+}
+
+test('the prose scan reads every module but the translations and demo mode', () => {
+  const files = uiFiles();
+  for (const f of ['app.js', 'gif-search.js', 'collection.js', 'messages.js', 'ui/gif-search.js', 'ui/collection.js', 'editor/store.js']) assert.ok(files.includes(f), f);
+  assert.deepEqual(files.filter((f) => f.startsWith('i18n/') || /(?:^|\/)demo-/.test(f)), []);
+});
+
+// A literal that reads like a sentence is text for a person, whatever
+// receives it: `el(…)`, a toast, or a local helper like `keyProblem('…')`.
+/** A capitalised word with another after it: "Paste the key", "Added ${name}". */
+const CAPITALISED_PHRASE = /\p{Lu}\p{Ll}*\s+[\p{L}\0]/u;
+/** A word that ends a sentence: "Done.", "first!", "Really?", "Saving…". */
+const SENTENCE_END = /\p{L}[.!?…]$/u;
+/** The start of a translation key built in code (`'error.' + code`): it ends in "." but is no sentence. */
+const KEY_PREFIX = /^[a-z][\w.]*\.$/;
+/** A lowercase word as it stands in a sentence, maybe before a comma, ";" or ":". */
+const LOWERCASE_WORD = /^\p{Ll}+[,;:]?$/u;
+
+/** Whether a literal's `text` (`\0` for each `${…}`) reads like prose: one of the shapes above, or three lowercase words in a row. */
+function readsLikeProse(text) {
+  const trimmed = text.trim();
+  if (CAPITALISED_PHRASE.test(trimmed)) return true;
+  if (SENTENCE_END.test(trimmed) && !KEY_PREFIX.test(trimmed)) return true;
+  const plain = trimmed.split(/\s+/).map((word) => LOWERCASE_WORD.test(word));
+  return plain.some((word, i) => word && plain[i + 1] && plain[i + 2]);
+}
+
+/** The texts of the string and template literals of `code` that read like prose. */
+function proseLiterals(code) {
+  return literals(code).filter((l) => hasWords(l.text) && readsLikeProse(l.text)).map((l) => l.text.replace(/\0/g, '${…}'));
+}
+
+/**
+ * The literals of the UI code that read like prose and are not for a
+ * translation, as "<file>: <text>". Each one is on the tree: an exception
+ * that no longer is fails the test too, so the list cannot go stale.
+ */
+const NOT_PROSE = new Set([
+  // Font families the font picker lists: their own names in every language.
+  'app.js: JetBrains Mono',
+  'app.js: Roboto Mono',
+  // An Error's message for a malformed frame from the renderer: a detail for
+  // the log, which the user reads inside the translated `error.unknown`.
+  'bridge.js: frame too short',
+]);
+
+test('the prose scan finds sentences whatever function receives them', () => {
+  const code = [
+    "keyProblem('Paste the key in the field first.'); say(`Added ${name}`); note('paste the key first');",
+    "note('Done.'); note(\"Really?\"); note(`Saving…`);",
+    "t('gifs.keyEmpty'); t('error.' + code); t(`gifs.kind.${kind}`); x.textContent = '?'; f(`${a} s`, `${a}%`);",
+    "el('p', { class: 'icon-button key-help-button', 'aria-describedby': 'gif-key-status gif-key-error' });",
+    "matchMedia('(prefers-reduced-motion: reduce)'); url.startsWith('data:image/'); key === 'ArrowDown'; g('image/gif', '0 0 4px');",
+    '// Paste the key first. /* Not this either. */',
+    "/* Nor this. */ throw new Error(`unknown widget ${widget}`);",
+  ].join('\n');
+  assert.deepEqual(proseLiterals(code), ['Paste the key in the field first.', 'Added ${…}', 'paste the key first', 'Done.', 'Really?', 'Saving…']);
+});
+
+test('no sentence is written in the UI code, whatever function receives it', () => {
+  const found = uiFiles().flatMap((f) => proseLiterals(readFileSync(new URL(f, src), 'utf8')).map((text) => `${f}: ${text}`));
+  assert.deepEqual(found.filter((entry) => !NOT_PROSE.has(entry)), []);
+  assert.deepEqual([...NOT_PROSE].filter((entry) => !found.includes(entry)), [], 'an exception no longer on the tree');
+});
+
 test('index.html has no text of its own but the brand', () => {
   const html = readFileSync(new URL('index.html', src), 'utf8');
   const texts = [...html.matchAll(/>([^<>]+)</g)].map((m) => m[1].trim()).filter((text) => /\p{L}/u.test(text));

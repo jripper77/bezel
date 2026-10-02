@@ -106,6 +106,15 @@ test.describe('gif search', () => {
     await expect(steps).toBeHidden();
     await expect(help).toBeFocused();
 
+    // Saving with the field empty says so on the field, in the UI's language.
+    await expect(key).toHaveValue('');
+    await dialog.getByRole('button', { name: t('gifs.keySave') }).click();
+    await expect(dialog.getByText(t('gifs.keyEmpty'), { exact: true })).toBeVisible();
+    await expect(key).toHaveAttribute('aria-invalid', 'true');
+    await expect(key).toHaveAttribute('aria-describedby', /\bgif-key-error\b/);
+    await expect(dialog.locator('#gif-key-error')).toHaveText(t('gifs.keyEmpty'));
+    expect(await lastQuery(page)).toBeNull();
+
     // A key that is not one; then a key KLIPY refuses at the first search, which opens the help.
     await key.fill('not a key!');
     await dialog.getByRole('button', { name: t('gifs.keySave') }).click();

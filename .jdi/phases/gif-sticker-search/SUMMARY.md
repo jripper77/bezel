@@ -49,6 +49,10 @@
   features resolvidas pelo `cargo metadata`), panic hook que diz só onde; `86f5c99` — guia de problemas com o que o usuário vê.
 - Rodada 3, iter 2 (D-15): `0bfa420` — sem sockets no core (linha 1) nem no studio; `Command` só na reabertura do próprio
   app; o navegador do sistema só abre por `open_link`/`open_guide` (clique do usuário).
+- Rodada 3, iter 3 (D-16, D-17): `70b926b` (janelas do `tauri.conf.json` só locais, nenhuma crate/plugin de rede além do
+  `bezel-klipy`), `3f71b78` (`studio-starts-silent.sh`: o binário real, com chave salva, sob um shim de `connect`/`execve`
+  — nada sai para fora no início; abrir o navegador, janela remota ou socket reprovam), `944cfc3` (e2e: nada sem clique,
+  mesmo 1 h ociosa); o orquestrador apertou as linhas 1 (core sem I/O) e 10 (`test.fixme(` pede issue).
 
 ## Blocked tasks
 - nenhuma

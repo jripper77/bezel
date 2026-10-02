@@ -1,14 +1,14 @@
 # Phase 11: Busca de GIFs e stickers (KLIPY) e coleção — Context  (slug: gif-sticker-search)
 
 ## Goal
-GIFs/stickers do KLIPY, com a chave do usuário, numa coleção local gerenciável e usados nos temas como imagens.
+GIFs/stickers do KLIPY com a chave do usuário, numa coleção local gerenciável e usada nos temas.
 
 ## Locked decisions
-- D-1: pedido de 2026-10-01 (Tenor desligado, GIPHY pago).
+- D-1: pedido de 2026-10-01.
 - D-2: porta `GifSource`; `bezel-klipy` (`ureq` 3 + rustls) só no studio; `content_filter` `off`/`medium`; arquivos só de `static.klipy.com`, sem chave, com teto.
-- D-3: chave em `<config>/klipy.json` (0600), fora da janela e dos logs; sem chave nada sai; "?" abre popover (4 passos + Painel).
+- D-3: chave em `<config>/klipy.json` (0600), fora da janela e dos logs; "?" abre popover (4 passos + Painel).
 - D-4: busca na Coleção: "Search KLIPY", explícitos desligado, nada ao abrir, debounce, "Carregar mais"; prévias `data:` por id (CSP igual); 429 = 100/h.
-- D-5: `GifCollection`: maior GIF ≤ 25 MiB, 1 cópia por SHA-256; Mídia: "Deste tema" | "Coleção" (usar, arrastar, renomear, excluir).
+- D-5: `GifCollection`: maior GIF ≤ 25 MiB, 1 cópia por SHA-256; Mídia: "Deste tema" | "Coleção".
 - D-6: provas pelo caminho de produção; guia com Privacidade.
 - D-7: API real: `format_filter` por tipo, still PNG no sticker, 404 = chave recusada.
 
@@ -27,8 +27,8 @@ GIFs/stickers do KLIPY, com a chave do usuário, numa coleção local gerenciáv
 - [ ] `KlipyClient` contra servidor HTTP loopback com JSON gravado
       **Verify:** `cargo test -p bezel-klipy --locked --lib -- --exact client::tests::searches_over_loopback_http client::tests::maps_429_and_refused_keys client::tests::stops_at_the_byte_limit client::tests::files_only_from_klipy_without_key client::tests::errors_hide_the_key client::tests::production_is_https_api_klipy_com 2>&1 | grep -q 'ok. 6 passed' && echo OK`
       **Source:** CONTEXT
-- [ ] Studio: nada sai sem chave/no início, chave privada, só itens da última busca, alpha, fundo animado, excluir nomeia temas; CSP igual
-      **Verify:** `cargo test -p bezel-studio --locked --lib -- --exact gifs::tests::no_request_at_start_or_without_key gifs::tests::key_never_reaches_the_window gifs::tests::only_items_of_the_last_search gifs::tests::sticker_alpha_shows_the_background gifs::tests::animated_gif_background_as_today gifs::tests::delete_names_themes_using_it backend::tests::partner_panel_is_the_only_new_link tests::every_command_is_allowed_by_name tests::the_app_setup_sends_nothing_at_start tests::nothing_in_the_app_forges_an_invocation tests::the_studio_installs_no_logger diag::tests::a_panic_says_where_never_what 2>&1 | grep -q 'ok. 12 passed' && cargo test -p bezel-media --locked --lib -- --exact collection::tests::saves_atomically_by_content collection::tests::unreadable_index_is_an_error 2>&1 | grep -q 'ok. 2 passed' && cd apps/bezel-studio/src-tauri && [ "$(grep '"csp"' tauri.conf.json)" = "$(git show origin/main:./tauri.conf.json | grep '"csp"')" ] && [ -z "$(git ls-files | grep -iE '^tauri.*\.(json5?|toml)$' | grep -vx tauri.conf.json)" ] && ! grep -qE '"(opener|http):' capabilities/*.json && echo OK`
+- [ ] Studio: nada sai sem chave/no início (comportamento), chave privada, só a última busca, alpha, fundo animado, excluir nomeia temas; CSP igual
+      **Verify:** `cargo test -p bezel-studio --locked --lib -- --exact gifs::tests::no_request_at_start_or_without_key gifs::tests::key_never_reaches_the_window gifs::tests::only_items_of_the_last_search gifs::tests::sticker_alpha_shows_the_background gifs::tests::animated_gif_background_as_today gifs::tests::delete_names_themes_using_it backend::tests::partner_panel_is_the_only_new_link tests::every_command_is_allowed_by_name tests::the_app_setup_sends_nothing_at_start tests::nothing_in_the_app_forges_an_invocation tests::the_studio_installs_no_logger diag::tests::a_panic_says_where_never_what 2>&1 | grep -q 'ok. 12 passed' && cargo test -p bezel-media --locked --lib -- --exact collection::tests::saves_atomically_by_content collection::tests::unreadable_index_is_an_error 2>&1 | grep -q 'ok. 2 passed' && cd apps/bezel-studio/src-tauri && [ "$(grep '"csp"' tauri.conf.json)" = "$(git show origin/main:./tauri.conf.json | grep '"csp"')" ] && [ -z "$(git ls-files | grep -iE '^tauri.*\.(json5?|toml)$' | grep -vx tauri.conf.json)" ] && ! grep -qE '"(opener|http):' capabilities/*.json && cd - >/dev/null && bash scripts/ci/studio-starts-silent.sh | grep -q '^studio-starts-silent: OK: ' && echo OK`
       **Source:** CONTEXT
 - [ ] `Cargo.lock` só ganha pacotes; `ureq` só via `bezel-klipy`; CLI sem `ureq`/`rustls`
       **Verify:** `! git diff "$(git merge-base HEAD origin/main)" -- Cargo.lock | grep -qE '^-(version|source|checksum)' && cargo tree -i ureq --locked --target all -e normal --prefix none --depth 1 | awk '{print $1}' | sort -u | paste -sd' ' | grep -qx 'bezel-klipy ureq' && t=$(cargo tree -p bezel --locked --target all -e normal --prefix none) && ! grep -qE '^(ureq|rustls) ' <<<"$t" && echo OK`
@@ -48,6 +48,6 @@ GIFs/stickers do KLIPY, com a chave do usuário, numa coleção local gerenciáv
 
 ## Deferred to PR review
 - Uso real com a chave do usuário (feito).
-- Termos do KLIPY sobre guardar downloads.
+- Termos do KLIPY sobre guardar arquivos.
 - Visual: Coleção, diálogo e popover.
 - Sticker na 8.8" real com transparência.

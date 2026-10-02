@@ -246,14 +246,14 @@ fn extension_of(bytes: &[u8]) -> &'static str {
 }
 
 /// An I/O failure on `path`.
-pub(super) fn failed(what: &str, path: &Path, e: &io::Error) -> BezelError {
+pub(crate) fn failed(what: &str, path: &Path, e: &io::Error) -> BezelError {
     BezelError::Transport(format!("{what} {}: {e}", path.display()))
 }
 
 /// Writes `bytes` to `path` so that `path` is always whole: into a temporary
 /// file next to it, flushed to disk and closed, then renamed over it. When
 /// that fails the previous file stays and the temporary one is removed.
-pub(super) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| failed("cannot create", dir, &e))?;
     }
@@ -284,7 +284,7 @@ fn temporary(path: &Path) -> PathBuf {
 }
 
 /// Removes `path`; a file already gone is not an error.
-fn remove(path: &Path) -> Result<()> {
+pub(crate) fn remove(path: &Path) -> Result<()> {
     match patiently(|| fs::remove_file(path)) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(failed("cannot remove", path, &e)),
         _ => Ok(()),

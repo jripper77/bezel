@@ -11,6 +11,7 @@ import { el, icon } from './ui/dom.js';
 import { ICONS } from './ui/icons.js';
 import { askChoice } from './ui/dialog.js';
 import { createPreferences } from './ui/preferences.js';
+import { createGifSearch } from './ui/gif-search.js';
 import { showAccessHelp } from './ui/udev.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
@@ -107,6 +108,10 @@ const canvasView = createCanvasView({
   onFrameRequest: () => setFramingMode(true),
 });
 
+// "Search GIFs and stickers", opened from the Media tab's Collection
+// (D-2026-10-01-gif-sticker-search-4).
+const gifSearch = createGifSearch({ t, bridge, locale: () => locale });
+
 const library = createLibrary({
   store,
   canvas: canvasView,
@@ -121,6 +126,7 @@ const library = createLibrary({
     importTheme: () => importTheme(),
     addImage: () => addImage(),
     addVideo: () => addMedia(),
+    searchGifs: () => void gifSearch.open(),
     setBrightness: (screen, percent) => bridge.setBrightness(screen, percent).then(() => { state.brightness[screen] = percent; }).catch((e) => fail(e)),
     release: (screen) => bridge.release(screen).then(() => setLive(false)).catch((e) => fail(e)),
     setAutostart: (on) => bridge.setAutostart(on).then(() => { state.autostart = on; }).catch((e) => fail(e)),

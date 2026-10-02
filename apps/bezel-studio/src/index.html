@@ -120,13 +120,27 @@
           <ul class="theme-grid" id="theme-grid"></ul>
         </section>
         <section class="panel" role="tabpanel" id="panel-media" aria-labelledby="tab-media" hidden>
-          <div class="button-row">
-            <button type="button" class="text-button" id="media-add" data-i18n="media.add"></button>
-            <button type="button" class="text-button" id="media-add-video" data-i18n="media.addVideo"></button>
+          <div class="subtabs" role="tablist" data-i18n-aria-label="library.media">
+            <button type="button" role="tab" id="subtab-media-theme" aria-controls="media-theme" aria-selected="true" data-subtab="theme" data-i18n="media.thisTheme"></button>
+            <button type="button" role="tab" id="subtab-media-collection" aria-controls="media-collection" aria-selected="false" tabindex="-1" data-subtab="collection" data-i18n="media.collection"></button>
           </div>
-          <p class="hint" data-i18n="media.dropHint"></p>
-          <p class="hint" id="media-status" role="status" hidden data-i18n="media.adding"></p>
-          <ul class="media-list" id="media-list"></ul>
+          <div role="tabpanel" id="media-theme" aria-labelledby="subtab-media-theme">
+            <div class="button-row">
+              <button type="button" class="text-button" id="media-add" data-i18n="media.add"></button>
+              <button type="button" class="text-button" id="media-add-video" data-i18n="media.addVideo"></button>
+            </div>
+            <p class="hint" data-i18n="media.dropHint"></p>
+            <p class="hint" id="media-status" role="status" hidden data-i18n="media.adding"></p>
+            <ul class="media-list" id="media-list"></ul>
+          </div>
+          <div role="tabpanel" id="media-collection" aria-labelledby="subtab-media-collection" hidden>
+            <button type="button" class="text-button gif-search-open" id="gif-search-open" aria-haspopup="dialog">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM21 21l-5.2-5.2" /></svg>
+              <span data-i18n="media.searchGifs"></span>
+            </button>
+            <p class="hint" data-i18n="media.collectionHint"></p>
+            <div id="collection-panel" class="collection"></div>
+          </div>
         </section>
         <section class="panel" role="tabpanel" id="panel-screen" aria-labelledby="tab-screen" hidden>
           <div class="subtabs" role="tablist" data-i18n-aria-label="library.screen">

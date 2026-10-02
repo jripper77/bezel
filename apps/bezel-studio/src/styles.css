@@ -452,6 +452,46 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .field-error::before { content: "⚠ "; }
 input[aria-invalid="true"] { border-color: var(--danger) !important; }
 
+/* -------------------------------------- GIF and sticker search (KLIPY) -- */
+#media-collection .gif-search-open { width: 100%; }
+.gif-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px, calc(100vh - 32px)); max-height: none; }
+.gif-dialog[open] { display: flex; flex-direction: column; }
+.gif-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px 20px 12px; }
+.gif-key { display: grid; gap: 4px; }
+.gif-key > label { font-size: 0.8rem; color: var(--muted); }
+.gif-key .hint, .gif-body > .hint { margin: 0; }
+.gif-key .field-error:empty { display: none; }
+.gif-key-row { position: relative; display: flex; align-items: center; gap: 6px; }
+.gif-key-row input { flex: 1 1 auto; min-width: 0; min-height: 32px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+.key-help-button { font-weight: 700; }
+.key-help-button[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.key-help { position: absolute; z-index: 3; top: calc(100% + 6px); right: 0; width: min(420px, 100%); padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); font-size: 0.85rem; }
+.key-help h3 { margin: 0 0 8px; font-size: 0.95rem; }
+.key-help ol { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
+.key-help .hint { margin: 0 0 8px; }
+.gif-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 4px; border-top: 1px solid var(--border); }
+.gif-kinds button { min-height: 32px; padding: 0 14px; }
+.gif-controls .gif-query { flex: 1 1 240px; }
+.gif-results { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; align-content: start; gap: 8px; padding: 2px; }
+.gif-status { margin: 0; }
+.gif-problem:empty { display: none; }
+.gif-problem p { margin: 0 0 6px; }
+.gif-start { display: grid; justify-items: start; gap: 8px; padding: 16px 0; color: var(--muted); }
+.gif-start p { margin: 0; }
+.gif-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.gif-grid:empty { display: none; }
+.gif-tile { width: 100%; display: grid; gap: 4px; padding: 6px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; text-align: left; }
+.gif-tile:hover { border-color: var(--accent); }
+.gif-frame { display: grid; place-items: center; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--surface-3); }
+.gif-frame img { width: 100%; height: 100%; object-fit: contain; }
+.gif-frame:not([data-state="ready"]) img { visibility: hidden; }
+.gif-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
+.gif-action { justify-self: start; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 0.75rem; font-weight: 600; }
+.gif-tile[data-state="added"] .gif-action { border-color: var(--ok); color: var(--ok); }
+.gif-tile[data-state="added"] .gif-action::before { content: "✓ "; }
+.gif-more { justify-self: center; }
+.gif-attribution { margin: 0; text-align: end; color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+
 /* Narrow windows (the app allows 960 px): the brand and the orientation
    labels go, the orientation names stay for screen readers and in tooltips. */
 @media (max-width: 1180px) {
@@ -464,6 +504,8 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
   .icon-button, .text-button, .widget-tile, .sensor-row, .theme-card, .switch .thumb, .orientation-tools .segmented button, .subtabs [role="tab"], .drop-zone, .file-option { transition: border-color 120ms ease, background 120ms ease, color 120ms ease, left 120ms ease; }
   .usage > span { transition: width 200ms ease; }
   .theme-card .thumb-screen[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
+  .gif-frame[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
+  .gif-tile { transition: border-color 120ms ease; }
 }
 
 @keyframes thumb-wait { from { opacity: 0.55; } to { opacity: 1; } }

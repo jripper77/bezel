@@ -256,6 +256,53 @@ test('demo mode shows on the page the preview\'s video decoder and the guide pag
   assert.equal(attributes['data-demo-decoder'], undefined, 'nothing decodes yet');
 });
 
+test('tauri mode maps the GIF search and the collection to their commands', async () => {
+  const calls = [];
+  const invoke = async (cmd, args) => {
+    calls.push([cmd, args]);
+    return null;
+  };
+  const bridge = createBridge({ ...page(), __TAURI__: { core: { invoke } } });
+  await bridge.klipyKey();
+  await bridge.saveKlipyKey('k-1');
+  await bridge.removeKlipyKey();
+  await bridge.searchGifs({ kind: 'sticker', text: 'cat', page: 2, explicit: true, extra: 'dropped' });
+  await bridge.gifPreview('g1', true);
+  await bridge.collectGif('g1');
+  await bridge.gifCollection(false);
+  await bridge.renameCollected('sha', 'Cat');
+  await bridge.collectedUsers('sha');
+  await bridge.deleteCollected('sha', true);
+  await bridge.useCollected('sha', 'background');
+  await bridge.openLink('klipyPartnerPanel');
+  await bridge.openGuide('gifs-and-stickers', 'en');
+  assert.deepEqual(calls, [
+    ['klipy_key', undefined],
+    ['save_klipy_key', { key: 'k-1' }],
+    ['remove_klipy_key', undefined],
+    ['search_gifs', { kind: 'sticker', text: 'cat', page: 2, explicit: true }],
+    ['gif_preview', { id: 'g1', still: true }],
+    ['collect_gif', { id: 'g1' }],
+    ['gif_collection', { still: false }],
+    ['rename_collected', { id: 'sha', name: 'Cat' }],
+    ['collected_users', { id: 'sha' }],
+    ['delete_collected', { id: 'sha', confirmed: true }],
+    ['use_collected', { id: 'sha', target: 'background' }],
+    ['open_link', { link: 'klipyPartnerPanel' }],
+    ['open_guide', { page: 'gifs-and-stickers', language: 'en' }],
+  ]);
+});
+
+test('demo mode shows on the page the last query asked of KLIPY and the links opened', async () => {
+  const attributes = {};
+  const bridge = createBridge({ ...page('?demo=gifs'), document: { documentElement: { setAttribute: (k, v) => { attributes[k] = v; } } } });
+  assert.equal(attributes['data-demo-gif-query'], undefined, 'nothing asked at start');
+  await bridge.searchGifs({ kind: 'gif', text: 'cat', page: 1, explicit: false });
+  assert.deepEqual(JSON.parse(attributes['data-demo-gif-query']), { kind: 'gif', text: 'cat', page: 1, explicit: false });
+  await bridge.openLink('klipyPartnerPanel');
+  assert.equal(attributes['data-demo-link'], 'klipyPartnerPanel');
+});
+
 test('demo mode shows on the page which sensors the list shows', async () => {
   const attributes = {};
   const bridge = createBridge({ ...page(), document: { documentElement: { setAttribute: (k, v) => { attributes[k] = v; } } } });

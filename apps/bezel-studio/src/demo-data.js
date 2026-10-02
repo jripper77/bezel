@@ -373,8 +373,11 @@ export const DEMO_LIBRARY = Object.freeze([
 /** The command the app shows to install its udev rule (Linux). */
 export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.github.slipalison.bezel/60-bezel.rules /etc/udev/rules.d/60-bezel.rules && sudo udevadm control --reload && sudo udevadm trigger';
 
+/** The KLIPY key the `gifs` scenarios saved: an obvious fake, it ends in `a1b2`. */
+export const DEMO_KLIPY_KEY = 'demo-demo-demo-a1b2';
+
 /**
- * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: object, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean, flaky?: boolean}>}
+ * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: object, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean, flaky?: boolean, klipy?: {key: string|null, rateLimited?: boolean}}>}
  */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
@@ -407,4 +410,9 @@ export const SCENARIOS = Object.freeze({
   // 0.1.0-dev.287 (D-2026-10-01-live-screen-controls-1): the UI keeps the
   // listed screen chosen.
   mcuLive: { screens: [turing88], mcuLive: true },
+  // GIF and sticker search (D-2026-10-01-gif-sticker-search-6): a KLIPY key
+  // saved, none yet, and a key that reached its 100 requests of the hour.
+  gifs: { screens: [turing88], klipy: { key: DEMO_KLIPY_KEY } },
+  gifsNoKey: { screens: [turing88], klipy: { key: null } },
+  gifsRateLimited: { screens: [turing88], klipy: { key: DEMO_KLIPY_KEY, rateLimited: true } },
 });

@@ -55,6 +55,9 @@
   compila), a guarda de fonte lê identificadores com `syn` (pega `r#eval`, macros, `with_webview`), os helpers da UI só
   aceitam chaves de i18n (texto solto = chave desconhecida) e o e2e confere `keySavedNow`, `keyRemoved` e
   `collection.using` no idioma.
+- Rodada 2, iter 2 (crítico: `expose_secret` num print e o token feito por outro comando): `e99c81b` — a chave só é
+  lida como argumento direto do cliente e na gravação do arquivo, nunca dentro de macro; `UserAsked::of` só nos 3
+  comandos de GIF (renomear ou embrulhar também falha); `navigate` e literais `javascript:` recusados.
 
 ## Blocked tasks
 - nenhuma

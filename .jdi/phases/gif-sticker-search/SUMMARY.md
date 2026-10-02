@@ -28,6 +28,13 @@
   imagem/fundo pelos caminhos de hoje, `log` limitado a debug (o trace do ureq traria a chave).
 - T-6 `4094f49`: UI — Coleção na aba Mídia (Todos/GIFs/Stickers, usar, arrastar, renomear, excluir com os temas que
   usam o item), still com movimento reduzido.
+- Iter 2 (crítico da iter 1: linhas 1, 3, 5, 6 e 10 ocas e objetivas → BLOCKED): `f3bd567` (o `setup` real do app
+  roda num teste com a fonte injetada: `tests::the_app_setup_sends_nothing_at_start`; um aquecimento no início o
+  derruba), `6ffa470` (W2: pasta da coleção inutilizável vira `collectionUnavailable`, nada some calado), `f9bbc24` (W3:
+  chave curta = "Chave salva"), `d5fa90e` (`scripts/e2e-passed.mjs`: cada teste nomeado aprovado nos 4 projetos com o
+  axe registrado), `b524c83` + `e49329a` (W1: Privacidade exata — PNG nos stickers — e o `check-docs.sh` exige os fatos
+  dentro da seção). O orquestrador apertou as linhas 1 (core só com `thiserror`), 3 (CSP igual à da `main` linha a
+  linha, todas as capabilities, o teste do `setup`) e 5 (`e2e-passed.mjs`) e o grep de TODO do PROJECT (`e2c9cb2`).
 
 ## Blocked tasks
 - nenhuma
@@ -42,9 +49,9 @@
 - `docs/user/{,pt-BR/}{gifs-and-stickers,README}.md`, `scripts/ci/check-docs.sh`, `CHANGELOG.md`, `README.md`
 
 ## Tests
-- `cargo test --workspace --locked`: 930 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
+- `cargo test --workspace --locked`: 933 passando, 0 falhando, 12 ignorados (hardware, ffmpeg real e o KLIPY real)
 - DoD 1–6: OK no branch combinado; DoD 7 (Windows no CI) depois do push
-- UI: 207 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
+- UI: 221 unitários; Playwright 208/208 (claro/escuro × pt-BR/en, axe), 24 novos
 - fmt, clippy `-D warnings` (Linux e `--target x86_64-pc-windows-msvc` sem studio e klipy: o `ring` não compila
   para MSVC aqui; o `rust-windows` do CI cobre), `check-docs.sh`, `check-packaging.sh`, `cargo audit`
 - Cobertura: `bezel-klipy` 97%, studio `gifs.rs` 96,87%, `collection.js` 100%

@@ -34,6 +34,8 @@ idioma do sistema, ou o que você escolher em **Preferências → Idioma**.
   [como gerenciá-los](storage-and-video.md#gerenciar-os-arquivos): mover entre a
   memória interna e o cartão, renomear, restaurar um cartão, o assistente de
   limpeza e as cópias locais do Bezel.
+- [GIFs e stickers](gifs-and-stickers.md): busque no KLIPY com a sua própria
+  chave gratuita, guarde GIFs e stickers na sua coleção e use-os nos temas.
 - [Instalar o ffmpeg](ffmpeg.md), necessário para converter vídeos.
 - [Preparar um cartão SD](sd-card.md) para telas com entrada de cartão.
 - [Iniciar com o computador](run-at-login.md): pela bandeja ou como serviço do

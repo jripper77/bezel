@@ -36,10 +36,15 @@
 //! the core's [`ArchiveStore`](bezel_core::ports::ArchiveStore) port: on
 //! disk in `<data>/bezel/storage/` ([`archive::DiskArchive`]: the catalog,
 //! one file per content, thumbnails made on demand), or in memory for tests.
+//!
+//! [`collection`] holds the user's collection of GIFs and stickers, behind
+//! the core's [`GifCollection`](bezel_core::ports::GifCollection) port, and
+//! the fake GIF provider the tests search through.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod archive;
+pub mod collection;
 mod framing;
 mod gif;
 mod mp4;

@@ -1,6 +1,6 @@
 // What every e2e spec shares: the `t` fixture (the studio's own translator
 // in the project's language, so each test runs in pt-BR and en alike), the
-// console watch, the axe check and pointer drags.
+// console watch, the axe check (recorded on the run) and pointer drags.
 import { test as base, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { pickLocale, translator } from '../../src/i18n/index.js';
@@ -21,11 +21,16 @@ export function watchErrors(page) {
   return errors;
 }
 
-/** No serious or critical accessibility violation on the page now. */
+/**
+ * No serious or critical accessibility violation on the page now. A check
+ * that passed is recorded on the test's run (annotation `axe`), so
+ * `scripts/e2e-passed.mjs` can require it of every run of a named test.
+ */
 export async function expectAccessible(page) {
-  const { violations } = await new AxeBuilder({ page }).analyze();
+  const { violations, passes } = await new AxeBuilder({ page }).analyze();
   const serious = violations.filter((v) => ['critical', 'serious'].includes(v.impact));
   expect(serious.map((v) => `${v.id}: ${v.help} @ ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+  test.info().annotations.push({ type: 'axe', description: `${passes.length} rules passed, no serious or critical violation` });
 }
 
 /** Drags `source` onto `target` at a fraction of its box, like a person. */

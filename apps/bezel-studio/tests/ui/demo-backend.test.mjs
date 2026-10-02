@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_AWAY_SAMPLES, DEMO_IMPORT_WARNINGS, DEMO_SENSORS, createDemoBackend, demoFits, demoFormat, demoNextChange, demoOrientation, demoThumbnail, demoValue } from '../../src/demo-backend.js';
-import { DEMO_DRAGON_THEME, DEMO_GIF_THEME, DEMO_LIBRARY } from '../../src/demo-data.js';
+import { DEMO_DRAGON_THEME, DEMO_GIF_THEME, DEMO_KLIPY_KEY, DEMO_LIBRARY } from '../../src/demo-data.js';
+import { DEMO_GIF_OVERLAP, DEMO_GIF_PAGES, DEMO_GIF_PAGE_SIZE, DEMO_REFUSED_KEY, demoContentId, demoGifPage, demoGifSlug } from '../../src/demo-gifs.js';
 
 const fixed = { now: () => 1000 };
 
@@ -548,4 +549,131 @@ test('the manager refuses like the overview, and a theme\'s video and the boot m
   assert.equal(usb.deletes, false);
   assert.deepEqual(usb.files.map((f) => [f.name, f.size]), [['logo.png', 184_320], ['amd_90.mp4', 18_874_368], ['chuva.mp4', null]]);
   assert.deepEqual((await turzx.planMove(screen.key, ['internal/image/logo.png'], 'sd')).skipped.map((s) => s.code), ['deleteUnsupported']);
+});
+
+// ------------------------------------------------- GIFs and stickers --
+// The demo's KLIPY and collection answer like the backend's commands
+// (D-2026-10-01-gif-sticker-search-6).
+
+/** A demo with the GIF hooks recorded. */
+function gifDemo(scenario) {
+  const seen = { queries: [], previews: [], collects: [], links: [] };
+  const demo = createDemoBackend(scenario, fixed, {
+    onGifQuery: (q) => seen.queries.push(q),
+    onGifPreview: (id) => seen.previews.push(id),
+    onGifCollect: (id) => seen.collects.push(id),
+    onLink: (l) => seen.links.push(l),
+  });
+  return { demo, seen };
+}
+const code = (expected, args) => (e) => e.code === expected && (args === undefined || JSON.stringify(e.args) === JSON.stringify(args));
+
+test('the demo KLIPY key: nothing asked without one, checked when saved, shown by its last 4', async () => {
+  const { demo, seen } = gifDemo('gifsNoKey');
+  assert.deepEqual(await demo.klipyKey(), { configured: false, last4: null });
+  await assert.rejects(demo.searchGifs({ kind: 'gif', text: '', page: 1, explicit: false }), code('klipyNoKey', {}));
+  assert.deepEqual(seen.queries, [], 'no key: nothing reaches KLIPY');
+  for (const bad of ['', 'has space', 'a'.repeat(129), 'chave-ç', 42]) await assert.rejects(demo.saveKlipyKey(bad), code('invalidInput'), String(bad));
+  assert.deepEqual(await demo.saveKlipyKey('abc_DEF-123x'), { configured: true, last4: '123x' });
+  assert.deepEqual(await demo.klipyKey(), { configured: true, last4: '123x' });
+  assert.deepEqual(seen.queries, [], 'saving sends nothing');
+  assert.deepEqual(await demo.saveKlipyKey('short-1'), { configured: true, last4: null }, 'like the backend: a short key shows no ending');
+  assert.deepEqual(await demo.saveKlipyKey('nine-char'), { configured: true, last4: 'char' });
+  assert.deepEqual(await demo.removeKlipyKey(), { configured: false, last4: null });
+  assert.deepEqual(await createDemoBackend('turing88').klipyKey(), { configured: false, last4: null }, 'a fresh install has none');
+  assert.deepEqual(await createDemoBackend('gifs').klipyKey(), { configured: true, last4: DEMO_KLIPY_KEY.slice(-4) });
+});
+
+test('the demo KLIPY pages: 24 results, later pages repeat a few, the query shown', async () => {
+  assert.equal(demoGifSlug(' Dancing Cat! '), 'dancing-cat');
+  assert.equal(demoGifSlug(''), '');
+  const { demo, seen } = gifDemo('gifs');
+  const first = await demo.searchGifs({ kind: 'gif', text: ' Cat ', page: 1, explicit: false });
+  assert.deepEqual([first.kind, first.text, first.page, first.hasNext, first.items.length], ['gif', 'Cat', 1, true, DEMO_GIF_PAGE_SIZE]);
+  assert.deepEqual(first.items[0], { id: 'gif-cat-1', title: 'Happy dance', width: 480, height: 270 });
+  assert.deepEqual(seen.queries, [{ kind: 'gif', text: 'Cat', page: 1, explicit: false }]);
+  const second = await demo.searchGifs({ kind: 'gif', text: 'Cat', page: 2, explicit: false });
+  assert.deepEqual(second.items.slice(0, DEMO_GIF_OVERLAP), first.items.slice(-DEMO_GIF_OVERLAP), 'page 2 repeats the end of page 1');
+  const last = await demo.searchGifs({ kind: 'gif', text: 'Cat', page: DEMO_GIF_PAGES, explicit: true });
+  assert.equal(last.hasNext, false);
+  assert.equal(last.items.at(-1).title, 'High five 3', 'titles repeat with a number');
+  const stickers = await demo.searchGifs({ kind: 'sticker', text: '', page: 1, explicit: true });
+  assert.deepEqual(stickers.items[0], { id: 'sticker-trending-1', title: 'Star', width: 512, height: 512 });
+  assert.deepEqual(seen.queries.at(-1), { kind: 'sticker', text: '', page: 1, explicit: true });
+  await assert.rejects(demo.searchGifs({ kind: 'video', text: 'x', page: 1, explicit: false }), code('invalidInput'));
+  await assert.rejects(demo.searchGifs({ kind: 'gif', text: 'x', page: 0, explicit: false }), code('invalidInput'));
+  await assert.rejects(demo.searchGifs(), code('invalidInput'));
+  assert.deepEqual(demoGifPage({ kind: 'gif', text: 'Cat', page: 1 }), first, 'recorded: the same for the same query');
+});
+
+test('the demo previews and adds only results of the last search, once per content', async () => {
+  const { demo, seen } = gifDemo('gifs');
+  await assert.rejects(demo.gifPreview('gif-cat-1', false), code('gifNotInResults', { item: 'gif-cat-1' }), 'no search yet');
+  await assert.rejects(demo.collectGif('gif-cat-1'), code('gifNotInResults', { item: 'gif-cat-1' }));
+  assert.deepEqual([seen.previews, seen.collects], [[], []], 'nothing asked of KLIPY for what no search found');
+  const page = await demo.searchGifs({ kind: 'sticker', text: 'star', page: 1, explicit: false });
+  const [a, b] = page.items;
+  const moving = await demo.gifPreview(a.id, false);
+  const still = await demo.gifPreview(a.id, true);
+  assert.match(moving, /^data:image\/svg\+xml,/);
+  assert.ok(moving.includes('animate') && !still.includes('animate'), 'motion reduced: a still');
+  assert.ok(!decodeURIComponent(moving).includes('<rect'), 'a sticker has no background');
+  assert.ok(!moving.includes('(') && !moving.includes(')'), 'usable in CSS url()');
+  const added = await demo.collectGif(a.id);
+  assert.deepEqual(Object.keys(added).sort(), ['addedAt', 'bytes', 'height', 'id', 'kind', 'name', 'preview', 'source', 'width']);
+  assert.deepEqual([added.id, added.name, added.kind, added.width, added.addedAt], [demoContentId(a.id), 'Star', 'sticker', 512, 1000]);
+  assert.match(added.id, /^[0-9a-f]{64}$/);
+  assert.deepEqual(added.source, { provider: 'klipy', id: a.id, url: `https://klipy.com/stickers/${a.id}` });
+  assert.ok(added.bytes > 0 && added.bytes < 26_214_400);
+  assert.deepEqual(await demo.collectGif(a.id), added, 'the same content: the item already there');
+  await demo.collectGif(b.id);
+  assert.deepEqual(seen.previews, [a.id, a.id], 'each preview asked of KLIPY is shown');
+  assert.deepEqual(seen.collects, [a.id, a.id, b.id], 'each download, even of content already there');
+  assert.deepEqual((await demo.gifCollection(false)).map((c) => c.name), ['Heart', 'Star'], 'newest first');
+  assert.ok(!(await demo.gifCollection(true))[0].preview.includes('animate'), 'stills when motion is reduced');
+  await demo.searchGifs({ kind: 'gif', text: 'other', page: 1, explicit: false });
+  await assert.rejects(demo.gifPreview(a.id, false), code('gifNotInResults', { item: a.id }), 'a new search replaces the results');
+  await assert.rejects(demo.collectGif(a.id), code('gifNotInResults', { item: a.id }));
+  await demo.searchGifs({ kind: 'gif', text: 'other', page: 2, explicit: false });
+  assert.match(await demo.gifPreview('gif-other-1', false), /^data:/, 'a later page keeps the earlier ones');
+});
+
+test('the demo answers 429 and a refused key like KLIPY, after asking', async () => {
+  const { demo, seen } = gifDemo('gifsRateLimited');
+  await assert.rejects(demo.searchGifs({ kind: 'gif', text: 'cat', page: 1, explicit: false }), code('klipyRateLimited', {}));
+  assert.deepEqual(seen.queries, [{ kind: 'gif', text: 'cat', page: 1, explicit: false }], 'the request was made');
+  const refused = gifDemo('gifs');
+  await refused.demo.saveKlipyKey(DEMO_REFUSED_KEY);
+  await assert.rejects(refused.demo.searchGifs({ kind: 'gif', text: '', page: 1, explicit: false }), code('klipyKeyRejected', {}));
+});
+
+test('the demo collection: rename, the themes using an item, use and delete', async () => {
+  const { demo, seen } = gifDemo('gifs');
+  const [first] = (await demo.searchGifs({ kind: 'gif', text: 'wave', page: 1, explicit: false })).items;
+  const item = await demo.collectGif(first.id);
+  await assert.rejects(demo.renameCollected(item.id, '  '), code('invalidInput'));
+  await assert.rejects(demo.renameCollected('nope', 'x'), code('notInCollection', { item: 'nope' }));
+  assert.equal((await demo.renameCollected(item.id, ' Olá ')).name, 'Olá');
+  assert.deepEqual(await demo.collectedUsers(item.id), { themes: [], openTheme: false });
+  const image = await demo.useCollected(item.id, 'image');
+  assert.deepEqual(image, { ref: 'assets/ol.gif', kind: 'image', poster: null, bytes: item.bytes, durationMs: null, posterError: null });
+  assert.deepEqual(await demo.collectedUsers(item.id), { themes: [], openTheme: true }, 'the open theme holds it once copied, saved or not');
+  const background = await demo.useCollected(item.id, 'background');
+  assert.deepEqual([background.ref, background.kind, background.bytes], ['assets/ol-2.gif', 'video', item.bytes]);
+  assert.ok((await demo.assets()).some((a) => a.ref === image.ref));
+  await assert.rejects(demo.useCollected(item.id, 'wallpaper'), code('invalidInput'));
+  const { theme } = await demo.session();
+  const using = { ...theme, name: 'Mine', background: { type: 'video', asset: background.ref } };
+  await demo.saveTheme(using, false);
+  assert.deepEqual(await demo.collectedUsers(item.id), { themes: ['Mine'], openTheme: true });
+  await assert.rejects(demo.collectedUsers('nope'), code('notInCollection'));
+  await assert.rejects(demo.deleteCollected(item.id, false), code('notConfirmed'));
+  assert.equal(await demo.deleteCollected(item.id, true), null);
+  assert.deepEqual(await demo.gifCollection(false), []);
+  await assert.rejects(demo.deleteCollected(item.id, true), code('notInCollection', { item: item.id }));
+  await assert.rejects(demo.openLink('https://example.com'), code('invalidInput'));
+  await demo.openLink('klipyPartnerPanel');
+  assert.deepEqual(seen.links, ['klipyPartnerPanel']);
+  await demo.openGuide('gifs-and-stickers', 'pt-BR');
+  await createDemoBackend('gifs').openLink('klipyPartnerPanel');
 });

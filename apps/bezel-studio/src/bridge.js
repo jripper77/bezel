@@ -201,6 +201,33 @@ export const PROGRESS_EVENT = 'storage-progress';
  *   A preview frame (`parseFrame`) and how long the render took, ms.
  */
 
+// ------------------------------------------- GIF and sticker search --
+// KLIPY with the user's own key, and the collection
+// (D-2026-10-01-gif-sticker-search-2..-5). The window never gets the key
+// back, never sees a KLIPY URL (a result is named by its id, a preview comes
+// as a `data:` URL) and only items of the last search's pages can be
+// previewed or added. Errors reject like every command, as `{code, args,
+// message}`: `klipyNoKey`, `klipyKeyRejected`, `klipyRateLimited`,
+// `klipyUnavailable {detail}`, `gifNotInResults {item}`,
+// `notInCollection {item}`, `invalidInput {detail}` (a key with other
+// characters than `[A-Za-z0-9_-]{1,128}`, a download that is not a GIF, an
+// empty name), `notConfirmed`.
+/**
+ * @typedef {{configured: boolean, last4: string|null}} KeyDto Whether a
+ *   key is saved, and its last 4 characters (never the key).
+ * @typedef {'gif'|'sticker'} GifKindCode
+ * @typedef {{id: string, title: string, width: number, height: number}} GifItemDto
+ * @typedef {{kind: GifKindCode, text: string, page: number, hasNext: boolean, items: GifItemDto[]}} GifPageDto
+ *   A page of 24 results; `text` empty is trending.
+ * @typedef {{
+ *   id: string, name: string, kind: GifKindCode, width: number, height: number, bytes: number, addedAt: number,
+ *   source: {provider: string, id: string, url: string|null}, preview: string|null,
+ * }} CollectedDto A collection item: `id` is the SHA-256 of its bytes,
+ *   `addedAt` seconds since the epoch, `preview` a `data:` URL.
+ * @typedef {{themes: string[], openTheme: boolean}} CollectedUsersDto The
+ *   user's themes, and whether the open one, that hold the item's bytes.
+ */
+
 /**
  * Event the app sends when the window's close button is pressed with unsaved
  * edits and no screen live: the UI asks, then calls `closeWindow`.
@@ -280,17 +307,46 @@ function tauriBridge(invoke, tauri = {}) {
     /**
      * Opens a page of the user guide in the system's browser: `open_guide
      * {page, language}`. `page`: `ffmpeg` (installing ffmpeg,
-     * `docs/user/ffmpeg.md`); `language`: `pt-BR` (the guide's
+     * `docs/user/ffmpeg.md`) or `gifs-and-stickers` (KLIPY and the
+     * collection); `language`: `pt-BR` (the guide's
      * `docs/user/pt-BR/` page) or `en`. The backend maps the page to its
      * fixed URL on the project's site
      * (`https://github.com/slipalison/bezel/blob/main/docs/user/[pt-BR/]ffmpeg.md`),
      * so the webview never navigates and no other URL can be opened; an
      * unknown page or language rejects with `invalidInput`.
-     * @param {'ffmpeg'} page
+     * @param {'ffmpeg'|'gifs-and-stickers'} page
      * @param {'pt-BR'|'en'} language
      * @returns {Promise<void>}
      */
     openGuide: (page, language) => invoke('open_guide', { page, language }),
+    /** @returns {Promise<KeyDto>} */
+    klipyKey: () => invoke('klipy_key'),
+    /** Saves the KLIPY key (nothing is sent to KLIPY). @returns {Promise<KeyDto>} */
+    saveKlipyKey: (key) => invoke('save_klipy_key', { key }),
+    /** @returns {Promise<KeyDto>} */
+    removeKlipyKey: () => invoke('remove_klipy_key'),
+    /**
+     * A page of GIFs or stickers for `text` (empty: trending); `explicit`
+     * asks KLIPY for unfiltered results. @returns {Promise<GifPageDto>}
+     * @param {{kind: GifKindCode, text: string, page: number, explicit: boolean}} query
+     */
+    searchGifs: ({ kind, text, page, explicit }) => invoke('search_gifs', { kind, text, page, explicit }),
+    /** A result's small GIF, or its JPEG still, as a `data:` URL, or `null`. @returns {Promise<string|null>} */
+    gifPreview: (id, still) => invoke('gif_preview', { id, still }),
+    /** Downloads a result into the collection (once per content). @returns {Promise<CollectedDto>} */
+    collectGif: (id) => invoke('collect_gif', { id }),
+    /** @returns {Promise<CollectedDto[]>} */
+    gifCollection: (still) => invoke('gif_collection', { still }),
+    /** @returns {Promise<CollectedDto>} */
+    renameCollected: (id, name) => invoke('rename_collected', { id, name }),
+    /** @returns {Promise<CollectedUsersDto>} */
+    collectedUsers: (id) => invoke('collected_users', { id }),
+    /** @returns {Promise<null>} */
+    deleteCollected: (id, confirmed) => invoke('delete_collected', { id, confirmed }),
+    /** Copies an item into the theme, like `add_media`'s answer. @param {'image'|'background'} target */
+    useCollected: (id, target) => invoke('use_collected', { id, target }),
+    /** Opens a link of the backend's fixed list in the system's browser (`klipyPartnerPanel`). */
+    openLink: (link) => invoke('open_link', { link }),
     pushTheme: (theme) => invoke('push_theme', { theme }),
     setLive: (on, screen) => invoke('set_live', { on, screen }),
     setBrightness: (screen, percent) => invoke('set_brightness', { screen, percent }),
@@ -393,12 +449,17 @@ export function createBridge(win) {
   // close button is a window event: Playwright drives and checks both. So
   // are the sensors the list shows (`data-demo-sensors`).
   const root = win.document?.documentElement;
-  // So are the preview's video decoder and the guide pages opened.
+  // So are the preview's video decoder, the guide pages and links opened,
+  // and the last query, preview and download asked of KLIPY.
   const demo = createDemoBackend(scenario, {}, {
     onWindow: (state) => root?.setAttribute('data-demo-window', state),
     onSensorsShown: (keys) => root?.setAttribute('data-demo-sensors', keys.join(' ')),
     onDecoder: (state) => root?.setAttribute('data-demo-decoder', state),
     onGuide: (page, language) => root?.setAttribute('data-demo-guide', `${page} ${language}`),
+    onLink: (link) => root?.setAttribute('data-demo-link', link),
+    onGifQuery: (query) => root?.setAttribute('data-demo-gif-query', JSON.stringify(query)),
+    onGifPreview: (id) => root?.setAttribute('data-demo-gif-preview', id),
+    onGifCollect: (id) => root?.setAttribute('data-demo-gif-collect', id),
     languages: win.navigator?.languages ?? [],
     hold: params.has('hold'),
   });

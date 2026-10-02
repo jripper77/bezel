@@ -83,6 +83,26 @@ pub enum BezelError {
         /// Bytes the screen reports for it (0 when it reports none).
         stored: u64,
     },
+    /// An online service (the GIF and sticker provider) did not answer a
+    /// request; nothing was kept.
+    #[error("{0}")]
+    Service(ServiceFailure),
+}
+
+/// Why an online service did not answer a request. Adapters say why
+/// without the request itself: an address can carry the user's key.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ServiceFailure {
+    /// The key reached the service's request limit.
+    #[error("the online service's request limit was reached")]
+    RateLimited,
+    /// The service refused the key.
+    #[error("the online service refused the key")]
+    KeyRejected,
+    /// Any other failure (no network, a timeout, an unexpected answer). The
+    /// text says what was seen.
+    #[error("the online service is unavailable: {0}")]
+    Unavailable(String),
 }
 
 fn partial_note(partial: &Option<u64>) -> String {
@@ -135,6 +155,23 @@ mod tests {
                 .to_string(),
             "the screen stopped responding: it stopped reading what was sent \
              (250 bytes still queued)"
+        );
+    }
+
+    #[test]
+    fn service_failures_read_well() {
+        let unavailable = ServiceFailure::Unavailable("timed out after 10 s".into());
+        assert_eq!(
+            BezelError::Service(unavailable).to_string(),
+            "the online service is unavailable: timed out after 10 s"
+        );
+        assert_eq!(
+            BezelError::Service(ServiceFailure::RateLimited).to_string(),
+            "the online service's request limit was reached"
+        );
+        assert_eq!(
+            BezelError::Service(ServiceFailure::KeyRejected).to_string(),
+            "the online service refused the key"
         );
     }
 

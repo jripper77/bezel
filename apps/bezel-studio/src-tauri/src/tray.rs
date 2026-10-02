@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter as _, Manager};
 
 use crate::clock::now;
 use crate::commands::{Shared, Unsaved};
+use crate::diag::{self, DiagCode};
 use crate::texts::Texts;
 
 const SHOW: &str = "show";
@@ -36,7 +37,7 @@ impl LiveItem {
         }
         match self.item.set_checked(live) {
             Ok(()) => *shown = Some(live),
-            Err(e) => tracing::warn!("tray live item not updated: {e}"),
+            Err(_) => diag::report(DiagCode::TrayLiveItemNotUpdated),
         }
     }
 
@@ -50,9 +51,9 @@ impl LiveItem {
 /// Hides the main window (Bezel stays in the tray).
 fn hide_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(crate::MAIN_WINDOW)
-        && let Err(e) = window.hide()
+        && window.hide().is_err()
     {
-        tracing::warn!("window not hidden: {e}");
+        diag::report(DiagCode::WindowNotHidden);
     }
 }
 
@@ -65,8 +66,8 @@ fn quit(app: &AppHandle) {
         crate::OnQuit::Exit => app.exit(0),
         crate::OnQuit::Ask => {
             crate::show_main_window(app);
-            if let Err(e) = app.emit(crate::QUIT_EVENT, ()) {
-                tracing::warn!("unsaved edits not asked about before quitting: {e}");
+            if app.emit(crate::QUIT_EVENT, ()).is_err() {
+                diag::report(DiagCode::UnsavedEditsNotAskedBeforeQuitting);
                 app.exit(0);
             }
         }
@@ -84,15 +85,15 @@ fn toggle_live(app: &AppHandle, item: &LiveItem) {
     let spawned = std::thread::Builder::new()
         .name("bezel-tray-live".into())
         .spawn(move || {
-            if let Err(e) = backend.toggle_live(now()) {
-                tracing::warn!("live mode from the tray: {e}");
+            if backend.toggle_live(now()).is_err() {
+                diag::report(DiagCode::TrayLiveFailed);
             }
             // Not under the session's lock: the menu waits for the main thread.
             let live = backend.studio().live_key().is_some();
             item.sync(live);
         });
-    if let Err(e) = spawned {
-        tracing::warn!("live mode from the tray not started: {e}");
+    if spawned.is_err() {
+        diag::report(DiagCode::TrayLiveNotStarted);
     }
 }
 
@@ -120,8 +121,8 @@ impl TrayMenu {
             self.quit.set_text(text.quit),
         ];
         for result in labels {
-            if let Err(e) = result {
-                tracing::warn!("tray menu not relabelled: {e}");
+            if result.is_err() {
+                diag::report(DiagCode::TrayMenuNotRelabelled);
             }
         }
     }

@@ -1,0 +1,21 @@
+[package]
+name = "bezel-klipy"
+description = "Driven adapter of Bezel for GIF and sticker search: the KLIPY API over HTTPS with the user's own key."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+serde_json = { workspace = true }
+# Blocking HTTPS client: rustls with ring and the webpki roots, no gzip,
+# no cookies, no JSON helpers (D-2026-10-01-gif-sticker-search-2).
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+# The random customer id made once per saved key.
+getrandom = "0.3.4"
+
+[lints]
+workspace = true

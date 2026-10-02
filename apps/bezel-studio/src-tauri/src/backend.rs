@@ -26,6 +26,7 @@ use bezel_themes::dto::{BackgroundDto, ThemeDto};
 use bezel_themes::import::import_path;
 use bezel_themes::native::{is_native, native_location};
 
+use crate::diag::{self, DiagCode};
 use crate::dto::{
     AddedDto, AssetDto, DevicesDto, ImportedDto, LiveVideoDto, MonitorModeDto, PreferencesDto,
     ReconnectingDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, ThemeEntryDto,
@@ -170,7 +171,24 @@ fn check_rotation(background: &BackgroundDto) -> UiResult<()> {
 }
 
 /// Pages of the user guide the UI opens in the system's browser.
-pub const GUIDE_PAGES: &[&str] = &["ffmpeg"];
+pub const GUIDE_PAGES: &[&str] = &["ffmpeg", "gifs-and-stickers"];
+
+/// The other pages the UI opens in the system's browser, by the name it
+/// asks for: KLIPY's Partner Panel, where a key is made
+/// (D-2026-10-01-gif-sticker-search-3).
+pub const LINKS: &[(&str, &str)] = &[("klipyPartnerPanel", "https://partner.klipy.com")];
+
+/// The fixed address of the link named `link` ([`LINKS`]), so the UI can
+/// open no other.
+pub fn link_url(link: &str) -> UiResult<&'static str> {
+    LINKS
+        .iter()
+        .find(|(name, _)| *name == link)
+        .map(|(_, url)| *url)
+        .ok_or_else(|| {
+            UiError::new(ErrorCode::InvalidInput).arg("detail", format!("link \"{link}\""))
+        })
+}
 
 /// Where the guide's `page` is in `language` (`en` or `pt-BR`): a fixed
 /// address on the project's site, so the UI can open no other.
@@ -430,7 +448,7 @@ impl Backend {
         let live = was_live
             && self
                 .set_live(true, Some(&key), time)
-                .inspect_err(|e| tracing::warn!(screen = key, "live mode not resumed: {e}"))
+                .inspect_err(|_| diag::report(DiagCode::LiveNotResumed))
                 .is_ok();
         Ok(RestartedDto { key, live })
     }
@@ -872,7 +890,7 @@ impl Backend {
             self.library.grant(&location);
             match self.open_at(location) {
                 Ok(_) => return,
-                Err(e) => tracing::warn!(theme = last, "last theme not reopened: {e}"),
+                Err(_) => diag::report(DiagCode::LastThemeNotReopened),
             }
         }
         let screen = discover_screens(self.bus.as_ref())
@@ -884,8 +902,8 @@ impl Backend {
             .map(|a| a.0.clone());
         let blank = match self.new_theme(key.as_deref(), self.texts().untitled, None) {
             Ok(theme) => theme,
-            Err(e) => {
-                tracing::warn!("no starting theme: {e}");
+            Err(_) => {
+                diag::report(DiagCode::NoStartingTheme);
                 return;
             }
         };
@@ -898,9 +916,9 @@ impl Backend {
                 && crate::dto::orientation_slug(e.theme.orientation) == blank.orientation
         });
         if let Some(entry) = fitting
-            && let Err(e) = self.open_at(entry.location.clone())
+            && self.open_at(entry.location.clone()).is_err()
         {
-            tracing::warn!(theme = entry.location.0, "bundled theme not opened: {e}");
+            diag::report(DiagCode::BundledThemeNotOpened);
         }
     }
 
@@ -910,9 +928,9 @@ impl Backend {
     /// display's ([`Self::set_live`]; D-2026-10-01-live-screen-controls-2).
     pub fn restore_live(&self, time: LocalTime) {
         if let Some(key) = self.settings.load().live_screen
-            && let Err(e) = self.set_live(true, Some(&key), time)
+            && self.set_live(true, Some(&key), time).is_err()
         {
-            tracing::warn!(screen = key, "live mode not restored: {e}");
+            diag::report(DiagCode::LiveNotRestored);
         }
     }
 
@@ -927,8 +945,8 @@ impl Backend {
         let probe = self.studio().live_video_to_probe();
         self.learn_video(probe, Wait::No);
         let delivered = self.studio().tick(time, now);
-        if let Err(e) = self.deliver(delivered) {
-            tracing::warn!("live screen frame failed: {e}");
+        if self.deliver(delivered).is_err() {
+            diag::report(DiagCode::LiveFrameFailed);
         }
         self.studio().next_due()
     }
@@ -1304,6 +1322,78 @@ mod tests {
             assert_eq!(error.code(), "invalidInput", "{page} {language}");
             assert!(error.to_string().contains(page), "{error}");
         }
+    }
+
+    /// D-2026-10-01-gif-sticker-search-3: KLIPY's Partner Panel is the one
+    /// link the UI may open besides the guide's pages (the GIF guide among
+    /// them); the app's code names no other address and the window gets no
+    /// permission to open one itself.
+    #[test]
+    fn partner_panel_is_the_only_new_link() {
+        assert_eq!(
+            LINKS,
+            [("klipyPartnerPanel", "https://partner.klipy.com")],
+            "one link"
+        );
+        assert_eq!(
+            link_url("klipyPartnerPanel").unwrap(),
+            "https://partner.klipy.com"
+        );
+        for link in [
+            "",
+            "klipy",
+            "KlipyPartnerPanel",
+            "https://partner.klipy.com",
+            "https://example.com",
+            "../ffmpeg",
+        ] {
+            let error = link_url(link).unwrap_err();
+            assert_eq!(error.code(), "invalidInput", "{link}");
+            assert!(error.to_string().contains(link), "{error}");
+        }
+        assert_eq!(GUIDE_PAGES, ["ffmpeg", "gifs-and-stickers"]);
+        let site = "https://github.com/slipalison/bezel/blob/main/";
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for (language, page) in [
+            ("en", "docs/user/gifs-and-stickers.md"),
+            ("pt-BR", "docs/user/pt-BR/gifs-and-stickers.md"),
+        ] {
+            assert_eq!(
+                guide_url("gifs-and-stickers", language).unwrap(),
+                format!("{site}{page}")
+            );
+            assert!(repo.join(page).is_file(), "{page}");
+        }
+        // Every address the app's own code holds: the guide's site and the
+        // panel.
+        let code = [
+            include_str!("backend.rs"),
+            include_str!("commands.rs"),
+            include_str!("gifs.rs"),
+            include_str!("gifs/key.rs"),
+            include_str!("lib.rs"),
+        ];
+        let mut addresses: Vec<&str> = code
+            .iter()
+            .map(|source| source.split("#[cfg(test)]\nmod tests {").next().unwrap())
+            .flat_map(|source| {
+                source
+                    .match_indices("https://")
+                    .map(|(at, _)| &source[at..])
+            })
+            .map(|from| from.split(['"', '{', ')', ' ']).next().unwrap())
+            .collect();
+        addresses.sort_unstable();
+        addresses.dedup();
+        assert_eq!(
+            addresses,
+            [
+                "https://github.com/slipalison/bezel/blob/main/docs/user/",
+                "https://partner.klipy.com",
+            ]
+        );
+        let capability = include_str!("../capabilities/default.json");
+        assert!(!capability.contains("\"opener:"), "no opener permission");
     }
 
     #[test]

@@ -1,5 +1,6 @@
-// The left library: widgets, sensors, layers, themes, media and screen, each a
-// tab panel. Widgets and sensors drag onto the canvas.
+// The left library: widgets, sensors, layers, themes, media (the theme's and
+// the GIF collection) and screen, each a tab panel. Widgets and sensors drag
+// onto the canvas.
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { makeDraggable } from './dragdrop.js';
@@ -7,7 +8,7 @@ import { checkField } from './fields.js';
 import { WIDGETS, widgetOf } from '../editor/widgets.js';
 import { backgroundOf, fileNameOf, mediaItems, moves, videoFacts } from '../editor/background.js';
 import { warningText } from '../messages.js';
-import { formatBytes } from './storage.js';
+import { formatBytes, wireSubtabs } from './storage.js';
 import { SHOW_ALL, axisOf, countText, emptyState, filterThemes, rememberedFilter, scopeIn, screenLabel, thumbnailKey } from '../theme-filter.js';
 
 export { axisOf };
@@ -420,6 +421,11 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
 
   $('media-add').addEventListener('click', () => actions.addImage());
   $('media-add-video').addEventListener('click', () => actions.addVideo());
+
+  // "This theme" | "Collection" (D-2026-10-01-gif-sticker-search-5): the
+  // collection is where GIFs and stickers are searched on KLIPY.
+  wireSubtabs($('panel-media').querySelector('.subtabs'), (name) => actions.mediaSubtab?.(name));
+  $('gif-search-open').addEventListener('click', () => actions.searchGifs());
 
   // -------------------------------------------------------------- screen --
   const autostartField = () => checkField(t('screen.autostart'), actions.autostart(), (on) => actions.setAutostart(on));

@@ -76,6 +76,7 @@ use bezel_core::ports::{
 };
 use bezel_core::{BezelError, Result};
 
+use crate::diag::{self, DiagCode};
 use crate::media::png_of;
 use crate::messages::{ErrorCode, UiError};
 use crate::storage::MediaSetup;
@@ -109,8 +110,8 @@ impl VideoCopy {
 
 impl Drop for VideoCopy {
     fn drop(&mut self) {
-        if let Err(e) = std::fs::remove_file(&self.0) {
-            tracing::warn!(file = %self.0.display(), "copy of the theme video not removed: {e}");
+        if std::fs::remove_file(&self.0).is_err() {
+            diag::report(DiagCode::VideoCopyNotRemoved);
         }
     }
 }
@@ -177,7 +178,6 @@ fn converter(media: &SharedMedia, wait: Wait) -> Option<MutexGuard<'_, Box<dyn M
 pub struct VideoProbe {
     /// Which of the session's videos it is ([`ThemeVideo::serial`]).
     serial: u64,
-    asset: AssetRef,
     location: MediaLocation,
     media: SharedMedia,
 }
@@ -189,9 +189,7 @@ impl VideoProbe {
     pub fn run(self, wait: Wait) -> Option<Probed> {
         let probed = converter(&self.media, wait)?.probe(&self.location);
         let info = probed
-            .inspect_err(|e| {
-                tracing::warn!(video = self.asset.0, "the theme's video is not probed: {e}");
-            })
+            .inspect_err(|_| diag::report(DiagCode::VideoNotProbed))
             .ok();
         Some(Probed {
             serial: self.serial,
@@ -211,7 +209,6 @@ pub struct Probed {
 pub struct PosterRetake {
     /// Which of the session's videos it is ([`ThemeVideo::serial`]).
     serial: u64,
-    asset: AssetRef,
     poster: AssetRef,
     spec: PosterSpec,
     location: MediaLocation,
@@ -230,9 +227,7 @@ impl PosterRetake {
         let taken = media.poster(&self.location, self.spec);
         drop(media);
         let frame = taken
-            .inspect_err(|e| {
-                tracing::warn!(video = self.asset.0, "the poster is not taken again: {e}");
-            })
+            .inspect_err(|_| diag::report(DiagCode::PosterNotRetaken))
             .ok()?;
         Some(TakenPoster {
             serial: self.serial,
@@ -868,16 +863,15 @@ impl Studio {
     pub fn video_to_probe(&mut self) -> Option<VideoProbe> {
         let host = self.host.as_ref()?;
         let video = self.video.as_mut().filter(|v| !v.probed)?;
-        let (serial, asset) = (video.serial, video.asset.clone());
+        let serial = video.serial;
         match video.file(&host.dir, self.runtime.assets()) {
             Ok(location) => Some(VideoProbe {
                 serial,
-                asset,
                 location,
                 media: Arc::clone(&host.media),
             }),
-            Err(e) => {
-                tracing::warn!(video = asset.0, "the theme's video is not probed: {e}");
+            Err(_) => {
+                diag::report(DiagCode::VideoNotProbed);
                 self.record_probe(None);
                 None
             }
@@ -969,13 +963,10 @@ impl Studio {
         let (video, host) = (self.video.as_mut()?, self.host.as_ref()?);
         let location = video
             .file(&host.dir, self.runtime.assets())
-            .inspect_err(|e| {
-                tracing::warn!(video = video.asset.0, "the poster is not taken again: {e}");
-            })
+            .inspect_err(|_| diag::report(DiagCode::PosterNotRetaken))
             .ok()?;
         Some(PosterRetake {
             serial: video.serial,
-            asset: video.asset.clone(),
             poster,
             spec,
             location,
@@ -1094,8 +1085,8 @@ impl Studio {
                 video.decoder = Some(PreviewDecoder { frames, asked: now });
                 Playing::Video
             }
-            Err(e) => {
-                tracing::warn!(video = video.asset.0, "the preview does not play it: {e}");
+            Err(_) => {
+                diag::report(DiagCode::PreviewNotPlayed);
                 video.failed(now);
                 video.waiting(now)
             }
@@ -1121,8 +1112,8 @@ impl Studio {
         decoder.asked = now;
         let picture = match decoder.frames.frame_at(elapsed) {
             Ok(picture) => picture,
-            Err(e) => {
-                tracing::warn!(video = video.asset.0, "the preview stops playing it: {e}");
+            Err(_) => {
+                diag::report(DiagCode::PreviewStopped);
                 video.failed(now);
                 return Ok(None);
             }
@@ -1358,7 +1349,7 @@ impl Studio {
         live.restart_video = false;
         match started {
             Ok(playback) => live.host = playback,
-            Err(e) => tracing::warn!(screen = live.key, "video background not started: {e}"),
+            Err(_) => diag::report(DiagCode::VideoBackgroundNotStarted),
         }
     }
 
@@ -1439,10 +1430,7 @@ impl Studio {
             if worth_reconnecting(e) && live.screen.is_some() {
                 let mut attempts = Reconnect::new();
                 let wait = attempts.next_wait().unwrap_or_default();
-                tracing::warn!(
-                    screen = live.key,
-                    "live screen lost ({e}); connecting it again"
-                );
+                diag::report(DiagCode::LiveScreenLost);
                 live.slot = Slot::Away(Away {
                     attempts,
                     due: now + wait,
@@ -1515,7 +1503,7 @@ impl Studio {
         };
         match outcome {
             Ok((screen, link)) => {
-                tracing::info!(screen = live.key, "the live screen is back");
+                diag::report(DiagCode::LiveScreenBack);
                 live.key = screen
                     .address()
                     .map_or_else(|| live.key.clone(), |a| a.0.clone());
@@ -1531,7 +1519,7 @@ impl Studio {
                 let wait = worth_reconnecting(&e)
                     .then(|| away.attempts.next_wait())
                     .flatten();
-                tracing::warn!(screen = live.key, "the live screen is not back: {e}");
+                diag::report(DiagCode::LiveScreenNotBack);
                 match wait {
                     Some(wait) => away.due = now + wait,
                     None => {
@@ -1602,7 +1590,7 @@ impl Studio {
         match self.runtime.sample_on_time(self.sensors.as_mut(), clock) {
             Ok(true) => self.sample_millis = started.elapsed().as_secs_f64() * 1000.0,
             Ok(false) => {}
-            Err(e) => tracing::warn!("sensor sample failed: {e}"),
+            Err(_) => diag::report(DiagCode::SensorSampleFailed),
         }
         if due.is_none_or(|due| now < due) {
             return Ok(None);

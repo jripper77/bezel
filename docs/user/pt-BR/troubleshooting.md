@@ -124,6 +124,43 @@ depois em **Executar assim mesmo**:
 Ele está no modo desktop (segundo monitor) do fabricante:
 [Telas suportadas](devices.md#modo-desktop).
 
+## O aplicativo não abre
+
+Abra-o por um terminal (`bezel-studio`) e leia o que ele imprime. No Windows o
+aplicativo não abre console: num Prompt de Comando, na pasta onde o Bezel está
+instalado, rode `bezel-studio.exe 2> bezel-studio.txt` e depois abra o
+`bezel-studio.txt`.
+
+As mensagens do aplicativo no terminal (`bezel-studio: …`) são frases fixas de
+uma lista fechada: nenhuma traz o texto do erro por trás dela, nem um arquivo
+ou pasta seus. É de propósito, para que nada que o aplicativo imprime carregue
+um segredo, como a sua chave do KLIPY, ou um caminho pessoal. Quando o
+aplicativo para num erro (um panic), a única linha que ele imprime acrescenta
+onde no código-fonte isso aconteceu: um arquivo do código do Bezel ou de uma
+biblioteca, a partir da pasta do crate (`tao-0.37.1/src/…`), e uma linha e uma
+coluna, nunca a mensagem do erro. Quando o aplicativo não abre, ou abre sem uma
+parte, o terminal diz qual parte falhou:
+
+| O terminal diz | O que falhou |
+| --- | --- |
+| `bezel-studio: the app panicked at tao-…/src/platform_impl/linux/event_loop.rs:…` | Linux: não há sessão gráfica, então o GTK não pôde iniciar. Abra o aplicativo dentro da sua sessão gráfica, não por SSH nem por um serviço do sistema. |
+| `bezel-studio: the app's folders were not found`, depois `bezel-studio: the app panicked at tauri-…/src/app.rs:…` | Onde o aplicativo guarda ajustes, dados e cache (no Linux, achados pelo `HOME` e pelas variáveis `XDG_*_HOME`). |
+| `bezel-studio: the tray icon was not added`, depois `bezel-studio: the app panicked at tauri-…/src/app.rs:…` | O ícone da bandeja. Linux: a biblioteca AppIndicator (`libayatana-appindicator`). |
+| `bezel-studio: the app panicked at tauri-…/src/app.rs:…`, sem linha antes | A janela ou a página dentro dela. Linux: o WebKitGTK; com o AppImage, tente `--appimage-extract-and-run`. Windows: o runtime do WebView2; rode o instalador de novo. |
+| `bezel-studio: the app panicked at …`, outro lugar | Um erro dentro do aplicativo ou de uma biblioteca que ele usa. Relate-o, com a linha inteira. |
+| `bezel-studio: the app did not start: a plugin did not start` | Um dos plugins dele: janela única, diálogos de arquivo, abrir links, abrir no login. |
+| `bezel-studio: the app did not start` | Outra causa. |
+| `bezel-studio: refresh loop not started: no thread or memory to spare` | O aplicativo abre, mas os sensores e a tela ao vivo não se atualizam: o sistema está sem threads ou sem memória. Feche alguns programas e abra o Bezel de novo. |
+| `bezel-studio: refresh loop not started` | O mesmo, por outra causa. |
+| `bezel-studio: could not restart with the DMA-BUF renderer off: the app's program file is gone` | Linux. Ao abrir, o aplicativo se reinicia uma vez com o renderizador DMA-BUF do WebKitGTK desligado (ligado, o driver da NVIDIA fecha o aplicativo); o arquivo do programa foi removido ou trocado nesse meio-tempo. Abra-o de novo. |
+| `bezel-studio: could not restart with the DMA-BUF renderer off: running the app's program file was not allowed` | O mesmo reinício, recusado: o programa está num disco montado com `noexec`, ou uma política de segurança o impede. |
+| `bezel-studio: could not restart with the DMA-BUF renderer off` | O mesmo reinício, por outra causa. Nesses três casos, abra-o com `WEBKIT_DISABLE_DMABUF_RENDERER=1 bezel-studio`. |
+
+Num lugar, o `…` substitui a versão da biblioteca, a linha e a coluna, que
+mudam de uma versão do Bezel para outra.
+
+Ao relatar o problema, copie essas linhas como estão.
+
 ## Relatar um problema
 
 Inclua a saída de `bezel --version` e de `bezel -v devices`, e o log do que

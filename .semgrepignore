@@ -1,0 +1,23 @@
+# Semgrep's default ignores (kept as they are) ...
+.gitignore
+.git/
+:include .gitignore
+node_modules/
+build/
+dist/
+vendor/
+.env/
+.venv/
+.tox/
+*.min.js
+.npm/
+.yarn/
+test/
+tests/
+*_test.go
+.semgrep
+.semgrep_logs/
+
+# ... plus the JDI process records: prose about the code (reviews, loop logs,
+# decisions) that quotes test values, not code (D-2026-10-01-gif-sticker-search-19).
+.jdi/

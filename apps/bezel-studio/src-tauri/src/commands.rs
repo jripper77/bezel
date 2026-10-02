@@ -1,6 +1,15 @@
 //! The `#[tauri::command]`s the UI invokes: each runs its [`Backend`] method
 //! on a blocking thread (screens and files block) and opens the native file
 //! dialogs the method needs.
+//!
+//! The window enters a command only through IPC: no code names a command
+//! function but its definition and `generate_handler!` in `run`, only the
+//! GIF commands `search_gifs`, `gif_preview` and `collect_gif` take the
+//! invocation (`Request`), nothing here prints, logs or panics
+//! (D-2026-10-01-gif-sticker-search-11, -12: only [`crate::diag`] says
+//! anything, fixed text only), and only `open_fixed`, which `open_link` and
+//! `open_guide` call, uses the system opener (-15); the source guard
+//! `tests::nothing_in_the_app_forges_an_invocation` checks it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,19 +20,22 @@ use bezel_core::domain::screen::Confirm;
 use bezel_core::ports::ThemeLocation;
 use bezel_themes::dto::ThemeDto;
 use bezel_themes::native::EXTENSION;
-use tauri::ipc::Response;
-use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, State, WebviewWindow};
+use tauri::ipc::{Request, Response};
+use tauri::{AppHandle, Manager as _, Runtime, State, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt as _;
 use tauri_plugin_opener::OpenerExt as _;
 
-use crate::backend::{Backend, guide_url};
+use crate::backend::{Backend, guide_url, link_url};
 use crate::clock::now;
 use crate::dto::{
-    AddedDto, AddedMediaDto, AssetDto, DevicesDto, ImportedDto, JobDto, MediaToolsDto,
-    MonitorModeDto, PreferencesDto, PrepareDto, ProgressDto, RestartedDto, SampleDto, SavedDto,
-    SensorDto, SessionDto, StorageDto, ThemeEntryDto, VideoAutoDto, parse_orientation,
+    AddedDto, AddedMediaDto, AssetDto, CollectedDto, CollectedUsersDto, DevicesDto, GifPageDto,
+    ImportedDto, JobDto, KeyDto, MediaToolsDto, MonitorModeDto, PreferencesDto, PrepareDto,
+    ProgressDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, StorageDto,
+    ThemeEntryDto, VideoAutoDto, parse_orientation,
 };
+use crate::emit_progress;
+use crate::gifs::{Gifs, KlipyKey, SharedGifs, Target, UserAsked};
 use crate::manager::{
     Ask, CacheDto, CandidatesDto, ClearedDto, ConfirmedFileDto, DeleteReportDto, ManagedFileDto,
     ManagerOverviewDto, PlanDto, RunDto,
@@ -164,7 +176,22 @@ pub async fn open_guide<R: Runtime>(
     page: String,
     language: String,
 ) -> UiResult<()> {
-    let url = guide_url(&page, &language)?;
+    open_fixed(app, guide_url(&page, &language)?).await
+}
+
+/// Opens a page of the fixed list [`LINKS`](crate::backend::LINKS) (`link`
+/// names it: `klipyPartnerPanel`) in the system's browser, off the main
+/// thread.
+#[tauri::command]
+pub async fn open_link<R: Runtime>(app: AppHandle<R>, link: String) -> UiResult<()> {
+    open_fixed(app, link_url(&link)?.to_string()).await
+}
+
+/// Opens `url`, one of the app's fixed addresses, in the system's browser.
+/// The one user of the system opener, called only by [`open_link`] and
+/// [`open_guide`], so a page opens only on the user's click
+/// (D-2026-10-01-gif-sticker-search-15; the source guard checks it).
+async fn open_fixed<R: Runtime>(app: AppHandle<R>, url: String) -> UiResult<()> {
     tauri::async_runtime::spawn_blocking(move || app.opener().open_url(url, None::<&str>))
         .await
         .map_err(UiError::system)?
@@ -465,7 +492,8 @@ pub async fn pick_folder<R: Runtime>(app: AppHandle<R>) -> UiResult<Option<Strin
 
 // ------------------------------------------------------------- storage --
 
-/// Event carrying a running upload's progress ([`ProgressDto`]).
+/// Event carrying a storage job's progress ([`ProgressDto`]): an upload's,
+/// a storage manager plan's; `crate::emit_progress` sends it.
 pub const PROGRESS_EVENT: &str = "storage-progress";
 
 /// The answer of the UI's confirmation dialog (which names the file) as the
@@ -541,10 +569,8 @@ pub async fn run_upload<R: Runtime>(
     blocking(&state, move |b| {
         let mut throttle = ProgressThrottle::default();
         let mut report = |progress: Progress| {
-            if throttle.pass(progress)
-                && let Err(e) = app.emit(PROGRESS_EVENT, ProgressDto::from(progress))
-            {
-                tracing::warn!("upload progress not sent: {e}");
+            if throttle.pass(progress) {
+                emit_progress(&app, ProgressDto::from(progress));
             }
         };
         b.run_upload(ticket, confirm_of(overwrite), now(), &mut report)
@@ -603,13 +629,6 @@ pub async fn set_boot_media(
 }
 
 // ----------------------------------------------------- storage manager --
-
-/// Sends a storage manager job's progress as [`PROGRESS_EVENT`].
-fn emit_progress<R: Runtime>(app: &AppHandle<R>, progress: ProgressDto) {
-    if let Err(e) = app.emit(PROGRESS_EVENT, progress) {
-        tracing::warn!("storage progress not sent: {e}");
-    }
-}
 
 /// Both media of a screen next to the catalog of what Bezel sent.
 #[tauri::command]
@@ -810,6 +829,161 @@ pub async fn clear_cache(
 #[tauri::command]
 pub async fn set_cache_limit(state: State<'_, Shared>, bytes: u64) -> UiResult<CacheDto> {
     blocking(&state, move |b| b.set_cache_limit(bytes)).await
+}
+
+// --------------------------------------------------- GIFs and stickers --
+
+/// Runs `work` on the blocking pool with the GIF state and the backend (a
+/// request to the provider, files and the theme block).
+async fn with_gifs<T: Send + 'static>(
+    gifs: &State<'_, SharedGifs>,
+    state: &State<'_, Shared>,
+    work: impl FnOnce(&Gifs, &Backend) -> UiResult<T> + Send + 'static,
+) -> UiResult<T> {
+    let gifs = Arc::clone(gifs);
+    blocking(state, move |b| work(&gifs, b)).await
+}
+
+/// Whether a KLIPY key is saved, and its last 4 characters (never the key).
+#[tauri::command]
+pub async fn klipy_key(gifs: State<'_, SharedGifs>, state: State<'_, Shared>) -> UiResult<KeyDto> {
+    with_gifs(&gifs, &state, |g, _| g.key_status()).await
+}
+
+/// Saves the user's KLIPY key; nothing is sent to KLIPY. The window sends
+/// it as a string, read straight into a [`KlipyKey`]: one that cannot be a
+/// key is `invalidInput` (D-2026-10-01-gif-sticker-search-10).
+#[tauri::command]
+pub async fn save_klipy_key(
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    key: KlipyKey,
+) -> UiResult<KeyDto> {
+    with_gifs(&gifs, &state, move |g, _| g.save_key(key)).await
+}
+
+/// Deletes the saved KLIPY key.
+#[tauri::command]
+pub async fn remove_klipy_key(
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+) -> UiResult<KeyDto> {
+    with_gifs(&gifs, &state, |g, _| g.remove_key()).await
+}
+
+/// A page of GIFs or stickers (`kind`) for `text` (empty: the trending
+/// ones), explicit results shown only with `explicit`, in the app's
+/// language. The window's invocation (`request`) is the proof the user
+/// asked: none, no request to the provider.
+#[tauri::command]
+pub async fn search_gifs(
+    request: Request<'_>,
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    kind: String,
+    text: String,
+    page: u32,
+    explicit: Option<bool>,
+) -> UiResult<GifPageDto> {
+    let asked = UserAsked::of(&request);
+    with_gifs(&gifs, &state, move |g, b| {
+        let explicit = explicit.unwrap_or(false);
+        let query = crate::gifs::query(&kind, &text, page, explicit, b.language())?;
+        g.search(&asked, &query)
+    })
+    .await
+}
+
+/// The preview of a result of the last search as a `data:` URL (its still
+/// with `still`: a GIF's JPEG, a sticker's PNG), or `None`; the window's
+/// invocation (`request`) is the proof the user asked.
+#[tauri::command]
+pub async fn gif_preview(
+    request: Request<'_>,
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    id: String,
+    still: Option<bool>,
+) -> UiResult<Option<String>> {
+    let asked = UserAsked::of(&request);
+    with_gifs(&gifs, &state, move |g, _| {
+        g.preview(&asked, &id, still.unwrap_or(false))
+    })
+    .await
+}
+
+/// Adds a result of the last search to the collection; the window's
+/// invocation (`request`) is the proof the user asked.
+#[tauri::command]
+pub async fn collect_gif(
+    request: Request<'_>,
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    id: String,
+) -> UiResult<CollectedDto> {
+    let asked = UserAsked::of(&request);
+    with_gifs(&gifs, &state, move |g, _| g.collect(&asked, &id)).await
+}
+
+/// The collection, the last added first, previews still with `still`.
+#[tauri::command]
+pub async fn gif_collection(
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    still: Option<bool>,
+) -> UiResult<Vec<CollectedDto>> {
+    with_gifs(&gifs, &state, move |g, _| g.list(still.unwrap_or(false))).await
+}
+
+/// Renames an item of the collection.
+#[tauri::command]
+pub async fn rename_collected(
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    id: String,
+    name: String,
+) -> UiResult<CollectedDto> {
+    with_gifs(&gifs, &state, move |g, _| g.rename(&id, &name)).await
+}
+
+/// The user's themes, and whether the open one, that hold an item's bytes.
+#[tauri::command]
+pub async fn collected_users(
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    id: String,
+) -> UiResult<CollectedUsersDto> {
+    with_gifs(&gifs, &state, move |g, b| g.users(b, &id)).await
+}
+
+/// Deletes an item of the collection; `confirmed` comes from the dialog
+/// that named the themes using it.
+#[tauri::command]
+pub async fn delete_collected(
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    id: String,
+    confirmed: bool,
+) -> UiResult<()> {
+    with_gifs(&gifs, &state, move |g, _| {
+        g.delete(&id, confirm_of(confirmed))
+    })
+    .await
+}
+
+/// Copies an item of the collection into the theme as an image or its
+/// background (`target`).
+#[tauri::command]
+pub async fn use_collected(
+    gifs: State<'_, SharedGifs>,
+    state: State<'_, Shared>,
+    id: String,
+    target: String,
+) -> UiResult<AddedMediaDto> {
+    with_gifs(&gifs, &state, move |g, b| {
+        g.use_in_theme(b, &id, Target::parse(&target)?)
+    })
+    .await
 }
 
 #[cfg(test)]

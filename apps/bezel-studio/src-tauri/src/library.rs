@@ -22,6 +22,8 @@ use bezel_core::domain::theme::{AssetRef, Background, Theme};
 use bezel_core::ports::ThemeLocation;
 use bezel_themes::native::{EXTENSION, is_native, load_manifest};
 
+use crate::diag::{self, DiagCode};
+
 /// A theme found in the library.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeEntry {
@@ -313,8 +315,8 @@ fn scan(dir: &Path, bundled: bool) -> Vec<ThemeEntry> {
                     theme,
                     bundled,
                 }),
-                Err(e) => {
-                    tracing::warn!(theme = %location.0, "skipped: {e}");
+                Err(_) => {
+                    diag::report(DiagCode::ThemeSkipped);
                     None
                 }
             }

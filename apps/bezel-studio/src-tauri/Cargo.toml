@@ -26,6 +26,14 @@ bezel-render = { workspace = true }
 bezel-sensors = { workspace = true }
 bezel-themes = { workspace = true }
 bezel-media = { workspace = true }
+# The KLIPY adapter behind the GIF search (D-2026-10-01-gif-sticker-search-2):
+# only the studio reaches the network, never the CLI.
+bezel-klipy = { workspace = true }
+# Not called: caps every `log` record at debug for the whole binary, so the
+# HTTP client's trace records, which print request paths (the KLIPY key is
+# one of their segments), are compiled out even if a `log` bridge is ever
+# installed.
+log = { version = "0.4.34", features = ["max_level_debug", "release_max_level_debug"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -40,6 +48,21 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 sys-locale = "0.3.2"
 base64 = "0.22.1"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
+
+# The source guard (`tests::nothing_in_the_app_forges_an_invocation`,
+# D-2026-10-01-gif-sticker-search-10) reads the studio's Rust as a syntax
+# tree: identifiers (raw ones and those inside macro calls included), not
+# text. Both are already in `Cargo.lock` through the proc macros.
+[dev-dependencies]
+proc-macro2 = "1.0.107"
+syn = { version = "2.0.119", features = ["full", "visit"] }
+
+# Tauri's mock runtime (`tauri::test`), to run the app's own setup in a test.
+# Not on Windows (D-2026-10-01-gif-sticker-search-8): with this feature the
+# Windows test binary needs the Common Controls v6 manifest and fails to load
+# (0xc0000139); the test it serves runs on the other targets.
+[target.'cfg(not(windows))'.dev-dependencies]
+tauri = { version = "2.12.0", features = ["test"] }
 
 [lints]
 workspace = true

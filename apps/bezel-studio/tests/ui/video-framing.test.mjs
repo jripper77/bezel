@@ -444,6 +444,6 @@ test('the guide opens only its own pages', async () => {
   assert.deepEqual(opened, [['ffmpeg', 'pt-BR'], ['ffmpeg', 'en']]);
   await assert.rejects(demo.openGuide('../../etc/passwd', 'en'), (e) => e.code === 'invalidInput');
   await assert.rejects(demo.openGuide('ffmpeg', 'de'), (e) => e.code === 'invalidInput');
-  assert.deepEqual(DEMO_GUIDE_PAGES, ['ffmpeg']);
+  assert.deepEqual(DEMO_GUIDE_PAGES, ['ffmpeg', 'gifs-and-stickers']);
   await createDemoBackend('turing88').openGuide('ffmpeg', 'en');
 });

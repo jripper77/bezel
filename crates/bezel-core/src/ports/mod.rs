@@ -7,6 +7,7 @@ use crate::domain::clock::{Language, LocalTime};
 use crate::domain::discovery::{DesktopModePanel, Endpoint, MonitorModeConfirmed, Screen};
 use crate::domain::frame::Frame;
 use crate::domain::geometry::Orientation;
+use crate::domain::gifs::{Collection, GifPage, GifQuery, Rendition};
 use crate::domain::history::Histories;
 use crate::domain::job::Job;
 use crate::domain::media::{MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
@@ -197,6 +198,71 @@ pub trait ArchiveStore: Send {
 
     /// Removes the copy kept as `content` (a thumbnail of it stays).
     /// Removing a copy that is not kept is not an error.
+    fn discard(&mut self, content: &ContentId) -> Result<()>;
+}
+
+/// Driven port: an online provider of GIFs and stickers, reached with the
+/// user's own key (D-2026-10-01-gif-sticker-search-2). Nothing reaches it
+/// unless a use case in `app::gifs` calls it on a user action. Shared by
+/// the threads that run the user's requests, so its methods take `&self`.
+///
+/// Failures are [`BezelError::Service`](crate::BezelError::Service): the
+/// key at its request limit is [`ServiceFailure::RateLimited`], a refused
+/// key [`ServiceFailure::KeyRejected`], anything else
+/// [`ServiceFailure::Unavailable`]. No error text, log line or `Debug`
+/// output of an adapter carries the key.
+///
+/// [`ServiceFailure::RateLimited`]: crate::domain::error::ServiceFailure::RateLimited
+/// [`ServiceFailure::KeyRejected`]: crate::domain::error::ServiceFailure::KeyRejected
+/// [`ServiceFailure::Unavailable`]: crate::domain::error::ServiceFailure::Unavailable
+pub trait GifSource: Send + Sync {
+    /// The provider's name, recorded as the origin of what is collected
+    /// from it.
+    fn provider(&self) -> &str;
+
+    /// One page of GIFs or stickers for `query` (the trending ones when its
+    /// text is empty), [`PAGE_SIZE`](crate::domain::gifs::PAGE_SIZE) items
+    /// at most, filtered as [`GifQuery::filter`] says. Adapters read the
+    /// provider's answer tolerantly: unknown fields are ignored, renditions
+    /// they cannot read are skipped and an item without a GIF is dropped.
+    fn page(&self, query: &GifQuery) -> Result<GifPage>;
+
+    /// The bytes of `rendition`, read up to `limit` bytes: a larger file
+    /// is `BezelError::InvalidInput` naming the limit, and nothing past it
+    /// is read. Files never carry the user's key.
+    fn download(&self, rendition: &Rendition, limit: u64) -> Result<Vec<u8>>;
+}
+
+/// Driven port: the user's collection of GIFs and stickers
+/// (D-2026-10-01-gif-sticker-search-5), kept in the user's data folder by
+/// the disk adapter. Shaped like [`ArchiveStore`]: an index saved whole and
+/// bytes addressed by content, so the same GIF is kept once; each kept GIF
+/// may also have a small preview, under the same id.
+pub trait GifCollection: Send {
+    /// The index as last saved; an empty one when none was saved yet. An
+    /// index that cannot be read is an error naming it, never an empty
+    /// collection.
+    fn load(&mut self) -> Result<Collection>;
+
+    /// Saves `index` atomically: if it fails, the previous one stays whole.
+    fn save(&mut self, index: &Collection) -> Result<()>;
+
+    /// Keeps `bytes` (a GIF) and returns their id, their SHA-256. Bytes
+    /// already kept are stored once and give the same id.
+    fn keep(&mut self, bytes: &[u8]) -> Result<ContentId>;
+
+    /// The bytes kept as `content`; `None` when none are kept.
+    fn read(&mut self, content: &ContentId) -> Result<Option<Vec<u8>>>;
+
+    /// Keeps `bytes` (a small GIF) as the preview of the GIF kept as
+    /// `content`, replacing an earlier one.
+    fn keep_preview(&mut self, content: &ContentId, bytes: &[u8]) -> Result<()>;
+
+    /// The preview of the GIF kept as `content`; `None` when it has none.
+    fn read_preview(&mut self, content: &ContentId) -> Result<Option<Vec<u8>>>;
+
+    /// Removes the bytes kept as `content` and their preview. Removing what
+    /// is not kept is not an error.
     fn discard(&mut self, content: &ContentId) -> Result<()>;
 }
 

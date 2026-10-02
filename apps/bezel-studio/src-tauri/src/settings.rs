@@ -10,6 +10,7 @@ use bezel_core::domain::geometry::Orientation;
 use bezel_sensors::SensorOptions;
 use serde::{Deserialize, Serialize};
 
+use crate::diag::{self, DiagCode};
 use crate::dto::{orientation_slug, parse_orientation};
 use crate::texts::parse_language;
 
@@ -133,8 +134,8 @@ impl SettingsFile {
             let json = serde_json::to_vec_pretty(&settings).map_err(std::io::Error::other)?;
             std::fs::write(&self.path, json)
         };
-        if let Err(e) = write() {
-            tracing::warn!(path = %self.path.display(), "settings not saved: {e}");
+        if write().is_err() {
+            diag::report(DiagCode::SettingsNotSaved);
         }
     }
 }

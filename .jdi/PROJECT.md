@@ -56,7 +56,7 @@ bezel
       **Verify:** `cargo llvm-cov --workspace --locked --fail-under-lines 80 --summary-only && echo OK`
       **Source:** PROJECT
 - [ ] No `TODO`/`FIXME` without linked issue reference
-      **Verify:** `export LC_ALL=C.UTF-8; ! git grep -nEi '\b(todo|fixme)\b' -- 'crates/*.rs' 'apps/*.rs' 'apps/*.js' | grep -vEi '(todo|fixme)[^a-z]*\(?#[0-9]+' && echo OK`
+      **Verify:** `export LC_ALL=C.UTF-8; ! git grep -nIiE '\b(todo|fixme)' -- . ':!*.md' ':!*.json' ':!*.lock' ':!.jdi' ':!docs' ':!.githooks' ':!apps/bezel-studio/scripts/e2e-passed.mjs' ':!apps/bezel-studio/tests/ui/e2e-passed.test.mjs' | sed -E "s/(todo|fixme)s?\(#[0-9]+\)//Ig" | grep -qE 'TODO|FIXME|[Ff][Ii][Xx][Mm][Ee]|\b[Tt][Oo][Dd][Oo]\b|\bT[Oo]D[Oo][Ss]?\b' && echo OK`
       **Source:** PROJECT
 
 ### Manual

@@ -16,6 +16,8 @@ mod thumbs;
 mod tests;
 
 pub use disk::DiskArchive;
+// The atomic replace, the removal and the I/O error the GIF collection reuses.
+pub(crate) use disk::{failed, remove, write_atomically};
 pub use memory::MemoryArchive;
 pub use thumbs::THUMBNAIL_EDGE;
 

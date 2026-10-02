@@ -46,6 +46,7 @@ use bezel_core::ports::{ArchiveStore, MediaTranscoder, ScreenLink};
 use bezel_media::archive::{DiskArchive, MemoryArchive};
 
 use crate::backend::Backend;
+use crate::diag::{self, DiagCode};
 use crate::messages::{ErrorCode, UiError, UiResult};
 use crate::storage::StorageState;
 use crate::studio::Resume;
@@ -339,8 +340,8 @@ impl Backend {
         let mut media = self.storage.picture_media();
         match self.storage.pictures().thumbnail(&content, media.as_mut()) {
             Ok(png) => png.map(|png| data_url(&png)),
-            Err(e) => {
-                tracing::warn!(path, "no thumbnail: {e}");
+            Err(_) => {
+                diag::report(DiagCode::NoFileThumbnail);
                 None
             }
         }

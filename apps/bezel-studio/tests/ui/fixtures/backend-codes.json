@@ -7,6 +7,10 @@
     "brightnessRange": [],
     "busy": [],
     "cancelled": [],
+    "collectionUnavailable": [
+      "folder",
+      "reason"
+    ],
     "fileError": [
       "file",
       "reason"
@@ -15,6 +19,9 @@
       "file",
       "limit",
       "size"
+    ],
+    "gifNotInResults": [
+      "item"
     ],
     "hung": [
       "detail"
@@ -35,6 +42,12 @@
     "invalidTheme": [
       "detail"
     ],
+    "klipyKeyRejected": [],
+    "klipyNoKey": [],
+    "klipyRateLimited": [],
+    "klipyUnavailable": [
+      "detail"
+    ],
     "live": [],
     "noModel": [],
     "noScreenAddress": [],
@@ -45,6 +58,9 @@
     ],
     "notConfirmed": [
       "detail"
+    ],
+    "notInCollection": [
+      "item"
     ],
     "notInLibrary": [
       "location"

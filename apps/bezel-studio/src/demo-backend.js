@@ -3,6 +3,7 @@
 import { DEMO_BACK_FROM_DESKTOP, DEMO_LIBRARY, DEMO_LOCAL_FILES, DEMO_ORIGINALS, DEMO_ORIGINALS_FOLDER, DEMO_PANELS, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_THEME_VIDEOS, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
 import { demoFindings, demoPlanAcross, demoPlanRename, demoPlanRestore, demoRank, demoSameFile } from './demo-manager.js';
 import { DEMO_THEME } from './demo-theme.js';
+import { createDemoGifs } from './demo-gifs.js';
 import { DEMO_GIF_FRAME_MS, DEMO_VIDEO_LOOP_MS, renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
 import { IMAGE_EXTENSIONS as PICTURES, droppable, extensionOf, fileNameOf } from './editor/background.js';
@@ -349,7 +350,7 @@ export function createDemoDecoder({ wait = (fn, ms) => setTimeout(fn, ms), cance
 }
 
 /** The guide pages `open_guide` opens. */
-export const DEMO_GUIDE_PAGES = Object.freeze(['ffmpeg']);
+export const DEMO_GUIDE_PAGES = Object.freeze(['ffmpeg', 'gifs-and-stickers']);
 
 /**
  * Holds a job phase in the middle until it is let go: a test sees the job
@@ -1156,6 +1157,41 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     videoFiles.set(ref, { width: known?.width ?? 1920, height: known?.height ?? 1080, durationMs, bytes });
     return { ref, kind: 'video', poster, bytes, durationMs, posterError: poster ? null : { ...NO_POSTER } };
   }
+  /**
+   * A collection item copied into the theme under its name, like
+   * `use_collected`: an image, or a background that plays like an animated
+   * GIF added with "Add video…".
+   */
+  async function useInTheme(item, target) {
+    const name = `${item.name}.gif`;
+    if (target === 'image') {
+      const ref = freeRef(name);
+      images.push(ref);
+      return { ref, kind: 'image', poster: null, bytes: item.bytes, durationMs: null, posterError: null };
+    }
+    const source = `demo://${name}`;
+    dropped.set(source, item.bytes);
+    return addMedia(source);
+  }
+  /**
+   * The user's saved themes that use one of `refs`, and whether the open
+   * one holds one of them among its assets (like the backend, which looks
+   * for the same bytes in the session's assets, used or not yet).
+   */
+  const themesUsing = (refs) => {
+    const uses = (t) => refs.some((ref) => JSON.stringify(t).includes(JSON.stringify(ref)));
+    const held = taken();
+    return { themes: saved.filter((s) => !s.bundled && uses(s.theme)).map((s) => s.theme.name), openTheme: refs.some((ref) => held.has(ref)) };
+  };
+  const gifs = createDemoGifs(chosen.klipy ?? {}, {
+    now,
+    useInTheme,
+    themesUsing,
+    onQuery: (query) => hooks.onGifQuery?.(query),
+    onPreview: (id) => hooks.onGifPreview?.(id),
+    onCollect: (id) => hooks.onGifCollect?.(id),
+    onLink: (link) => hooks.onLink?.(link),
+  });
   // The window, like the app: the close button hides it while a screen is
   // live, asks the UI when edits are unsaved, and closes it otherwise.
   let unsaved = false;
@@ -1173,6 +1209,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
 
   return {
     ...storageApi,
+    ...gifs,
     listDevices: () => (chosen.error ? Promise.reject(new Error(chosen.error)) : Promise.resolve(structuredClone(devices))),
     leaveDesktopMode: (key, confirmed) => {
       const at = devices.desktopMode.findIndex((p) => p.key === key);

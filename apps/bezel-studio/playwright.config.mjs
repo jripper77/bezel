@@ -7,6 +7,13 @@ import { defineConfig } from '@playwright/test';
 
 const PORT = Number(process.env.BEZEL_E2E_PORT) || 1430;
 
+/** A project in `colorScheme` and `locale`. The same two settings go in its
+ *  metadata: the JSON report keeps a project's metadata but not its `use`,
+ *  and scripts/e2e-passed.mjs reads them there. */
+function project(name, colorScheme, locale) {
+  return { name, use: { colorScheme, locale }, metadata: { colorScheme, locale } };
+}
+
 export default defineConfig({
   testDir: 'tests/e2e',
   fullyParallel: true,
@@ -21,10 +28,10 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'light-pt', use: { colorScheme: 'light', locale: 'pt-BR' } },
-    { name: 'dark-pt', use: { colorScheme: 'dark', locale: 'pt-BR' } },
-    { name: 'light-en', use: { colorScheme: 'light', locale: 'en-US' } },
-    { name: 'dark-en', use: { colorScheme: 'dark', locale: 'en-US' } },
+    project('light-pt', 'light', 'pt-BR'),
+    project('dark-pt', 'dark', 'pt-BR'),
+    project('light-en', 'light', 'en-US'),
+    project('dark-en', 'dark', 'en-US'),
   ],
   webServer: {
     command: `python3 -m http.server ${PORT} --directory src`,

@@ -65,6 +65,18 @@ const COMMANDS: &[&str] = &[
     "cache_info",
     "clear_cache",
     "set_cache_limit",
+    "klipy_key",
+    "save_klipy_key",
+    "remove_klipy_key",
+    "search_gifs",
+    "gif_preview",
+    "collect_gif",
+    "gif_collection",
+    "rename_collected",
+    "collected_users",
+    "delete_collected",
+    "use_collected",
+    "open_link",
 ];
 
 fn main() -> ExitCode {

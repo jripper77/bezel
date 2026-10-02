@@ -10,6 +10,12 @@
 // `'open_link'`), escapes decoded. A mention in a comment is not a use. The
 // demo's KLIPY and the translations are not the bridge: they are out of the
 // KLIPY and guide rules, never out of the backend one.
+//
+// Nor can a page run code those rules do not read (D-2026-10-01-gif-sticker-
+// search-19): Tauri hashes an inline script into the CSP at build, so it
+// runs. So every page under src/ (`index.html`) loads only the app's own
+// modules (`<script type="module" src>` of a module under src/), and has no
+// inline script, no inline event handler (`on*=`) and no `javascript:` URL.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -63,13 +69,19 @@ function notTheBridge(file) {
   return !/^src\/demo-[^/]*\.js$/.test(file) && !file.startsWith('src/i18n/');
 }
 
-/** Every module under src/, as `src/<path>`. */
-function modules(dir = 'src/') {
+/** Every file under `dir` whose name matches `pattern`, as `src/<path>`. */
+function filesUnder(dir, pattern) {
   return readdirSync(new URL(dir, APP), { withFileTypes: true }).flatMap((entry) => {
-    if (entry.isDirectory()) return modules(`${dir}${entry.name}/`);
-    return /\.m?js$/.test(entry.name) ? [`${dir}${entry.name}`] : [];
+    if (entry.isDirectory()) return filesUnder(`${dir}${entry.name}/`, pattern);
+    return pattern.test(entry.name) ? [`${dir}${entry.name}`] : [];
   });
 }
+
+/** Every module under src/, as `src/<path>`. */
+const modules = () => filesUnder('src/', /\.m?js$/);
+
+/** Every page under src/, as `src/<path>`. */
+const pages = () => filesUnder('src/', /\.x?html?$/i);
 
 /** Words after which a `/` starts a regular expression, not a division. */
 const BEFORE_EXPRESSION = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
@@ -215,6 +227,140 @@ const outside = (uses) => uses
   .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
   .map((u) => `${u.file}:${u.line} ${u.rule}: ${u.text}`);
 
+/**
+ * Reads the HTML `source` as far as its start tags, as a browser does
+ * (comments, doctype and end tags skipped; `/` between attributes is a
+ * space): each tag's lower-cased `name`, its `attributes` (lower-cased
+ * name, value as written, offset) and its offset; a script's `text` up to
+ * its end tag (`null` for any other tag). Only a script's content is read
+ * as text: inside an `<svg>`, a `<style>` or `<title>` holds markup, so
+ * theirs is read as markup everywhere.
+ */
+function readTags(source) {
+  const tags = [];
+  const skipTo = (from, end) => {
+    const at = source.indexOf(end, from);
+    if (at === -1) throw new SyntaxError(`no "${end}" after ${from}`);
+    return at + end.length;
+  };
+  const attributesFrom = (start, attributes) => {
+    let j = start;
+    for (;;) {
+      while (/[\s/]/.test(source[j] ?? '')) j += 1;
+      if (j >= source.length) throw new SyntaxError(`unclosed tag at ${start}`);
+      if (source[j] === '>') return j + 1;
+      const at = j;
+      const name = /^[\s\S][^\s/>=]*/.exec(source.slice(j))[0];
+      j += name.length;
+      while (/\s/.test(source[j] ?? '')) j += 1;
+      let value = '';
+      if (source[j] === '=') {
+        j += 1;
+        while (/\s/.test(source[j] ?? '')) j += 1;
+        if (source[j] === '"' || source[j] === "'") {
+          const end = skipTo(j + 1, source[j]);
+          value = source.slice(j + 1, end - 1);
+          j = end;
+        } else {
+          value = /^[^\s>]*/.exec(source.slice(j))[0];
+          j += value.length;
+        }
+      }
+      attributes.push({ name: name.toLowerCase(), value, at });
+    }
+  };
+  let i = 0;
+  while (i < source.length) {
+    const lt = source.indexOf('<', i);
+    if (lt === -1) break;
+    const name = /^[a-z][^\s/>]*/i.exec(source.slice(lt + 1))?.[0];
+    if (source.startsWith('<!--', lt)) i = skipTo(lt + 4, '-->');
+    else if (/[!?/]/.test(source[lt + 1] ?? '')) i = skipTo(lt, '>');
+    else if (!name) i = lt + 1;
+    else {
+      const tag = { name: name.toLowerCase(), attributes: [], at: lt, text: null };
+      i = attributesFrom(lt + 1 + name.length, tag.attributes);
+      if (tag.name === 'script') {
+        const end = /<\/script[\s/>]/i.exec(source.slice(i));
+        if (!end) throw new SyntaxError(`unclosed <script> at ${lt}`);
+        tag.text = source.slice(i, i + end.index);
+        i += end.index;
+      }
+      tags.push(tag);
+    }
+  }
+  return tags;
+}
+
+/** An attribute value as the browser reads it: character references decoded (numeric and the few that spell a URL scheme). */
+function decodedValue(value) {
+  const named = { colon: ':', tab: '\t', newline: '\n', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  return value.replaceAll(/&(?:#x([\da-f]+)|#(\d+)|([a-z]+));?/gi, (whole, hex, dec, name) => {
+    if (hex ?? dec) return String.fromCodePoint(Number.parseInt(hex ?? dec, hex ? 16 : 10));
+    return named[name.toLowerCase()] ?? whole;
+  });
+}
+
+/** Whether an attribute value is a `javascript:` URL (the browser drops tabs and line breaks, and leading spaces). */
+const isScriptUrl = (value) => /^javascript:/i.test(decodedValue(value).replaceAll(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+/, ''));
+
+/** A fake origin the page `src/<path>` is served from, to resolve its URLs as the app does. */
+const ORIGIN = 'https://app.invalid';
+
+/**
+ * The module of the app (`src/<path>`, one of `known`) that the URL `src`
+ * in the page `page` names, else `null`: a path of this origin, without
+ * scheme, host, query or fragment.
+ */
+function ownModule(page, src, known) {
+  const text = decodedValue(src).trim();
+  if (/^[a-z][\w+.-]*:/i.test(text) || /^[/\\]{2}/.test(text)) return null;
+  let url;
+  try {
+    url = new URL(text, `${ORIGIN}/${page.replace(/^src\//, '')}`);
+  } catch {
+    return null;
+  }
+  if (url.origin !== ORIGIN || url.search || url.hash) return null;
+  let path;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+  return known.includes(`src${path}`) ? `src${path}` : null;
+}
+
+/**
+ * What the page `page` (its `source`) runs that is not one of the app's
+ * modules (`known`), each `{ page, line, what, text }` (`text` being the
+ * line it is on), in order: an inline script (a `<script>` with content), a
+ * script that is not a `type="module"` with the `src` of a module under
+ * src/, an inline event handler (an `on*` attribute) and a `javascript:`
+ * URL. A tag's first attribute of a name counts, as for the browser.
+ */
+function pageProblems(page, source, known) {
+  const lines = source.split('\n');
+  const problems = [];
+  const report = (offset, what) => {
+    const line = source.slice(0, offset).split('\n').length;
+    problems.push({ offset, page, line, what, text: lines[line - 1].trim() });
+  };
+  for (const tag of readTags(source)) {
+    const first = (name) => tag.attributes.find((a) => a.name === name);
+    for (const attribute of tag.attributes) {
+      if (attribute.name.startsWith('on')) report(attribute.at, 'an inline event handler');
+      else if (isScriptUrl(attribute.value)) report(attribute.at, 'a javascript: URL');
+    }
+    if (tag.name !== 'script') continue;
+    if (/\S/.test(tag.text)) report(tag.at, 'an inline script');
+    const src = first('src') ?? first('href') ?? first('xlink:href');
+    const module = first('type')?.value.trim().toLowerCase() === 'module';
+    if (!src || !module || !ownModule(page, src.value, known)) report(tag.at, "a script that is not one of the app's modules");
+  }
+  return problems.sort((a, b) => a.offset - b.offset).map(({ offset, ...problem }) => problem);
+}
+
 test('only the bridge talks to the backend; only the GIF and collection UI asks KLIPY or opens a link', () => {
   const files = modules();
   for (const file of ['src/app.js', 'src/bridge.js', 'src/ui/gif-search.js', 'src/ui/collection.js', 'src/ui/library.js', 'src/demo-backend.js']) {
@@ -272,4 +418,74 @@ test('the reader: a comment is not a use; a string by its name, a template and b
   assert.deepEqual(at('src/demo-gifs.js', 'window.__TAURI__.core.invoke("x");\n'), ['src/demo-gifs.js:1', 'src/demo-gifs.js:1']);
   assert.deepEqual(at('src/i18n/en.js', "export default { 'media.searchGifs': 'Search', 'x': 'openLink' };\n"), []);
   assert.throws(() => readSource("const a = 'open"), SyntaxError);
+});
+
+test("the pages load only the app's own modules: no inline script, no inline event handler", () => {
+  const known = modules();
+  const found = pages();
+  assert.ok(found.includes('src/index.html'), 'src/index.html is read');
+  const read = (page) => readFileSync(new URL(page, APP), 'utf8');
+
+  // The reader sees the page's own module and reads it to its end: a reader
+  // blind to scripts, or stopping early, would pass anything.
+  const tags = readTags(read('src/index.html'));
+  const src = (tag) => tag.attributes.find((a) => a.name === 'src')?.value ?? '';
+  assert.ok(tags.some((tag) => tag.name === 'script' && ownModule('src/index.html', src(tag), known) === 'src/app.js'), 'the page loads src/app.js');
+  assert.equal(tags.at(-1).attributes.find((a) => a.name === 'id')?.value, 'toast');
+
+  const problems = found.flatMap((page) => pageProblems(page, read(page), known));
+  assert.deepEqual(problems.map((p) => `${p.page}:${p.line} ${p.what}: ${p.text}`), [], "runs code that is not one of the app's modules");
+});
+
+test('the page reader: inline scripts, handlers and other scripts, however written', () => {
+  const known = ['src/app.js', 'src/ui/dom.js'];
+  const at = (source, page = 'src/index.html') => pageProblems(page, source, known).map((p) => `${p.page}:${p.line} ${p.what}`);
+  // Line 4 is the head's first, 7 the body's.
+  const page = (head, body = '') => `<!doctype html>\n<html lang="en">\n<head>\n${head}\n</head>\n<body>\n${body}\n</body>\n</html>\n`;
+  const own = '<script type="module" src="app.js"></script>';
+  const notOwn = "a script that is not one of the app's modules";
+
+  // The app's own modules, however their path is written; comments and text are not markup.
+  assert.deepEqual(at(page(own)), []);
+  assert.deepEqual(at(page('<SCRIPT TYPE=Module SRC=./app.js></SCRIPT>\n<script type="module" src="/ui/dom.js">\n</script>\n<script type=" module " src="&#97;pp.js"></script>')), []);
+  assert.deepEqual(at(page(own, "<!-- <script>window.__TAURI__.core.invoke('open_link')</script> <img onload=\"x()\"> -->\n<p title=\"onload=x() <script>\" data-on=\"1\">a > b</p>")), []);
+  assert.deepEqual(at(page(own, '<a href="guide.html">javascript:</a>')), []);
+  assert.deepEqual(at('<script type="module" src="../app.js"></script>', 'src/ui/page.html'), []);
+
+  // The critic's mutants (D-2026-10-01-gif-sticker-search-19): an inline script, an inline handler.
+  assert.deepEqual(at(page(`${own}\n<script>window.__TAURI__.core.invoke('open_link', {link:'klipyPartnerPanel'})</script>`)), [
+    'src/index.html:5 an inline script', `src/index.html:5 ${notOwn}`,
+  ]);
+  assert.deepEqual(at(page(own, '<img src="icon.svg" alt="" onload="window.__TAURI__.core.invoke(\'open_link\')">')), ['src/index.html:7 an inline event handler']);
+  // Inline code, however written.
+  assert.deepEqual(at(page(`<script type="module" src="app.js">bridge.openLink('x')</script>\n<script type="importmap">{}</script>`)), [
+    'src/index.html:4 an inline script', 'src/index.html:5 an inline script', `src/index.html:5 ${notOwn}`,
+  ]);
+  assert.deepEqual(at(page(own, '<img/onerror=alert(1) src=x>\n<div title="a>b" ONCLICK=\'x()\'></div>\n<svg><set attributeName="x" onbegin="x()"/></svg>')), [
+    'src/index.html:7 an inline event handler', 'src/index.html:8 an inline event handler', 'src/index.html:9 an inline event handler',
+  ]);
+  assert.deepEqual(at(page(own, '<a href=" jav&#x09;ascript&colon;void(0)">x</a>\n<iframe src="JavaScript:x()"></iframe>\n<form action=javascript:x()></form>')), [
+    'src/index.html:7 a javascript: URL', 'src/index.html:8 a javascript: URL', 'src/index.html:9 a javascript: URL',
+  ]);
+  // Inside an <svg>, a <style> or a <title> holds markup: read as markup.
+  assert.deepEqual(at(page(own, '<svg><style><img src=x onerror=x()></style>\n<title><a href="javascript:x()">t</a></title></svg>')), [
+    'src/index.html:7 an inline event handler', 'src/index.html:8 a javascript: URL',
+  ]);
+  // A script that is not one of the app's modules: elsewhere, not a module, not a module of the app.
+  const others = [
+    'https://cdn.example/x.js', '//cdn.example/x.js', '\\\\cdn.example\\x.js', '/\\cdn.example/x.js', 'data:text/javascript,x()',
+    'blob:https://app.invalid/1', 'app.js?v=2', 'app.js#x', 'demo.js', 'app.mjs', 'ui/', '',
+  ];
+  for (const src of others) assert.deepEqual(at(page(`<script type="module" src="${src}"></script>`)), [`src/index.html:4 ${notOwn}`], src);
+  assert.deepEqual(at(page('<script src="app.js"></script>\n<script type="text/javascript" src="app.js"></script>\n<script type="module"></script>')), [
+    `src/index.html:4 ${notOwn}`, `src/index.html:5 ${notOwn}`, `src/index.html:6 ${notOwn}`,
+  ]);
+  assert.deepEqual(at(page('<svg><script href="data:text/javascript,x()"></script></svg>')), [`src/index.html:4 ${notOwn}`]);
+  assert.deepEqual(at('<script type="module" src="app.js"></script>', 'src/ui/page.html'), [`src/ui/page.html:1 ${notOwn}`]);
+  // The first attribute of a name is the one the browser takes.
+  assert.deepEqual(at(page('<script type="module" src="app.js" src="https://cdn.example/x.js"></script>')), []);
+  assert.deepEqual(at(page('<script type="module" src="https://cdn.example/x.js" src="app.js"></script>')), [`src/index.html:4 ${notOwn}`]);
+  assert.deepEqual(at(page('<script type="text/javascript" type="module" src="app.js"></script>')), [`src/index.html:4 ${notOwn}`]);
+  // A page it cannot read is an error, not a pass.
+  for (const broken of ['<script type="module" src="app.js">', '<div title="x>', '<!-- <script>', '<p']) assert.throws(() => readTags(broken), SyntaxError, broken);
 });

@@ -4,9 +4,11 @@
 // searching waits for one and the "?" discloses how to get it (Esc and a
 // click outside close it, the focus goes back), the Partner Panel and the
 // guide open through the backend; a refused key opens the help; explicit
-// results are off at every start and kept while the app runs; typing waits
-// for a pause; a 429 explains the 100 requests per hour with the Partner
-// Panel. The collection (D-2026-10-01-gif-sticker-search-5) lists what was
+// results are off at every start and kept while the app runs; typing
+// searches only after a 600 ms pause from the last key, with 2 characters or
+// more, and Enter at once (on the page's clock, which the test holds); a 429
+// explains the 100 requests per hour with the Partner Panel. The collection
+// (D-2026-10-01-gif-sticker-search-5) lists what was
 // added, filters it, puts an item on the canvas (in the middle, or where its
 // preview is dropped) or makes it the background, in vertical and horizontal
 // themes alike, renames it in place and deletes it after a confirmation that
@@ -16,8 +18,34 @@
 import { test, expect, watchErrors, expectAccessible, dragTo } from './helpers.mjs';
 
 const root = (page) => page.locator('html');
+/** Where the demo writes each query its KLIPY is asked (the bridge's `onGifQuery`). */
+const QUERY_ATTRIBUTE = 'data-demo-gif-query';
+/** The pause after the last key before typing searches (D-2026-10-01-gif-sticker-search-4), ms. */
+const PAUSE_MS = 600;
 /** The last query the demo's KLIPY was asked (`null`: none). */
-const lastQuery = async (page) => JSON.parse((await root(page).getAttribute('data-demo-gif-query')) ?? 'null');
+const lastQuery = async (page) => JSON.parse((await root(page).getAttribute(QUERY_ATTRIBUTE)) ?? 'null');
+
+/**
+ * Watches every query the demo's KLIPY is asked from now on, not only the
+ * last: each one is a write of the query attribute, which a mutation
+ * observer records with the value it replaced. So each write's value is the
+ * one the next write replaced, and the last one's is the attribute now.
+ * @returns {Promise<() => Promise<object[]>>} the queries asked so far, in order
+ */
+async function watchQueries(page) {
+  await page.evaluate((name) => {
+    const html = document.documentElement;
+    const replaced = [];
+    const keep = (records) => replaced.push(...records.map((record) => record.oldValue));
+    const observer = new MutationObserver(keep);
+    observer.observe(html, { attributeFilter: [name], attributeOldValue: true });
+    globalThis.demoGifQueries = () => {
+      keep(observer.takeRecords());
+      return replaced.length ? [...replaced.slice(1), html.getAttribute(name)] : [];
+    };
+  }, QUERY_ATTRIBUTE);
+  return async () => (await page.evaluate(() => globalThis.demoGifQueries())).map((value) => JSON.parse(value));
+}
 
 async function openSearch(page, t, scenario) {
   await page.goto(`/index.html?demo=${scenario}`);
@@ -114,6 +142,8 @@ test.describe('gif search', () => {
   test('explicit off by default', async ({ page, t }) => {
     const errors = watchErrors(page);
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    // The page's clock is Playwright's: it runs as usual until the test holds it.
+    await page.clock.install();
     const dialog = await openSearch(page, t, 'gifs');
     await expect(dialog.getByText(t('gifs.keySaved', { last4: 'a1b2' }))).toBeVisible();
     const field = dialog.getByRole('searchbox', { name: 'Search KLIPY' });
@@ -124,9 +154,40 @@ test.describe('gif search', () => {
     await expectAccessible(page);
     expect(await lastQuery(page)).toBeNull();
 
+    // Typing searches only after a 600 ms pause from the last key, with 2
+    // characters or more; Enter at once. Every query KLIPY is asked is
+    // recorded while the test holds the clock and moves it by hand.
+    const asked = await watchQueries(page);
+    const gifQuery = (text) => ({ kind: 'gif', text, page: 1, explicit: false });
+    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + PAUSE_MS);
+    // One character: no search, however long the pause.
+    await field.press('c');
+    await page.clock.runFor(PAUSE_MS * 2);
+    expect(await asked()).toEqual([]);
+    // "ca", then quickly "t": nothing before the pause after "t", then one search, for "cat".
+    await field.clear();
+    await field.pressSequentially('ca');
+    await page.clock.runFor(PAUSE_MS / 2);
+    await field.press('t');
+    await page.clock.runFor(PAUSE_MS - 1);
+    expect(await asked()).toEqual([]);
+    await page.clock.runFor(1);
+    await expect.poll(asked).toEqual([gifQuery('cat')]);
+    await page.clock.runFor(PAUSE_MS * 2);
+    expect(await asked()).toEqual([gifQuery('cat')]);
+    // Enter: at once, with the clock still held, and no search after the pause either.
+    await field.fill('wave');
+    await field.press('Enter');
+    await expect.poll(asked).toEqual([gifQuery('cat'), gifQuery('wave')]);
+    await page.clock.runFor(PAUSE_MS * 2);
+    expect(await asked()).toEqual([gifQuery('cat'), gifQuery('wave')]);
+    await field.clear();
+    await page.clock.resume();
+
     // Typing searches after a pause: 24 results, stills while motion is reduced.
     await field.pressSequentially('ca');
     await expect.poll(() => lastQuery(page)).toEqual({ kind: 'gif', text: 'ca', page: 1, explicit: false });
+    expect(await asked()).toEqual([gifQuery('cat'), gifQuery('wave'), gifQuery('ca')]);
     const grid = dialog.getByRole('list', { name: t('gifs.results') });
     const tiles = grid.getByRole('button');
     await expect(tiles).toHaveCount(24);

@@ -10,7 +10,13 @@
 #     the headings expected of it (the video framing section of each language);
 #     the GIFs and stickers page names KLIPY's Partner Panel and API hosts, the
 #     mandatory "Search KLIPY" placeholder and the test key's 100 requests an
-#     hour, and has a Privacy section in each language;
+#     hour, and has a Privacy section in each language that says, between its
+#     heading and the next one of the same or a higher level, what is sent
+#     (each query parameter, the formats and stills of GIFs and stickers), to
+#     which host, when (nothing without a key nor at start), that previews
+#     come through Bezel, where the key is kept and with which permissions,
+#     that the window sees only its last 4 characters, how to remove it and
+#     where the collection is;
 #   - every relative link of the docs, README.md and CHANGELOG.md points at a
 #     file that exists, and an `#anchor` at a heading of that file;
 #   - nothing private: no home-folder paths, e-mail addresses, tokens, keys or
@@ -91,6 +97,31 @@ HEADINGS = {
     PT: {"storage-and-video.md": ["### Enquadrar o vídeo"],
          "gifs-and-stickers.md": ["### Privacidade"]},
 }
+# Phrases a section must contain between its heading (one of HEADINGS) and
+# the next heading of the same or a higher level (phase gif-sticker-search:
+# the Privacy section says what is sent, to which host and when, where the key
+# is kept and how to remove it, D-2026-10-01-gif-sticker-search-3, -6 and -7).
+# PRIVACY is in both languages.
+PRIVACY = ["api.klipy.com", "static.klipy.com", "HTTPS",
+           "`q`", "`page`", "`per_page`", "`customer_id`", "`locale`",
+           "`content_filter`", "`format_filter`", "`gif,jpg`", "`gif,png`",
+           "JPEG", "PNG", "klipy.json", "io.github.slipalison.bezel", "`0600`",
+           "bezel/collection", "collection.json"]
+SECTIONS = {
+    EN: {("gifs-and-stickers.md", "### Privacy"): PRIVACY + [
+        "Nothing is sent without a key.", "Nothing is sent when Bezel starts",
+        "only when you act", "**Trending**", "**Load more**", "**Add to collection**",
+        "a random number", "JPEG for a GIF, PNG for a sticker",
+        "Previews come through Bezel", "only its last 4 characters",
+        "**Remove**, beside the key field, deletes `klipy.json`"]},
+    PT: {("gifs-and-stickers.md", "### Privacidade"): PRIVACY + [
+        "Nada é enviado sem uma chave.", "Nada é enviado quando o Bezel abre",
+        "só se conecta ao KLIPY quando você age", "**Em alta**", "**Carregar mais**",
+        "**Adicionar à coleção**", "um número aleatório",
+        "JPEG para um GIF, PNG para um sticker", "As prévias passam pelo Bezel",
+        "só os 4 últimos caracteres",
+        "**Remover**, ao lado do campo da chave, apaga o `klipy.json`"]},
+}
 PRIVATE = [
     (re.compile(r"/home/(?!<)[A-Za-z0-9._-]+"), "a home-folder path (use ~ or <you>)"),
     (re.compile(r"/Users/(?!<)[A-Za-z0-9._-]+"), "a home-folder path (use ~ or <you>)"),
@@ -143,6 +174,28 @@ def anchors(path):
         seen[base] = n + 1
         out.add(base if n == 0 else f"{base}-{n}")
     return out
+
+
+def section(path, heading):
+    """The text between `heading` (a whole line outside code blocks) and the
+    next heading of the same or a higher level, its spaces collapsed (a
+    phrase may wrap); None when the page has no such heading."""
+    level = len(heading) - len(heading.lstrip("#"))
+    body, fence = None, None
+    for line in text_of(path).splitlines():
+        marker = re.match(r"^(```|~~~)", line)
+        if marker and fence in (None, marker.group(1)):
+            fence = None if fence else marker.group(1)
+        elif fence is None:
+            other = re.match(r"^(#{1,6})\s", line)
+            if body is not None and other and len(other.group(1)) <= level:
+                break
+            if body is None and line.rstrip() == heading:
+                body = []
+                continue
+        if body is not None:
+            body.append(line)
+    return None if body is None else re.sub(r"\s+", " ", "\n".join(body))
 
 
 def links(path):
@@ -211,6 +264,11 @@ for lang in (EN, PT):
         for heading in HEADINGS[lang].get(page, []):
             if heading not in lines:
                 fail(path, f"has no heading {heading!r}")
+                continue
+            text = section(path, heading) or ""
+            for phrase in SECTIONS[lang].get((page, heading), []):
+                if phrase not in text:
+                    fail(path, f"section {heading!r} does not mention {phrase!r}")
 
 # 3 and 4. Links and privacy, over the guide, README.md and CHANGELOG.md.
 documents = sorted(EN.rglob("*.md")) + [Path("README.md"), Path("CHANGELOG.md")]

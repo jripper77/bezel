@@ -122,17 +122,22 @@ the app opens no console: in a Command Prompt, in the folder Bezel is installed
 in, run `bezel-studio.exe 2> bezel-studio.txt`, then open `bezel-studio.txt`.
 
 The app's messages in the terminal (`bezel-studio: …`) are fixed sentences from
-a closed list: none of them holds a file name, a path or the text of the error
-behind it. This is by design, so that nothing the app prints can carry a
-secret, such as your KLIPY key, or a personal path. When the app cannot start,
-or starts without a part, the sentence says which part failed:
+a closed list: none of them holds the text of the error behind it, nor a file
+or folder of yours. This is by design, so that nothing the app prints can carry
+a secret, such as your KLIPY key, or a personal path. When the app stops on an
+error (it panics), the one line it prints adds where in the source code that
+happened: a file of Bezel's or of a library's code, from its crate's folder
+on (`tao-0.37.1/src/…`), and a line and a column, never the error's message.
+When the app cannot start, or starts without a part, the terminal says which
+part failed:
 
 | The terminal says | What failed |
 | --- | --- |
-| `bezel-studio: the app did not start: its window or web view could not be made` | The window or the page inside it. Linux: start it inside your desktop session (GTK and WebKitGTK); with the AppImage, try `--appimage-extract-and-run`. Windows: the WebView2 runtime; run the installer again. |
-| `bezel-studio: the app's folders were not found` | Where the app keeps its settings, data and cache (on Linux, found from `HOME` and the `XDG_*_HOME` variables). The next line says the app did not start. |
-| `bezel-studio: the tray icon was not added` | The tray icon. Linux: the AppIndicator library (`libayatana-appindicator`). The next line says the app did not start. |
-| `bezel-studio: the app did not start: its setup failed` | The app's own start; the line before says which part. |
+| `bezel-studio: the app panicked at tao-…/src/platform_impl/linux/event_loop.rs:…` | Linux: there is no graphical session, so GTK could not start. Start the app inside your desktop session, not over SSH or from a system service. |
+| `bezel-studio: the app's folders were not found`, then `bezel-studio: the app panicked at tauri-…/src/app.rs:…` | Where the app keeps its settings, data and cache (on Linux, found from `HOME` and the `XDG_*_HOME` variables). |
+| `bezel-studio: the tray icon was not added`, then `bezel-studio: the app panicked at tauri-…/src/app.rs:…` | The tray icon. Linux: the AppIndicator library (`libayatana-appindicator`). |
+| `bezel-studio: the app panicked at tauri-…/src/app.rs:…`, with no line before it | The window or the page inside it. Linux: WebKitGTK; with the AppImage, try `--appimage-extract-and-run`. Windows: the WebView2 runtime; run the installer again. |
+| `bezel-studio: the app panicked at …`, another place | An error inside the app or a library it uses. Report it, with the whole line. |
 | `bezel-studio: the app did not start: a plugin did not start` | One of its plugins: a single window, file dialogs, opening links, starting at login. |
 | `bezel-studio: the app did not start` | Another cause. |
 | `bezel-studio: refresh loop not started: no thread or memory to spare` | The app opens, but sensors and the live screen do not update: the system is out of threads or memory. Close some programs and open Bezel again. |
@@ -140,6 +145,9 @@ or starts without a part, the sentence says which part failed:
 | `bezel-studio: could not restart with the DMA-BUF renderer off: the app's program file is gone` | Linux. At start the app restarts itself once with WebKitGTK's DMA-BUF renderer off (with it on, NVIDIA's driver closes the app); its program file was removed or replaced meanwhile. Open it again. |
 | `bezel-studio: could not restart with the DMA-BUF renderer off: running the app's program file was not allowed` | The same restart, refused: the program is on a disk mounted `noexec`, or a security policy stops it. |
 | `bezel-studio: could not restart with the DMA-BUF renderer off` | The same restart, for another cause. In these three cases, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1 bezel-studio`. |
+
+In a place, `…` stands for the library's version, the line and the column,
+which change from one Bezel release to the next.
 
 When you report the problem, copy these lines as they are.
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Proves by behaviour that the studio sends nothing and opens nothing at
-# start (D-2026-10-01-gif-sticker-search-16, -17, -18), whatever would do it:
-# Rust, the window's JavaScript, a window from the config, a plugin or the
-# system browser.
+# start, at its next start, or when its hidden window is shown again
+# (D-2026-10-01-gif-sticker-search-16 to -19), whatever would do it: Rust,
+# the window's JavaScript, a window from the config, a plugin or the system
+# browser.
 #
 #   bash scripts/ci/studio-starts-silent.sh
 #
@@ -14,33 +15,53 @@
 #      it enters) of the whole process tree;
 #   2. builds the studio (`cargo build -p bezel-studio --locked`, debug, in
 #      $CARGO_TARGET_DIR when set);
-#   3. starts the real binary four times: with a saved, fake KLIPY key and
-#      with none, each hidden (`--hidden`, as autostart starts it) and
-#      shown. Each run has
+#   3. starts the real binary four times, in two sequences: with a saved,
+#      fake KLIPY key, then with none; in each, first hidden (`--hidden`, as
+#      autostart starts it), then shown, ON THE SAME FOLDERS: the shown start
+#      sees whatever the hidden one saved (config, data, cache, state, the
+#      web view's storage), as a user's next start does
+#      (D-2026-10-01-gif-sticker-search-19). In each hidden run, once the
+#      window has run (the probe below), the script starts the studio a
+#      second time in the run's own environment (its bus, compositor,
+#      folders and shim), as a user does from the menu: the single-instance
+#      plugin hands that launch to the running studio, which shows its
+#      window, and the launch exits; the run then goes on watching. Each run
+#      has
 #        - its own `dbus-run-session`, a bus with no service folder: it
 #          starts nothing, and neither the single-instance plugin nor the
-#          tray reaches a studio that is already running;
+#          tray reaches a studio that is already running (the user's): only
+#          the run's second launch reaches the run's studio;
 #        - its own headless compositor, `kwin_wayland --virtual` on a socket
 #          of its own, with no Xwayland, lock screen, global shortcuts or
 #          activities (so it starts no helper). KWin starts the studio once
 #          its socket is up (`--exit-with-session`), through
-#          `env LD_PRELOAD=<shim> WAYLAND_DISPLAY=<its socket>`: KWin has
-#          file capabilities (cap_sys_nice), so glibc preloads nothing into
-#          it and drops LD_PRELOAD from what it passes on. KWin is the one
-#          process of a run the shim does not record; any other one fails;
-#        - a temporary HOME, XDG config/data/cache/state folders and
-#          XDG_RUNTIME_DIR. Of the user's environment only PATH, LANG and
-#          XDG_CURRENT_DESKTOP are kept: DISPLAY, WAYLAND_DISPLAY,
-#          XAUTHORITY and DBUS_SESSION_BUS_ADDRESS are not passed, so
-#          nothing can reach the user's display or session bus;
-#   4. after $SILENT_SECONDS (default 12, counted once the compositor is up)
-#      stops the run's process group (compositor and studio), checks that
-#      nothing of it is left, and fails the run when
+#          `env LD_PRELOAD=<shim> WAYLAND_DEBUG=client
+#          WAYLAND_DISPLAY=<its socket>`: KWin has file capabilities
+#          (cap_sys_nice), so glibc preloads nothing into it and drops
+#          LD_PRELOAD from what it passes on. KWin is the one process of a
+#          run the shim does not record; any other one fails.
+#          WAYLAND_DEBUG=client only makes the studio print its Wayland
+#          requests, which tell when it maps its window (an xdg_toplevel);
+#        - temporary HOME and XDG config/data/cache/state folders (shared by
+#          the two starts of a sequence) and its own XDG_RUNTIME_DIR. Of the
+#          user's environment only PATH, LANG and XDG_CURRENT_DESKTOP are
+#          kept: DISPLAY, WAYLAND_DISPLAY, XAUTHORITY and
+#          DBUS_SESSION_BUS_ADDRESS are not passed, so nothing can reach the
+#          user's display or session bus;
+#   4. after $SILENT_SECONDS (default 12, counted once the compositor is up;
+#      in a hidden run, at least half of it after the second launch) stops
+#      the run's process group (compositor and studio), checks that nothing
+#      of it is left, and fails the run when
 #        - the window never ran: the studio did not run the video tools
 #          probe (`ffmpeg -hide_banner -version`), which the window asks for
 #          through `media_tools` at the end of its start (app.js); a page
 #          that throws, or a web view that never starts, fails;
 #        - the studio did not start, panicked, or exited within the window;
+#        - a shown start never mapped its window, or a hidden one mapped it
+#          before the second launch;
+#        - in a hidden run, the window was not shown again: the second
+#          launch did not exit 0 within 10s, the running studio did not
+#          outlive it, or its window was not mapped within 5s after it;
 #        - a process connected (or sent a datagram) anywhere but
 #            - the run's compositor socket,
 #            - the run's test bus socket,
@@ -55,7 +76,7 @@
 #            - KWin, by dbus-run-session, with exactly the arguments above,
 #              before the studio;
 #            - the dbus-* programs dbus-run-session starts before the studio;
-#            - the studio itself (its DMA-BUF re-exec);
+#            - the studio itself (its DMA-BUF re-exec, the second launch);
 #            - WebKit's helpers (WebKitWebProcess, WebKitNetworkProcess,
 #              WebKitGPUProcess, by basename);
 #            - the video tools probe, with exactly these arguments:
@@ -73,6 +94,9 @@
 # another program is not started (the glycin sandbox included), so a
 # regression never reaches the network, the user's bus or the desktop while
 # it is checked.
+#
+# Everything any process of a run does counts, the second launch's
+# included, from the start of the run to its end.
 #
 # Prints one summary per run and, when all four pass, a last line
 # `studio-starts-silent: OK: ...`. Exit 0: silent, or "SKIPPED" (loudly, with
@@ -208,12 +232,13 @@ webkit="WebKitWebProcess WebKitNetworkProcess WebKitGPUProcess"
 verdict() {
   # KWin's argv through the environment: `-v` would turn its \x20 into spaces.
   SILENT_KWIN_ARGV=$1 awk -F '\t' -v studio="$studio" -v webkit="$webkit" -v kwin="$kwin" \
-    -v compositor="$2" -v bus="$3" -v dir="$4" \
+    -v compositor="$2" -v bus="$3" -v dir="$4" -v folders="$5" \
     -v user_run="$user_run" -v user_bus="$user_bus" -v user_bus_address="$user_bus_address" '
   function base(p) { sub(/.*\//, "", p); return p }
   function args(argv) { sub(/^[^ ]* ?/, "", argv); return argv }
   function short(p) {
     if (index(p, dir "/") == 1) p = "<run>" substr(p, length(dir) + 1)
+    else if (index(p, folders "/") == 1) p = "<folders>" substr(p, length(folders) + 1)
     return p
   }
   function bad(why) { if (!(why in seen)) { seen[why] = 1; offences[++n] = why } }
@@ -341,26 +366,118 @@ unrecorded() {
   done
 }
 
-# One run: $1 its number, $2 `key` or `none`, $3 `hidden` or `shown`.
-# Prints its summary; answers 1 when it failed.
+# Whether the run's studio mapped a window (made an xdg_toplevel: with
+# WAYLAND_DEBUG=client it prints each Wayland request) in what the run
+# printed from byte $1 up to byte $2 (to the end when there is no $2).
+mapped() {
+  grep -boE -- '-> xdg_surface[@#][0-9]+\.get_toplevel\(' "$out" 2>/dev/null |
+    awk -F: -v from="$1" -v to="${2:-}" '$1 >= from && (to == "" || $1 < to) {found = 1} END {exit !found}'
+}
+
+# Whether the window has run: the studio asked for the video tools probe.
+probed() {
+  awk -F '\t' -v studio="$studio" '
+    $1 == "exec" && $3 == studio && $5 ~ /(^|\/)ffmpeg$/ && $6 ~ /^[^ ]* -hide_banner -version$/ {found = 1; exit}
+    END {exit !found}' "$log" 2>/dev/null
+}
+
+# Shows the hidden window again as a user does, by starting the studio a
+# second time (as from the menu: no argument) in the run's session: with
+# the environment of the running studio (its bus, compositor, folders and
+# the shim), less the DMA-BUF switch the studio sets on itself for its
+# re-exec, so the second launch takes the steps a first one takes. The
+# single-instance plugin hands it to the running studio, which shows its
+# window, and exits 0. Adds to run_once's `failures` unless the window was
+# still unmapped, the launch exited 0 within 10s, the running studio
+# outlived it and mapped its window within 5s after it; then says so in
+# run_once's `window`.
+show_again() {
+  local first second since t0 took status=0 at var i early="" environ=()
+  at=$((SECONDS - began))
+  first=$(awk -F '\t' -v s="$studio" '$1 == "load" && $4 == s {print $2; exit}' "$log")
+  if [ -z "$first" ] || [ "$(readlink "/proc/$first/exe" 2>/dev/null)" != "$studio" ]; then
+    failures+=("the window was not shown again: the studio was gone before the second launch")
+    return
+  fi
+  since=$(stat -c %s "$out")
+  if mapped 0 "$since"; then
+    early=1
+    failures+=("the hidden start showed its window before anything asked for it: the studio mapped it (an xdg_toplevel) before the second launch")
+  fi
+  while IFS= read -r -d '' var; do
+    [ "$var" = WEBKIT_DISABLE_DMABUF_RENDERER=1 ] || environ+=("$var")
+  done 2>/dev/null <"/proc/$first/environ"
+  if [ "${#environ[@]}" -eq 0 ]; then
+    failures+=("the window was not shown again: the running studio's environment could not be read")
+    return
+  fi
+  t0=${EPOCHREALTIME/./}
+  "$envbin" -i "${environ[@]}" "$studio" </dev/null >"$dir/second.out" 2>&1 &
+  second=$!
+  for i in $(seq 100); do
+    kill -0 "$second" 2>/dev/null || break
+    sleep 0.1
+  done
+  took=$(((${EPOCHREALTIME/./} - t0) / 100000))
+  took="$((took / 10)).$((took % 10))s"
+  if kill -0 "$second" 2>/dev/null; then
+    failures+=("the window was not shown again: the second launch (pid $second) still ran after $took, so it did not hand over to the running studio and exit")
+    return
+  fi
+  wait "$second" || status=$?
+  if [ "$status" != 0 ]; then
+    failures+=("the window was not shown again: the second launch exited with status $status after $took (handing over to the running studio exits 0)")
+    return
+  fi
+  if [ "$(readlink "/proc/$first/exe" 2>/dev/null)" != "$studio" ]; then
+    failures+=("the window was not shown again: the running studio (pid $first) did not outlive the second launch")
+    return
+  fi
+  # A window already mapped is not mapped again: that start failed above.
+  [ -z "$early" ] || return 0
+  for i in $(seq 50); do
+    mapped "$since" && break
+    sleep 0.1
+  done
+  if ! mapped "$since"; then
+    failures+=("the window was not shown again: the running studio did not map it (no xdg_toplevel) within 5s after the second launch exited 0")
+    return
+  fi
+  window="hidden, then shown again at ${at}s by a second launch (exit 0 in $took, then mapped)"
+}
+
+# The folders a sequence's two starts share ($tmp/$1): HOME and the XDG
+# config, data, cache and state folders; for `key`, with a saved, fake
+# KLIPY key in them.
+new_folders() {
+  local folders=$tmp/$1
+  mkdir -p "$folders/home" "$folders/config/$identifier" "$folders/data" "$folders/cache" "$folders/state"
+  [ "$1" = key ] || return 0
+  # A saved key (fake): the start of a user who has set KLIPY up.
+  (
+    umask 077
+    printf '{\n  "key": "silent-test-key-0000",\n  "customerId": "0123456789abcdef"\n}\n' \
+      >"$folders/config/$identifier/klipy.json"
+  )
+}
+
+# One run: $1 its number, $2 `key` or `none` (its sequence, whose folders
+# $tmp/$2 its two starts share), $3 `hidden` or `shown`. Prints its summary;
+# answers 1 when it failed.
 run_once() {
-  local n=$1 key=$2 mode=$3 label dir out sock compositor session allow sockets
-  local kwin_args kwin_argv began ready="" ended="" deadline status lost report line
-  local failures=()
+  local n=$1 key=$2 mode=$3 label dir folders out sock compositor session allow sockets
+  local kwin_args kwin_argv began watched ready="" ended="" deadline status lost report line
+  local kept window="" asked="" failures=()
   label="$([ "$key" = key ] && echo 'saved key' || echo 'no key'), $mode"
   dir=$tmp/$n
+  folders=$tmp/$key
   log=$dir/events.log
   out=$dir/out
-  mkdir -p "$dir/home" "$dir/config/$identifier" "$dir/data" "$dir/cache" "$dir/state"
+  mkdir -p "$dir"
   mkdir -m 700 "$dir/rt"
-  if [ "$key" = key ]; then
-    # A saved key (fake): the start of a user who has set KLIPY up.
-    (
-      umask 077
-      printf '{\n  "key": "silent-test-key-0000",\n  "customerId": "0123456789abcdef"\n}\n' \
-        >"$dir/config/$identifier/klipy.json"
-    )
-  fi
+  kept=$(find "$folders" -type f | wc -l)
+  kept="$kept file$([ "$kept" = 1 ] || echo s)"
+  if [ "$mode" = hidden ]; then kept="new ($kept)"; else kept="those run $((n - 1)) left ($kept)"; fi
   # The test bus: a session bus with no service folder, so it starts nothing.
   cat >"$dir/bus.conf" <<EOF
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
@@ -379,7 +496,7 @@ run_once() {
 EOF
   sock=bezel-silent-$$-$n
   compositor=$dir/rt/$sock
-  session="$envbin LD_PRELOAD='$shim' WAYLAND_DISPLAY='$sock' '$studio'"
+  session="$envbin LD_PRELOAD='$shim' WAYLAND_DEBUG=client WAYLAND_DISPLAY='$sock' '$studio'"
   [ "$mode" = hidden ] && session+=" --hidden"
   kwin_args=(--virtual --socket="$sock" --width 1280 --height 800
     --no-lockscreen --no-global-shortcuts --no-kactivities --exit-with-session "$session")
@@ -392,8 +509,8 @@ EOF
   setsid env -i \
     PATH="$PATH" LANG="${LANG:-C.UTF-8}" XDG_SESSION_TYPE=wayland \
     ${XDG_CURRENT_DESKTOP:+XDG_CURRENT_DESKTOP="$XDG_CURRENT_DESKTOP"} \
-    HOME="$dir/home" XDG_CONFIG_HOME="$dir/config" XDG_DATA_HOME="$dir/data" \
-    XDG_CACHE_HOME="$dir/cache" XDG_STATE_HOME="$dir/state" XDG_RUNTIME_DIR="$dir/rt" \
+    HOME="$folders/home" XDG_CONFIG_HOME="$folders/config" XDG_DATA_HOME="$folders/data" \
+    XDG_CACHE_HOME="$folders/cache" XDG_STATE_HOME="$folders/state" XDG_RUNTIME_DIR="$dir/rt" \
     SILENT_LOG="$log" SILENT_BLOCK=1 SILENT_ALLOW="$allow" SILENT_SOCKETS="$sockets" \
     LD_PRELOAD="$shim" \
     dbus-run-session --config-file="$dir/bus.conf" -- "$kwin" "${kwin_args[@]}" \
@@ -410,13 +527,21 @@ EOF
     sleep 0.1
   done
   if [ -n "$ready" ]; then
+    watched=$SECONDS
     deadline=$((SECONDS + seconds))
     while [ "$SECONDS" -lt "$deadline" ]; do
       if ! kill -0 "$sid" 2>/dev/null; then
         status=0
         wait "$sid" || status=$?
-        ended="the studio (and so its compositor) exited with status $status after about $((seconds - (deadline - SECONDS)))s, within the ${seconds}s window"
+        ended="the studio (and so its compositor) exited with status $status after about $((SECONDS - watched))s, within the window"
         break
+      fi
+      # A hidden window is shown again once it has run, then watched on to
+      # the window's end, and at least half of it after the second launch.
+      if [ "$mode" = hidden ] && [ -z "$asked" ] && probed; then
+        asked=1
+        show_again
+        [ "$deadline" -ge $((SECONDS + (seconds + 1) / 2)) ] || deadline=$((SECONDS + (seconds + 1) / 2))
       fi
       sleep 0.5
     done
@@ -428,41 +553,57 @@ EOF
   stop_run
   touch "$log"
 
-  report=$(verdict "$kwin_argv" "$compositor" "$dir/bus" "$dir")
+  if [ -n "$ready" ] && [ "$mode" = shown ]; then
+    if mapped 0; then
+      window="shown at start (mapped)"
+    else
+      failures+=("the shown start never showed its window: the studio mapped none (no xdg_toplevel)")
+    fi
+  elif [ -n "$ready" ] && [ -z "$asked" ]; then
+    failures+=("the window was not shown again: it never ran, so it was never launched a second time")
+  fi
+  report=$(verdict "$kwin_argv" "$compositor" "$dir/bus" "$dir" "$folders")
   while IFS= read -r line; do
     failures+=("${line#OFFENCE }")
   done < <(grep '^OFFENCE ' <<<"$report" || true)
   [ -z "$ended" ] || failures+=("$ended")
-  if grep -q 'panicked' "$out"; then
-    failures+=("the studio panicked: $(grep -m1 'panicked' "$out")")
+  if grep -sq 'panicked' "$out" "$dir/second.out"; then
+    failures+=("the studio panicked: $(grep -shm1 'panicked' "$out" "$dir/second.out" | head -n 1)")
   fi
   while IFS= read -r line; do
     [ -z "$line" ] || failures+=("a process the shim did not record ran in the run: $line")
   done <<<"$lost"
   [ -z "$left" ] || failures+=("left running after the run, even after SIGKILL: $left")
 
-  line="run $n/4 ($label): $([ "${#failures[@]}" -eq 0 ] && echo OK || echo FAIL) in $((SECONDS - began))s: $(sed -n 's/^SUMMARY //p' <<<"$report")"
+  line="run $n/4 ($label): $([ "${#failures[@]}" -eq 0 ] && echo OK || echo FAIL) in $((SECONDS - began))s: folders: $kept; window: ${window:-not shown as asked}; $(sed -n 's/^SUMMARY //p' <<<"$report")"
   say "$line"
   [ "${#failures[@]}" -gt 0 ] || return 0
   for line in "${failures[@]}"; do say "FAIL ($label): $line" >&2; done
-  if [ -s "$out" ]; then
+  # What the studio and KWin said, less the Wayland requests.
+  if grep -sqvE '^\[[0-9:.]+\] ' "$out"; then
     say "last lines printed in the run ($label):" >&2
-    tail -n 15 "$out" | sed 's/^/    /' >&2
+    { grep -vE '^\[[0-9:.]+\] ' "$out" || true; } | tail -n 15 | sed 's/^/    /' >&2
+  fi
+  if grep -sqvE '^\[[0-9:.]+\] ' "$dir/second.out"; then
+    say "last lines printed by the second launch ($label):" >&2
+    { grep -vE '^\[[0-9:.]+\] ' "$dir/second.out" || true; } | tail -n 15 | sed 's/^/    /' >&2
   fi
   return 1
 }
 
-# 3. The four starts.
+# 3. The four starts: for each key, hidden then shown, on the same folders.
 start=$SECONDS
 failed=0
 n=0
-for run in "key hidden" "key shown" "none hidden" "none shown"; do
-  n=$((n + 1))
-  # shellcheck disable=SC2086 # two words: key, mode
-  run_once "$n" $run || failed=$((failed + 1))
+for key in key none; do
+  new_folders "$key"
+  for mode in hidden shown; do
+    n=$((n + 1))
+    run_once "$n" "$key" "$mode" || failed=$((failed + 1))
+  done
 done
 if [ "$failed" -gt 0 ]; then
   say "$failed of 4 runs failed (see FAIL above)" >&2
   exit 1
 fi
-say "OK: in 4 runs of ${seconds}s ($((SECONDS - start))s; saved key and none, hidden and shown; each in its own compositor and bus) the window ran, and the studio connected only to its compositor, its test bus, the system bus, userdb and the DNS stub, and started only the programs above"
+say "OK: in 4 runs of ${seconds}s ($((SECONDS - start))s; saved key, then none, each started hidden and then shown on the folders the hidden start left; each run in its own compositor and bus) the window ran, each hidden window stayed unmapped until a second launch showed it again, each shown one was mapped, and the studio connected only to its compositor, its test bus, the system bus, userdb and the DNS stub, and started only the programs above"

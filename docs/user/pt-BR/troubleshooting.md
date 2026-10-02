@@ -124,6 +124,35 @@ depois em **Executar assim mesmo**:
 Ele está no modo desktop (segundo monitor) do fabricante:
 [Telas suportadas](devices.md#modo-desktop).
 
+## O aplicativo não abre
+
+Abra-o por um terminal (`bezel-studio`) e leia o que ele imprime. No Windows o
+aplicativo não abre console: num Prompt de Comando, na pasta onde o Bezel está
+instalado, rode `bezel-studio.exe 2> bezel-studio.txt` e depois abra o
+`bezel-studio.txt`.
+
+As mensagens do aplicativo no terminal (`bezel-studio: …`) são frases fixas de
+uma lista fechada: nenhuma traz nome de arquivo, caminho ou o texto do erro por
+trás dela. É de propósito, para que nada que o aplicativo imprime carregue um
+segredo, como a sua chave do KLIPY, ou um caminho pessoal. Quando o aplicativo
+não abre, ou abre sem uma parte, a frase diz qual parte falhou:
+
+| O terminal diz | O que falhou |
+| --- | --- |
+| `bezel-studio: the app did not start: its window or web view could not be made` | A janela ou a página dentro dela. Linux: abra-o dentro da sua sessão gráfica (GTK e WebKitGTK); com o AppImage, tente `--appimage-extract-and-run`. Windows: o runtime do WebView2; rode o instalador de novo. |
+| `bezel-studio: the app's folders were not found` | Onde o aplicativo guarda ajustes, dados e cache (no Linux, achados pelo `HOME` e pelas variáveis `XDG_*_HOME`). A linha seguinte diz que o aplicativo não abriu. |
+| `bezel-studio: the tray icon was not added` | O ícone da bandeja. Linux: a biblioteca AppIndicator (`libayatana-appindicator`). A linha seguinte diz que o aplicativo não abriu. |
+| `bezel-studio: the app did not start: its setup failed` | A abertura do próprio aplicativo; a linha anterior diz qual parte. |
+| `bezel-studio: the app did not start: a plugin did not start` | Um dos plugins dele: janela única, diálogos de arquivo, abrir links, abrir no login. |
+| `bezel-studio: the app did not start` | Outra causa. |
+| `bezel-studio: refresh loop not started: no thread or memory to spare` | O aplicativo abre, mas os sensores e a tela ao vivo não se atualizam: o sistema está sem threads ou sem memória. Feche alguns programas e abra o Bezel de novo. |
+| `bezel-studio: refresh loop not started` | O mesmo, por outra causa. |
+| `bezel-studio: could not restart with the DMA-BUF renderer off: the app's program file is gone` | Linux. Ao abrir, o aplicativo se reinicia uma vez com o renderizador DMA-BUF do WebKitGTK desligado (ligado, o driver da NVIDIA fecha o aplicativo); o arquivo do programa foi removido ou trocado nesse meio-tempo. Abra-o de novo. |
+| `bezel-studio: could not restart with the DMA-BUF renderer off: running the app's program file was not allowed` | O mesmo reinício, recusado: o programa está num disco montado com `noexec`, ou uma política de segurança o impede. |
+| `bezel-studio: could not restart with the DMA-BUF renderer off` | O mesmo reinício, por outra causa. Nesses três casos, abra-o com `WEBKIT_DISABLE_DMABUF_RENDERER=1 bezel-studio`. |
+
+Ao relatar o problema, copie essas linhas como estão.
+
 ## Relatar um problema
 
 Inclua a saída de `bezel --version` e de `bezel -v devices`, e o log do que

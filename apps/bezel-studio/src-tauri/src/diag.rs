@@ -24,19 +24,43 @@
 /// Something the studio says outside its window. Each code has its own
 /// fixed sentence ([`DiagCode::text`]) and says where it goes: the log at a
 /// level, or the terminal. What it is about (a theme, a screen, a file, a
-/// video) and the error's own text are not said.
+/// video) and the error's own text are not said; where a failure has
+/// causes told apart by the kind of its error (Tauri's error's variant, an
+/// I/O error's kind), each cause has a code of its own, so the terminal
+/// still says why in fixed words (review W1 of round 2, iter 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagCode {
     // ------------------------------------------- the terminal (stderr) --
-    /// The app did not start (Tauri's error).
+    /// The app did not start, for another cause than those below.
     NotStarted,
+    /// The app did not start: its window or web view could not be made
+    /// (Tauri's runtime: GTK or WebKitGTK on Linux, WebView2 on Windows).
+    NoWindow,
+    /// The app did not start: its own setup failed (the line before says
+    /// which part).
+    SetupFailed,
+    /// The app did not start: one of its plugins did not start.
+    PluginNotStarted,
+    /// The app's folders (settings, data, cache) were not found.
+    FoldersNotFound,
+    /// The tray icon was not added.
+    TrayNotAdded,
     /// The screen and the sensors are simulated (`BEZEL_FAKE=1`).
     Simulated,
     /// The process could not restart itself with WebKitGTK's DMA-BUF
-    /// renderer off.
+    /// renderer off, for another cause than those below.
     DmabufRendererOn,
-    /// The thread that refreshes the session did not start.
+    /// The process could not restart itself: its program file is gone.
+    DmabufRestartNoFile,
+    /// The process could not restart itself: running its program file was
+    /// not allowed.
+    DmabufRestartDenied,
+    /// The thread that refreshes the session did not start, for another
+    /// cause than the one below.
     RefreshLoopNotStarted,
+    /// The thread that refreshes the session did not start: the system had
+    /// no thread or memory to spare.
+    RefreshLoopNoResources,
     // ------------------------------------------------------- the window --
     /// The UI was not asked about unsaved edits before the window closed.
     UnsavedEditsNotAsked,
@@ -115,11 +139,19 @@ pub enum DiagCode {
 
 impl DiagCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 46] = [
         Self::NotStarted,
+        Self::NoWindow,
+        Self::SetupFailed,
+        Self::PluginNotStarted,
+        Self::FoldersNotFound,
+        Self::TrayNotAdded,
         Self::Simulated,
         Self::DmabufRendererOn,
+        Self::DmabufRestartNoFile,
+        Self::DmabufRestartDenied,
         Self::RefreshLoopNotStarted,
+        Self::RefreshLoopNoResources,
         Self::UnsavedEditsNotAsked,
         Self::UnsavedEditsNotAskedBeforeQuitting,
         Self::StorageProgressNotSent,
@@ -160,9 +192,24 @@ impl DiagCode {
     pub const fn text(self) -> &'static str {
         match self {
             Self::NotStarted => "the app did not start",
+            Self::NoWindow => "the app did not start: its window or web view could not be made",
+            Self::SetupFailed => "the app did not start: its setup failed",
+            Self::PluginNotStarted => "the app did not start: a plugin did not start",
+            Self::FoldersNotFound => "the app's folders were not found",
+            Self::TrayNotAdded => "the tray icon was not added",
             Self::Simulated => "BEZEL_FAKE=1, simulated Turing 8.8\" and sensors",
             Self::DmabufRendererOn => "could not restart with the DMA-BUF renderer off",
+            Self::DmabufRestartNoFile => {
+                "could not restart with the DMA-BUF renderer off: the app's program file is gone"
+            }
+            Self::DmabufRestartDenied => {
+                "could not restart with the DMA-BUF renderer off: running the app's program file \
+                 was not allowed"
+            }
             Self::RefreshLoopNotStarted => "refresh loop not started",
+            Self::RefreshLoopNoResources => {
+                "refresh loop not started: no thread or memory to spare"
+            }
             Self::UnsavedEditsNotAsked => "unsaved edits not asked about",
             Self::UnsavedEditsNotAskedBeforeQuitting => {
                 "unsaved edits not asked about before quitting"
@@ -206,9 +253,17 @@ impl DiagCode {
     const fn channel(self) -> Channel {
         match self {
             Self::NotStarted
+            | Self::NoWindow
+            | Self::SetupFailed
+            | Self::PluginNotStarted
+            | Self::FoldersNotFound
+            | Self::TrayNotAdded
             | Self::Simulated
             | Self::DmabufRendererOn
-            | Self::RefreshLoopNotStarted => Channel::Terminal,
+            | Self::DmabufRestartNoFile
+            | Self::DmabufRestartDenied
+            | Self::RefreshLoopNotStarted
+            | Self::RefreshLoopNoResources => Channel::Terminal,
             Self::CopiesInMemory => Channel::Error,
             Self::LiveScreenBack => Channel::News,
             _ => Channel::Warning,
@@ -264,6 +319,9 @@ mod tests {
         );
     }
 
+    /// What was printed before, and each cause of a start that failed
+    /// (review W1 of round 2, iter 4), goes to the terminal; the rest to the
+    /// log.
     #[test]
     fn what_the_terminal_shows_is_what_was_printed_before() {
         let on_the_terminal: Vec<DiagCode> = DiagCode::ALL
@@ -274,11 +332,36 @@ mod tests {
             on_the_terminal,
             [
                 DiagCode::NotStarted,
+                DiagCode::NoWindow,
+                DiagCode::SetupFailed,
+                DiagCode::PluginNotStarted,
+                DiagCode::FoldersNotFound,
+                DiagCode::TrayNotAdded,
                 DiagCode::Simulated,
                 DiagCode::DmabufRendererOn,
+                DiagCode::DmabufRestartNoFile,
+                DiagCode::DmabufRestartDenied,
                 DiagCode::RefreshLoopNotStarted,
+                DiagCode::RefreshLoopNoResources,
             ]
         );
+        // A cause adds to the sentence said without one.
+        for (cause, without) in [
+            (DiagCode::NoWindow, DiagCode::NotStarted),
+            (DiagCode::SetupFailed, DiagCode::NotStarted),
+            (DiagCode::PluginNotStarted, DiagCode::NotStarted),
+            (DiagCode::DmabufRestartNoFile, DiagCode::DmabufRendererOn),
+            (DiagCode::DmabufRestartDenied, DiagCode::DmabufRendererOn),
+            (
+                DiagCode::RefreshLoopNoResources,
+                DiagCode::RefreshLoopNotStarted,
+            ),
+        ] {
+            assert!(
+                cause.text().starts_with(&format!("{}: ", without.text())),
+                "{cause:?}"
+            );
+        }
         assert_eq!(DiagCode::CopiesInMemory.channel(), Channel::Error);
         assert_eq!(DiagCode::LiveScreenBack.channel(), Channel::News);
         assert_eq!(DiagCode::SettingsNotSaved.channel(), Channel::Warning);

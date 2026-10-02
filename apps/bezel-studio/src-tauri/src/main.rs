@@ -7,15 +7,16 @@
 
 use std::process::ExitCode;
 
-use bezel_studio::diag::{self, DiagCode};
+use bezel_studio::diag;
 
 fn main() -> ExitCode {
     match bezel_studio::run() {
         Ok(()) => ExitCode::SUCCESS,
-        // Said without Tauri's error text: the studio prints fixed text only
+        // Which part failed, by the variant of Tauri's error, without its
+        // text: the studio prints fixed text only
         // (D-2026-10-01-gif-sticker-search-12).
-        Err(_) => {
-            diag::report(DiagCode::NotStarted);
+        Err(error) => {
+            diag::report(bezel_studio::start_failure(&error));
             ExitCode::FAILURE
         }
     }

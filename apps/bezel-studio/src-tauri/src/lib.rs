@@ -30,6 +30,7 @@ pub mod udev_help;
 pub mod video;
 
 use std::ffi::OsStr;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -128,11 +129,46 @@ pub const HIDDEN_ARG: &str = "--hidden";
 #[cfg(target_os = "linux")]
 const DMABUF_SWITCH: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
 
+/// What the terminal says when the app did not start: which part failed,
+/// told by the variant of Tauri's `error`, never by its text
+/// (D-2026-10-01-gif-sticker-search-12, review W1 of round 2, iter 4).
+pub fn start_failure(error: &tauri::Error) -> DiagCode {
+    match error {
+        tauri::Error::Runtime(_) => DiagCode::NoWindow,
+        tauri::Error::Setup(_) => DiagCode::SetupFailed,
+        tauri::Error::PluginInitialization(..) => DiagCode::PluginNotStarted,
+        _ => DiagCode::NotStarted,
+    }
+}
+
+/// What the terminal says when the refresh loop's thread did not start,
+/// told by the kind of the `error`: the system out of threads or memory, or
+/// another cause.
+fn refresh_loop_failure(error: &io::Error) -> DiagCode {
+    match error.kind() {
+        io::ErrorKind::WouldBlock | io::ErrorKind::OutOfMemory => DiagCode::RefreshLoopNoResources,
+        _ => DiagCode::RefreshLoopNotStarted,
+    }
+}
+
+/// What the terminal says when the process could not restart itself with
+/// the DMA-BUF renderer off, told by the kind of `exec`'s `error`: its
+/// program file gone, running it not allowed, or another cause.
+#[cfg(target_os = "linux")]
+fn restart_failure(error: &io::Error) -> DiagCode {
+    match error.kind() {
+        io::ErrorKind::NotFound => DiagCode::DmabufRestartNoFile,
+        io::ErrorKind::PermissionDenied => DiagCode::DmabufRestartDenied,
+        _ => DiagCode::DmabufRendererOn,
+    }
+}
+
 /// Starts the app and blocks until it exits.
 ///
 /// # Errors
 ///
-/// Tauri's error when the app cannot start.
+/// Tauri's error when the app cannot start; [`start_failure`] says which
+/// part failed.
 pub fn run() -> Result<(), tauri::Error> {
     #[cfg(target_os = "linux")]
     restart_without_dmabuf_renderer();
@@ -314,7 +350,9 @@ struct Start<R: Runtime> {
 /// `KlipyClient::new` but the source factory's. Code written to get past
 /// it otherwise is left to code review.
 fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
-    let folders = (start.folders)(app.handle())?;
+    // Each part that fails says so, before the app says it did not start.
+    let folders =
+        (start.folders)(app.handle()).inspect_err(|_| diag::report(DiagCode::FoldersNotFound))?;
     let backend: Shared = Arc::new(compose(&folders, start.simulate));
     // Before the window asks for it: the last theme, or a blank one for the
     // connected screen.
@@ -325,7 +363,8 @@ fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::e
     app.manage(gifs);
     app.manage(Unsaved::default());
     let live = backend.studio().live_key().is_some();
-    let live_item = (start.tray)(app.handle(), live, &backend.texts())?;
+    let live_item = (start.tray)(app.handle(), live, &backend.texts())
+        .inspect_err(|_| diag::report(DiagCode::TrayNotAdded))?;
     start_refresh_loop(backend, live_item);
     if !start.hidden {
         show_main_window(app.handle());
@@ -605,8 +644,8 @@ fn start_refresh_loop(backend: Shared, live_item: LiveSync) {
                 std::thread::sleep(sleep_until(due, Instant::now()));
             }
         });
-    if spawned.is_err() {
-        diag::report(DiagCode::RefreshLoopNotStarted);
+    if let Err(error) = spawned {
+        diag::report(refresh_loop_failure(&error));
     }
 }
 
@@ -630,11 +669,11 @@ fn restart_without_dmabuf_renderer() {
         return;
     };
     // `exec` returns only when the process could not replace itself.
-    let _ = std::process::Command::new(exe)
+    let error = std::process::Command::new(exe)
         .args(std::env::args_os().skip(1))
         .env(DMABUF_SWITCH, "1")
         .exec();
-    diag::report(DiagCode::DmabufRendererOn);
+    diag::report(restart_failure(&error));
 }
 
 #[cfg(test)]
@@ -993,6 +1032,49 @@ mod tests {
         assert_eq!(status.unwrap(), shown);
         assert!(on_disk.unwrap().is_some(), "the key was saved");
         assert!(made_rx.try_recv().is_err(), "saving a key asks nothing");
+    }
+
+    /// Review W1 of round 2, iter 4: a start that failed says which part
+    /// failed, by the variant of Tauri's error or the kind of the I/O
+    /// error, never by its text.
+    #[test]
+    fn a_failed_start_says_which_part_failed() {
+        let runtime = serde_json::from_str::<u8>("x").unwrap_err();
+        let setup: Box<dyn std::error::Error> = "the folders were not found".into();
+        for (error, code) in [
+            (tauri::Error::Runtime(runtime.into()), DiagCode::NoWindow),
+            (tauri::Error::Setup(setup.into()), DiagCode::SetupFailed),
+            (
+                tauri::Error::PluginInitialization("dialog".into(), "no portal".into()),
+                DiagCode::PluginNotStarted,
+            ),
+            (tauri::Error::WindowNotFound, DiagCode::NotStarted),
+            (tauri::Error::UnknownPath, DiagCode::NotStarted),
+        ] {
+            assert_eq!(start_failure(&error), code, "{error:?}");
+        }
+        let io = io::Error::from;
+        for (kind, code) in [
+            (io::ErrorKind::WouldBlock, DiagCode::RefreshLoopNoResources),
+            (io::ErrorKind::OutOfMemory, DiagCode::RefreshLoopNoResources),
+            (io::ErrorKind::Other, DiagCode::RefreshLoopNotStarted),
+        ] {
+            assert_eq!(refresh_loop_failure(&io(kind)), code, "{kind:?}");
+        }
+        #[cfg(target_os = "linux")]
+        for (kind, code) in [
+            (io::ErrorKind::NotFound, DiagCode::DmabufRestartNoFile),
+            (
+                io::ErrorKind::PermissionDenied,
+                DiagCode::DmabufRestartDenied,
+            ),
+            (
+                io::ErrorKind::ArgumentListTooLong,
+                DiagCode::DmabufRendererOn,
+            ),
+        ] {
+            assert_eq!(restart_failure(&io(kind)), code, "{kind:?}");
+        }
     }
 
     /// Review W2: the app's collection lives in its folder: one that cannot

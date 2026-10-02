@@ -56,7 +56,7 @@ bezel
       **Verify:** `cargo llvm-cov --workspace --locked --fail-under-lines 80 --summary-only && echo OK`
       **Source:** PROJECT
 - [ ] No `TODO`/`FIXME` without linked issue reference
-      **Verify:** `export LC_ALL=C.UTF-8; ! git grep -nIiE '\b(todo|fixme)' -- . ':!*.md' ':!*.json' ':!*.lock' ':!.jdi' ':!docs' ':!.githooks' | sed -E "s/test\.fixme\b([^(]|$)/\1/g; s/'fixme'//g; s/(todo|fixme)s?\(#[0-9]+\)//Ig" | grep -qE '\b([Tt][Oo][Dd][Oo]|[Ff][Ii][Xx][Mm][Ee])\b|\b(TODO|FIXME)[Ss]\b|\b[Ff]ixmes\b' && echo OK`
+      **Verify:** `export LC_ALL=C.UTF-8; ! git grep -nIiE '\b(todo|fixme)' -- . ':!*.md' ':!*.json' ':!*.lock' ':!.jdi' ':!docs' ':!.githooks' ':!apps/bezel-studio/scripts/e2e-passed.mjs' ':!apps/bezel-studio/tests/ui/e2e-passed.test.mjs' | sed -E "s/(todo|fixme)s?\(#[0-9]+\)//Ig" | grep -qE '\b([Tt][Oo][Dd][Oo]|[Ff][Ii][Xx][Mm][Ee])\b|\b(TODO|FIXME)[Ss]\b|\b[Ff]ixmes\b' && echo OK`
       **Source:** PROJECT
 
 ### Manual

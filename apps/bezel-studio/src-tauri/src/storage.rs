@@ -23,15 +23,22 @@
 //! theme's video), delete and boot media goes through the core's
 //! `app::manager`, which records it with the exact bytes sent in the store
 //! of local copies the storage manager ([`crate::manager`]) shows.
+//!
+//! The final state of a shutdown (D-2026-10-03-power-off-standby-3,
+//! [`crate::power`]): from [`StorageState::enter_final_state`] on, no
+//! operation gets the screens ([`StorageState::claim`] answers `busy`), the
+//! running job is cancelled and the shutdown waits for it
+//! ([`StorageState::wait_until_idle`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use bezel_core::BezelError;
 use bezel_core::app::manager::Manager;
 use bezel_core::app::storage::{self, PreparedUpload, UploadRequest};
-use bezel_core::domain::archive::TransferPlan;
+use bezel_core::domain::archive::{Catalog, ContentId, TransferPlan};
 use bezel_core::domain::clock::LocalTime;
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::geometry::Orientation;
@@ -105,11 +112,42 @@ pub struct StorageState {
     pictures: Box<dyn Pictures>,
     scratch: PathBuf,
     busy: AtomicBool,
+    /// The computer is shutting down: no operation gets the screens.
+    ending: AtomicBool,
     cancel: Mutex<Option<CancelToken>>,
     pending: Mutex<Option<Pending>>,
     plan: Mutex<Option<PendingPlan>>,
     shown: Mutex<Shown>,
     tickets: AtomicU64,
+}
+
+/// The catalog and the local copies, locked for each call only
+/// ([`StorageState::archive_per_call`]): a use case that talks to a screen
+/// between its reads and saves of the catalog holds it while it reads or
+/// saves, never while the screen works (review W1 of iteration 3 of
+/// power-off-standby).
+pub(crate) struct ArchivePerCall<'a>(&'a Mutex<Box<dyn ArchiveStore>>);
+
+impl ArchiveStore for ArchivePerCall<'_> {
+    fn load(&mut self) -> bezel_core::Result<Catalog> {
+        lock(self.0).load()
+    }
+
+    fn save(&mut self, catalog: &Catalog) -> bezel_core::Result<()> {
+        lock(self.0).save(catalog)
+    }
+
+    fn keep(&mut self, bytes: &[u8]) -> bezel_core::Result<ContentId> {
+        lock(self.0).keep(bytes)
+    }
+
+    fn read(&mut self, content: &ContentId) -> bezel_core::Result<Option<Vec<u8>>> {
+        lock(self.0).read(content)
+    }
+
+    fn discard(&mut self, content: &ContentId) -> bezel_core::Result<()> {
+        lock(self.0).discard(content)
+    }
 }
 
 /// The claim on the screen of the running storage operation.
@@ -125,6 +163,9 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// How often [`StorageState::wait_until_idle`] looks at the running job.
+const IDLE_POLL: Duration = Duration::from_millis(10);
+
 impl StorageState {
     /// Storage commands over `media`, recording what they send in
     /// `copies`; copies of theme videos to send go to `scratch`.
@@ -136,6 +177,7 @@ impl StorageState {
             pictures: copies.pictures,
             scratch,
             busy: AtomicBool::new(false),
+            ending: AtomicBool::new(false),
             cancel: Mutex::new(None),
             pending: Mutex::new(None),
             plan: Mutex::new(None),
@@ -150,13 +192,19 @@ impl StorageState {
         Arc::clone(&self.media)
     }
 
-    /// Holds the screens for one operation (a storage job, or a restart):
-    /// the others answer `busy` until it is dropped.
+    /// Holds the screens for one operation (a storage job, a restart,
+    /// opening a screen): the others answer `busy` until it is dropped. In
+    /// the final state of a shutdown every claim answers `busy`. The flag is
+    /// read after the claim is taken, so a shutdown that set it either sees
+    /// the claim ([`Self::wait_until_idle`]) or the claim sees the flag.
     pub(crate) fn claim(&self) -> UiResult<Claim<'_>> {
-        self.busy
+        let claim = self
+            .busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map(|_| Claim(&self.busy))
-            .map_err(|_| UiError::new(ErrorCode::Busy))
+            .map_err(|_| UiError::new(ErrorCode::Busy))?;
+        self.refuse_while_shutting_down()?;
+        Ok(claim)
     }
 
     /// Whether a storage operation holds a screen.
@@ -164,12 +212,50 @@ impl StorageState {
         self.busy.load(Ordering::SeqCst)
     }
 
-    /// `busy` while a storage operation holds a screen.
+    /// `busy` while a storage operation holds a screen, or the computer is
+    /// shutting down.
     pub fn ensure_idle(&self) -> UiResult<()> {
         if self.is_busy() {
             return Err(UiError::new(ErrorCode::Busy));
         }
+        self.refuse_while_shutting_down()
+    }
+
+    /// `busy` in the final state of a shutdown.
+    pub(crate) fn refuse_while_shutting_down(&self) -> UiResult<()> {
+        if self.ending.load(Ordering::SeqCst) {
+            return Err(UiError::new(ErrorCode::Busy));
+        }
         Ok(())
+    }
+
+    /// The final state of a shutdown starts: from now on no claim is given
+    /// and the running job is asked to stop.
+    pub(crate) fn enter_final_state(&self) {
+        self.ending.store(true, Ordering::SeqCst);
+        self.cancel();
+    }
+
+    /// The shutdown was cancelled: claims are given again.
+    pub(crate) fn leave_final_state(&self) {
+        self.ending.store(false, Ordering::SeqCst);
+    }
+
+    /// Waits until no operation holds the screens, at `deadline` at the
+    /// latest, asking the running job to stop meanwhile (one started just
+    /// before the final state included); whether none holds them.
+    pub(crate) fn wait_until_idle(&self, deadline: Instant) -> bool {
+        loop {
+            self.cancel();
+            if !self.is_busy() {
+                return true;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            std::thread::sleep(IDLE_POLL.min(deadline - now));
+        }
     }
 
     /// The media converter, waiting while a job uses it.
@@ -185,6 +271,18 @@ impl StorageState {
     /// The catalog and the local copies; only under the claim.
     pub(crate) fn archive(&self) -> MutexGuard<'_, Box<dyn ArchiveStore>> {
         lock(&self.archive)
+    }
+
+    /// The catalog and the local copies, each call locking them on its own:
+    /// for the shutdown, whose screens may hang between its reads and saves
+    /// ([`ArchivePerCall`]).
+    pub(crate) fn archive_per_call(&self) -> ArchivePerCall<'_> {
+        ArchivePerCall(&self.archive)
+    }
+
+    /// Where files written to be sent wait for their upload (`<cache>/sending`).
+    pub(crate) fn scratch(&self) -> &Path {
+        &self.scratch
     }
 
     /// The thumbnails of the local copies.

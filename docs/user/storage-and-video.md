@@ -4,7 +4,8 @@
 
 Screens with storage (Turing rev C, and the Turing USB generation) keep pictures
 and videos in their internal memory and, when they have a slot, on an SD card.
-They play them on their own and can show one at power-up, without Bezel running.
+They play them on their own and, on Turing rev C screens, can start with the
+card's pictures or one of its videos at power-up, without Bezel running.
 
 The screen has four folders: `internal/image`, `internal/video`, `sd/image` and
 `sd/video`. `sd` is the memory card, reached only through the screen. Bezel
@@ -29,9 +30,12 @@ filter and sort both sides.
   in a loop, or shows a stored picture. With **Live** on, the theme covers what
   the screen plays, so these wait until you turn Live off.
 - **Delete…**: asks for confirmation, naming the file (or listing the files).
-- **At start**: **Show at start…** (or a file dragged onto **At start**) picks
-  the file the screen shows when it powers up; **Back to the default clock**
-  undoes it. The screen remembers the choice.
+- **At start**: **Show at start…** (or a file dragged onto **At start**) sets
+  what the screen starts with when it powers up, by the file's kind: with a
+  picture, the card's pictures in turn; with a video, the **first video of
+  `sd/video`**, not necessarily that file (see
+  [What the screen shows at power-up](#what-the-screen-shows-at-power-up));
+  **Back to the default clock** undoes it. The screen remembers the choice.
 - **Move to the SD card**, **Copy to the SD card** (or to the internal memory),
   **Rename…**, **Restore…**, **Cleanup assistant…**, **Associate original…** and
   **Local copies…**: see [Managing the files](#managing-the-files).
@@ -46,7 +50,7 @@ bezel storage put logo.png sd/image/logo.png
 bezel storage play internal/video/clip.mp4  # loop it on the screen (--once: play it once)
 bezel storage stop
 bezel storage rm internal/video/clip.mp4 --yes
-bezel storage boot internal/video/clip.mp4 --brightness 60 --yes   # shown at power-up
+bezel storage boot internal/video/clip.mp4 --brightness 60 --yes   # start with a video: the first of sd/video
 bezel storage boot default --yes            # back to the built-in start screen
 ```
 
@@ -176,10 +180,10 @@ upload left is named with the command that deletes it.
 
 The new name follows the sending rule (lower-case letters, digits, `_`, `.` and
 `-`, the same extension): moving `NVI.mp4` gives `nvi.mp4`. A file of that name
-already there is left out unless you choose to replace it. Moving the file the
-screen shows at start, or renaming a video a theme plays, adds a warning to the
-confirmation: the screen starts with the last file it played, and a theme finds
-its video by its name.
+already there is left out unless you choose to replace it. Moving the file set
+with **Show at start…**, or renaming a video a theme plays, adds a warning to the
+confirmation (a theme finds its video by its name; for the start setting, see
+[What the screen shows at power-up](#what-the-screen-shows-at-power-up)).
 
 In the app, select files in one list and press **Move to the SD card** (or
 **Move to the internal memory**), or drag them onto the other list. **Copy to
@@ -263,7 +267,7 @@ uploads that did not finish, the cleanup assistant points out likely leftovers:
 - **Not used**: a file Bezel did not send that no theme plays. Only listed.
 
 Only exact signals are pre-checked; what is merely likely is shown, not chosen.
-The assistant never suggests the file Bezel set to show at start, nor a video a
+The assistant never suggests the file set with **Show at start…**, nor a video a
 theme plays (a theme's video background, for example). It never runs on its
 own, and nothing is deleted until you confirm the exact list.
 
@@ -328,11 +332,22 @@ either, so they share one catalog.
 
 ## What the screen shows at power-up
 
-On rev C screens the power-up choice also stores the brightness the screen
-starts with: in the app, the brightness set under **Settings**; on the command
-line, `--brightness`; otherwise the vendor's default, about 67%. On the
-Turing USB generation, Bezel can send and play files but cannot yet delete them,
-play a video once, or change the power-up choice.
+On rev C screens the power-up choice is a start setting, not a file: the screen
+picks what it shows by itself (measured on the 8.8"). With a picture chosen, it
+shows every picture of the card's `sd/image` in turn, every 3 to 5 seconds (the
+album of [When the computer shuts down](power-off.md)); with a video, it plays
+the **first video of `sd/video`** on the card, not necessarily the one you
+chose; with **Back to the default clock**, its built-in clock. What it shows
+without a memory card is not known yet. The setting takes effect when the
+screen restarts or powers up; choosing a file also plays it right away. It is
+the same start setting that **When the computer shuts down** stores: the last
+one you made wins.
+
+The power-up choice also stores the brightness the screen starts with: in the
+app, the brightness set under **Settings**; on the command line,
+`--brightness`; otherwise the vendor's default, about 67%. On the Turing USB
+generation, Bezel can send and play files but cannot yet delete them, play a
+video once, or change the power-up choice.
 
 ## Themes with a video background
 

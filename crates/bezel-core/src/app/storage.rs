@@ -8,6 +8,7 @@
 use crate::domain::job::{Job, JobPhase, Progress};
 use crate::domain::media::{ConvertOptions, Converter, MediaInfo, MediaKind, UploadProfile};
 use crate::domain::screen::{Brightness, Confirm};
+use crate::domain::standby::{PlanB, Standby};
 use crate::domain::storage::{
     BootMedia, Confirmed, FileEntry, FileName, Medium, Operation, Refusal, RemotePath, Repeat,
     StorageInfo, StorageLocation, UploadAction, UploadCheck, UploadPlan, preflight,
@@ -376,7 +377,8 @@ pub fn delete(link: &mut dyn ScreenLink, path: &RemotePath, confirm: Confirm) ->
     storage_of(link)?.delete(path, confirmed)
 }
 
-fn ensure_stored(storage: &mut dyn ScreenStorage, path: &RemotePath) -> Result<()> {
+/// `InvalidInput` unless a file is stored at `path` (a size query).
+pub(crate) fn ensure_stored(storage: &mut dyn ScreenStorage, path: &RemotePath) -> Result<()> {
     match presence(storage, path)? {
         Presence::Stored(_) => Ok(()),
         Presence::Absent => Err(BezelError::InvalidInput(format!(
@@ -409,17 +411,34 @@ pub fn stop(link: &mut dyn ScreenLink) -> Result<()> {
 }
 
 /// Sets what the screen shows on its own after power-up: a stored file is
-/// played (videos loop) so the firmware picks it, then the start mode is
-/// written; both under one `Confirm::Yes` (D-2026-09-30-storage-video-5).
+/// played (videos loop) so the firmware picks it, then the OPTIONS are
+/// written whole with its start mode; both under one `Confirm::Yes`
+/// (D-2026-09-30-storage-video-5).
 ///
 /// The screen keeps the backlight level it boots with alongside the start
 /// mode: `brightness` is set first, so it boots with that level (`None`
-/// keeps the one the link last set). With `Confirm::No` the port is not
-/// called; a file that is not stored is refused before anything is sent.
+/// keeps the one the link last set). Without a recorded choice there is no
+/// sleep timer (the plan B of `keep`); [`crate::app::manager::Manager::set_boot_media`]
+/// keeps the timer of the screen's recorded `off`
+/// (D-2026-10-03-power-off-standby-2 (4)). With `Confirm::No` the port is
+/// not called; a file that is not stored is refused before anything is
+/// sent.
 pub fn set_boot_media(
     link: &mut dyn ScreenLink,
     boot: &BootMedia,
     brightness: Option<Brightness>,
+    confirm: Confirm,
+) -> Result<()> {
+    write_boot_media(link, boot, brightness, &Standby::Keep, confirm)
+}
+
+/// [`set_boot_media`] next to the screen's recorded `standby`: the OPTIONS
+/// written are [`PlanB::with_boot`].
+pub(crate) fn write_boot_media(
+    link: &mut dyn ScreenLink,
+    boot: &BootMedia,
+    brightness: Option<Brightness>,
+    standby: &Standby,
     confirm: Confirm,
 ) -> Result<()> {
     let confirmed = Confirmed::require(confirm, &Operation::Boot(boot.clone()))?;
@@ -434,7 +453,7 @@ pub fn set_boot_media(
     if let BootMedia::File(path) = boot {
         start_playing(storage, path, Repeat::Loop)?;
     }
-    storage.set_start_mode(boot.start_mode(), confirmed)
+    storage.set_options(PlanB::with_boot(boot, standby), confirmed)
 }
 
 /// A suggested upload name for a host file, when the screen can store it.

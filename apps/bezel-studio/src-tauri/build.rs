@@ -77,6 +77,11 @@ const COMMANDS: &[&str] = &[
     "delete_collected",
     "use_collected",
     "open_link",
+    "standby_overview",
+    "set_standby",
+    "pick_photo",
+    "album_preview",
+    "album_add",
 ];
 
 fn main() -> ExitCode {

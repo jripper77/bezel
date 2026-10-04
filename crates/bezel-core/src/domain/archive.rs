@@ -8,7 +8,9 @@
 //! ([`ScreenKey`]), medium, folder and name. A card entry also keeps the
 //! card's capacity, the only card trait the protocol shows, so a card of
 //! another capacity shows the other card's entries as restorable
-//! ([`Overview::other_card`]).
+//! ([`Overview::other_card`]). A screen's record also keeps the boot media
+//! Bezel set and what the screen does when the computer shuts down
+//! ([`ScreenRecord::standby`]).
 //!
 //! Moving, renaming and restoring are re-uploads of a copy. This module plans
 //! them ([`plan_move`], [`plan_copy`], [`plan_rename`], [`plan_restore`]); the
@@ -24,6 +26,8 @@ use super::cleanup::{Protected, artifact_base};
 use super::device::ModelId;
 use super::geometry::Size;
 use super::media::{MediaInfo, MediaKind};
+use super::screen::Brightness;
+use super::standby::{PlanB, Standby, StoredPlanB};
 use super::storage::{
     BootMedia, FileEntry, FileName, Medium, NameError, Refusal, RemotePath, StorageLocation,
     check_size,
@@ -298,6 +302,14 @@ pub struct ScreenRecord {
     /// The boot media Bezel last set, when it is a stored file (`None`: the
     /// default start screen, or never set through Bezel).
     pub boot: Option<RemotePath>,
+    /// What the screen does when the computer shuts down
+    /// (D-2026-10-03-power-off-standby-2): `keep` until the user chooses.
+    pub standby: Standby,
+    /// The plan B Bezel last stored on the screen, by the choice or the
+    /// boot media; `None` when none was stored since records kept it (then
+    /// [`ScreenRecord::plan_b`] derives it from the choice and the boot
+    /// media).
+    pub stored: Option<StoredPlanB>,
 }
 
 impl ScreenRecord {
@@ -341,6 +353,31 @@ impl ScreenRecord {
             BootMedia::File(path) => Some(path.clone()),
             BootMedia::Default => None,
         };
+    }
+
+    /// The boot media Bezel last set ([`BootMedia::Default`] when none).
+    pub fn boot_media(&self) -> BootMedia {
+        self.boot
+            .clone()
+            .map_or(BootMedia::Default, BootMedia::File)
+    }
+
+    /// The plan B on the screen as the record says: the one Bezel last
+    /// stored ([`ScreenRecord::stored`]: by the choice, or by the boot media
+    /// set after it, [`PlanB::with_boot`]); without one, the plan B the
+    /// recorded choice writes next to the recorded boot media
+    /// ([`Standby::plan_b`]).
+    pub fn plan_b(&self) -> PlanB {
+        self.stored.map_or_else(
+            || self.standby.plan_b(self.boot_media().start_mode()),
+            |stored| stored.plan,
+        )
+    }
+
+    /// The backlight level stored with the last plan B, when the user chose
+    /// one.
+    pub fn start_brightness(&self) -> Option<Brightness> {
+        self.stored.and_then(|stored| stored.brightness)
     }
 
     /// Marks every entry of the media `listing` shows as stored or missing
@@ -1380,8 +1417,45 @@ mod tests {
         assert!(record.forget(&path("internal/image/a.png"), None).is_none());
         record.set_boot(&BootMedia::File(path("sd/video/clip.mp4")));
         assert_eq!(record.boot, Some(path("sd/video/clip.mp4")));
+        assert_eq!(
+            record.boot_media(),
+            BootMedia::File(path("sd/video/clip.mp4"))
+        );
         record.set_boot(&BootMedia::Default);
         assert_eq!(record.boot, None);
+        assert_eq!(record.boot_media(), BootMedia::Default);
+    }
+
+    #[test]
+    fn a_record_keeps_its_standby_choice_and_its_plan_b() {
+        use crate::domain::standby::SleepMinutes;
+        use crate::domain::storage::StartMode;
+
+        let mut record = ScreenRecord::default();
+        assert_eq!(record.standby, Standby::Keep, "keep until chosen");
+        assert_eq!(record.plan_b(), PlanB::new(StartMode::Default, 0));
+        let three = SleepMinutes::new(3).expect("minutes");
+        record.standby = Standby::Off(three);
+        record.set_boot(&BootMedia::File(path("internal/image/logo.png")));
+        assert_eq!(record.plan_b(), PlanB::new(StartMode::Image, 3));
+        record.standby = Standby::Album;
+        assert_eq!(record.plan_b(), PlanB::new(StartMode::Image, 0));
+        assert_eq!(record.start_brightness(), None);
+
+        // What was stored last is what the record says (review W7): the
+        // boot media set after the album, with its level.
+        let forty = Brightness::new(40).expect("level");
+        record.stored = Some(StoredPlanB {
+            plan: PlanB::new(StartMode::Video, 0),
+            brightness: Some(forty),
+        });
+        assert_eq!(record.plan_b(), PlanB::new(StartMode::Video, 0));
+        assert_eq!(record.start_brightness(), Some(forty));
+        let shown = record.stored.map(|s| s.to_string());
+        assert_eq!(
+            shown.as_deref(),
+            Some("start mode 2, sleep timer off, brightness 40%")
+        );
     }
 
     fn view<'a>(

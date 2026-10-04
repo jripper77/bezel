@@ -29,10 +29,10 @@ use tauri_plugin_opener::OpenerExt as _;
 use crate::backend::{Backend, guide_url, link_url};
 use crate::clock::now;
 use crate::dto::{
-    AddedDto, AddedMediaDto, AssetDto, CollectedDto, CollectedUsersDto, DevicesDto, GifPageDto,
-    ImportedDto, JobDto, KeyDto, MediaToolsDto, MonitorModeDto, PreferencesDto, PrepareDto,
-    ProgressDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, StorageDto,
-    ThemeEntryDto, VideoAutoDto, parse_orientation,
+    AddedDto, AddedMediaDto, AlbumAddedDto, AssetDto, CollectedDto, CollectedUsersDto, DevicesDto,
+    GifPageDto, ImportedDto, JobDto, KeyDto, MediaToolsDto, MonitorModeDto, PreferencesDto,
+    PrepareDto, ProgressDto, RestartedDto, SampleDto, SavedDto, SensorDto, SessionDto, StandbyDto,
+    StorageDto, ThemeEntryDto, VideoAutoDto, parse_orientation,
 };
 use crate::emit_progress;
 use crate::gifs::{Gifs, KlipyKey, SharedGifs, Target, UserAsked};
@@ -42,6 +42,7 @@ use crate::manager::{
 };
 use crate::media::{BACKGROUND_EXTENSIONS, IMAGE_EXTENSIONS, MEDIA_EXTENSIONS};
 use crate::messages::{ErrorCode, UiError, UiResult};
+use crate::standby::{Asked, PHOTO_EXTENSIONS, PhotoAsked};
 use crate::storage::ProgressThrottle;
 use crate::studio::Motion;
 use crate::tray::{LiveItem, TrayMenu};
@@ -624,6 +625,89 @@ pub async fn set_boot_media(
     blocking(&state, move |b| {
         let confirm = confirm_of(confirmed);
         b.set_boot_media(&screen, path.as_deref(), brightness, confirm, now())
+    })
+    .await
+}
+
+// ------------------------------------------ when the computer shuts down --
+
+/// What a screen does when the computer shuts down: its choice, the four
+/// options and what it offers (D-2026-10-03-power-off-standby-2).
+#[tauri::command]
+pub async fn standby_overview(state: State<'_, Shared>, screen: String) -> UiResult<StandbyDto> {
+    blocking(&state, move |b| b.standby_overview(&screen, now())).await
+}
+
+/// Records the choice of a screen and writes its plan B (`sleep_minutes`
+/// with `off`, `file` with `video`); `confirmed` comes from the dialog that
+/// says what is written.
+#[tauri::command]
+pub async fn set_standby(
+    state: State<'_, Shared>,
+    screen: String,
+    choice: String,
+    sleep_minutes: Option<u32>,
+    file: Option<String>,
+    confirmed: bool,
+) -> UiResult<StandbyDto> {
+    let asked = Asked {
+        choice,
+        sleep_minutes,
+        file,
+    };
+    blocking(&state, move |b| {
+        b.set_standby(&screen, &asked, confirm_of(confirmed), now())
+    })
+    .await
+}
+
+/// Asks for a photo for a screen's album. `None` when cancelled.
+#[tauri::command]
+pub async fn pick_photo<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+) -> UiResult<Option<String>> {
+    let filter = state.texts().images;
+    Ok(pick_file(&app, filter, PHOTO_EXTENSIONS)?.map(|p| p.display().to_string()))
+}
+
+/// The photo `source` framed by `fit` (`cover` or `contain`) as the album
+/// of `screen` shows it, as a PNG `data:` URL.
+#[tauri::command]
+pub async fn album_preview(
+    state: State<'_, Shared>,
+    screen: String,
+    source: String,
+    fit: String,
+) -> UiResult<String> {
+    blocking(&state, move |b| {
+        b.album_preview(&screen, &PathBuf::from(source), &fit)
+    })
+    .await
+}
+
+/// Sends the photo `source`, framed like its preview, to the album of
+/// `screen` as `name`; `confirmed` comes from the dialog that showed it and
+/// named it, and `replace` from its own confirmation of replacing a photo
+/// of that name (D-2026-10-03-power-off-standby-4 (3)).
+#[tauri::command]
+pub async fn album_add(
+    state: State<'_, Shared>,
+    screen: String,
+    source: String,
+    fit: String,
+    name: String,
+    confirmed: bool,
+    replace: bool,
+) -> UiResult<AlbumAddedDto> {
+    let asked = PhotoAsked {
+        source: PathBuf::from(source),
+        fit,
+        name,
+        replace: confirm_of(replace),
+    };
+    blocking(&state, move |b| {
+        b.album_add(&screen, &asked, confirm_of(confirmed), now())
     })
     .await
 }

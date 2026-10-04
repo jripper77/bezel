@@ -4,6 +4,7 @@ pub mod gifs;
 pub mod manager;
 mod runtime;
 mod screens;
+pub mod standby;
 pub mod storage;
 
 pub use crate::domain::media::device_video_name;

@@ -1,0 +1,31 @@
+[package]
+name = "bezel-power"
+description = "Adapter of Bezel for the machine's power events: logind's shutdown delay lock on Linux, the end of the session on Windows."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+# Test support for the crates that use this one (Linux): a private
+# dbus-daemon, a fake logind on it and a monitor of that bus. This crate's
+# own tests always have it.
+fake = []
+
+[dependencies]
+thiserror = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# logind over D-Bus through libdbus, already in the tree through tao
+# (D-2026-10-03-power-off-standby-3). `stdfd`: the inhibitor's descriptor
+# is a std `OwnedFd`, so holding and closing it needs no `unsafe`.
+dbus = { version = "0.9.12", features = ["stdfd"] }
+
+[target.'cfg(windows)'.dependencies]
+# GetSystemMetrics(SM_SHUTTINGDOWN): whether the session is ending.
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging"] }
+
+[lints]
+workspace = true

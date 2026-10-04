@@ -10,6 +10,7 @@ pub mod live;
 mod messages;
 mod screen;
 mod sensors;
+pub mod standby;
 pub mod storage;
 pub mod theme;
 pub mod udev_rules;
@@ -31,6 +32,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 pub use live::{Pace, RunRequest, SleepPace};
 pub use sensors::{WatchStyle, run as run_sensors};
+pub use standby::{StandbyArgs, StandbyKit, run as run_standby_command};
 pub use storage::{ProgressStyle, StorageArgs, StorageKit, run as run_storage_command};
 
 /// Product version: the one CI or `scripts/install-local.sh` stamped, else the crate's.
@@ -319,6 +321,12 @@ pub enum Command {
     /// storage manager: move, rename and restore from Bezel's local copies,
     /// clean up, and the catalog and cache of those copies.
     Storage(StorageArgs),
+    /// What each screen does when the computer shuts down: leave it as it
+    /// is, turn it off, loop a stored video or show the photo album of its
+    /// card (Turing rev C screens). Bezel Studio carries out the choice at
+    /// shutdown; these commands record it, store the plan B on the screen
+    /// and fill the album.
+    Standby(StandbyArgs),
 }
 
 impl Command {
@@ -458,6 +466,8 @@ where
         }
         // Need a media transcoder and a cancel token: see `run_storage_command`.
         Command::Storage(_) => anyhow::bail!("storage commands run through run_storage_command"),
+        // Need Bezel's catalog and a media reader: see `run_standby_command`.
+        Command::Standby(_) => anyhow::bail!("standby commands run through run_standby_command"),
         // Needs the HID port: see `run_monitor_mode`.
         Command::MonitorMode { .. } => {
             anyhow::bail!("`monitor-mode` runs through run_monitor_mode")
@@ -550,6 +560,8 @@ mod tests {
         assert!(err.to_string().contains("run_sensors"), "{err}");
         let err = run_args(&["bezel", "--fake", "storage", "info"]).unwrap_err();
         assert!(err.to_string().contains("run_storage_command"), "{err}");
+        let err = run_args(&["bezel", "--fake", "standby", "show"]).unwrap_err();
+        assert!(err.to_string().contains("run_standby_command"), "{err}");
         let err = run_args(&["bezel", "--fake", "monitor-mode", "--yes"]).unwrap_err();
         assert!(err.to_string().contains("run_monitor_mode"), "{err}");
         let err = run_args(&["bezel", "udev-rules"]).unwrap_err();

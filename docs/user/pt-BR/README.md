@@ -40,6 +40,9 @@ idioma do sistema, ou o que você escolher em **Preferências → Idioma**.
 - [Preparar um cartão SD](sd-card.md) para telas com entrada de cartão.
 - [Iniciar com o computador](run-at-login.md): pela bandeja ou como serviço do
   systemd.
+- [Quando o computador desligar](power-off.md): deixar a tela como está,
+  apagá-la, tocar em loop um vídeo guardado nela ou mostrar o álbum de fotos
+  do cartão.
 - [Vindo do turing-smart-screen-python](migrating.md).
 
 ## Quando algo dá errado

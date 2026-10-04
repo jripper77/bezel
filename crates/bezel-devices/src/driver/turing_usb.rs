@@ -28,8 +28,9 @@ use bezel_core::domain::frame::{Frame, Rgba};
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::job::Job;
 use bezel_core::domain::screen::{Brightness, ScreenIdentity};
+use bezel_core::domain::standby::PlanB;
 use bezel_core::domain::storage::{
-    Confirmed, FileName, Medium, RemotePath, Repeat, StartMode, StorageInfo, StorageLocation,
+    Confirmed, FileName, Medium, RemotePath, Repeat, StorageInfo, StorageLocation,
 };
 use bezel_core::ports::{ScreenLink, ScreenStorage};
 use bezel_core::{BezelError, Result};
@@ -461,8 +462,9 @@ impl<W: Wire, C: Clock, P: Pause> ScreenStorage for TuringUsb<W, C, P> {
 
     /// Not offered: the start mode lives in SAVE_SETTINGS (125, persistent,
     /// never sent) and the boot logo is golden-only
-    /// (D-2026-09-30-storage-video-5). Nothing is sent.
-    fn set_start_mode(&mut self, _mode: StartMode, _confirmed: Confirmed) -> Result<()> {
+    /// (D-2026-09-30-storage-video-5); the plan B is rev C's
+    /// (D-2026-10-03-power-off-standby-2). Nothing is sent.
+    fn set_options(&mut self, _plan: PlanB, _confirmed: Confirmed) -> Result<()> {
         Err(BezelError::Unsupported(
             "a Turing USB screen's boot media cannot be set by Bezel yet".into(),
         ))
@@ -517,7 +519,7 @@ mod tests {
     use bezel_core::domain::geometry::Size;
     use bezel_core::domain::job::{CancelToken, Progress};
     use bezel_core::domain::screen::Confirm;
-    use bezel_core::domain::storage::{BootMedia, Capacity, Operation};
+    use bezel_core::domain::storage::{BootMedia, Capacity, Operation, StartMode};
     use cbc::cipher::{Block, BlockModeDecrypt, KeyIvInit};
 
     #[derive(Clone)]
@@ -1235,9 +1237,11 @@ mod tests {
         assert!(matches!(err, BezelError::Unsupported(_)), "{err}");
         assert!(err.to_string().contains("internal/image/logo.png"), "{err}");
         for mode in [StartMode::Default, StartMode::Image, StartMode::Video] {
-            let err = s.set_start_mode(mode, confirmed()).unwrap_err();
+            let err = s.set_options(PlanB::new(mode, 0), confirmed()).unwrap_err();
             assert!(matches!(err, BezelError::Unsupported(_)), "{err}");
         }
+        let err = s.restart(confirmed()).unwrap_err();
+        assert!(matches!(err, BezelError::Unsupported(_)), "{err}");
         assert_eq!(s.wire().sent.len(), before, "nothing sent");
     }
 
@@ -1267,7 +1271,8 @@ mod tests {
         script(&mut s, stopped());
         s.stop().unwrap();
         let _ = s.delete(&path("sd/video/a.h264"), confirmed());
-        let _ = s.set_start_mode(StartMode::Video, confirmed());
+        let _ = s.set_options(PlanB::new(StartMode::Video, 0), confirmed());
+        let _ = s.restart(confirmed());
         let allowed = [
             op::SYNC,
             op::STORAGE_INFO,

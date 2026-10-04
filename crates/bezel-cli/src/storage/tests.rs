@@ -7,6 +7,7 @@ use bezel_core::domain::device::ModelId;
 use bezel_core::domain::frame::Rect;
 use bezel_core::domain::geometry::Size;
 use bezel_core::domain::media::MediaFormat;
+use bezel_core::domain::standby::{PlanB, SleepMinutes, Standby};
 use bezel_core::domain::storage::StartMode;
 use bezel_devices::fake::{FakeStorage, Playback, StorageCall};
 use bezel_devices::{FakeBus, FakeConnector};
@@ -566,6 +567,54 @@ fn a_cancelled_upload_says_how_to_delete_what_is_left() {
     );
 }
 
+/// What `storage boot` says about the sleep timer, with or without a
+/// recorded shutdown choice (D-2026-10-03-power-off-standby-2 (4)).
+const BOOT_KEEPS_THE_TIMER: &str = "and with the sleep timer of the shutdown choice: \
+     it goes to sleep on its own\n  only when `bezel standby` chose off, \
+     after the minutes chosen there";
+
+/// D-2026-10-03-power-off-standby-2 (4): the boot media keeps the sleep
+/// timer of a recorded `off` choice, as `storage boot` says.
+#[test]
+fn boot_keeps_the_sleep_timer_of_a_recorded_off_choice() {
+    let connector = with_files(&[("internal/video/intro.mp4", 3000)]);
+    let mut archive = MemoryArchive::new();
+    let mut catalog = Catalog::default();
+    catalog
+        .screen_mut(&ScreenKey::new(ModelId("turing-8.8")))
+        .standby = Standby::Off(SleepMinutes::new(3).unwrap());
+    archive.save(&catalog).unwrap();
+    let cli = Cli::try_parse_from([
+        "bezel",
+        "storage",
+        "boot",
+        "internal/video/intro.mp4",
+        "--yes",
+    ])
+    .unwrap();
+    let Command::Storage(args) = &cli.command else {
+        panic!("a storage command")
+    };
+    let (mut media, cancel, mut log) = (StubMedia::ready(), CancelToken::new(), Vec::new());
+    let mut kit = StorageKit {
+        media: &mut media,
+        cancel: &cancel,
+        progress: ProgressStyle::Lines,
+        log: &mut log,
+        archive: &mut archive,
+        archive_dir: None,
+        theme_videos: &[],
+        now: NOW,
+    };
+    run(args, &FakeBus::turing_88(), &connector, &mut kit).unwrap();
+    let log = String::from_utf8(log).unwrap();
+    assert!(log.contains(BOOT_KEEPS_THE_TIMER), "{log}");
+    assert_eq!(
+        connector.log().storage.calls.last(),
+        Some(&StorageCall::Options(PlanB::new(StartMode::Video, 3)))
+    );
+}
+
 #[test]
 fn play_stop_and_boot() {
     let connector = with_files(&[
@@ -619,10 +668,8 @@ fn play_stop_and_boot() {
         "{log}"
     );
     assert!(log.contains("the vendor default, about 67%"), "{log}");
-    assert!(
-        log.contains("with its sleep timer off: it does not go to sleep on its own"),
-        "{log}"
-    );
+    assert!(log.contains(BOOT_KEEPS_THE_TIMER), "{log}");
+    assert!(!log.contains("sleep timer off"), "{log}");
     assert_eq!(
         connector.log().storage.calls.len(),
         calls_before,
@@ -650,6 +697,11 @@ fn play_stop_and_boot() {
     let screen = connector.log();
     assert_eq!(screen.brightness, [Brightness::new(40).unwrap()]);
     assert_eq!(screen.storage.start_mode, Some(StartMode::Video));
+    assert_eq!(
+        screen.storage.calls.last(),
+        Some(&StorageCall::Options(PlanB::new(StartMode::Video, 0))),
+        "no shutdown choice recorded: no sleep timer"
+    );
     assert_eq!(
         screen.storage.playback,
         Playback::Video(path("internal/video/intro.mp4"), Repeat::Loop)

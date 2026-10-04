@@ -228,6 +228,45 @@ export const PROGRESS_EVENT = 'storage-progress';
  *   user's themes, and whether the open one, that hold the item's bytes.
  */
 
+// ------------------------------------- when the computer shuts down --
+// The choice of each Turing rev C screen and its plan B, and the card album
+// (D-2026-10-03-power-off-standby-2, -4, -6). Every call takes the screen's
+// key like the storage tab's; the choice is kept in the catalog the CLI
+// shares (`ScreenRecord.standby`, keyed by model and the user's name for the
+// screen). Nothing is written nor recorded without `confirmed`; a photo
+// replaces one of the same name only with `replace` too, its own
+// confirmation, which the app checks against the card's listing like the
+// storage tab's uploads. Errors reject like every command, as `{code, args,
+// message}` (`notConfirmed`, `unsupported`, `invalidInput`,
+// `screenNotFound`, `busy`, ...); no code is new. The album is listed with
+// `managerOverview` (its `sd`/`image` files:
+// the listing `managerThumbnail` answers for) and its photos deleted with
+// `deleteStored`.
+/**
+ * @typedef {'keep'|'off'|'video'|'album'} StandbyChoiceCode
+ * @typedef {'notConnected'|'unsupported'|'noCard'|'noVideo'} StandbyReasonCode
+ *   Why an option is not offered: the screen is not awake (`notConnected`),
+ *   its family keeps no choice (`unsupported`: every option, for anything
+ *   but rev C), no card (`noCard`: `album`), no video stored (`noVideo`: `video`).
+ * @typedef {{
+ *   choice: StandbyChoiceCode,
+ *   sleepMinutes: number|null,
+ *   file: string|null,
+ *   options: {choice: StandbyChoiceCode, enabled: boolean, reason: StandbyReasonCode|null}[],
+ *   videos: StoredFileDto[],
+ *   card: boolean,
+ *   orientation: 'portrait'|'reverse-portrait'|'landscape'|'reverse-landscape',
+ * }} StandbyDto The screen's choice as recorded (`sleepMinutes` 1–10 only
+ *   with `off`, `file` — `<internal|sd>/video/<name>` — only with `video`);
+ *   one option per choice, in the order `keep`, `off`, `video`, `album`
+ *   (`reason` is `null` exactly when `enabled`); the videos stored on the
+ *   screen, internal memory and card (empty when it is not awake); whether
+ *   it has a card; and how it stands, the orientation last used with it
+ *   (`screenOrientations`), else its model's: the shape photos are framed in.
+ * @typedef {{path: string, bytes: number}} AlbumAddedDto Where the photo
+ *   went (`sd/image/<name>`) and the bytes of the PNG stored.
+ */
+
 /**
  * Event the app sends when the window's close button is pressed with unsaved
  * edits and no screen live: the UI asks, then calls `closeWindow`.
@@ -411,6 +450,36 @@ function tauriBridge(invoke, tauri = {}) {
     clearCache: (scope, confirmed) => invoke('clear_cache', { scope, confirmed }),
     /** @returns {Promise<CacheDto>} */
     setCacheLimit: (bytes) => invoke('set_cache_limit', { bytes }),
+    // -------------------------------- when the computer shuts down --
+    /** The screen's choice and what it offers. @returns {Promise<StandbyDto>} */
+    standbyOverview: (screen) => invoke('standby_overview', { screen }),
+    /**
+     * Records the choice and writes its plan B to the screen (one OPTIONS),
+     * only with `confirmed` (the answer to the dialog that said what is
+     * written); `keep` while it is the choice writes nothing. The screen
+     * must be awake. @returns {Promise<StandbyDto>}
+     * @param {{choice: StandbyChoiceCode, sleepMinutes?: number|null, file?: string|null}} request
+     *   `sleepMinutes` (1–10) with `off`, `file` with `video`, else `null`
+     */
+    setStandby: (screen, { choice, sleepMinutes = null, file = null }, confirmed) => invoke('set_standby', { screen, choice, sleepMinutes, file, confirmed }),
+    /** A photo chosen on the PC (JPEG, PNG, BMP or GIF), or `null` when cancelled. @returns {Promise<string|null>} */
+    pickPhoto: () => invoke('pick_photo'),
+    /**
+     * The photo framed as the album shows it, in the shape the screen stands
+     * in (`StandbyDto.orientation`), its EXIF orientation applied: Fill
+     * (`cover`) or Fit (`contain`, black around it). @returns {Promise<string>} a `data:` PNG URL
+     * @param {'cover'|'contain'} fit
+     */
+    albumPreview: (screen, source, fit) => invoke('album_preview', { screen, source, fit }),
+    /**
+     * Sends the photo, framed like its preview, to the card album as
+     * `sd/image/<name>` (a `.png` of the panel's size), only with
+     * `confirmed`; a photo of that name is replaced only with `replace`
+     * (the answer to replacing it), else the call rejects `notConfirmed`
+     * (`detail`: `replacing sd/image/<name>`) and nothing is sent. Nothing is
+     * sent without a card. @returns {Promise<AlbumAddedDto>}
+     */
+    albumAdd: (screen, source, fit, name, confirmed, replace = false) => invoke('album_add', { screen, source, fit, name, confirmed, replace }),
     setUnsaved: (unsaved) => invoke('set_unsaved', { unsaved }),
     closeWindow: () => invoke('close_window'),
     quitApp: () => invoke('quit_app'),
@@ -460,6 +529,8 @@ export function createBridge(win) {
     onGifQuery: (query) => root?.setAttribute('data-demo-gif-query', JSON.stringify(query)),
     onGifPreview: (id) => root?.setAttribute('data-demo-gif-preview', id),
     onGifCollect: (id) => root?.setAttribute('data-demo-gif-collect', id),
+    // And every plan B written to a screen ("When the computer shuts down").
+    onStandby: (writes) => root?.setAttribute('data-demo-standby', JSON.stringify(writes)),
     languages: win.navigator?.languages ?? [],
     hold: params.has('hold'),
   });

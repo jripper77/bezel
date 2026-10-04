@@ -115,6 +115,33 @@ const DRAGON_STORAGE = Object.freeze({
   files: Object.freeze([...DEMO_STORAGE.files, ['internal/video/dragon.mp4', 2_588_343]]),
 });
 
+/**
+ * The 8.8" of the `album` scenario (D-2026-10-03-power-off-standby-4): the
+ * demo's storage plus a card album of two photos, one Bezel sent (cataloged,
+ * with its local copy: it has a thumbnail) and one the vendor app put there
+ * (shown by its name).
+ */
+export const ALBUM_STORAGE = Object.freeze({
+  ...DEMO_STORAGE,
+  files: Object.freeze([...DEMO_STORAGE.files, ['sd/image/praia.png', 1_105_920], ['sd/image/img_0042.jpg', 734_003]]),
+  catalog: Object.freeze([
+    ...DEMO_STORAGE.catalog,
+    { path: 'sd/image/praia.png', size: 1_105_920, sentAt: day('2026-10-02'), source: '/home/demo/Imagens/Praia.jpg', card: DEMO_STORAGE.cardTotal, resolution: { width: 480, height: 1920 } },
+  ]),
+});
+
+/**
+ * Photos on the PC the demo's photo picker knows, upright (their EXIF
+ * orientation applied): a phone photo taken standing, stored 4032x3024 with
+ * EXIF orientation 6, comes out 3024x4032.
+ */
+export const DEMO_PHOTOS = Object.freeze({
+  '/home/demo/Imagens/Praia do Forte.jpg': Object.freeze({ width: 3024, height: 4032 }),
+});
+
+/** The photo the demo's picker returns. */
+export const DEMO_PICKED_PHOTO = '/home/demo/Imagens/Praia do Forte.jpg';
+
 /** The capacity of the user's card (29.7 GiB), the only trait the protocol shows of a card. */
 export const VENDOR_CARD_TOTAL = 31_890_132_172;
 /** Another card the demo's catalog remembers a file on. */
@@ -377,7 +404,7 @@ export const DEMO_UDEV_COMMAND = 'sudo install -m 644 /home/demo/.cache/io.githu
 export const DEMO_KLIPY_KEY = 'demo-demo-demo-a1b2';
 
 /**
- * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: object, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean, flaky?: boolean, klipy?: {key: string|null, rateLimited?: boolean}}>}
+ * @type {Record<string, {screens?: object[], desktopMode?: object[], error?: string, storage?: object, ffmpeg?: boolean, card?: boolean, internalTotal?: number, theme?: object, denied?: boolean, hung?: boolean, flaky?: boolean, klipy?: {key: string|null, rateLimited?: boolean}, standby?: {choice: string, sleepMinutes: number|null, file: string|null}}>}
  */
 export const SCENARIOS = Object.freeze({
   turing88: { screens: [turing88] },
@@ -415,4 +442,10 @@ export const SCENARIOS = Object.freeze({
   gifs: { screens: [turing88], klipy: { key: DEMO_KLIPY_KEY } },
   gifsNoKey: { screens: [turing88], klipy: { key: null } },
   gifsRateLimited: { screens: [turing88], klipy: { key: DEMO_KLIPY_KEY, rateLimited: true } },
+  // "When the computer shuts down" (D-2026-10-03-power-off-standby-6): an
+  // 8.8" without a card (no album), one whose choice is to turn off after
+  // 5 minutes, and one that shows its card album, with two photos in it.
+  noCard: { screens: [turing88], card: false },
+  standbyOff: { screens: [turing88], standby: { choice: 'off', sleepMinutes: 5, file: null } },
+  album: { screens: [turing88], storage: ALBUM_STORAGE, standby: { choice: 'album', sleepMinutes: null, file: null } },
 });

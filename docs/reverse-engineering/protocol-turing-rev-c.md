@@ -105,9 +105,9 @@ bytes (236 for 0x6F). Every packet is zero-padded to 250 bytes.
 | 0x81 | ROTATION | `81 ef 69 00 00 00 01 00 00 00 <0..3>` | none | no | theme start, large screens | P (**inferred**) |
 | 0x82 | (restart device app?) | `82 ef 69 00 00 00 01` | none; the vendor waits 2 s and re-inits | no | before video play, small screens | X |
 | 0x83 | TURNOFF | `83 ef 69 00 00 00 01` | none | yes | exit, unless "sleep mode" is set | D |
-| 0x84 | RESTART | `84 ef 69 00 00 00 01` | none; the SoC reboots and re-enumerates | yes, `Reset` | device page; after a firmware upload | X |
+| 0x84 | RESTART | `84 ef 69 00 00 00 01` | none; the SoC reboots and re-enumerates into its start mode (section 19) | yes, `Reset` | device page; after a firmware upload | X |
 | 0x86 | PRE_UPDATE_BITMAP | `86 ef 69 00 00 00 01` | none | before every full frame | once per theme start | D |
-| 0x87 | (end of PC stream?) | `87 ef 69 00 00 00 01` | none | no | every theme stop | D |
+| 0x87 | (end of PC stream?) | `87 ef 69 00 00 00 01` | none; after a device video it freezes the video's frame (section 19) | no | every theme stop | D |
 | 0x8C | PLAY_IMAGE | `8c ef 69 BE32(n) 00 00 00 <path>` | `play_img_ok` (3 s) | no | device page | D |
 | 0x96 | STOP_MEDIA | `96 ef 69 00 00 00 01` | contains `media_stop` once playback stopped (1 s) | yes, `R 1024`, ignored | polled after STOP_VIDEO | D |
 | 0xC8 | DISPLAY_BITMAP | `c8 ef 69 BE32(W*H*4) 00 00 00` + data phase | one read, logged; hardware: `full_png_sucess` | yes, bytes 6..7 differ (quirk 18.2) | full frames | D |
@@ -195,14 +195,26 @@ software** (section 10).
 | Byte | Field | Values |
 |---|---|---|
 | 10 | brightness | stored brightness 0..255. Python's constant `2d` therefore stores 45 |
-| 11 | startMode | 0 default (built-in clock/logo), 1 image, 2 video: what the device shows on its own after boot or when no host streams. The vendor UI says it takes effect after a power cycle |
+| 11 | startMode | 0 default (built-in clock/logo), 1 image, 2 video: what the device shows on its own once the SoC has booted. Applied only when the SoC (re)starts (power-up, 0x84, the MCU restart), not when the host leaves; the vendor UI says it takes effect after a power cycle. **Hardware** (section 19): 1 is the firmware's carousel album (the vendor's zh label 轮播相册), every image of `/mnt/SDCARD/img/` in turn every ~3–5 s, with no interval setting; 2 plays the first entry of `/mnt/SDCARD/video/` |
 | 12 | reserved | `00` |
-| 13 | imgFlip | 0/1, "flip 180°" for device-side playback. The vendor also sets 1 when its rotation setting is non-zero on large screens |
-| 14 | sleepDelay | 0 never, 1..10 minutes: the firmware's own screen-sleep timer |
+| 13 | imgFlip | 0/1, "flip 180°" for device-side playback. The vendor also sets 1 when its rotation setting is non-zero on large screens. It turns by 180° only, so album pictures for a screen used the other way must be stored already turned to the native buffer (480 x 1920 on the 8.8") |
+| 14 | sleepDelay | 0 never, 1..10 minutes: the firmware's own screen-sleep timer. **Hardware** (section 19): it counts the time since the last host traffic and, when it fires, the SoC powers down as with TURNOFF; it also fires during standalone album or video playback |
 
 Sent at every theme start (then 10 ms), by the device page's Save, and first in the exit sequence. Two OEM builds
-force startMode 2. Which stored file start modes 1 and 2 show is decided by the firmware (presumably the last one
-played with 0x78 / 0x8C); there is no "set boot media" command on this transport.
+force startMode 2. The vendor's `offLineMode` setting never reaches rev C: only the config packet of its "207 LCD"
+class carries it.
+
+The firmware, not the host, picks the stored file a start mode shows (**hardware**, section 19): start mode 2 boots
+the first entry of `/mnt/SDCARD/video/`, and playing another video with 0x78 first (then waiting 75 s) does not change
+it; start mode 1 cycles every image of the card. There is no "set boot media" command on this transport: the vendor
+app (decompiled) never names a boot file. OPTIONS is the only packet behind its start-mode setting, and its "Play
+Select" sends 0x78 with flag 0.
+
+Bezel writes OPTIONS whole from what it recorded for the screen (the start mode, flip 0, the sleep timer, and as
+brightness the level the user chose with it, sent as SET_BRIGHTNESS just before, else the link's last level), and only on
+an explicit user action: the boot media (`bezel storage boot`, **Show at start**) and the plan B of the shutdown choice
+(section 16). Neither rewrites the other's fields on its own; the last action wins, and the catalog records which plan B
+was stored last, with its chosen level (`D-2026-10-03-power-off-standby-2` (3), (4)).
 
 ### 6.3 ROTATION 0x81 (vendor)
 
@@ -247,7 +259,7 @@ The vendor's serial refresh rate is therefore a fixed 1 Hz. An anti-burn-in opti
 
 | Event | Vendor traffic |
 |---|---|
-| Theme stop or switch | `87 ef 69 00 00 00 01` (semantics unknown; probably "leave PC-stream mode") |
+| Theme stop or switch | `87 ef 69 00 00 00 01` (semantics unknown; probably "leave PC-stream mode"; after a device video it freezes the video's frame, section 19) |
 | App exit, Windows shutdown | 100 ms; OPTIONS; SET_BRIGHTNESS 0; TURNOFF (unless "sleep mode" is set); STOP_VIDEO; close |
 | System suspend | SET_BRIGHTNESS 0 |
 | Resume | SET_BRIGHTNESS `<b>`; re-init with up to 40 reconnect attempts |
@@ -454,6 +466,8 @@ granularity (section 2.5); replies are matched to requests by timing only.
 | TF card videos | `/mnt/SDCARD/video/` | `/mnt/SDCARD/video/` |
 | RAM (lost at reboot) | `/tmp/video/` | `/tmp/video/` |
 
+Start mode 1 cycles the TF card's `img/` and start mode 2 boots the first entry of its `video/` (section 6.2).
+
 Firmware image: `/update.app` (section 14). The vendor's factory test mode (a command-line switch) deletes `/app_cfg`
 after init and `/usr/data/app.cfg` at theme start; `/usr/data/...` are otherwise TUR_USB paths. The serial transport
 never reads or writes a device configuration file: settings travel with 0x7B, 0x7D and 0x81.
@@ -519,7 +533,8 @@ keeps sending the theme overlay at 1 Hz.
 3. If absent, upload it (section 13.4) to the TF card when a card is present, else to internal flash. The file must
    already have the panel's exact native resolution.
 4. PLAY_VIDEO with loop = 1: [small screens] 0x82, 2000 ms, re-init (HELLO, up to 10 attempts); GET_FILE_SIZE (result
-   unused); `78 ef 69 BE32(n) 01 00 00 <path>`; read <= 6 s for `play_video_success`; 2 attempts.
+   unused); `78 ef 69 BE32(n) 01 00 00 <path>`; read <= 6 s for `play_video_success`; 2 attempts. A looping video
+   keeps playing after the host closes the port (section 19).
 
 Overlay:
 
@@ -584,20 +599,50 @@ screen off. Everything below is **never sent implicitly**: it needs an explicit 
 automatically, once per connection attempt, to a SoC that is on the bus but answers no HELLO or stopped reading; it is
 refused while another program holds the SoC's port.
 
+The shutdown choice (`D-2026-10-03-power-off-standby-2` (5) and `-3`) adds no new exception: on its paths, OPTIONS,
+RESTART 0x84 and PLAY_VIDEO of a stored file come only from the user's own choice of what a screen does when the
+computer shuts down. OPTIONS (written whole: the plan B) goes when the user confirms that choice; at shutdown go the
+packets that carry it out, the one case where they leave without a click at that moment:
+
+| Choice | At shutdown | Plan B (OPTIONS) |
+|---|---|---|
+| `keep` (default) | nothing | start mode of the boot media, sleep 0 (nothing when it already was `keep`) |
+| `off` | TURNOFF 0x83 only, without waiting for the SoC to leave | start mode of the boot media, sleep 1..10 min |
+| `video` | GET_FILE_SIZE 0x6E of the chosen file, STOP_VIDEO 0x79 and at most one STOP_MEDIA 0x96, then PLAY_VIDEO 0x78, loop; no 0x87 after it | start mode 2, sleep 0 |
+| `album` | GET_STORAGE_INFO 0x64 (a card?), SET_BRIGHTNESS 0x7B when a level was stored with the last plan B, OPTIONS (start mode 1, sleep 0, that level), then RESTART 0x84, without waiting | start mode 1, sleep 0 |
+
+Besides the queries, the SET_BRIGHTNESS of `album` is the one packet at shutdown that `D-2026-10-03-power-off-standby-3`
+(1) does not list (it names OPTIONS start mode 1 and RESTART), and it adds no exception. OPTIONS stores as its byte 10
+the level the link last set (section 6.2), and the link that carries out the choice at shutdown is the live one, at the
+level the studio set, or one opened for it, which set none. Without 0x7B first, the album would start after the restart
+at that level or at the vendor's default (170), not at the one chosen with the plan B (`bezel standby set album
+--brightness`), which `D-2026-10-03-power-off-standby-2` (3) has OPTIONS carry. It goes only when the record holds a
+chosen level; otherwise OPTIONS carries the link's level and no 0x7B is sent. 0x7B is the brightness Bezel sends at
+every theme start, within the automatic set above: neither a storage command nor a disruptive one, and persistent only
+through the OPTIONS that follows it. That OPTIONS (start mode 1) is what the catalog then records as the plan B stored
+last, also when a boot media set after the choice had stored another.
+
+A choice that cannot be carried out (the file or the card is gone) gets TURNOFF instead of a frozen frame. The sleep
+timer goes only with `off`, because it also powers down a standalone album or video (section 19). No other persistent,
+storage or disruptive command (DELETE, UPLOAD, 0x82, 0x81, the MCU restart) leaves these paths, and Bezel never
+deletes a device file on its own. While a rev C screen is live, a minimal partial update (one pixel with the value
+already shown) and the usual QUERY_STATUS after 30 s without traffic keep the sleep timer from firing
+(`D-2026-10-03-power-off-standby-5`): frame traffic, within the automatic set above.
+
 | Command | Effect | Kind |
 |---|---|---|
 | 0x66 DELETE_FILE | removes a stored file | destructive |
 | 0x6F UPLOAD_FILE | writes or overwrites a file; fills flash | destructive (storage write) |
 | automatic video cleanup (section 13.6) | deletes every stored video | destructive; Bezel never runs it |
 | firmware (`/update.app` + 0x84) | replaces the firmware | destructive |
-| 0x84 RESTART | reboots the SoC; the gadget re-enumerates | disruptive |
+| 0x84 RESTART | reboots the SoC, one packet: the gadget leaves the bus in about 3 s and returns about 13 s later in its start mode (**hardware**, 8.8") | disruptive |
 | 0x82 | restarts something on the device; the vendor waits 2 s and re-inits | disruptive |
-| MCU `00 00 00 00 00 c9` | restarts the SoC: it leaves the bus at once and returns about 10 s later (**hardware**, 8.8"), also when hung | disruptive |
+| MCU `00 00 00 00 00 c9` | restarts the SoC, with the MCU port held 8 s: it leaves the bus at once and returns about 10 s later (**hardware**, 8.8"), also when hung | disruptive |
 | USB device reset (section 15) | re-enumerates the screen | disruptive |
-| 0x7D OPTIONS | boot mode, flip, sleep timer and stored brightness | persistent |
+| 0x7D OPTIONS | boot mode, flip, sleep timer and stored brightness; Bezel writes it whole (section 6.2) | persistent |
 | 0x81 ROTATION | rotation setting | persistent (**inferred**) |
 | 0x65 LIST_DIR on a missing directory | creates it | storage write |
-| 0x78 / 0x8C | device-side playback; may become the boot media | explicit only |
+| 0x78 / 0x8C | device-side playback; a looping video outlives the host's connection; neither picks the boot media (section 6.2) | explicit only |
 
 ## 17. Test vectors
 
@@ -716,7 +761,8 @@ MCU command (disruptive; written to the MCU port, not the SoC; not padded):
 ## 19. Hardware observations
 
 Confidence **hardware**: one Turing 8.8" rev C (SoC 0525:a4a7 and MCU 1a86:ca88 `CT88INCH` both enumerated), Linux
-host, measured by the project.
+host, measured by the project. The rows from "Video after the host" to "Host shut down", and the last sentence of
+TURNOFF, were measured on ROM 1.90 on 2026-10-03 (`D-2026-10-03-power-off-standby-1`).
 
 | Observation | Detail |
 |---|---|
@@ -725,7 +771,7 @@ host, measured by the project.
 | Full-frame time | about 220 ms from the HELLO answer to that reply (about 17 MB/s for 3,701,250 wire bytes, **inferred** from the timing) |
 | Partial updates | sent back to back, each followed by QUERY_STATUS, they are answered `needReSend:0\|renderCnt:0` roughly every 2.5 ms |
 | Re-enumeration | when another program that was driving the screen stopped, the SoC gadget re-enumerated (new USB device number) within about 2 s |
-| TURNOFF | 0x83 powers the SoC down: its gadget leaves the bus about 3 s later and only the MCU stays; turing-smart-screen-python sends it on exit. A wake right after takes about 17 s, after a few seconds of sleep about 11 s |
+| TURNOFF | 0x83 powers the SoC down: its gadget leaves the bus about 3 s later and only the MCU stays; turing-smart-screen-python sends it on exit. A wake right after takes about 17 s, after a few seconds of sleep about 11 s. The panel goes fully dark, backlight included, and stays off (observed for over 4 minutes); nothing requires the host to wait for the SoC to leave |
 | Storage info | 0x64 on the 8.8": flash 65.9 MiB after the 512 KiB reserve; a 29.7 GiB FAT32 card reported in the TF fields |
 | Uploads | PNG and MP4 to `/mnt/UDISK/{img,video}` and `/mnt/SDCARD/{img,video}` accepted and verified with GET_FILE_SIZE; `create_success` and `file_rev_done` as in section 13.4 |
 | Playback | PLAY_VIDEO (loop) and PLAY_IMAGE answered; after playback a full frame (PRE_UPDATE_BITMAP + frame) is accepted (`full_png_sucess`); that the overlay's alpha shows the video through is still to be confirmed by eye |
@@ -733,21 +779,31 @@ host, measured by the project.
 | Host drain | writes of 64 KB to a card file can take longer than a 10 ms serial timeout to drain; a signal during the drain must not fail the write |
 | Upload size | the firmware stops reading at exactly 29,577,216 bytes of an upload, at any rate, and hangs (section 13.4) |
 | MCU restart | `00 00 00 00 00 c9` on the MCU port, held 8 s: the SoC left the bus within 0.2–1.4 s and returned under a new device number about 10 s later, answering HELLO; the same from the hung state above (three times), so no USB replug is needed |
+| Video after the host | PLAY_VIDEO 0x78 with loop = 1 keeps playing after the host closes the port, and it replaces the frozen last frame of the PC stream: connecting, HELLO and PLAY_VIDEO took about 0.55 s in all |
+| 0x87 after a video | 0x87 sent while a device video plays freezes the video's current frame; the screen does not switch to its start-mode content |
+| Start mode 1 | after OPTIONS start mode 1 and a SoC restart, the firmware's carousel album (the vendor's zh label 轮播相册) shows every image of `/mnt/SDCARD/img/` in turn, every ~3–5 s, with no interval setting. imgFlip turns by 180° only, so pictures for a landscape screen must be stored already turned to the native 480 x 1920 |
+| Start mode 2 | after OPTIONS start mode 2 and a SoC restart, the firmware plays the first entry of `/mnt/SDCARD/video/`. Playing another video with 0x78 first and waiting 75 s did not change it: the start mode is applied only when the SoC starts, and the file is the firmware's choice |
+| RESTART 0x84 | one packet: the SoC left the bus in about 3 s and returned about 13 s later, already showing its start mode (the album above). The MCU restart, by contrast, needs its port held 8 s |
+| Sleep timer | OPTIONS byte 14 counts idle time since the last host traffic. With a 1-minute timer, 150 s of streamed frames kept the screen awake; about 60–75 s after the stream stopped the SoC left the bus, as with TURNOFF. It also fires while the screen plays the album or a video on its own |
+| Host shut down | a board that keeps USB powered in S5 leaves the screen frozen on the last frame after shutdown when the host sends nothing |
 
 Consequences: full frames have a text reply of their own; the partial round trip is far below the vendor's 1 Hz tick;
 a host must expect the gadget to come back under a new device number and re-open it by identity
 ([devices.md](devices.md) section 5.4), to wake a screen another program turned off, and not to cancel an upload
-lightly: the firmware has no abort for the data phase.
+lightly: the firmware has no abort for the data phase. What a screen shows once its host is gone follows from the
+last packets: a looping device video keeps playing, TURNOFF leaves it dark, a start mode shows only after a SoC
+restart (0x84), the sleep timer turns it off after the idle time, and with nothing sent the last frame stays frozen
+for as long as the USB is powered.
 
 ## 20. Open questions
 
 1. HELLO's trailing `c5 d3`; the full HELLO answer beyond the id (Python reads 23 bytes, the vendor up to 1024).
 2. Whether bytes 7..9 of the 0xC8 header must be zero (Python sends `0e 10` in bytes 6..7), and whether the firmware
    needs the vendor's full-frame ritual (brightness, frame sent twice) or Python's 0x86 / `2c` / 0xC8 suffices.
-3. Semantics of 0x82 and 0x87, and of the vendor's unused MCU command values (10, 11, 13, 14, 15, 40, 101, 201,
-   253); 0xC9 restarts the SoC (section 19).
-4. Whether 0x81 and imgFlip affect streamed frames or only stored media; whether 0x81 persists; which file start modes
-   1/2 show; whether the 0x78 loop flag persists.
+3. Semantics of 0x82, of 0x87 beyond freezing a device video's frame, and of the vendor's unused MCU command values
+   (10, 11, 13, 14, 15, 40, 101, 201, 253); 0xC9 restarts the SoC (section 19).
+4. Whether 0x81 and imgFlip affect streamed frames or only stored media; whether 0x81 persists; whether the 0x78
+   loop flag survives a SoC restart (it survives the host closing the port, section 19).
 5. How the screen wakes after TURNOFF (no host sends TURNON).
 6. Whether the no-change dummy (6 bytes + `ef 69`) is valid in raw BGRA mode, where a single-pixel record is 7 bytes.
 7. The text before `file:` in LIST_DIR answers, and whether long listings span several USB packets.
@@ -755,3 +811,6 @@ lightly: the firmware has no abort for the data phase.
 9. Storage units (KiB per the vendor's arithmetic).
 10. Which USB control request actually wakes the MCU; whether `rtscts` / DTR matter to any firmware.
 11. Endpoint layout of the models without a descriptor dump.
+12. What start modes 1 and 2 show without a memory card (the internal `/mnt/UDISK/` folders?), and whether the
+    "first entry" of `/mnt/SDCARD/video/` follows the directory order, the name or the age.
+13. Which host packets reset the sleep timer: it was measured with streamed frames only.

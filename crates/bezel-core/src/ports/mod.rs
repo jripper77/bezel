@@ -14,8 +14,9 @@ use crate::domain::media::{MediaInfo, MediaTools, StreamSpec, TranscodeTarget};
 use crate::domain::poster::PosterSpec;
 use crate::domain::screen::{Brightness, ScreenIdentity};
 use crate::domain::sensor::{Quantities, SensorInfo, Snapshot, Wanted};
+use crate::domain::standby::PlanB;
 use crate::domain::storage::{
-    Confirmed, FileName, RemotePath, Repeat, StartMode, StorageInfo, StorageLocation,
+    Confirmed, FileName, RemotePath, Repeat, StorageInfo, StorageLocation,
 };
 use crate::domain::theme::{AssetRef, Theme};
 use std::collections::BTreeMap;
@@ -92,6 +93,14 @@ pub trait ScreenLink: Send {
     /// Turns the panel off. Some screens power down completely (a rev C
     /// SoC leaves the bus); the next connection wakes them.
     fn screen_off(&mut self) -> Result<()>;
+    /// Turns the panel off at once, waiting for nothing: the `off` choice
+    /// when the computer shuts down, within the shutdown's deadline
+    /// (D-2026-10-03-power-off-standby-3; rev C: TURNOFF 0x83 alone, without
+    /// waiting for the SoC to leave the bus). The default:
+    /// [`Self::screen_off`].
+    fn turn_off_now(&mut self) -> Result<()> {
+        self.screen_off()
+    }
     /// Hands the screen back to its standalone mode (clock, stored media).
     fn release(&mut self) -> Result<()>;
     /// The screen's stored files and device-side playback, over this same
@@ -157,22 +166,38 @@ pub trait ScreenStorage {
     /// (rev C: PLAY_VIDEO, waiting for `play_video_success`). With
     /// [`Repeat::Loop`] it loops until [`Self::stop`]; frames presented
     /// meanwhile are drawn over it with their alpha. The firmware may also
-    /// take it as the video of [`StartMode::Video`].
+    /// take it as the video of
+    /// [`StartMode::Video`](crate::domain::storage::StartMode::Video).
     fn play_video(&mut self, path: &RemotePath, repeat: Repeat) -> Result<()>;
 
     /// Stops whatever the screen plays and shows the stored image at `path`
     /// (rev C: PLAY_IMAGE, waiting for `play_img_ok`). The firmware may also
-    /// take it as the image of [`StartMode::Image`].
+    /// take it as the image of
+    /// [`StartMode::Image`](crate::domain::storage::StartMode::Image).
     fn play_image(&mut self, path: &RemotePath) -> Result<()>;
 
     /// Stops device-side playback (video or image) and waits until the
     /// screen reports it stopped. Nothing is deleted.
     fn stop(&mut self) -> Result<()>;
 
-    /// Persistently sets what the screen shows on its own after power-up
-    /// (rev C: OPTIONS 0x7D, rewritten with the brightness and sleep delay
-    /// this link last sent so that only the start mode changes).
-    fn set_start_mode(&mut self, mode: StartMode, confirmed: Confirmed) -> Result<()>;
+    /// Persistently writes what the screen does on its own: its start mode
+    /// after power-up and its sleep timer (rev C: OPTIONS 0x7D written
+    /// whole, with the brightness this link last sent, `plan`'s start mode,
+    /// no flip and `plan`'s timer; D-2026-10-03-power-off-standby-2 (3),
+    /// (4)). Families that cannot: `Unsupported`, nothing sent.
+    fn set_options(&mut self, plan: PlanB, confirmed: Confirmed) -> Result<()>;
+
+    /// Restarts the screen's own system into its start mode, without
+    /// waiting for it (rev C: RESTART 0x84; the `album` choice when the
+    /// computer shuts down, D-2026-10-03-power-off-standby-3). Disruptive,
+    /// never destructive: the link is gone afterwards. The default, for
+    /// screens that cannot: `Unsupported`, nothing sent.
+    fn restart(&mut self, confirmed: Confirmed) -> Result<()> {
+        let _ = confirmed;
+        Err(crate::BezelError::Unsupported(
+            "restarting the screen's system".into(),
+        ))
+    }
 }
 
 /// Driven port: the local copies of what Bezel sends to screens, and their

@@ -33,6 +33,8 @@ parts:
 - [Installing ffmpeg](ffmpeg.md), needed to convert videos.
 - [Preparing an SD card](sd-card.md) for screens with a card slot.
 - [Running at login](run-at-login.md): from the tray, or as a systemd service.
+- [When the computer shuts down](power-off.md): leave the screen as it is,
+  turn it off, loop a video stored on it or show the card's photo album.
 - [Coming from turing-smart-screen-python](migrating.md).
 
 ## When something goes wrong

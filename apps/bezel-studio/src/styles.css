@@ -526,6 +526,73 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
 .collection-empty p { margin: 0; }
 .collection-empty p:first-of-type { color: var(--text); font-weight: 600; }
 
+/* --------------------------- when the computer shuts down (Settings) -- */
+.standby { display: grid; gap: 8px; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border); }
+.standby[aria-busy="true"] .standby-options { cursor: progress; }
+.standby-head, .standby-field-head { position: relative; display: flex; align-items: center; gap: 6px; }
+.standby-head > svg { flex: none; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.standby-head h3 { flex: 1; margin: 0; font-size: 0.9rem; }
+.standby-field-head label, .standby-field-head h3 { flex: 1; }
+.standby-field-head .dialog-subtitle { margin: 4px 0; }
+.standby-screen { margin: -4px 0 0; color: var(--muted); font-size: 0.8rem; }
+.standby .hint, .standby .field-error { margin: 0; }
+.standby-options { display: grid; gap: 6px; }
+.standby-option { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 4px; }
+.standby-radio {
+  display: grid; grid-template-columns: 16px 16px minmax(0, 1fr); align-items: center; gap: 2px 8px; width: 100%; min-height: 40px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer;
+}
+.standby-radio > svg { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.standby-radio:hover:not([aria-disabled="true"]) { border-color: var(--accent); }
+.standby-radio[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.standby-mark { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--muted); background: var(--surface); }
+.standby-radio[aria-checked="true"] .standby-mark { border-color: var(--accent); background: radial-gradient(circle, var(--accent) 0 3.5px, var(--surface) 4.5px); }
+.standby-radio[aria-disabled="true"] { border-style: dashed; background: transparent; color: var(--muted); cursor: not-allowed; }
+.standby-radio[aria-disabled="true"] > svg { stroke: var(--muted); }
+.standby-label { overflow-wrap: anywhere; }
+.standby-detail { grid-column: 3; color: var(--muted); font-size: 0.8rem; font-weight: 400; overflow-wrap: anywhere; }
+.help-button { width: 28px; min-height: 28px; font-weight: 700; }
+.standby-option > .help-button { margin-top: 6px; }
+.help-button[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.popover {
+  position: absolute; z-index: 4; top: calc(100% + 4px); left: 0; right: 0; max-width: 420px; margin-left: auto;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text);
+  box-shadow: var(--shadow); font-size: 0.85rem; font-weight: 400;
+}
+.popover p { margin: 4px 0 0; }
+.popover:focus-visible { outline-offset: 0; }
+.standby-dialog .field select { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+.standby-dialog .field input[type="text"] { width: 100%; min-height: 32px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+.standby-field-head label { font-size: 0.85rem; color: var(--muted); }
+.standby-summary { margin: 12px 0 4px; }
+.standby-written { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.standby-videos { margin: 4px 0; }
+.video-group + .video-group { margin-top: 8px; }
+.video-medium { margin: 0 0 2px; color: var(--muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.video-choice small { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.album-photos { list-style: none; margin: 4px 0 8px; padding: 0; display: grid; gap: 4px; max-height: min(40vh, 360px); overflow: auto; }
+.album-photo { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.album-thumb { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 6px; background: #0b1020; color: #94a3b8; overflow: hidden; }
+.album-thumb svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.album-thumb img { display: none; width: 100%; height: 100%; object-fit: cover; }
+.album-thumb.has-picture img { display: block; }
+.album-thumb.has-picture svg { display: none; }
+.album-info { display: grid; gap: 1px; min-width: 0; }
+.album-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.album-info small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.album-photo .icon-button svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.album-need { margin: 0; }
+.standby-dialog .field-error:empty { display: none; }
+.album-preview { display: grid; justify-items: center; gap: 6px; margin: 4px 0 12px; padding: 12px; border-radius: var(--radius); background: var(--surface-3); }
+.album-preview figcaption .hint { margin: 0; text-align: center; }
+.album-frame { display: grid; place-items: center; width: 100%; max-width: 100%; border-radius: 6px; background: #000; box-shadow: 0 0 0 3px #1e293b; overflow: hidden; }
+.album-frame[data-axis="vertical"] { width: auto; height: min(32vh, 320px); }
+.album-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.album-frame[data-state="loading"] img, .album-frame[data-state="none"] img { visibility: hidden; }
+.album-fit { display: flex; width: max-content; }
+.album-fit button { min-height: 32px; padding: 0 16px; }
+.album-fit button + button { border-left: 1px solid var(--border); }
+
 /* Narrow windows (the app allows 960 px): the brand and the orientation
    labels go, the orientation names stay for screen readers and in tooltips. */
 @media (max-width: 1180px) {
@@ -541,6 +608,11 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
   .gif-frame[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
   .gif-tile { transition: border-color 120ms ease; }
   .collection-filter button { transition: color 120ms ease, box-shadow 120ms ease; }
+  .standby-radio { transition: border-color 120ms ease, background 120ms ease; }
+  .popover:not([hidden]) { animation: popover-in 120ms ease-out; }
+  .album-frame[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
 }
+
+@keyframes popover-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 @keyframes thumb-wait { from { opacity: 0.55; } to { opacity: 1; } }

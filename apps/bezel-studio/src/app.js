@@ -13,6 +13,7 @@ import { askChoice } from './ui/dialog.js';
 import { createPreferences } from './ui/preferences.js';
 import { createGifSearch } from './ui/gif-search.js';
 import { createCollectionPanel } from './ui/collection.js';
+import { createStandbyPanel } from './ui/standby.js';
 import { showAccessHelp } from './ui/udev.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
@@ -168,6 +169,23 @@ const storage = createStoragePanel({
   }),
   restart: (screen) => restartScreen(screen),
 });
+// Whether the card album changed what the screen stores since the Storage
+// tab last listed it: it lists again when shown.
+let storageStale = false;
+
+// "When the computer shuts down" under Screen › Settings
+// (D-2026-10-03-power-off-standby-6), for the screen chosen at the top. It
+// reads the screen's choice only while shown.
+const standby = createStandbyPanel({
+  root: $('standby-panel'),
+  t,
+  locale: () => locale,
+  bridge,
+  notify: toast,
+  context: () => ({ screen: currentScreen() }),
+  storageChanged: () => { storageStale = true; },
+});
+
 // The Storage tab is the storage manager: shown, it takes the whole width of
 // the window (D-2026-09-30-storage-manager-4); the editor comes back with
 // any other tab.
@@ -180,13 +198,27 @@ function syncStorageWide() {
   if (wide) {
     setFramingMode(false, { restoreFocus: false });
     storage.show();
+    if (storageStale) void storage.refresh();
+    storageStale = false;
   } else {
     storage.hide();
     canvasView.fit();
   }
 }
-const panelWatch = new MutationObserver(syncStorageWide);
-for (const id of ['panel-screen', 'screen-storage']) panelWatch.observe($(id), { attributes: true, attributeFilter: ['hidden'] });
+/** The Settings subtab shown or hidden: the standby section reads the choice when it shows. */
+let standbyShown = false;
+function syncStandby() {
+  const shown = !$('panel-screen').hidden && !$('screen-device').hidden;
+  if (shown === standbyShown) return;
+  standbyShown = shown;
+  if (shown) standby.show();
+  else standby.hide();
+}
+const panelWatch = new MutationObserver(() => {
+  syncStorageWide();
+  syncStandby();
+});
+for (const id of ['panel-screen', 'screen-storage', 'screen-device']) panelWatch.observe($(id), { attributes: true, attributeFilter: ['hidden'] });
 wireSubtabs(document.querySelector('#panel-screen .subtabs'), syncStorageWide);
 
 // The preview moves (animated GIFs, a video background) only while the
@@ -420,6 +452,7 @@ function renderScreenSelect() {
   $('status-device').textContent = device;
   library.renderScreen(state.screens, state.screen, state.live, state.brightness, state.desktopMode, { restarting: state.restarting, hung: state.hung });
   storage.update();
+  standby.update();
   inspector.contextChanged();
   void refreshAuto();
 }
@@ -904,6 +937,7 @@ function setLocale(next) {
   library.setCatalog(labelledCatalog());
   library.retranslate();
   storage.retranslate();
+  standby.retranslate();
   collection.retranslate();
   if (canvasView.framing()) $('overlay').setAttribute('aria-label', t('framing.surface'));
   refreshChrome('select');

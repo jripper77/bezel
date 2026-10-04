@@ -14,6 +14,7 @@ use bezel_core::domain::media::{MediaInfo, MediaTools, Mismatch};
 use bezel_core::domain::sensor::{
     DisplayFormat, Quantities, Reading, SensorInfo, Snapshot, format_reading,
 };
+use bezel_core::domain::standby::{Offer, SleepMinutes, Standby, StandbyOption, Unavailable};
 use bezel_core::domain::storage::{Capacity, FileEntry, NameError, Refusal, RemotePath};
 use bezel_themes::dto::{SizeDto, ThemeDto};
 use serde::Serialize;
@@ -634,6 +635,87 @@ pub struct StorageDto {
     pub card: Option<CapacityDto>,
     /// Internal folders, then the card's when a card is present.
     pub folders: Vec<FolderDto>,
+}
+
+/// What a screen does when the computer shuts down, as the section "When
+/// the computer shuts down" shows it (D-2026-10-03-power-off-standby-2, -6):
+/// the choice recorded in the catalog the CLI shares, the four options and
+/// why any is not offered, the videos stored on the screen, its card, and
+/// how it stands (the shape the album's photos are framed in).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StandbyDto {
+    /// `keep`, `off`, `video` or `album`.
+    pub choice: &'static str,
+    /// The sleep timer of `off`, 1 to 10 minutes; `None` for the others.
+    pub sleep_minutes: Option<u8>,
+    /// The video of `video` (`<internal|sd>/video/<name>`); `None` for the
+    /// others.
+    pub file: Option<String>,
+    /// The four options, in the order `keep`, `off`, `video`, `album`.
+    pub options: Vec<StandbyOptionDto>,
+    /// The videos stored on the screen with their sizes, internal first
+    /// (empty when it is not awake).
+    pub videos: Vec<StoredFileDto>,
+    /// Whether the screen has a memory card (false when it is not awake).
+    pub card: bool,
+    /// How the screen stands (`portrait`, `landscape`, ...): the orientation
+    /// last used with it, else its model's.
+    pub orientation: &'static str,
+}
+
+impl StandbyDto {
+    /// The DTO of `standby` as recorded, `options` as offered, what the
+    /// screen offers (`offer`: its card and videos) and `orientation`.
+    pub fn of(
+        standby: &Standby,
+        options: &[StandbyOption],
+        offer: &Offer,
+        orientation: Orientation,
+    ) -> Self {
+        Self {
+            choice: standby.choice().slug(),
+            sleep_minutes: standby.sleep_minutes().map(SleepMinutes::get),
+            file: standby.file().map(ToString::to_string),
+            options: options.iter().map(StandbyOptionDto::from).collect(),
+            videos: offer.videos.iter().map(StoredFileDto::from).collect(),
+            card: offer.card,
+            orientation: orientation_slug(orientation),
+        }
+    }
+}
+
+/// One of the four options for a screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StandbyOptionDto {
+    /// `keep`, `off`, `video` or `album`.
+    pub choice: &'static str,
+    /// Whether it can be chosen now.
+    pub enabled: bool,
+    /// Why not (`notConnected`, `unsupported`, `noCard`, `noVideo`);
+    /// `None` exactly when it is enabled.
+    pub reason: Option<&'static str>,
+}
+
+impl From<&StandbyOption> for StandbyOptionDto {
+    fn from(option: &StandbyOption) -> Self {
+        Self {
+            choice: option.choice.slug(),
+            enabled: option.unavailable.is_none(),
+            reason: option.unavailable.map(Unavailable::code),
+        }
+    }
+}
+
+/// A photo added to the card's album.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumAddedDto {
+    /// Where it is stored: `sd/image/<name>`.
+    pub path: String,
+    /// The bytes of the PNG stored.
+    pub bytes: u64,
 }
 
 /// Whether ffmpeg can convert videos, and how to install it.

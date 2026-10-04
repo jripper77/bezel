@@ -1429,3 +1429,37 @@ fn core_errors_keep_a_code_the_ui_translates() {
     });
     assert_eq!(busy.value("holders"), Some("b, c"));
 }
+
+/// Review W1 of iteration 3 of power-off-standby: the catalog locked for
+/// each call only ([`ArchivePerCall`]) is the same catalog and the same
+/// local copies, and holds no lock between its calls.
+#[test]
+fn the_archive_per_call_is_locked_only_while_it_is_called() {
+    use bezel_core::domain::archive::ScreenKey;
+    use bezel_core::domain::device::ModelId;
+    use bezel_core::domain::standby::Standby;
+    let f = fixture("per-call");
+    let free = || f.backend.storage.archive.try_lock().is_ok();
+    let key = ScreenKey::new(ModelId("turing-8.8"));
+    let mut store = f.backend.storage.archive_per_call();
+
+    let mut catalog = store.load().unwrap();
+    assert!(free());
+    catalog.screen_mut(&key).standby = Standby::Album;
+    store.save(&catalog).unwrap();
+    assert!(free());
+    let saved = f.backend.storage.archive().load().unwrap();
+    assert_eq!(
+        saved.screen(&key).map(|r| &r.standby),
+        Some(&Standby::Album)
+    );
+
+    let content = store.keep(b"a photo").unwrap();
+    assert!(free());
+    let kept = f.backend.storage.archive().read(&content).unwrap();
+    assert_eq!(kept.as_deref(), Some(&b"a photo"[..]));
+    assert_eq!(store.read(&content).unwrap(), kept);
+    store.discard(&content).unwrap();
+    assert!(free());
+    assert_eq!(store.read(&content).unwrap(), None);
+}

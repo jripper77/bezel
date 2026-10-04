@@ -73,10 +73,11 @@ test('file names come from local paths', () => {
 
 test('the boot dialog names the brightness the screen starts with', () => {
   const pt = translator('pt-BR');
-  assert.equal(bootKeepsText(pt, 40), 'Ela liga com brilho de 40%, o nível que você ajustou no Bezel, e nunca entra em repouso sozinha.');
+  // The sleep timer is the one "When the computer shuts down" sets (D-2026-10-03-power-off-standby-2 (4)).
+  assert.equal(bootKeepsText(pt, 40), 'Ela liga com brilho de 40%, o nível que você ajustou no Bezel. Ela só entra em repouso sozinha quando “Quando o computador desligar” está em apagar a tela.');
   assert.match(bootKeepsText(pt, null), /brilho padrão, cerca de 67%/);
   assert.match(bootKeepsText(pt, undefined), /cerca de 67%/);
-  assert.equal(bootKeepsText(translator('en'), 0), 'It starts with brightness 0%, the level you set in Bezel, and never goes to sleep on its own.');
+  assert.equal(bootKeepsText(translator('en'), 0), 'It starts with brightness 0%, the level you set in Bezel. It goes to sleep on its own only when “When the computer shuts down” is set to turn the screen off.');
 });
 
 test('demo names, kinds and theme videos follow the core', () => {

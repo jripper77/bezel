@@ -4,7 +4,8 @@
 
 As telas com armazenamento (Turing rev C e a geração Turing USB) guardam imagens
 e vídeos na memória interna e, quando têm entrada, num cartão SD. Elas os tocam
-sozinhas e podem mostrar um deles ao ligar, sem o Bezel rodando.
+sozinhas e, nas telas Turing rev C, podem ligar com as imagens do cartão ou um
+dos vídeos dele, sem o Bezel rodando.
 
 A tela tem quatro pastas: `internal/image`, `internal/video`, `sd/image` e
 `sd/video`. `sd` é o cartão de memória, acessado só através da tela. O Bezel
@@ -31,8 +32,11 @@ enviou, ou que o Bezel não o enviou. Acima das listas, **Nome contém**,
 - **Apagar…**: pede confirmação, com o nome do arquivo (ou a lista dos
   arquivos).
 - **Ao ligar**: **Mostrar ao ligar…** (ou um arquivo arrastado para **Ao
-  ligar**) escolhe o arquivo que a tela mostra quando liga; **Voltar ao relógio
-  padrão** desfaz. A tela guarda a escolha.
+  ligar**) define com o que a tela começa quando liga, pelo tipo do arquivo:
+  com uma imagem, as imagens do cartão, uma depois da outra; com um vídeo, o
+  **primeiro vídeo de `sd/video`**, não necessariamente esse arquivo (veja
+  [O que a tela mostra ao ligar](#o-que-a-tela-mostra-ao-ligar)); **Voltar ao
+  relógio padrão** desfaz. A tela guarda a escolha.
 - **Mover para o cartão SD**, **Copiar para o cartão SD** (ou para a memória
   interna), **Renomear…**, **Restaurar…**, **Assistente de limpeza…**,
   **Associar original…** e **Cópias locais…**: veja
@@ -48,7 +52,7 @@ bezel storage put logo.png sd/image/logo.png
 bezel storage play internal/video/clipe.mp4 # repete na tela (--once: toca uma vez)
 bezel storage stop
 bezel storage rm internal/video/clipe.mp4 --yes
-bezel storage boot internal/video/clipe.mp4 --brightness 60 --yes   # mostrado ao ligar
+bezel storage boot internal/video/clipe.mp4 --brightness 60 --yes   # ligar com um vídeo: o primeiro de sd/video
 bezel storage boot default --yes            # volta à tela de início original
 ```
 
@@ -189,9 +193,10 @@ envio cancelado aparece com o comando que o apaga.
 O novo nome segue a regra de envio (letras minúsculas sem acento, números, `_`,
 `.` e `-`, a mesma extensão): mover `NVI.mp4` dá `nvi.mp4`. Um arquivo com esse
 nome que já esteja lá fica de fora, a menos que você escolha substituí-lo. Mover
-o arquivo que a tela mostra ao ligar, ou renomear um vídeo que um tema toca,
-acrescenta um aviso à confirmação: a tela liga com o último arquivo que tocou, e
-um tema acha o vídeo dele pelo nome.
+o arquivo escolhido em **Mostrar ao ligar…**, ou renomear um vídeo que um tema
+toca, acrescenta um aviso à confirmação (um tema acha o vídeo dele pelo nome;
+sobre o ajuste de início, veja
+[O que a tela mostra ao ligar](#o-que-a-tela-mostra-ao-ligar)).
 
 No aplicativo, selecione arquivos numa lista e clique em **Mover para o cartão
 SD** (ou **Mover para a memória interna**), ou arraste-os para a outra lista.
@@ -280,8 +285,8 @@ sobras:
   listado.
 
 Só os sinais exatos já vêm marcados; o que é apenas provável aparece, mas não é
-escolhido. O assistente nunca sugere o arquivo que o Bezel escolheu para a tela
-mostrar ao ligar, nem um vídeo que um tema toca (o vídeo de fundo de um tema,
+escolhido. O assistente nunca sugere o arquivo escolhido em **Mostrar ao
+ligar…**, nem um vídeo que um tema toca (o vídeo de fundo de um tema,
 por exemplo). Ele nunca roda sozinho, e nada é apagado até você confirmar a
 lista exata.
 
@@ -348,11 +353,22 @@ catálogo.
 
 ## O que a tela mostra ao ligar
 
-Nas telas rev C, a escolha do que mostrar ao ligar também guarda o brilho com
-que a tela liga: no aplicativo, o brilho ajustado em **Ajustes**; na linha de
-comando, o `--brightness`; sem isso, o padrão do fabricante, cerca de 67%. Na
-geração Turing USB, o Bezel envia e toca arquivos, mas ainda não consegue
-apagá-los, tocar um vídeo uma vez só nem mudar o que a tela mostra ao ligar.
+Nas telas rev C, a escolha do que mostrar ao ligar é um ajuste de início, não um
+arquivo: a própria tela escolhe o que mostra (medido no 8.8"). Com uma imagem
+escolhida, ela mostra todas as imagens de `sd/image` do cartão, uma depois da
+outra, a cada 3 a 5 segundos (o álbum de
+[Quando o computador desligar](power-off.md)); com um vídeo, ela toca o
+**primeiro vídeo de `sd/video`** do cartão, não necessariamente o que você
+escolheu; com **Voltar ao relógio padrão**, o relógio dela. O que ela mostra sem
+cartão de memória ainda não se sabe. O ajuste vale quando a tela reinicia ou
+liga; escolher um arquivo também o toca na hora. É o mesmo ajuste de início que
+**Quando o computador desligar** grava: vale o último que você fez.
+
+A escolha do que mostrar ao ligar também guarda o brilho com que a tela liga:
+no aplicativo, o brilho ajustado em **Ajustes**; na linha de comando, o
+`--brightness`; sem isso, o padrão do fabricante, cerca de 67%. Na geração
+Turing USB, o Bezel envia e toca arquivos, mas ainda não consegue apagá-los,
+tocar um vídeo uma vez só nem mudar o que a tela mostra ao ligar.
 
 ## Temas com vídeo de fundo
 

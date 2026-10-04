@@ -4,6 +4,7 @@ import { DEMO_BACK_FROM_DESKTOP, DEMO_LIBRARY, DEMO_LOCAL_FILES, DEMO_ORIGINALS,
 import { demoFindings, demoPlanAcross, demoPlanRename, demoPlanRestore, demoRank, demoSameFile } from './demo-manager.js';
 import { DEMO_THEME } from './demo-theme.js';
 import { createDemoGifs } from './demo-gifs.js';
+import { createDemoStandby } from './demo-standby.js';
 import { DEMO_GIF_FRAME_MS, DEMO_VIDEO_LOOP_MS, renderApprox } from './demo-render.js';
 import { isHorizontal } from './editor/geometry.js';
 import { IMAGE_EXTENSIONS as PICTURES, droppable, extensionOf, fileNameOf } from './editor/background.js';
@@ -431,6 +432,8 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
   const tools = { ready: chosen.ffmpeg !== false, configured: null };
   let tickets = 0;
   let job = null;
+  // What the last manager overview listed, like the studio's: thumbnails only for these files.
+  let listedBy = { key: null, paths: new Set() };
   const gate = createDemoGate(hold);
   const state = { playback: null, boot: layout.boot ?? null, bootBrightness: null };
   // The catalog of the 8.8" model (the demo's only model with storage).
@@ -442,7 +445,8 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
   };
 
   // Errors like the app's: a code, its arguments and the English text.
-  const refuse = (code, message, args = {}) => Promise.reject(Object.assign(new Error(message), { code, args }));
+  const errorOf = (code, message, args = {}) => Object.assign(new Error(message), { code, args });
+  const refuse = (code, message, args = {}) => Promise.reject(errorOf(code, message, args));
   // A refusal like the preflight's (and like an upload whose conversion is still too large).
   const refused = (code, extra = {}) => ({ status: 'refused', code, message: code, mismatches: [], candidates: [], accepted: [], ...extra });
   const screenOf = (key) => screens().find((s) => s.key === key);
@@ -573,13 +577,21 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
     const steps = plan.steps.map(({ content, ...step }) => step);
     return { ...plan, ticket, steps, bytes: steps.reduce((sum, s) => sum + s.size, 0), free: capacity(plan.to).free };
   }
-  /** Why the manager cannot read or plan now (like the overview's refusals). */
-  function blocked(key, to = 'internal') {
-    if (chosen.denied) return Promise.reject(demoDenied(key));
-    if (!screenOf(key)?.models.every((m) => m.capabilities.storage)) return refuse('unsupported', 'not supported: no storage', { detail: 'no storage' });
-    if (job) return refuse('busy', 'a storage operation is using the screen');
-    if (!['internal', 'sd'].includes(to)) return refuse('unknownMedium', `unknown medium "${to}" (internal or sd)`, { medium: String(to) });
+  /**
+   * Why the manager cannot read or plan now (like the overview's refusals):
+   * the error it answers with, or `null` when it can.
+   */
+  function whyBlocked(key, to = 'internal') {
+    if (chosen.denied) return demoDenied(key);
+    if (!screenOf(key)?.models.every((m) => m.capabilities.storage)) return errorOf('unsupported', 'not supported: no storage', { detail: 'no storage' });
+    if (job) return errorOf('busy', 'a storage operation is using the screen');
+    if (!['internal', 'sd'].includes(to)) return errorOf('unknownMedium', `unknown medium "${to}" (internal or sd)`, { medium: String(to) });
     return null;
+  }
+  /** `whyBlocked` as an answer: its rejection, or `null` when the manager can go on (`blocked(key) ?? answer`). */
+  function blocked(key, to = 'internal') {
+    const why = whyBlocked(key, to);
+    return why ? Promise.reject(why) : null;
   }
 
   /**
@@ -832,27 +844,36 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
       return Promise.resolve({ internal: capacity('internal'), card: card ? capacity('sd') : null, folders });
     },
     /** Both media with the catalog beside them (the storage manager's view). */
-    managerOverview: (key) => blocked(key) ?? Promise.resolve({
-      internal: capacity('internal'),
-      card: card ? capacity('sd') : null,
-      files: managedFiles(key),
-      folderErrors: [],
-      restorable: restorable().map(({ content, ...r }) => r),
-      deletes: !limited(key),
-      cap: capOf(key),
-      cache: cacheInfo(),
-    }),
-    /** A file's thumbnail from its local copy (kept when the copy is cleared), else `null`. */
+    managerOverview: (key) => {
+      const why = whyBlocked(key);
+      if (why) return Promise.reject(why);
+      const listed = managedFiles(key);
+      listedBy = { key, paths: new Set(listed.map((f) => f.path)) };
+      return Promise.resolve({
+        internal: capacity('internal'),
+        card: card ? capacity('sd') : null,
+        files: listed,
+        folderErrors: [],
+        restorable: restorable().map(({ content, ...r }) => r),
+        deletes: !limited(key),
+        cap: capOf(key),
+        cache: cacheInfo(),
+      });
+    },
+    /**
+     * A file's thumbnail from its local copy (kept when the copy is cleared), else `null`; like the
+     * studio's, only for a file the last manager overview of `key` listed.
+     */
     managerThumbnail: (key, path) => {
-      const found = entryAt(path);
+      const found = listedBy.key === key && listedBy.paths.has(path) ? entryAt(path) : null;
       return Promise.resolve(found?.thumb ? demoFileThumbnail(found.path.split('/')[2], found.path.split('/')[1]) : null);
     },
     planMove: (key, paths, to, overwrite = []) => blocked(key, to) ?? Promise.resolve(keepPlan(key, demoPlanAcross(planView(key), 'move', paths, to, overwrite))),
     planCopy: (key, paths, to, overwrite = []) => blocked(key, to) ?? Promise.resolve(keepPlan(key, demoPlanAcross(planView(key), 'copy', paths, to, overwrite))),
     planRename: (key, path, newName, overwrite = []) => blocked(key) ?? Promise.resolve(keepPlan(key, demoPlanRename(planView(key), path, newName, overwrite))),
     planRestore: (key, ids, to, overwrite = []) => {
-      const refusal = blocked(key, to);
-      if (refusal) return refusal;
+      const why = whyBlocked(key, to);
+      if (why) return Promise.reject(why);
       const chosenEntries = restorable().filter((r) => ids.includes(r.id));
       const room = { free: capacity(to).free, cap: capOf(key) };
       return Promise.resolve(keepPlan(key, demoPlanRestore(planView(key), chosenEntries, to, room, overwrite)));
@@ -887,8 +908,8 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
     /** The originals the demo's picker returns: files, or their folder. */
     pickOriginals: (folder) => Promise.resolve(folder ? [DEMO_ORIGINALS_FOLDER] : Object.keys(DEMO_ORIGINALS)),
     associateCandidates: (key, path, sources) => {
-      const refusal = blocked(key);
-      if (refusal) return refusal;
+      const why = whyBlocked(key);
+      if (why) return Promise.reject(why);
       const size = listedSize(key, path);
       if (!files.has(path) || size === null) return refuse('invalidInput', `invalid input: ${path} is not stored on the screen`, { detail: `${path} is not stored on the screen` });
       const known = (source) => (DEMO_ORIGINALS[source] ? [source] : Object.keys(DEMO_ORIGINALS).filter((p) => p.startsWith(`${source}/`)));
@@ -900,8 +921,8 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
     /** Copies a confirmed original into the store: the file gets a thumbnail and becomes movable. */
     associateOriginal: (key, path, source, confirmed) => {
       if (!confirmed) return refuse('notConfirmed', `associating ${path} needs confirmation`, { detail: `associating ${path}` });
-      const refusal = blocked(key);
-      if (refusal) return refusal;
+      const why = whyBlocked(key);
+      if (why) return Promise.reject(why);
       const original = DEMO_ORIGINALS[source];
       const size = listedSize(key, path);
       if (!original || original.size !== size || original.kind !== path.split('/')[1]) {
@@ -1009,6 +1030,22 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
     videoOfTheme,
     /** Whether ffmpeg is there (or was located): it decodes the preview's video. */
     toolsReady: () => tools.ready,
+    /**
+     * What "When the computer shuts down" reads and adds (`demo-standby.js`):
+     * the files, whether a card is in, the boot media, and a photo sent to
+     * the card album, cataloged with its local copy like every upload.
+     */
+    standbyStorage: {
+      files: () => new Map(files),
+      card: () => card,
+      boot: () => state.boot,
+      // A photo's upload waits here like a job's phase (`hooks.hold`, tests only).
+      hold: () => gate.hold(),
+      storePhoto: (path, size, source) => {
+        files.set(path, size);
+        record({ path, card: cardNow(), size, content: demoContent(source, size), localCopy: true, sentAt: nowSec(), source, resolution: { ...NATIVE }, state: 'stored' });
+      },
+    },
     /** What the simulated screen plays, shows at power-up and starts with, and the catalog. */
     storageState: () => ({ ...state, files: new Map(files), catalog: catalog.entries.map((e) => ({ ...e })), limit: catalog.limit }),
   };
@@ -1018,10 +1055,11 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
  * @param {string} scenario key of SCENARIOS
  * @param {{now?: () => number, delay?: (ms: number) => Promise<void>, wait?: (fn: () => void, ms: number) => unknown, cancel?: (timer: unknown) => void}} [clock]
  *   seconds now, a pause, and the timer the preview's video decoder idles out with
- * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, onSensorsShown?: (keys: string[]) => void, onDecoder?: (state: 'running'|'stopped') => void, onGuide?: (page: string, language: string) => void, languages?: readonly string[], hold?: boolean}} [hooks]
+ * @param {{onWindow?: (state: 'open'|'hidden'|'closed'|'quit') => void, onSensorsShown?: (keys: string[]) => void, onDecoder?: (state: 'running'|'stopped') => void, onGuide?: (page: string, language: string) => void, onStandby?: (writes: object[]) => void, languages?: readonly string[], hold?: boolean}} [hooks]
  *   what the window does, the sensors the list shows, the preview's video
- *   decoder, the guide pages opened, the system's languages, and whether
- *   job phases wait in the middle until `letGo` (tests)
+ *   decoder, the guide pages opened, every plan B written to a screen, the
+ *   system's languages, and whether job phases wait in the middle until
+ *   `letGo` (tests)
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const now = clock.now ?? (() => Date.now() / 1000);
@@ -1096,7 +1134,17 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     videoInfo: (ref) => videoFiles.get(ref) ?? null,
     autoOf,
   });
-  const { videoOfTheme, toolsReady, ...storageApi } = storage;
+  const { videoOfTheme, toolsReady, standbyStorage, ...storageApi } = storage;
+  // "When the computer shuts down": the photo is framed in the shape the
+  // screen stands in, the orientation last used with it, else its model's.
+  const standby = createDemoStandby({
+    chosen,
+    screens: () => devices.screens,
+    storage: standbyStorage,
+    orientationOf: (key) => demoOrientation(modelOf(key), remembered.get(key)),
+    denied: demoDenied,
+    onWrite: (writes) => hooks.onStandby?.(writes),
+  });
   const taken = () => new Set([...images, ...posters.keys(), ...videos.keys()]);
   const decoder = createDemoDecoder({ wait: clock.wait, cancel: clock.cancel, onState: (state) => hooks.onDecoder?.(state) });
 
@@ -1210,6 +1258,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   return {
     ...storageApi,
     ...gifs,
+    ...standby,
     listDevices: () => (chosen.error ? Promise.reject(new Error(chosen.error)) : Promise.resolve(structuredClone(devices))),
     leaveDesktopMode: (key, confirmed) => {
       const at = devices.desktopMode.findIndex((p) => p.key === key);

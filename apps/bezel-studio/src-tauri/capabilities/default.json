@@ -78,6 +78,11 @@
     "allow-collected-users",
     "allow-delete-collected",
     "allow-use-collected",
-    "allow-open-link"
+    "allow-open-link",
+    "allow-standby-overview",
+    "allow-set-standby",
+    "allow-pick-photo",
+    "allow-album-preview",
+    "allow-album-add"
   ]
 }

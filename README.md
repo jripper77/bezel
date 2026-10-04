@@ -16,7 +16,8 @@ Download from the [releases page](https://github.com/slipalison/bezel/releases)
 and follow the **[user guide](docs/user/README.md)** (em português:
 **[guia do usuário](docs/user/pt-BR/README.md)**): installing on each system,
 screen permissions and Windows drivers, the first theme, sensors, game FPS,
-storage and video, GIFs and stickers, running at login and troubleshooting.
+storage and video, GIFs and stickers, running at login, what the screen does
+when the computer shuts down, and troubleshooting.
 
 The installers are not signed: Windows SmartScreen may ask you to confirm
 (*More info → Run anyway*); see [Install Bezel](docs/user/install.md).
@@ -52,6 +53,11 @@ window to design themes and drive the screen.
   screen shows at power-up), which opens full width as the storage manager:
   both sides with thumbnails, move by dragging, rename, restore a card, the
   cleanup assistant.
+- **When the computer shuts down** (Screen panel, Turing rev C screens): leave
+  the screen as it is, turn it off, loop a video stored on it, or show the
+  card's photo album instead of a frozen last frame; `bezel standby` makes the
+  same choice from a terminal
+  ([When the computer shuts down](docs/user/power-off.md)).
 
 `BEZEL_FAKE=1 bezel-studio` opens it with a simulated 8.8" and demo sensors.
 
@@ -140,7 +146,7 @@ bezel storage put logo.png sd/image/logo.png
 bezel storage play internal/video/clip.mp4   # the screen loops it itself (--once: plays it once)
 bezel storage stop
 bezel storage rm internal/video/clip.mp4 --yes
-bezel storage boot internal/video/clip.mp4 --brightness 60 --yes   # shown after power-up
+bezel storage boot internal/video/clip.mp4 --brightness 60 --yes   # start with a video: the first of sd/video
 bezel storage boot default --yes          # back to the built-in start screen
 ```
 
@@ -161,6 +167,9 @@ bezel storage boot default --yes          # back to the built-in start screen
   files, largest first, to choose from.
 - **Boot media.** Rev C screens store the boot choice together with the
   brightness they boot with: `--brightness`, else the vendor default (about 67%).
+  The choice is a start setting and the screen picks the file (measured on the
+  8.8"): a picture makes it show every picture of `sd/image` in turn, a video
+  makes it play the first video of `sd/video`, not necessarily the one named.
   On the Turing USB generation Bezel cannot yet delete files, play a video once
   or change the boot media; `bezel` says so.
 - **Storage manager.** Bezel keeps a local copy of every file it sends

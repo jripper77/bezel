@@ -52,6 +52,12 @@
 //! dropped and the screen connected again after 2, 5 and 10 s, outside the
 //! session ([`Studio::reconnect_due`], [`Studio::reconnected`]); turning
 //! live mode off meanwhile ends it at once.
+//!
+//! When the computer shuts down (D-2026-10-03-power-off-standby-3) the
+//! session enters a final state ([`Studio::enter_final_state`]) where no
+//! frame is drawn, no link is lent or connected again and no screen goes
+//! live; the shutdown takes the live link to apply the screen's choice
+//! through it ([`Studio::take_for_shutdown`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -415,13 +421,16 @@ enum Slot {
     Lent,
     /// Gone: it failed and the screen is being connected again.
     Away(Away),
+    /// Taken by the shutdown, which applied the screen's choice through it
+    /// ([`Studio::take_for_shutdown`]): the computer is shutting down.
+    ShutDown,
 }
 
 impl Slot {
     fn link(&mut self) -> Option<&mut Box<dyn ScreenLink>> {
         match self {
             Slot::Here(link) => Some(link),
-            Slot::Presenting | Slot::Lent | Slot::Away(_) => None,
+            Slot::Presenting | Slot::Lent | Slot::Away(_) | Slot::ShutDown => None,
         }
     }
 
@@ -511,6 +520,20 @@ pub struct Reconnecting {
     pub attempts: usize,
 }
 
+/// What the shutdown finds in the live screen's place
+/// ([`Studio::take_for_shutdown`]).
+pub enum ForShutdown {
+    /// No live link to apply the choice through: no screen is live, or its
+    /// link failed and no attempt to connect it again is under way.
+    Nothing,
+    /// The live link is out (showing a frame, lent to a storage job, or
+    /// being connected again): it comes back soon, ask again.
+    Out,
+    /// The live link, for the shutdown to apply the screen's choice
+    /// through it (its screen's model in its identity).
+    Link(Box<dyn ScreenLink>),
+}
+
 /// What a borrowed live link resumes when it comes back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resume {
@@ -551,6 +574,9 @@ pub struct Studio {
     /// The session's clock starts here: the runtime's cadence and the
     /// animations run on it.
     origin: Instant,
+    /// The final state of a shutdown ([`Self::enter_final_state`]): no
+    /// frame, no reconnection, no link lent, no screen going live.
+    shutting_down: bool,
 }
 
 /// A video (or an animated GIF) added to the session for a background: its
@@ -593,6 +619,7 @@ impl Studio {
             posters,
             serials: 0,
             origin: Instant::now(),
+            shutting_down: false,
         };
         studio.follow_video();
         studio
@@ -1207,8 +1234,15 @@ impl Studio {
             .is_some_and(|l| matches!(l.slot, Slot::Presenting))
     }
 
-    /// The live link of `key`, or why it cannot be had.
+    /// The live link of `key`, or why it cannot be had. In the final state
+    /// of a shutdown no screen's link can be had, live or not.
     fn link_of(&mut self, key: &str) -> Result<Option<&mut Box<dyn ScreenLink>>> {
+        if self.shutting_down {
+            return Err(BezelError::InUse {
+                address: key.to_string(),
+                holders: vec![SHUTTING_DOWN.to_string()],
+            });
+        }
         if !self.is_live(key) {
             return Ok(None);
         }
@@ -1220,6 +1254,7 @@ impl Studio {
             Slot::Presenting => LIVE_FRAME,
             Slot::Lent => STORAGE_JOB,
             Slot::Away(_) => RECONNECTING,
+            Slot::ShutDown => SHUTTING_DOWN,
         };
         Err(BezelError::InUse {
             address: key.to_string(),
@@ -1227,10 +1262,65 @@ impl Studio {
         })
     }
 
+    /// Whether the session is in the final state of a shutdown.
+    pub fn shutting_down(&self) -> bool {
+        self.shutting_down
+    }
+
+    /// The final state of a shutdown starts (D-2026-10-03-power-off-standby-3):
+    /// from now on no frame is drawn for the live screen, its link is
+    /// neither lent nor connected again, and no screen goes live. Live mode
+    /// stays as it is (the shutdown takes its link,
+    /// [`Self::take_for_shutdown`]).
+    pub fn enter_final_state(&mut self) {
+        self.shutting_down = true;
+    }
+
+    /// The shutdown was cancelled: the final state ends. A live screen whose
+    /// link the shutdown took stops (the caller shows the theme live again,
+    /// as at the app's start); one being connected again goes on.
+    pub fn leave_final_state(&mut self) -> Option<Box<dyn ScreenLink>> {
+        self.shutting_down = false;
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|l| matches!(l.slot, Slot::ShutDown))
+        {
+            return self.stop_live();
+        }
+        None
+    }
+
+    /// The live link, for the shutdown to apply the screen's choice through
+    /// it; in its place the live screen keeps [`Slot::ShutDown`], so that
+    /// nothing else reaches it. Only in the final state: nothing otherwise.
+    pub fn take_for_shutdown(&mut self) -> ForShutdown {
+        if !self.shutting_down {
+            return ForShutdown::Nothing;
+        }
+        let Some(live) = self.live.as_mut() else {
+            return ForShutdown::Nothing;
+        };
+        let out = match &live.slot {
+            Slot::Presenting | Slot::Lent => true,
+            Slot::Away(away) => away.trying,
+            Slot::Here(_) | Slot::ShutDown => false,
+        };
+        if out {
+            return ForShutdown::Out;
+        }
+        let Some(link) = live.slot.take_for(Slot::ShutDown) else {
+            return ForShutdown::Nothing;
+        };
+        live.host = None;
+        self.runtime.forget_screen();
+        ForShutdown::Link(link)
+    }
+
     /// Lends the live link of `key` to a storage job: frames pause and the
     /// session stays usable (previews keep rendering) while the job talks to
     /// the screen. `None` when `key` is not live; `InUse` while its link is
-    /// out.
+    /// out, and in the final state of a shutdown.
     pub fn lend_live_link(&mut self, key: &str) -> Result<Option<Box<dyn ScreenLink>>> {
         if self.link_of(key)?.is_none() {
             return Ok(None);
@@ -1258,8 +1348,14 @@ impl Studio {
         None
     }
 
-    /// Shows the edited theme on `link` from the next frame on.
-    pub fn go_live(&mut self, key: String, link: Box<dyn ScreenLink>) {
+    /// Shows the edited theme on `link` from the next frame on; whether it
+    /// does. In the final state of a shutdown no screen goes live: `link` is
+    /// closed (`false`).
+    pub fn go_live(&mut self, key: String, link: Box<dyn ScreenLink>) -> bool {
+        if self.shutting_down {
+            drop(link);
+            return false;
+        }
         self.runtime.forget_screen();
         self.generation += 1;
         self.live = Some(Live {
@@ -1273,21 +1369,29 @@ impl Studio {
             host: None,
         });
         self.live_error = None;
+        true
     }
 
     /// [`Self::go_live`] on `screen`, which is connected again when its
     /// link fails and is known by either of its ports ([`Self::is_live`]).
-    pub fn go_live_on(&mut self, key: String, screen: Screen, link: Box<dyn ScreenLink>) {
-        self.go_live(key, link);
+    pub fn go_live_on(&mut self, key: String, screen: Screen, link: Box<dyn ScreenLink>) -> bool {
+        if !self.go_live(key, link) {
+            return false;
+        }
         if let Some(live) = self.live.as_mut() {
             live.screen = Some(screen);
         }
+        true
     }
 
     /// Stops showing the theme and hands back the screen's link (`None`
     /// while it is out: whoever has it closes it). A screen being connected
-    /// again stops there.
+    /// again stops there. In the final state of a shutdown live mode stays
+    /// as it is and no link is handed out (`None`).
     pub fn stop_live(&mut self) -> Option<Box<dyn ScreenLink>> {
+        if self.shutting_down {
+            return None;
+        }
         let mut live = self.live.take()?;
         self.generation += 1;
         // The decoder stops before its copy of the video goes.
@@ -1357,8 +1461,11 @@ impl Studio {
     /// the session to show it ([`Delivery::present`], then
     /// [`Self::presented`]). `None` while nothing is live or the link is
     /// out. A theme that does not fit the screen stops the live mode, kept
-    /// for [`Self::live_error`].
+    /// for [`Self::live_error`]. Nothing in the final state of a shutdown.
     pub fn frame_for_screen(&mut self, time: LocalTime, now: Instant) -> Result<Option<Delivery>> {
+        if self.shutting_down {
+            return Ok(None);
+        }
         self.start_live_video();
         let orientation = self.runtime.theme().orientation;
         let clock = self.clock(now);
@@ -1462,8 +1569,12 @@ impl Studio {
     /// The attempt to connect the live screen again that is due at `now`,
     /// if any: the caller makes it outside the session (it takes seconds,
     /// longer when a hung screen restarts) and reports with
-    /// [`Self::reconnected`]. Nothing while one is under way.
+    /// [`Self::reconnected`]. Nothing while one is under way, nor in the
+    /// final state of a shutdown.
     pub fn reconnect_due(&mut self, now: Instant) -> Option<Attempt> {
+        if self.shutting_down {
+            return None;
+        }
         let live = self.live.as_mut()?;
         let screen = live.screen.clone()?;
         let Slot::Away(away) = &mut live.slot else {
@@ -1581,8 +1692,12 @@ impl Studio {
     /// One refresh at `now`: the preview's decoder ends when no picture was
     /// asked of it during [`PREVIEW_IDLE`], a sample when one is due (once
     /// per refresh, never per animation frame), then the live screen's frame
-    /// when it is due ([`Self::frame_for_screen`]).
+    /// when it is due ([`Self::frame_for_screen`]). In the final state of a
+    /// shutdown, nothing.
     pub fn tick(&mut self, time: LocalTime, now: Instant) -> Result<Option<Delivery>> {
+        if self.shutting_down {
+            return Ok(None);
+        }
         self.stop_idle_preview(now);
         // Before the sample moves the cadence on.
         let due = self.frame_due();
@@ -1658,6 +1773,8 @@ pub const STORAGE_JOB: &str = "a storage job of Bezel";
 pub const LIVE_FRAME: &str = "Bezel's live frame";
 /// Who holds a live screen while it is being connected again.
 pub const RECONNECTING: &str = "Bezel, connecting it again";
+/// Who holds every screen in the final state of a shutdown.
+pub const SHUTTING_DOWN: &str = "Bezel, as the computer shuts down";
 
 /// `"My Photo.PNG"` → (`"my-photo"`, `".png"`): safe, lowercase asset names.
 fn split_name(file_name: &str) -> (String, String) {

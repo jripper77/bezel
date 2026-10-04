@@ -14,9 +14,10 @@ use bezel_cli::theme::{
     bundled_candidates, data_home, first_dir, font_dirs, resolve, theme_folders, theme_videos,
 };
 use bezel_cli::{
-    Cli, Command, ProgressStyle, Rendering, SensorSettings, SensorsArgs, SleepPace, StorageArgs,
-    StorageKit, WatchStyle, clock, hang_hint, run, run_monitor_mode, run_restart, run_sensors,
-    run_storage_command, run_theme_command, udev_rules,
+    Cli, Command, ProgressStyle, Rendering, SensorSettings, SensorsArgs, SleepPace, StandbyArgs,
+    StandbyKit, StorageArgs, StorageKit, WatchStyle, clock, hang_hint, run, run_monitor_mode,
+    run_restart, run_sensors, run_standby_command, run_storage_command, run_theme_command,
+    udev_rules,
 };
 use bezel_core::domain::job::CancelToken;
 use bezel_core::ports::{ArchiveStore, SensorSource};
@@ -145,6 +146,34 @@ fn themes(cli: &Cli) -> anyhow::Result<String> {
     result
 }
 
+/// A token that the first Ctrl+C cancels, saying `note` on stderr; a second
+/// Ctrl+C quits at once. Without a note Ctrl+C keeps ending the program.
+fn cancel_on_ctrl_c(note: Option<&'static str>) -> anyhow::Result<CancelToken> {
+    let cancel = CancelToken::new();
+    if let Some(note) = note {
+        let token = cancel.clone();
+        ctrlc::set_handler(move || {
+            if token.is_cancelled() {
+                std::process::exit(130);
+            }
+            token.cancel();
+            eprintln!("\nbezel: {note} (Ctrl+C again quits at once)");
+        })?;
+    }
+    Ok(cancel)
+}
+
+/// Bezel's catalog and local copies in `dir` (`<data>/bezel/storage`), the
+/// ones the studio reads.
+fn disk_archive(dir: Option<&Path>) -> anyhow::Result<DiskArchive> {
+    let dir = dir.context(
+        "cannot find your data folder for Bezel's local copies: set HOME or \
+         XDG_DATA_HOME (APPDATA on Windows)",
+    )?;
+    DiskArchive::open(dir)
+        .with_context(|| format!("cannot open Bezel's local copies in {}", dir.display()))
+}
+
 /// Seconds since the Unix epoch: when what is sent now is recorded as sent.
 fn unix_now() -> u64 {
     SystemTime::now()
@@ -159,17 +188,7 @@ fn unix_now() -> u64 {
 /// `<data>/bezel/storage` (in memory, with the demo catalog, for `--fake`).
 fn storage(args: &StorageArgs, fake: bool) -> anyhow::Result<String> {
     let mut media = FfmpegTranscoder::new(args.ffmpeg().map(Path::to_path_buf));
-    let cancel = CancelToken::new();
-    if let Some(note) = args.cancel_note() {
-        let token = cancel.clone();
-        ctrlc::set_handler(move || {
-            if token.is_cancelled() {
-                std::process::exit(130);
-            }
-            token.cancel();
-            eprintln!("\nbezel: {note} (Ctrl+C again quits at once)");
-        })?;
-    }
+    let cancel = cancel_on_ctrl_c(args.cancel_note())?;
     let data = user_data();
     let videos = theme_videos(&theme_folders(data.as_deref(), bundled_dir().as_deref()));
     let dir = data.as_deref().map(storage_dir);
@@ -182,12 +201,7 @@ fn storage(args: &StorageArgs, fake: bool) -> anyhow::Result<String> {
     let archive: &mut dyn ArchiveStore = if fake || !args.uses_catalog() {
         &mut memory
     } else {
-        let dir = dir.as_deref().context(
-            "cannot find your data folder for Bezel's local copies: set HOME or \
-             XDG_DATA_HOME (APPDATA on Windows)",
-        )?;
-        disk = DiskArchive::open(dir)
-            .with_context(|| format!("cannot open Bezel's local copies in {}", dir.display()))?;
+        disk = disk_archive(dir.as_deref())?;
         &mut disk
     };
     let mut log = std::io::stderr();
@@ -210,6 +224,39 @@ fn storage(args: &StorageArgs, fake: bool) -> anyhow::Result<String> {
         run_storage_command(args, &fake_bus(), &fake_connector(), &mut kit)
     } else {
         run_storage_command(args, &SystemBus, &SystemConnector, &mut kit)
+    }
+}
+
+/// `bezel standby`. The choice and the album's local copies go to Bezel's
+/// catalog on disk, `<data>/bezel/storage`, the one Bezel Studio reads at
+/// shutdown, also with `--fake` (only the screen is simulated); `set`
+/// without `--yes` does not even open it. Ctrl+C during `album add`
+/// cancels the upload.
+fn standby(args: &StandbyArgs, fake: bool) -> anyhow::Result<String> {
+    let cancel = cancel_on_ctrl_c(args.cancel_note())?;
+    let dir = user_data().as_deref().map(storage_dir);
+    let mut memory = MemoryArchive::new();
+    let mut disk: DiskArchive;
+    let archive: &mut dyn ArchiveStore = if args.uses_catalog() {
+        disk = disk_archive(dir.as_deref())?;
+        &mut disk
+    } else {
+        &mut memory
+    };
+    let mut media = FfmpegTranscoder::new(None);
+    let mut log = std::io::stderr();
+    let mut kit = StandbyKit {
+        archive,
+        archive_dir: dir.as_deref(),
+        media: &mut media,
+        cancel: &cancel,
+        log: &mut log,
+        now: unix_now(),
+    };
+    if fake {
+        run_standby_command(args, &fake_bus(), &fake_connector(), &mut kit)
+    } else {
+        run_standby_command(args, &SystemBus, &SystemConnector, &mut kit)
     }
 }
 
@@ -257,6 +304,7 @@ fn main() -> ExitCode {
         Command::Sensors { args, settings } => sensors(args, settings, cli.fake),
         Command::Render { .. } | Command::Run { .. } | Command::Import { .. } => themes(&cli),
         Command::Storage(args) => storage(args, cli.fake),
+        Command::Standby(args) => standby(args, cli.fake),
         Command::MonitorMode { .. } => monitor_mode(&cli),
         Command::Restart { .. } => restart(&cli),
         Command::UdevRules => print_udev_rules(),

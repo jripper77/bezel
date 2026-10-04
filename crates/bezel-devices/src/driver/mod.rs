@@ -1,6 +1,6 @@
 //! Drivers: each family's handshake and frame pipeline over a [`crate::wire::Wire`].
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bezel_core::domain::device::DeviceModel;
 use bezel_core::domain::frame::Frame;
@@ -33,6 +33,24 @@ pub struct RealTime;
 impl Pause for RealTime {
     fn pause(&self, d: Duration) {
         std::thread::sleep(d);
+    }
+}
+
+/// Monotonic time, for what a driver does after a while without traffic
+/// (rev C's keepalive, D-2026-10-03-power-off-standby-5). Tests inject a
+/// clock they move by hand, so they never sleep.
+pub trait Monotonic: Send {
+    /// Now.
+    fn now(&self) -> Instant;
+}
+
+/// The host's monotonic clock.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SteadyClock;
+
+impl Monotonic for SteadyClock {
+    fn now(&self) -> Instant {
+        Instant::now()
     }
 }
 
@@ -340,6 +358,8 @@ mod tests {
         assert!(matches!(err, BezelError::InvalidInput(_)), "{err}");
         assert!(err.to_string().contains("2x3"), "{err}");
         RealTime.pause(Duration::ZERO);
+        let before = SteadyClock.now();
+        assert!(SteadyClock.now() >= before, "monotonic");
         assert!(matches!(
             io_err(std::io::Error::other("x")),
             BezelError::Transport(_)

@@ -18,6 +18,7 @@ use bezel_core::domain::media::{
     VideoCodec, VideoPixelFormat, VideoTrack,
 };
 use bezel_core::domain::screen::{Brightness, Confirm};
+use bezel_core::domain::standby::PlanB;
 use bezel_core::domain::storage::{
     BootMedia, FileEntry, REV_C_MAX_UPLOAD_BYTES, Refusal, RemotePath, Repeat, StartMode,
     UploadAction,
@@ -801,10 +802,10 @@ fn play_stop_and_boot_media() {
         writes(&connector)[played..],
         [
             StorageCall::PlayVideo(video, Repeat::Loop),
-            StorageCall::StartMode(StartMode::Video),
+            StorageCall::Options(PlanB::new(StartMode::Video, 0)),
             StorageCall::PlayImage(image),
-            StorageCall::StartMode(StartMode::Image),
-            StorageCall::StartMode(StartMode::Default)
+            StorageCall::Options(PlanB::new(StartMode::Image, 0)),
+            StorageCall::Options(PlanB::new(StartMode::Default, 0))
         ]
     );
     let written = writes(&connector);

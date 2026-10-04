@@ -13,7 +13,8 @@ bezel-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-# Only to read the size of still images from their headers (no decoding).
+# The size of still images from their headers, and the album's photos
+# (`photo`): decoded with their EXIF orientation and encoded as PNG.
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
 # The folder that holds conversion outputs, removed with the transcoder.
 tempfile = "3.27.0"

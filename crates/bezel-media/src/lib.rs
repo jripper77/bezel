@@ -40,6 +40,10 @@
 //! [`collection`] holds the user's collection of GIFs and stickers, behind
 //! the core's [`GifCollection`](bezel_core::ports::GifCollection) port, and
 //! the fake GIF provider the tests search through.
+//!
+//! [`photo`] reads the photos of a screen's album natively (JPEG, PNG, BMP,
+//! a GIF's first picture; EXIF orientation applied, no ffmpeg) and makes the
+//! panel-native PNG the album stores (D-2026-10-03-power-off-standby-4).
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
@@ -48,6 +52,7 @@ pub mod collection;
 mod framing;
 mod gif;
 mod mp4;
+pub mod photo;
 mod poster;
 mod probe;
 mod process;

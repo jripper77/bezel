@@ -300,6 +300,9 @@ test('the vendor card scenario is the user\'s real card beside an internal memor
   assert.deepEqual(o.cache, { copies: 6, bytes: 19_386_367, deletedCopies: 0, deletedBytes: 0, limit: 2 * 2 ** 30 });
   assert.match(await demo.managerThumbnail(KEY, 'internal/video/earth.mp4'), /^data:image\/svg\+xml,/);
   assert.equal(await demo.managerThumbnail(KEY, 'sd/video/AMD.mp4'), null);
+  // A refused overview answers before it lists anything: the thumbnails still follow the last listing.
+  await assert.rejects(demo.managerOverview('COM9'), (e) => e.code === 'unsupported');
+  assert.match(await demo.managerThumbnail(KEY, 'internal/video/earth.mp4'), /^data:/, 'the refusal did not replace the listing');
 });
 
 test('a move sends the copy, checks it, and only then deletes the source', async () => {
@@ -480,6 +483,9 @@ test('a cancelled batch delete stops before the next file', async () => {
 
 test('associating an original copies it into the store; clearing the cache keeps entries and thumbnails', async () => {
   const demo = createDemoBackend('vendorCard', instant);
+  // The manager lists the screen first: thumbnails answer for what it listed.
+  await demo.managerOverview(KEY);
+  assert.equal(await demo.managerThumbnail(KEY, 'internal/video/DARIUS.mp4'), null, 'no copy yet');
   const files = await demo.pickOriginals(false);
   const folder = await demo.pickOriginals(true);
   assert.equal(folder.length, 1);
@@ -676,4 +682,17 @@ test('the demo collection: rename, the themes using an item, use and delete', as
   assert.deepEqual(seen.links, ['klipyPartnerPanel']);
   await demo.openGuide('gifs-and-stickers', 'pt-BR');
   await createDemoBackend('gifs').openLink('klipyPartnerPanel');
+});
+
+test('the standby scenarios: an 8.8" without a card, one set to turn off, one with a card album', async () => {
+  const noCard = createDemoBackend('noCard');
+  const overview = await noCard.storageOverview('/dev/ttyACM1');
+  assert.equal(overview.card, null, 'no card listed');
+  assert.deepEqual(overview.folders.map((f) => `${f.medium}/${f.kind}`), ['internal/image', 'internal/video']);
+  const album = await createDemoBackend('album').storageOverview('/dev/ttyACM1');
+  const images = album.folders.find((f) => f.medium === 'sd' && f.kind === 'image').files.map((f) => f.name);
+  assert.deepEqual(images.sort(), ['img_0042.jpg', 'praia.png']);
+  assert.equal((await createDemoBackend('standbyOff').standbyOverview('/dev/ttyACM1')).choice, 'off');
+  // What the standby demo reads and adds of the storage stays inside the backend.
+  assert.equal(createDemoBackend('turing88').standbyStorage, undefined);
 });

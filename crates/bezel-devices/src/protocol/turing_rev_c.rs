@@ -357,6 +357,21 @@ pub fn diff_runs(previous: &[u8], current: &[u8], format: PixelFormat) -> Option
     Some(out)
 }
 
+/// The smallest partial update, to keep the screen awake while the frame
+/// does not change (D-2026-10-03-power-off-standby-5): one single-pixel
+/// record of pixel 0 carrying the value `frame` (a native BGRA buffer, the
+/// last one sent) already has there, encoded in `format` as every partial
+/// is. The firmware's sleep timer counts the time without host traffic;
+/// this is frame traffic that leaves the image as it is. Empty for an empty
+/// frame.
+pub fn keepalive_run(frame: &[u8], format: PixelFormat) -> Vec<u8> {
+    let mut out = Vec::new();
+    if let Some(first) = frame.get(..4) {
+        push_run(&mut out, 0, first, format);
+    }
+    out
+}
+
 fn push_run(out: &mut Vec<u8>, start: usize, pixels: &[u8], format: PixelFormat) {
     let count = pixels.len() / 4;
     let idx = start as u32;
@@ -792,6 +807,36 @@ mod tests {
                 .is_empty()
         );
         assert!(diff_runs(&prev, &cur[..8], PixelFormat::Bgra).is_none());
+    }
+
+    #[test]
+    fn the_keepalive_is_pixel_zero_as_it_is() {
+        // D-2026-10-03-power-off-standby-5: a single-pixel record (§ 9.2,
+        // idx | 0x800000) of pixel 0 with its current value.
+        let frame = [0x10, 0xFF, 0xFF, 0x00, 9, 9, 9, 9];
+        assert_eq!(
+            hex(&keepalive_run(&frame, PixelFormat::Bgra)),
+            "80000010ffff00"
+        );
+        // The 3-byte form as every partial carries it: a4 = 0.
+        assert_eq!(
+            hex(&keepalive_run(&frame, PixelFormat::CompressedBgra)),
+            "80000010fcff"
+        );
+        let opaque = [1, 2, 3, 255];
+        assert_eq!(
+            hex(&keepalive_run(&opaque, PixelFormat::Bgra)),
+            "800000010203ff"
+        );
+        assert!(keepalive_run(&[], PixelFormat::Bgra).is_empty());
+        // Applied to the frame it came from, it changes nothing: the same
+        // record a diff against a frame differing only there would give.
+        let mut before = frame;
+        before[..4].copy_from_slice(&[0, 0, 0, 0]);
+        assert_eq!(
+            diff_runs(&before, &frame, PixelFormat::Bgra),
+            Some(keepalive_run(&frame, PixelFormat::Bgra))
+        );
     }
 
     #[test]

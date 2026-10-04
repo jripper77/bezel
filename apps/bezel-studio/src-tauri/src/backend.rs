@@ -298,7 +298,11 @@ impl Backend {
         )?)
     }
 
+    /// Opens the screen `key`: under the claim of the storage operation that
+    /// needs it ([`StorageState::claim`]), never in the final state of a
+    /// shutdown (`busy`; D-2026-10-03-power-off-standby-3).
     pub(crate) fn connect(&self, key: &str) -> UiResult<Box<dyn ScreenLink>> {
+        self.storage.refuse_while_shutting_down()?;
         let screen = self.find_screen(key)?;
         Ok(self.connector.connect(&screen)?)
     }
@@ -417,8 +421,10 @@ impl Backend {
 
     /// Switches the panel in desktop mode at `key` back to USB monitor mode
     /// (D-2026-09-30-release-polish-8, not validated on hardware). Without
-    /// `Confirm::Yes` nothing is sent.
+    /// `Confirm::Yes` nothing is sent; in the final state of a shutdown
+    /// neither (`busy`, D-2026-10-03-power-off-standby-3).
     pub fn leave_desktop_mode(&self, key: &str, confirm: Confirm) -> UiResult<MonitorModeDto> {
+        self.storage.refuse_while_shutting_down()?;
         let switched =
             leave_desktop_mode(self.bus.as_ref(), self.hid.as_ref(), Some(key), confirm)?;
         Ok(MonitorModeDto::from(&switched))
@@ -441,6 +447,9 @@ impl Backend {
                 }
                 live
             };
+            // A shutdown that started meanwhile waits for this claim: the MCU
+            // restarts nothing then.
+            self.storage.refuse_while_shutting_down()?;
             let screen = restart_screen(self.bus.as_ref(), self.connector.as_ref(), Some(key))?;
             (key_of(&screen, key), was_live)
         };
@@ -457,25 +466,37 @@ impl Backend {
     /// edited theme live. The screen goes live under its one key, the
     /// address it is listed by once connected (its display's;
     /// D-2026-10-01-live-screen-controls-2), which is remembered with the
-    /// orientation; `screen` only when it cannot be listed again.
+    /// orientation; `screen` only when it cannot be listed again. The screen
+    /// is opened under the claim on the screens ([`StorageState::claim`]).
+    /// In the final state of a shutdown, `busy`: live mode and the
+    /// remembered live screen stay as they are.
     pub fn set_live(&self, on: bool, screen: Option<&str>, time: LocalTime) -> UiResult<()> {
         // Stop first: a screen can only be opened once.
-        let previous = self.idle_studio().stop_live();
+        let previous = {
+            let mut studio = self.idle_studio();
+            if studio.shutting_down() {
+                return Err(UiError::new(ErrorCode::Busy));
+            }
+            studio.stop_live()
+        };
         drop(previous);
         if !on {
             self.settings.update(|s| s.live_screen = None);
             return Ok(());
         }
         let asked = screen.ok_or_else(|| UiError::new(ErrorCode::NoScreenChosen))?;
-        self.storage.ensure_idle()?;
-        // Opening wakes the screen (seconds); the session stays usable meanwhile.
-        let (found, link) =
-            connect_screen(self.bus.as_ref(), self.connector.as_ref(), Some(asked))?;
-        let key = key_of(&found, asked);
-        let orientation = {
+        let (key, orientation) = {
+            let _claim = self.storage.claim()?;
+            // Opening wakes the screen (seconds); the session stays usable
+            // meanwhile.
+            let (found, link) =
+                connect_screen(self.bus.as_ref(), self.connector.as_ref(), Some(asked))?;
+            let key = key_of(&found, asked);
             let mut studio = self.studio();
-            studio.go_live_on(key.clone(), found, link);
-            studio.theme().orientation
+            if !studio.go_live_on(key.clone(), found, link) {
+                return Err(UiError::new(ErrorCode::Busy));
+            }
+            (key, studio.theme().orientation)
         };
         self.show_now(time)?;
         self.settings.update(|s| {
@@ -512,21 +533,23 @@ impl Backend {
     }
 
     /// Sets a screen's brightness (through the live link when it is live,
-    /// named by either of its ports).
+    /// named by either of its ports; else the screen opened under the claim
+    /// on the screens).
     pub fn set_brightness(&self, screen: &str, percent: u8) -> UiResult<()> {
         let brightness =
             Brightness::new(percent).ok_or_else(|| UiError::new(ErrorCode::BrightnessRange))?;
         if self.idle_studio().live_brightness(screen, brightness)? {
             return Ok(());
         }
-        self.storage.ensure_idle()?;
+        let _claim = self.storage.claim()?;
         Ok(self.connect(screen)?.set_brightness(brightness)?)
     }
 
     /// Hands a screen back to its own mode; a live one (named by either of
     /// its ports) stops live mode and is released through its live link.
+    /// Under the claim on the screens.
     pub fn release(&self, screen: &str) -> UiResult<()> {
-        self.storage.ensure_idle()?;
+        let _claim = self.storage.claim()?;
         let live = {
             let mut studio = self.idle_studio();
             if studio.is_live(screen) {
@@ -1293,6 +1316,16 @@ mod tests {
             .backend
             .leave_desktop_mode("hid:/dev/hidraw9", Confirm::Yes);
         assert_eq!(gone.unwrap_err().code(), "screenNotFound");
+
+        // Review W9 (iteration 1), D-2026-10-03-power-off-standby-3: in the
+        // final state of a shutdown no panel is switched either (`busy`).
+        let calls = hid.calls().len();
+        f.backend.enter_final_state();
+        let busy = f.backend.leave_desktop_mode(&key, Confirm::Yes);
+        assert_eq!(busy.unwrap_err().code(), "busy");
+        assert_eq!(hid.calls().len(), calls, "nothing sent in the final state");
+        f.backend.leave_final_state();
+        f.backend.leave_desktop_mode(&key, Confirm::Yes).unwrap();
     }
 
     /// The guide's pages open at their fixed addresses, pages of this

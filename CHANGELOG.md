@@ -185,6 +185,29 @@ the Conventional Commits.
   canvas, renamed or deleted (the confirmation names the themes that use it;
   they keep their own copy). A sticker's transparency shows the theme under
   it. See [GIFs and stickers](docs/user/gifs-and-stickers.md).
+- What a Turing rev C screen does when the computer shuts down or restarts,
+  instead of staying frozen on the theme's last picture: **Leave as it is**
+  (the default, as before), **Turn the screen off**, **Play a video stored on
+  the screen** in a loop, or the **Photo album from the card** (the screen's
+  own album of `sd/image`, a photo every 3 to 5 s). It is chosen per screen in
+  Bezel Studio (**Screen → Settings**) or with
+  `bezel standby set keep|off|video|album --yes` (`bezel standby show` lists
+  it), behind a confirmation, and Bezel Studio carries it out at shutdown: on
+  Linux through a systemd-logind delay inhibitor, on Windows when the session
+  ends; quitting the app applies nothing. Choosing also stores a plan B on the
+  screen for when the studio cannot act: the screen's sleep timer (1 to 10
+  minutes) with **Turn the screen off**, or what it starts with (the album, or
+  the first video of `sd/video`, since the screen cannot be told which file);
+  **Leave as it is** undoes it. Without the studio, only the sleep timer acts
+  while the screen stays powered: the album or a video starts when the screen
+  itself starts again. `--brightness` is recorded with the plan B, and the
+  album's restart at shutdown starts at it. A choice that cannot be carried out (the
+  video or the card is gone) turns the screen off. Photos added to the album
+  (`bezel standby album add`, or the studio's album) are stood upright by their
+  EXIF orientation and framed for the way the screen stands, filled or fitted.
+  A live rev C screen gets a one-pixel update after 30 s without traffic, so
+  its sleep timer does not fire while a theme is live. See
+  [When the computer shuts down](docs/user/power-off.md).
 
 ### Changed
 - Turing rev C screens take at most 25 MiB per file: their firmware keeps a
@@ -205,6 +228,9 @@ the Conventional Commits.
   pending: an upload that did not finish) and whether Bezel keeps a local copy;
   `put`, `rm` and `boot`, and the studio's sending, deleting and theme videos,
   record what they do in Bezel's catalog.
+- Setting what a rev C screen shows at start (`bezel storage boot`,
+  **Show at start…**) keeps the sleep timer of the shutdown choice: the
+  screen's settings are written whole from what Bezel recorded for it.
 
 ### Fixed
 - A rev C screen that another app just turned off (turing-smart-screen-python

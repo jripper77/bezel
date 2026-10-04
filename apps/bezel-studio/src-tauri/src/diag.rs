@@ -143,11 +143,42 @@ pub enum DiagCode {
     LiveScreenNotBack,
     /// The live screen stopped after a storage job.
     LiveStoppedAfterStorageJob,
+    // ------------------------------------------- the computer shutting down --
+    /// The system bus was not reached: each screen keeps its plan B when
+    /// the computer shuts down (D-2026-10-03-power-off-standby-3).
+    NoSystemBus,
+    /// logind is not on the system bus: each screen keeps its plan B.
+    NoLogind,
+    /// logind refused the shutdown delay lock: each screen keeps its plan B.
+    ShutdownDelayRefused,
+    /// The system bus was lost: each screen keeps its plan B.
+    SystemBusLost,
+    /// The thread that watches for shutdowns did not start: each screen
+    /// keeps its plan B.
+    ShutdownWatchNotStarted,
+    /// logind's delay was not read: its default is assumed.
+    ShutdownDelayNotRead,
+    /// The thread that applies the choices did not start.
+    ShutdownNotApplied,
+    /// The deadline came before every screen's choice was applied.
+    ShutdownDeadline,
+    /// A storage job did not stop before the deadline: no choice applied.
+    ShutdownJobNotStopped,
+    /// The catalog was not read at shutdown: no choice applied.
+    ShutdownCatalogNotRead,
+    /// The screens were not listed at shutdown: only the live one's choice
+    /// applied.
+    ShutdownScreensNotListed,
+    /// A screen's choice failed at shutdown.
+    ShutdownChoiceFailed,
+    /// A screen restarted into its album at shutdown, but the catalog was
+    /// not saved: its record still says the plan B stored before.
+    ShutdownAlbumNotRecorded,
 }
 
 impl DiagCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 58] = [
         Self::Panicked,
         Self::NotStarted,
         Self::PluginNotStarted,
@@ -193,6 +224,19 @@ impl DiagCode {
         Self::LiveScreenBack,
         Self::LiveScreenNotBack,
         Self::LiveStoppedAfterStorageJob,
+        Self::NoSystemBus,
+        Self::NoLogind,
+        Self::ShutdownDelayRefused,
+        Self::SystemBusLost,
+        Self::ShutdownWatchNotStarted,
+        Self::ShutdownDelayNotRead,
+        Self::ShutdownNotApplied,
+        Self::ShutdownDeadline,
+        Self::ShutdownJobNotStopped,
+        Self::ShutdownCatalogNotRead,
+        Self::ShutdownScreensNotListed,
+        Self::ShutdownChoiceFailed,
+        Self::ShutdownAlbumNotRecorded,
     ];
 
     /// Its fixed sentence.
@@ -252,6 +296,37 @@ impl DiagCode {
             Self::LiveScreenBack => "the live screen is back",
             Self::LiveScreenNotBack => "the live screen is not back",
             Self::LiveStoppedAfterStorageJob => "live screen stopped after a storage job",
+            Self::NoSystemBus => {
+                "the system bus was not reached: each screen keeps its plan B at shutdown"
+            }
+            Self::NoLogind => "logind was not found: each screen keeps its plan B at shutdown",
+            Self::ShutdownDelayRefused => {
+                "logind refused the shutdown delay: each screen keeps its plan B at shutdown"
+            }
+            Self::SystemBusLost => {
+                "the system bus was lost: each screen keeps its plan B at shutdown"
+            }
+            Self::ShutdownWatchNotStarted => {
+                "the shutdown watch did not start: each screen keeps its plan B at shutdown"
+            }
+            Self::ShutdownDelayNotRead => "logind's shutdown delay was not read: 5 s assumed",
+            Self::ShutdownNotApplied => "the choices for the shutdown were not applied",
+            Self::ShutdownDeadline => {
+                "the shutdown's deadline came before every screen's choice was applied"
+            }
+            Self::ShutdownJobNotStopped => {
+                "a storage job did not stop before the shutdown's deadline: no choice applied"
+            }
+            Self::ShutdownCatalogNotRead => {
+                "the catalog was not read at shutdown: no choice applied"
+            }
+            Self::ShutdownScreensNotListed => {
+                "the screens were not listed at shutdown: only the live one's choice applied"
+            }
+            Self::ShutdownChoiceFailed => "a screen's choice failed at shutdown",
+            Self::ShutdownAlbumNotRecorded => {
+                "a screen restarted into its album at shutdown, but the catalog was not saved"
+            }
         }
     }
 

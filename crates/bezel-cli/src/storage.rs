@@ -397,7 +397,7 @@ where
     }
 }
 
-const NOTHING_SENT: &str = "Nothing was sent to the screen.";
+pub(crate) const NOTHING_SENT: &str = "Nothing was sent to the screen.";
 
 /// Said when a command that only queried the screen stops for `--yes`.
 const NOTHING_CHANGED: &str = "Nothing on the screen was changed.";
@@ -461,7 +461,7 @@ where
 }
 
 /// A size as people read it: bytes, then KiB, MiB, GiB with one decimal.
-fn size_text(bytes: u64) -> String {
+pub(crate) fn size_text(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
     if bytes < 1024 {
         return format!("{bytes} B");
@@ -1024,7 +1024,7 @@ fn explain(error: BezelError) -> anyhow::Error {
 /// `Unsupported` for delete, boot and playing once,
 /// D-2026-09-30-storage-video-7; files whose size it cannot report are
 /// listed and played as present); refusals are explained.
-fn screen_error(what: &'static str) -> impl Fn(BezelError) -> anyhow::Error {
+pub(crate) fn screen_error(what: &'static str) -> impl Fn(BezelError) -> anyhow::Error {
     move |error| match error {
         BezelError::Unsupported(reason) => {
             anyhow!("this screen does not support {what} ({reason})")
@@ -1034,7 +1034,7 @@ fn screen_error(what: &'static str) -> impl Fn(BezelError) -> anyhow::Error {
 }
 
 /// The error of an interrupted upload, with what to do about a partial file.
-fn cancelled(path: &RemotePath, partial: Option<u64>) -> anyhow::Error {
+pub(crate) fn cancelled(path: &RemotePath, partial: Option<u64>) -> anyhow::Error {
     match partial {
         Some(bytes) => anyhow!(
             "cancelled; an incomplete file of {} remains at {path}: delete it with \
@@ -1213,7 +1213,9 @@ fn play(link: &mut dyn ScreenLink, path: &RemotePath, repeat: Repeat) -> anyhow:
 
 /// What `boot` is about to do, printed with or without `--yes`: the file,
 /// and what the screen keeps with it (OPTIONS: the brightness it boots
-/// with, and its own sleep timer, which Bezel leaves off).
+/// with, and its own sleep timer, which stays as the shutdown choice set
+/// it: the minutes of a recorded `off`, else none;
+/// D-2026-10-03-power-off-standby-2 (4)).
 fn boot_summary(args: &BootArgs) -> String {
     let mut out = match &args.media {
         BootMedia::Default => "Boot media: the screen's built-in start screen\n".to_string(),
@@ -1234,7 +1236,8 @@ fn boot_summary(args: &BootArgs) -> String {
     };
     out.push_str(&format!(
         "  The screen keeps this choice with the brightness it boots with: {brightness}\n  \
-         and with its sleep timer off: it does not go to sleep on its own\n"
+         and with the sleep timer of the shutdown choice: it goes to sleep on its own\n  \
+         only when `bezel standby` chose off, after the minutes chosen there\n"
     ));
     out
 }

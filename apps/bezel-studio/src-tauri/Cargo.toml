@@ -29,6 +29,10 @@ bezel-media = { workspace = true }
 # The KLIPY adapter behind the GIF search (D-2026-10-01-gif-sticker-search-2):
 # only the studio reaches the network, never the CLI.
 bezel-klipy = { workspace = true }
+# logind's shutdown delay lock on Linux and the end of the session on
+# Windows (D-2026-10-03-power-off-standby-3): the studio's one D-Bus
+# connection, to logind only.
+bezel-power = { workspace = true }
 # Not called: caps every `log` record at debug for the whole binary, so the
 # HTTP client's trace records, which print request paths (the KLIPY key is
 # one of their segments), are compiled out even if a `log` bridge is ever
@@ -55,6 +59,9 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # text. Both are already in `Cargo.lock` through the proc macros.
 [dev-dependencies]
 proc-macro2 = "1.0.107"
+# A private dbus-daemon, a fake logind on it and a monitor of that bus
+# (Linux), for the tests of what the studio does at shutdown.
+bezel-power = { workspace = true, features = ["fake"] }
 syn = { version = "2.0.119", features = ["full", "visit"] }
 
 # Tauri's mock runtime (`tauri::test`), to run the app's own setup in a test.

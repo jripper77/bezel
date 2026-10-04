@@ -15,6 +15,7 @@ use bezel_core::domain::frame::Frame;
 use bezel_core::domain::geometry::Orientation;
 use bezel_core::domain::job::Job;
 use bezel_core::domain::screen::{Brightness, ScreenIdentity};
+use bezel_core::domain::standby::PlanB;
 use bezel_core::domain::storage::{
     Capacity, Confirmed, FileName, Medium, RemotePath, Repeat, StartMode, StorageInfo,
     StorageLocation,
@@ -204,6 +205,21 @@ pub struct FakeLog {
     pub restarts: Vec<String>,
     /// The simulated storage, shared by every screen of the connector.
     pub storage: FakeStorage,
+    /// What the screens keep for how they start, in the order it reached
+    /// them: one list across the link's levels and the storage's OPTIONS.
+    pub kept: Vec<Kept>,
+}
+
+/// What reached a simulated screen that it keeps for how it starts: each
+/// backlight level set and each plan B written, in order (`FakeLog::kept`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kept {
+    /// `set_brightness`.
+    Brightness(Brightness),
+    /// `set_options`: the plan B, and the backlight level its OPTIONS
+    /// carries, as the rev C driver writes it: the last level its link set
+    /// (`None`: none yet, so the vendor's default).
+    Options(PlanB, Option<Brightness>),
 }
 
 /// One call that reached a simulated screen's storage.
@@ -225,8 +241,13 @@ pub enum StorageCall {
     PlayImage(RemotePath),
     /// `stop`.
     Stop,
-    /// `set_start_mode`.
-    StartMode(StartMode),
+    /// `set_options`: the plan B written (OPTIONS).
+    Options(PlanB),
+    /// `restart` of the screen's system.
+    Restart,
+    /// The link's `turn_off_now`, logged here so that a shutdown action's
+    /// whole sequence reads in one list.
+    TurnOffNow,
 }
 
 impl StorageCall {
@@ -266,8 +287,10 @@ pub struct FakeStorage {
     pub files: BTreeMap<RemotePath, Vec<u8>>,
     /// What plays on the screen.
     pub playback: Playback,
-    /// The last start mode set, if any.
+    /// The start mode of the last plan B written, if any.
     pub start_mode: Option<StartMode>,
+    /// The last plan B written (OPTIONS), if any.
+    pub options: Option<PlanB>,
     /// Every storage call, in order.
     pub calls: Vec<StorageCall>,
     /// Bytes every upload loses at its end (0: none), like a transfer the
@@ -287,6 +310,7 @@ impl Default for FakeStorage {
             files: BTreeMap::new(),
             playback: Playback::Idle,
             start_mode: None,
+            options: None,
             calls: Vec::new(),
             short_by: 0,
             size_unknown: BTreeSet::new(),
@@ -505,6 +529,7 @@ impl ScreenConnector for FakeConnector {
                 firmware: Some("simulated".into()),
             },
             orientation: Orientation::Portrait,
+            brightness: None,
             has_storage: matches!(model.family, Family::TuringRevC | Family::TuringUsb),
             log: Arc::clone(&self.log),
             script: Arc::clone(&self.script),
@@ -517,6 +542,8 @@ impl ScreenConnector for FakeConnector {
 pub struct FakeScreen {
     identity: ScreenIdentity,
     orientation: Orientation,
+    /// The last level this link set: what its OPTIONS carry.
+    brightness: Option<Brightness>,
     has_storage: bool,
     log: Arc<Mutex<FakeLog>>,
     script: Arc<Mutex<Script>>,
@@ -550,7 +577,11 @@ impl ScreenLink for FakeScreen {
     }
 
     fn set_brightness(&mut self, brightness: Brightness) -> Result<()> {
-        self.record(|l| l.brightness.push(brightness));
+        self.brightness = Some(brightness);
+        self.record(|l| {
+            l.brightness.push(brightness);
+            l.kept.push(Kept::Brightness(brightness));
+        });
         Ok(())
     }
 
@@ -586,6 +617,12 @@ impl ScreenLink for FakeScreen {
 
     fn screen_off(&mut self) -> Result<()> {
         self.record(|l| l.offs += 1);
+        Ok(())
+    }
+
+    /// Records [`StorageCall::TurnOffNow`] (not an `offs`).
+    fn turn_off_now(&mut self) -> Result<()> {
+        self.store(StorageCall::TurnOffNow, |_| ());
         Ok(())
     }
 
@@ -666,8 +703,21 @@ impl ScreenStorage for FakeScreen {
         Ok(())
     }
 
-    fn set_start_mode(&mut self, mode: StartMode, _confirmed: Confirmed) -> Result<()> {
-        self.store(StorageCall::StartMode(mode), |s| s.start_mode = Some(mode));
+    /// Records the plan B, and in [`FakeLog::kept`] with the level this
+    /// link last set.
+    fn set_options(&mut self, plan: PlanB, _confirmed: Confirmed) -> Result<()> {
+        let level = self.brightness;
+        self.record(|l| l.kept.push(Kept::Options(plan, level)));
+        self.store(StorageCall::Options(plan), |s| {
+            s.start_mode = Some(plan.start_mode);
+            s.options = Some(plan);
+        });
+        Ok(())
+    }
+
+    /// Records the restart; what plays stops, what is stored stays.
+    fn restart(&mut self, _confirmed: Confirmed) -> Result<()> {
+        self.store(StorageCall::Restart, |s| s.playback = Playback::Idle);
         Ok(())
     }
 }
@@ -850,9 +900,8 @@ mod tests {
         result.unwrap();
         storage.play_image(&image).unwrap();
         storage.stop().unwrap();
-        storage
-            .set_start_mode(StartMode::Video, confirmed())
-            .unwrap();
+        let plan = PlanB::new(StartMode::Video, 3);
+        storage.set_options(plan, confirmed()).unwrap();
         storage.delete(&video, confirmed()).unwrap();
         storage.delete(&video, confirmed()).unwrap();
 
@@ -860,8 +909,8 @@ mod tests {
         assert_eq!(log.files[&clip], data);
         assert!(!log.files.contains_key(&video));
         assert_eq!(
-            (log.playback, log.start_mode),
-            (Playback::Idle, Some(StartMode::Video))
+            (log.playback, log.start_mode, log.options),
+            (Playback::Idle, Some(StartMode::Video), Some(plan))
         );
         let writes: Vec<&StorageCall> = log
             .calls
@@ -878,11 +927,47 @@ mod tests {
                 &StorageCall::Upload(image.clone(), 3),
                 &StorageCall::PlayImage(image),
                 &StorageCall::Stop,
-                &StorageCall::StartMode(StartMode::Video),
+                &StorageCall::Options(plan),
                 &StorageCall::Delete(video.clone()),
                 &StorageCall::Delete(video),
             ]
         );
+    }
+
+    #[test]
+    fn fake_screens_record_the_shutdown_actions_in_order() {
+        let video = remote("sd/video/loop.mp4");
+        let connector = FakeConnector::with_storage(
+            FakeStorage::default()
+                .with_card(1 << 20)
+                .with_file(video.clone(), vec![7; 100]),
+        );
+        let mut link = open_screen(&FakeBus::turing_88(), &connector, None).unwrap();
+        link.turn_off_now().unwrap();
+        let storage = link.storage().unwrap();
+        storage.play_video(&video, Repeat::Loop).unwrap();
+        let album = PlanB::new(StartMode::Image, 0);
+        storage.set_options(album, confirmed()).unwrap();
+        storage.restart(confirmed()).unwrap();
+        let log = connector.log();
+        assert_eq!(log.offs, 0, "turn_off_now is not screen_off");
+        assert_eq!(
+            log.storage.calls,
+            [
+                StorageCall::TurnOffNow,
+                StorageCall::PlayVideo(video, Repeat::Loop),
+                StorageCall::Options(album),
+                StorageCall::Restart,
+            ]
+        );
+        assert!(
+            log.storage
+                .calls
+                .iter()
+                .all(StorageCall::changes_the_screen)
+        );
+        assert_eq!(log.storage.playback, Playback::Idle, "the restart stops it");
+        assert_eq!(log.storage.options, Some(album));
     }
 
     #[test]

@@ -90,6 +90,18 @@ pub struct SizeDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum BackgroundDto {
+    /// Video already stored on the screen.
+    #[serde(rename_all = "camelCase")]
+    DeviceVideo {
+        /// Exact internal/SD video path.
+        path: String,
+        /// Replay at the end.
+        #[serde(default = "yes")]
+        looping: bool,
+        /// Color outside video windows.
+        #[serde(default = "black")]
+        color: String,
+    },
     /// A color.
     Color {
         /// `#rrggbbaa`.
@@ -216,6 +228,17 @@ pub enum PaintDto {
         /// `[position, color]` pairs.
         stops: Vec<(f32, String)>,
     },
+}
+
+/// A linear transparency mask in a shape's box.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FadeDto {
+    /// Direction in degrees.
+    pub angle: f32,
+    /// Start opacity, 0..=1.
+    pub start: f32,
+    /// End opacity, 0..=1.
+    pub end: f32,
 }
 
 /// One element.
@@ -410,6 +433,12 @@ pub enum KindDto {
     /// Shape.
     #[serde(rename_all = "camelCase")]
     Shape {
+        /// Reveal the device video in this shape.
+        #[serde(default, rename = "videoWindow")]
+        video_window: bool,
+        /// Linear transparency, including the outline.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fade: Option<FadeDto>,
         /// `rect` or `ellipse`.
         shape: String,
         /// Corner radius for rects.
@@ -868,6 +897,8 @@ fn kind_dto(k: &ElementKind) -> KindDto {
             fit: fit_dto(*fit),
         },
         ElementKind::Shape {
+            video_window,
+            fade,
             shape,
             fill,
             stroke,
@@ -877,6 +908,12 @@ fn kind_dto(k: &ElementKind) -> KindDto {
                 ShapeKind::Ellipse => ("ellipse", 0.0),
             };
             KindDto::Shape {
+                video_window: *video_window,
+                fade: fade.map(|f| FadeDto {
+                    angle: f.angle,
+                    start: f.start,
+                    end: f.end,
+                }),
                 shape: name.to_string(),
                 radius,
                 fill: fill.as_ref().map(paint_dto),
@@ -1044,12 +1081,33 @@ fn kind(k: &KindDto) -> R<ElementKind> {
             fit: fit(*f),
         },
         KindDto::Shape {
+            video_window,
+            fade,
             shape,
             radius,
             fill,
             stroke,
             stroke_width,
         } => ElementKind::Shape {
+            video_window: *video_window,
+            fade: fade
+                .as_ref()
+                .map(|f| {
+                    if !f.angle.is_finite()
+                        || !f.start.is_finite()
+                        || !f.end.is_finite()
+                        || !(0.0..=1.0).contains(&f.start)
+                        || !(0.0..=1.0).contains(&f.end)
+                    {
+                        return err("invalid shape transparency");
+                    }
+                    Ok(bezel_core::domain::gradient::Fade {
+                        angle: f.angle,
+                        start: f.start,
+                        end: f.end,
+                    })
+                })
+                .transpose()?,
             shape: match shape.as_str() {
                 "rect" => ShapeKind::Rect { radius: *radius },
                 "ellipse" => ShapeKind::Ellipse,
@@ -1149,6 +1207,15 @@ impl From<&Theme> for ThemeDto {
             orientation: orientation_name(t.orientation).to_string(),
             refresh_seconds: t.refresh_seconds,
             background: match &t.background {
+                Background::DeviceVideo {
+                    path,
+                    repeat,
+                    color,
+                } => BackgroundDto::DeviceVideo {
+                    path: path.to_string(),
+                    looping: *repeat == bezel_core::domain::storage::Repeat::Loop,
+                    color: to_hex(*color),
+                },
                 Background::Color(c) => BackgroundDto::Color { color: to_hex(*c) },
                 Background::Image { asset, fit } => BackgroundDto::Image {
                     asset: asset.0.clone(),
@@ -1200,6 +1267,26 @@ impl TryFrom<&ThemeDto> for Theme {
             return err("empty canvas");
         }
         let background = match &d.background {
+            BackgroundDto::DeviceVideo {
+                path,
+                looping,
+                color: c,
+            } => {
+                let path = bezel_core::domain::storage::RemotePath::parse(path)
+                    .map_err(|e| DtoError(e.to_string()))?;
+                if path.location.kind != bezel_core::domain::media::MediaKind::Video {
+                    return err("device background must reference a video");
+                }
+                Background::DeviceVideo {
+                    path,
+                    repeat: if *looping {
+                        bezel_core::domain::storage::Repeat::Loop
+                    } else {
+                        bezel_core::domain::storage::Repeat::Once
+                    },
+                    color: color(c)?,
+                }
+            }
             BackgroundDto::Color { color: c } => Background::Color(color(c)?),
             BackgroundDto::Image { asset, fit: f } => Background::Image {
                 asset: AssetRef(asset.clone()),

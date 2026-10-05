@@ -334,6 +334,7 @@ export function actionsFor({ features, files, medium, card, live, busy }) {
     copy: common(1) ?? other ?? allow,
     rename: common(1, 1) ?? removes ?? allow,
     play: common(1, 1) ?? (live ? deny('live') : allow),
+    background: common(1, 1) ?? (single?.kind === 'video' ? allow : deny('videoOnly')),
     boot: common(1, 1) ?? (features.boot ? allow : deny('deleteUnsupported')),
     delete: common(1) ?? removes ?? allow,
     associate: common(1, 1) ?? (hasCopy(single) ? deny('hasCopy') : null) ?? (single.size === null ? deny('unknownSize') : allow),

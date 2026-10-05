@@ -101,6 +101,8 @@ fn sensor(k: &str) -> Option<TextContent> {
 
 fn card(y: f32, height: f32) -> (BoxF, ElementKind) {
     let kind = ElementKind::Shape {
+        video_window: false,
+        fade: None,
         shape: ShapeKind::Rect { radius: 28.0 },
         fill: Some(Paint::solid(Rgba {
             r: 255,
@@ -124,6 +126,8 @@ fn card(y: f32, height: f32) -> (BoxF, ElementKind) {
 fn header() -> Vec<(BoxF, ElementKind)> {
     let full = BoxF::new(0.0, 0.0, 480.0, 1920.0);
     let backdrop = ElementKind::Shape {
+        video_window: false,
+        fade: None,
         shape: ShapeKind::Rect { radius: 0.0 },
         fill: Some(linear(
             90.0,
@@ -335,6 +339,8 @@ fn gauge(top: f32) -> Option<Vec<(BoxF, ElementKind)>> {
         width: 5.0,
     };
     let hub = ElementKind::Shape {
+        video_window: false,
+        fade: None,
         shape: ShapeKind::Ellipse,
         fill: Some(Paint::solid(Rgba::opaque(24, 28, 44))),
         stroke: Some((Rgba::WHITE, 3.0)),

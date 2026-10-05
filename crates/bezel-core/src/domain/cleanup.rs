@@ -58,6 +58,14 @@ impl Protected {
     /// four turns, plain or with any framing (`<name>_f<8 hex>`), in the
     /// video folder of either medium.
     pub fn theme_video(&mut self, asset: &AssetRef, profile: &UploadProfile) {
+        // Device-only themes reference an exact stored path, without a local asset.
+        if let Some(raw) = asset.0.strip_prefix("screen://")
+            && let Ok(path) = RemotePath::parse(raw)
+            && path.location.kind == MediaKind::Video
+        {
+            self.videos.insert(path.name.as_str().to_ascii_lowercase());
+            return;
+        }
         for turns in 0..4 {
             let plain = video_name(asset, turns, None, profile);
             self.videos.insert(plain.as_str().to_ascii_lowercase());
@@ -584,6 +592,18 @@ mod tests {
         assert!(protected.is_boot(&path("sd/video/boot.mp4")));
         assert!(!protected.is_boot(&path("internal/video/boot.mp4")));
         assert!(!Protected::default().covers(&path("sd/video/boot.mp4")));
+    }
+
+    #[test]
+    fn exact_device_theme_videos_are_protected_without_bezel_names() {
+        let profile = model_by_id(ModelId("turing-8.8"))
+            .and_then(UploadProfile::for_model)
+            .unwrap();
+        let mut protected = Protected::default();
+        protected.theme_video(&AssetRef("screen://sd/video/AMD.mp4".into()), &profile);
+        assert!(protected.is_theme_video(&path("sd/video/amd.mp4")));
+        assert!(!protected.is_theme_video(&path("sd/video/bezel_AMD.mp4")));
+        assert!(!protected.is_theme_video(&path("sd/image/amd.mp4")));
     }
 
     #[test]

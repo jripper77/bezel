@@ -138,7 +138,7 @@ export function createConfirm(t, { refocus = () => {} } = {}) {
  * @param {() => {screen: object|null, live: boolean, liveVideo: {state: string, path?: string}|null}} deps.context
  * @param {(key: string) => void} [deps.restart] restarts a screen that stopped responding
  */
-export function createStoragePanel({ root, t, locale, bridge, notify, context, restart = () => {} }) {
+export function createStoragePanel({ root, t, locale, bridge, notify, context, restart = () => {}, useBackground = () => {} }) {
   const view = {
     key: null,
     shown: false,
@@ -610,6 +610,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
       askBoot,
       askDelete,
       play,
+      useBackground,
       dropZone,
       confirm,
       refocus,

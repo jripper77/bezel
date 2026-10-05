@@ -228,6 +228,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     }
     nodes.push(el('div', { class: 'button-row' }, [
       button(t('inspector.replaceVideo'), () => video.useVideo()),
+      button(t('deviceVideo.choose'), () => video.openStorage()),
       button(t('inspector.useImage'), () => video.useImage()),
       useColor(),
     ]));
@@ -235,6 +236,21 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
   }
 
   function backgroundFields(bg, assets) {
+    if (bg.type === 'deviceVideo') {
+      const context = video.context();
+      const windows = store.getState().theme.elements.some((e) => e.visible !== false && e.kind.type === 'shape' && e.kind.videoWindow);
+      const status = context.live ? context.liveVideo?.state : null;
+      return [
+        el('strong', { text: fileNameOf(bg.path) }),
+        el('p', { class: 'hint', text: t('deviceVideo.fromScreen') }),
+        checkField(t('deviceVideo.loop'), bg.looping !== false, (looping) => store.dispatch('setTheme', { patch: { background: { ...bg, looping } } })),
+        windows && colorField(t('deviceVideo.outsideColor'), bg.color ?? '#000000ff', (color) => store.dispatch('setTheme', { patch: { background: { ...bg, color } } })),
+        el('p', { class: 'hint', text: t('deviceVideo.preview') }),
+        status === 'storedMissing' && el('p', { class: 'hint', text: t('deviceVideo.missing') }),
+        status === 'noPlayback' && el('p', { class: 'hint', text: t('deviceVideo.unsupported') }),
+        el('div', { class: 'button-row' }, [button(t('deviceVideo.choose'), () => video.openStorage()), useColor()]),
+      ].filter(Boolean);
+    }
     if (bg.type === 'video') return videoBackground(bg, assets);
     return [
       bg.type === 'color'
@@ -243,6 +259,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       el('div', { class: 'button-row' }, [
         bg.type !== 'color' && useColor(),
         button(t('inspector.useVideo'), () => video.useVideo()),
+        button(t('deviceVideo.choose'), () => video.openStorage()),
       ]),
     ];
   }
@@ -459,7 +476,14 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     return [
       segmented(t('inspector.shape'), k.shape, [['rect', t('shape.rect')], ['ellipse', t('shape.ellipse')]], (v) => update(e.id, { kind: { shape: v } })),
       k.shape === 'rect' && numberField(t('inspector.radius'), k.radius ?? 0, (v) => update(e.id, { kind: { radius: Math.max(0, v) } }), { min: 0 }),
-      colorField(t('inspector.fill'), typeof k.fill === 'string' ? k.fill : '#1e293bff', (v) => update(e.id, { kind: { fill: v } })),
+      checkField(t('shape.videoWindow'), Boolean(k.videoWindow), (videoWindow) => update(e.id, { kind: { videoWindow } })),
+      k.videoWindow ? el('div', {}, [el('p', { class: 'hint', text: t('shape.videoWindowHint') }), button(t('deviceVideo.choose'), () => video.openStorage())]) : colorField(t('inspector.fill'), typeof k.fill === 'string' ? k.fill : '#1e293bff', (v) => update(e.id, { kind: { fill: v } })),
+      checkField(t('shape.fade'), Boolean(k.fade), (on) => update(e.id, { kind: { fade: on ? { angle: 0, start: 1, end: 0 } : null } })),
+      k.fade && el('div', {}, [
+        numberField(t('shape.fadeAngle'), k.fade.angle, (angle) => update(e.id, { kind: { fade: { angle } } }), { min: -360, max: 360 }),
+        rangeField(t('shape.fadeStart'), Math.round(k.fade.start * 100), (v) => update(e.id, { kind: { fade: { start: v / 100 } } }), { format: (v) => `${v}%` }),
+        rangeField(t('shape.fadeEnd'), Math.round(k.fade.end * 100), (v) => update(e.id, { kind: { fade: { end: v / 100 } } }), { format: (v) => `${v}%` }),
+      ]),
       el('div', { class: 'field-row' }, [
         numberField(t('inspector.strokeWidth'), k.strokeWidth ?? 0, (v) => update(e.id, { kind: { strokeWidth: Math.max(0, v), stroke: v > 0 ? (k.stroke ?? '#ffffffff') : null } }), { min: 0 }),
       ]),
@@ -556,8 +580,9 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
 
   function videoSignature() {
     const { theme, selection } = store.getState();
-    if (selection.length || theme.background.type !== 'video') return '';
+    if (selection.length || !['video', 'deviceVideo'].includes(theme.background.type)) return '';
     const c = video.context();
+    if (theme.background.type === 'deviceVideo') return JSON.stringify([c.live, c.screen?.key, c.liveVideo?.state, c.liveVideo?.path]);
     return JSON.stringify([videoStatus(c), c.tools?.ready ?? null, c.tools?.installHints?.length ?? 0, c.auto?.rotation ?? null, Boolean(c.framing), c.motion !== false]);
   }
 

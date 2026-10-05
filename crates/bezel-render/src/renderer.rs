@@ -63,7 +63,7 @@ struct CachedLayer {
 /// clock, no asset), so their layer can be kept between frames.
 fn is_static(element: &Element) -> bool {
     match &element.kind {
-        ElementKind::Shape { .. } => true,
+        ElementKind::Shape { video_window, .. } => !video_window,
         ElementKind::Text {
             content: TextContent::Static(_),
             style,
@@ -146,7 +146,7 @@ impl FrameRenderer for SkiaRenderer {
             Some(c) if (c.width(), c.height()) == (size.width, size.height) => c,
             _ => new_canvas(size)?,
         };
-        self.draw_background(&mut canvas, &theme.background, assets, &context);
+        self.draw_background(&mut canvas, theme, assets, &context);
         for (index, element) in theme.elements.iter().enumerate() {
             if element.visible {
                 let key = (index, element.id);
@@ -301,11 +301,33 @@ impl SkiaRenderer {
     fn draw_background(
         &mut self,
         canvas: &mut Pixmap,
-        background: &Background,
+        theme: &Theme,
         assets: &BTreeMap<AssetRef, Vec<u8>>,
         context: &RenderContext<'_>,
     ) {
-        let (asset, fit) = match (background, context.backdrop) {
+        let (asset, fit) = match (&theme.background, context.backdrop) {
+            (Background::DeviceVideo { color, .. }, backdrop) => {
+                let windows = theme.elements.iter().any(|e| {
+                    e.visible
+                        && opacity_of(e.opacity) > 0
+                        && matches!(
+                            e.kind,
+                            ElementKind::Shape {
+                                video_window: true,
+                                ..
+                            }
+                        )
+                });
+                let color = if windows {
+                    paint::color(*color)
+                } else if matches!(backdrop, Backdrop::OnDevice) {
+                    Color::TRANSPARENT
+                } else {
+                    paint::color(VIDEO_PLACEHOLDER)
+                };
+                canvas.fill(color);
+                return;
+            }
             (Background::Color(color), _) => {
                 canvas.fill(paint::color(*color));
                 return;
@@ -382,6 +404,45 @@ impl SkiaRenderer {
         else {
             return;
         };
+        if let ElementKind::Shape {
+            video_window: true,
+            shape,
+            fade,
+            ..
+        } = &element.kind
+            && matches!(context.backdrop, Backdrop::OnDevice)
+            && let Some(path) = shape::outline_path(element.frame, *shape, 0.0)
+            && let Some(mut mask) = tiny_skia::Mask::new(bounds.width(), bounds.height())
+        {
+            mask.fill_path(
+                &path,
+                tiny_skia::FillRule::Winding,
+                true,
+                Transform::from_translate(-(bounds.x() as f32), -(bounds.y() as f32)),
+            );
+            let width = canvas.width() as usize;
+            let frame = element.frame;
+            let ramp = fade.map(|f| f.ramp());
+            for (index, coverage) in mask.data().iter().enumerate() {
+                if *coverage == 0 {
+                    continue;
+                }
+                let x = bounds.x() as usize + index % bounds.width() as usize;
+                let y = bounds.y() as usize + index / bounds.width() as usize;
+                let strength = ramp.as_ref().map_or(1.0, |f| {
+                    f(
+                        (x as f32 + 0.5 - frame.x) / frame.width,
+                        (y as f32 + 0.5 - frame.y) / frame.height,
+                    )
+                });
+                let retain =
+                    1.0 - f32::from(*coverage) / 255.0 * f32::from(opacity) / 255.0 * strength;
+                let pixel = &mut canvas.data_mut()[(y * width + x) * 4..][..4];
+                for channel in pixel {
+                    *channel = (f32::from(*channel) * retain).round() as u8;
+                }
+            }
+        }
         let cacheable = is_static(element);
         if cacheable {
             self.used_layers.insert(key);
@@ -402,6 +463,21 @@ impl SkiaRenderer {
                 y: bounds.y(),
             };
             self.draw_kind(&mut layer, element, assets, context);
+        }
+        if let ElementKind::Shape {
+            fade: Some(fade), ..
+        } = &element.kind
+        {
+            let frame = element.frame;
+            let ramp = fade.ramp();
+            for (index, pixel) in scratch.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let x = bounds.x() as f32 + (index % w as usize) as f32 + 0.5;
+                let y = bounds.y() as f32 + (index / w as usize) as f32 + 0.5;
+                let strength = ramp((x - frame.x) / frame.width, (y - frame.y) / frame.height);
+                for channel in pixel {
+                    *channel = (f32::from(*channel) * strength).round() as u8;
+                }
+            }
         }
         let opaque = cacheable && composite::is_opaque(&scratch);
         composite_layer(canvas, &scratch, bounds, opacity, opaque);
@@ -471,10 +547,24 @@ impl SkiaRenderer {
                 self.draw_image(layer, asset, *fit, area, assets, context);
             }
             ElementKind::Shape {
+                video_window,
                 shape,
                 fill,
                 stroke,
-            } => shape::draw(layer, area, *shape, fill.as_ref(), *stroke),
+                ..
+            } => {
+                let placeholder = bezel_core::domain::theme::Paint::solid(VIDEO_PLACEHOLDER);
+                let fill = if *video_window {
+                    if matches!(context.backdrop, Backdrop::OnDevice) {
+                        None
+                    } else {
+                        Some(&placeholder)
+                    }
+                } else {
+                    fill.as_ref()
+                };
+                shape::draw(layer, area, *shape, fill, *stroke);
+            }
             ElementKind::Bar {
                 binding,
                 direction,
@@ -648,6 +738,8 @@ mod tests {
         let mut e = element(
             frame,
             ElementKind::Shape {
+                video_window: false,
+                fade: None,
                 shape: ShapeKind::Rect { radius: 0.0 },
                 fill: Some(Paint::solid(color)),
                 stroke: None,
@@ -667,6 +759,8 @@ mod tests {
         let disc = element(
             BoxF::new(20.0, 0.0, 12.0, 12.0),
             ElementKind::Shape {
+                video_window: false,
+                fade: None,
                 shape: ShapeKind::Ellipse,
                 fill: Some(Paint::solid(white)),
                 stroke: None,

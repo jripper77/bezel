@@ -159,6 +159,12 @@ const library = createLibrary({
 
 const storage = createStoragePanel({
   root: $('storage-panel'),
+  useBackground: (file) => {
+    store.dispatch('setTheme', { patch: { background: { type: 'deviceVideo', path: file.path, looping: true, color: '#0c0e16ff' } } });
+    store.select([]);
+    library.selectTab('widgets');
+    toast(t('deviceVideo.selected', { name: file.name }));
+  },
   t,
   locale: () => locale,
   bridge,

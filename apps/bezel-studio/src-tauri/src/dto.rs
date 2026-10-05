@@ -518,6 +518,7 @@ impl LiveVideoDto {
     pub fn of(state: &VideoState) -> Option<Self> {
         let (state, path) = match state {
             VideoState::NoVideo => return None,
+            VideoState::StoredMissing(path) => ("storedMissing", Some(path.to_string())),
             VideoState::NotStarted => ("notStarted", None),
             VideoState::OnDevice(path) => ("onDevice", Some(path.to_string())),
             VideoState::VideoMissing(missing) => ("missing", Some(missing.path.to_string())),

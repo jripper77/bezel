@@ -978,6 +978,8 @@ impl Importer {
                 outer,
                 visible,
                 ElementKind::Shape {
+                    video_window: false,
+                    fade: None,
                     shape: ShapeKind::Rect { radius },
                     fill: Some(Paint::Solid(back)),
                     stroke: None,
@@ -1168,6 +1170,8 @@ impl Importer {
                 frame,
                 visible,
                 ElementKind::Shape {
+                    video_window: false,
+                    fade: None,
                     shape: ShapeKind::Rect { radius: 0.0 },
                     fill: None,
                     stroke: Some((color, border)),

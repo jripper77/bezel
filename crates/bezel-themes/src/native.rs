@@ -334,6 +334,8 @@ mod tests {
                 el(
                     5,
                     ElementKind::Shape {
+                        video_window: false,
+                        fade: None,
                         shape: ShapeKind::Rect { radius: 12.0 },
                         fill: Some(gradient.clone()),
                         stroke: Some((Rgba::WHITE, 2.0)),
@@ -342,6 +344,8 @@ mod tests {
                 el(
                     6,
                     ElementKind::Shape {
+                        video_window: false,
+                        fade: None,
                         shape: ShapeKind::Ellipse,
                         fill: None,
                         stroke: None,
@@ -507,6 +511,61 @@ mod tests {
             .find(|e| e["kind"]["type"] == "ring")
             .unwrap();
         ring["kind"]["fill"]["transition"] = serde_json::json!(101);
+        let bad: ThemeDto = serde_json::from_value(json).unwrap();
+        assert!(Theme::try_from(&bad).is_err());
+    }
+
+    #[test]
+    fn device_background_and_window_transparency_round_trip_with_safe_defaults() {
+        use bezel_core::domain::{
+            gradient::Fade,
+            storage::{RemotePath, Repeat},
+        };
+        let (mut theme, _) = every_kind();
+        theme.background = Background::DeviceVideo {
+            path: RemotePath::parse("sd/video/vendor.mp4").unwrap(),
+            repeat: Repeat::Once,
+            color: Rgba::BLACK,
+        };
+        let shape = theme
+            .elements
+            .iter_mut()
+            .find_map(|e| match &mut e.kind {
+                ElementKind::Shape {
+                    video_window, fade, ..
+                } => Some((video_window, fade)),
+                _ => None,
+            })
+            .unwrap();
+        *shape.0 = true;
+        *shape.1 = Some(Fade {
+            angle: 90.0,
+            start: 0.2,
+            end: 0.8,
+        });
+        let dto = ThemeDto::from(&theme);
+        assert_eq!(Theme::try_from(&dto).unwrap(), theme);
+        assert!(!theme.assets().iter().any(|a| a.0.contains("vendor")));
+        let mut json = serde_json::to_value(dto).unwrap();
+        let shape = json["elements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|e| e["kind"]["type"] == "shape")
+            .unwrap();
+        shape["kind"].as_object_mut().unwrap().remove("videoWindow");
+        shape["kind"].as_object_mut().unwrap().remove("fade");
+        let legacy: ThemeDto = serde_json::from_value(json.clone()).unwrap();
+        let legacy = Theme::try_from(&legacy).unwrap();
+        assert!(legacy.elements.iter().any(|e| matches!(
+            e.kind,
+            ElementKind::Shape {
+                video_window: false,
+                fade: None,
+                ..
+            }
+        )));
+        json["background"]["path"] = serde_json::json!("sd/image/wrong.png");
         let bad: ThemeDto = serde_json::from_value(json).unwrap();
         assert!(Theme::try_from(&bad).is_err());
     }

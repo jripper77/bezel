@@ -1,3 +1,4 @@
+import { fadeLine } from './shape-fade.js';
 import { weatherText } from './weather-format.js';
 import { formatClock } from './clock-format.js';
 // An approximate renderer for demo mode (browser only). The real preview is
@@ -69,6 +70,20 @@ function drawText(ctx, e, t) {
 function drawElement(ctx, e, t) {
   const k = e.kind;
   const f = e.frame;
+  if (k.type === 'shape' && k.fade && f.width > 0 && f.height > 0) {
+    const layer = new OffscreenCanvas(Math.ceil(f.width), Math.ceil(f.height));
+    const lc = layer.getContext('2d');
+    lc.translate(-f.x, -f.y);
+    drawElement(lc, { ...e, opacity: 1, kind: { ...k, fade: null } }, t);
+    lc.globalCompositeOperation = 'destination-in';
+    const g = lc.createLinearGradient(...fadeLine(f, k.fade.angle));
+    g.addColorStop(0, `rgba(0,0,0,${k.fade.start})`);
+    g.addColorStop(1, `rgba(0,0,0,${k.fade.end})`);
+    lc.fillStyle = g; lc.fillRect(f.x, f.y, f.width, f.height);
+    ctx.save(); ctx.globalAlpha = e.opacity ?? 1;
+    ctx.drawImage(layer, f.x, f.y); ctx.restore();
+    return;
+  }
   const frac = fraction(t, e.id);
   ctx.save();
   ctx.globalAlpha = e.opacity ?? 1;
@@ -77,11 +92,12 @@ function drawElement(ctx, e, t) {
       drawText(ctx, e, t);
       break;
     case 'shape':
-      ctx.fillStyle = paint(k.fill);
+      ctx.fillStyle = k.videoWindow ? '#1f2330' : paint(k.fill);
       ctx.beginPath();
       if (k.shape === 'ellipse') ctx.ellipse(f.x + f.width / 2, f.y + f.height / 2, f.width / 2, f.height / 2, 0, 0, Math.PI * 2);
       else ctx.roundRect(f.x, f.y, f.width, f.height, k.radius ?? 0);
       ctx.fill();
+      if (k.stroke && k.strokeWidth > 0) { ctx.strokeStyle = color(k.stroke); ctx.lineWidth = k.strokeWidth; ctx.stroke(); }
       break;
     case 'bar': {
       ctx.fillStyle = paint(k.track);
@@ -270,7 +286,12 @@ export function renderApprox(theme, t, video = null) {
   const { width, height } = theme.canvas;
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d');
-  drawBackdrop(ctx, theme.background, theme.canvas, video);
+  const device = theme.background.type === 'deviceVideo';
+  const windows = theme.elements.some((e) => e.visible !== false && e.kind.type === 'shape' && e.kind.videoWindow);
+  if (device) {
+    ctx.fillStyle = windows ? color(theme.background.color) : '#1f2330';
+    ctx.fillRect(0, 0, width, height);
+  } else drawBackdrop(ctx, theme.background, theme.canvas, video);
   for (const e of theme.elements) if (e.visible !== false) drawElement(ctx, e, t);
   return { width, height, rgba: ctx.getImageData(0, 0, width, height).data };
 }

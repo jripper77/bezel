@@ -145,7 +145,7 @@ test('each action says what it does with the selection, and why not', () => {
   const theirs = managed('internal/video/b.mp4', 20);
   const ctx = (extra) => ({ features: full, files: [mine], medium: 'internal', card: true, live: false, busy: false, ...extra });
   const why = (can) => Object.fromEntries(Object.entries(can).map(([k, v]) => [k, v.enabled || v.reason]));
-  assert.deepEqual(why(actionsFor(ctx())), { move: true, copy: true, rename: true, play: true, boot: true, delete: true, associate: 'hasCopy' });
+  assert.deepEqual(why(actionsFor(ctx())), { move: true, copy: true, rename: true, play: true, background: true, boot: true, delete: true, associate: 'hasCopy' });
   assert.deepEqual(why(actionsFor(ctx({ busy: true }))).move, 'busy');
   assert.deepEqual(why(actionsFor(ctx({ files: [] }))), Object.fromEntries(Object.keys(actionsFor(ctx())).map((k) => [k, 'none'])));
   const two = why(actionsFor(ctx({ files: [mine, theirs] })));
@@ -155,6 +155,8 @@ test('each action says what it does with the selection, and why not', () => {
   const limited = why(actionsFor(ctx({ features: usb })));
   assert.deepEqual([limited.move, limited.copy, limited.rename, limited.delete, limited.boot], ['deleteUnsupported', true, 'deleteUnsupported', 'deleteUnsupported', 'deleteUnsupported']);
   assert.equal(why(actionsFor(ctx({ live: true }))).play, 'live');
+  assert.equal(why(actionsFor(ctx({ live: true }))).background, true);
+  assert.equal(why(actionsFor(ctx({ files: [managed('sd/image/x.png', 5)] }))).background, 'videoOnly');
   assert.equal(why(actionsFor(ctx({ files: [theirs] }))).associate, true);
   assert.equal(why(actionsFor(ctx({ files: [managed('sd/video/u.mp4', null)] }))).associate, 'unknownSize');
   assert.deepEqual(selectionInfo([mine, theirs, managed('sd/video/u.mp4', null)], ['internal/video/b.mp4', 'sd/video/u.mp4']).bytes, 20);

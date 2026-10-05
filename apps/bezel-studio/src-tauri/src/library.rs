@@ -242,6 +242,7 @@ impl ThemeLibrary {
         dirs.flat_map(|dir| manifests(dir))
             .filter_map(|theme| match theme.background {
                 Background::Video { asset, .. } => Some(asset),
+                Background::DeviceVideo { path, .. } => Some(AssetRef(format!("screen://{path}"))),
                 Background::Color(_) | Background::Image { .. } => None,
             })
             .collect()

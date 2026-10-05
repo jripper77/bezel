@@ -725,6 +725,8 @@ impl Importer {
             frame,
             true,
             ElementKind::Shape {
+                video_window: false,
+                fade: None,
                 shape: ShapeKind::Rect { radius: 0.0 },
                 fill: Some(Paint::Solid(color)),
                 stroke: None,
@@ -944,6 +946,8 @@ impl Importer {
                 frame,
                 true,
                 ElementKind::Shape {
+                    video_window: false,
+                    fade: None,
                     shape: ShapeKind::Rect { radius: 0.0 },
                     fill: None,
                     stroke: Some((color, 1.0)),

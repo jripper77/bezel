@@ -16,16 +16,19 @@ The original project remains upstream. `main` follows the original; `windows-imp
 
 - **Ring appearance:** optional two-color gradient along the full arc, with an adjustable 0-100 midpoint. Colors stay tied to the full scale as the sensor value changes. Clockwise/counterclockwise direction, round caps, separated blocks and alpha are supported. The inspector includes **Test: show 100%** for every ring, including solid rings, overriding only the drawn fraction. Uncheck it to restore sensor-driven rendering. The test flag and gradient settings persist in the theme and work with Undo and copy/paste. Existing imported linear gradients remain unchanged.
 
+- **Stored screen video backgrounds and shape windows:** Screen > Storage offers **Set as background** for a single selected video, even while the theme is live. It saves the exact device path and loop flag without downloading, uploading or decoding the file on the host. The theme inspector exposes looping, replacement and the outside color when windows are shown. Shapes can reveal the full-screen device video through rectangular, rounded or elliptical windows; all windows share its playback and keep the original video coordinates. A linear transparency mask offers start/end opacity and direction for normal shapes and video windows, including their borders. Layer order, element opacity, Undo, clipboard and theme persistence are preserved. The editor displays an explicitly labelled placeholder because the protocol cannot read back decoded frames. Selected device files are protected as theme videos by cleanup.
+
 ## Validation already performed
 
 - Actual Windows PC and Turing Smart Screen 8.8 Rev C ROM 1.90: full frame transfers and live updates completed after the serial change. Python on the same hardware served as the comparison.
 - Actual LibreHardwareMonitor 0.9.6: CPU temperature, fan speed and power were read through the local server.
-- 140 core tests, 28 renderer tests, 59 sensor tests, 184 Studio tests, 52 theme tests and 277 UI unit tests passed; clippy passed without warnings for renderer and Studio.
+- 141 core tests, 30 renderer tests, 59 sensor tests, 184 Studio tests, 53 theme tests, 97 CLI tests and 278 UI unit tests passed; clippy passed without warnings for renderer and Studio.
 - Icon browser tests passed in four light/dark and English/Portuguese configurations, using the native Content Security Policy; they cover search, drag insertion, inspector edits and Undo. Native Rust tests check colored translucent shadow pixels.
 - Clock and clipboard browser tests passed in all four light/dark and English/Portuguese configurations. Native tests verify Italian date rendering and backward-compatible theme persistence.
 - Weather browser tests passed in all four configurations, including city choice, language, units, icon visibility, Undo and clipboard. Live Open-Meteo city search and current weather were verified separately. Native pixels were inspected for the multiline weather object and its vector icon. Weather rendering on the physical display is still to be confirmed.
 - MDI pump selection, colour/shadow editing and Undo passed browser checks in all four configurations; Rust verifies embedded Apache notices, valid SVG, preserved metadata and rendered thumbnails.
 - Ring and weather configuration browser tests passed in all four UI configurations (8 checks). Native tests verify ring gradient pixels, direction, shifted midpoint, caps, block gaps, missing sensors and test-at-100 behavior, plus theme round trips and old theme defaults.
+- Stored-video runtime checks passed (18 tests), including exact path selection, loop/once, stop, missing files and unsupported screens. Native pixel checks passed for window alpha, rounded/ellipse masks, border and layer order, linear opacity and direction; browser checks passed in four UI configurations for Storage selection, loop, windows, fade controls, Undo and clipboard. Physical video masking and partial alpha blending on ROM 1.90 still need confirmation.
 - Other screen models and Linux runtime behavior have not been physically verified for these additions.
 
 ## Pending

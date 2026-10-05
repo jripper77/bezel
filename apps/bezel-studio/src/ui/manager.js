@@ -17,7 +17,7 @@ import {
 /** How far a press travels before it is a drag, px. */
 const DRAG_THRESHOLD = 4;
 /** The order of the side toolbar. */
-const ACTIONS = Object.freeze(['move', 'copy', 'rename', 'play', 'boot', 'associate', 'delete']);
+const ACTIONS = Object.freeze(['move', 'copy', 'rename', 'play', 'background', 'boot', 'associate', 'delete']);
 /** Icons of the manager's own actions (24x24, stroked). */
 export const GLYPHS = Object.freeze({
   move: ['M4 12h14', 'M13 6l6 6-6 6'],
@@ -27,7 +27,7 @@ export const GLYPHS = Object.freeze({
   box: ['M4 7h16v13H4z', 'M3 4h18v3H3z', 'M10 11h4'],
 });
 const ACTION_ICONS = Object.freeze({
-  move: GLYPHS.move, copy: ICONS.copy, rename: GLYPHS.rename, play: ICONS.play, boot: ICONS.power, associate: GLYPHS.link, delete: ICONS.trash,
+  move: GLYPHS.move, copy: ICONS.copy, rename: GLYPHS.rename, play: ICONS.play, background: ICONS.film, boot: ICONS.power, associate: GLYPHS.link, delete: ICONS.trash,
 });
 
 let dialogs = 0;
@@ -208,6 +208,7 @@ export function createManagerView({ t, locale, bridge, host }) {
         return transfer(name, medium, chosen.map((f) => f.path));
       case 'rename': return rename(chosen[0]);
       case 'play': return host.play(chosen[0]);
+      case 'background': return host.useBackground(chosen[0]);
       case 'boot': return host.askBoot(chosen[0]);
       case 'associate': return associate(chosen[0]);
       case 'delete': return chosen.length === 1 ? host.askDelete(chosen[0]) : deleteMany(chosen);

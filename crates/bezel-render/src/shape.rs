@@ -38,7 +38,7 @@ pub(crate) fn draw(
 }
 
 /// The shape inset by `inset` on every side.
-fn outline_path(area: BoxF, shape: ShapeKind, inset: f32) -> Option<Path> {
+pub(crate) fn outline_path(area: BoxF, shape: ShapeKind, inset: f32) -> Option<Path> {
     let (x, y) = (area.x + inset, area.y + inset);
     let (w, h) = (area.width - 2.0 * inset, area.height - 2.0 * inset);
     match shape {

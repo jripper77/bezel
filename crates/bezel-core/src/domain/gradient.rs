@@ -66,3 +66,26 @@ mod tests {
         assert_eq!(arc_color(a, b, 2.0, 0.5), b);
     }
 }
+
+/// A linear transparency mask, applied in the element's box.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fade {
+    /// Direction, degrees: 0 left to right, 90 top to bottom.
+    pub angle: f32,
+    /// Opacity at the start, 0..=1.
+    pub start: f32,
+    /// Opacity at the end, 0..=1.
+    pub end: f32,
+}
+
+impl Fade {
+    /// Precomputes the direction once; the returned ramp takes normalized box coordinates.
+    pub fn ramp(self) -> impl Fn(f32, f32) -> f32 {
+        let (sin, cos) = self.angle.to_radians().sin_cos();
+        let reach = cos.abs() + sin.abs();
+        move |x, y| {
+            let t = (0.5 + ((x - 0.5) * cos + (y - 0.5) * sin) / reach).clamp(0.0, 1.0);
+            (self.start + (self.end - self.start) * t).clamp(0.0, 1.0)
+        }
+    }
+}

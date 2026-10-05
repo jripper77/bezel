@@ -148,6 +148,8 @@ fn video_backdrops(r: &mut SkiaRenderer) {
     let square = element(
         BoxF::new(2.0, 2.0, 4.0, 4.0),
         ElementKind::Shape {
+            video_window: false,
+            fade: None,
             shape: ShapeKind::Rect { radius: 0.0 },
             fill: Some(solid(RED)),
             stroke: None,
@@ -524,6 +526,8 @@ fn shape_frame(
     stroke: Option<(Rgba, f32)>,
 ) -> Frame {
     let kind = ElementKind::Shape {
+        video_window: false,
+        fade: None,
         shape,
         fill,
         stroke,
@@ -969,6 +973,8 @@ pub(crate) fn composition(r: &mut SkiaRenderer) {
         element(
             frame,
             ElementKind::Shape {
+                video_window: false,
+                fade: None,
                 shape: ShapeKind::Rect { radius: 0.0 },
                 fill: Some(solid(fill)),
                 stroke: None,
@@ -1188,4 +1194,111 @@ fn arc_gradient_full_test_direction_midpoint_caps_and_segments() {
     }
     let full = ring_frame(&mut r, "ring_solid_test_full", k, Some(0.0));
     assert!(close(on_ring(&full, 270.0), GREEN, 0));
+}
+
+#[test]
+fn device_video_windows_clear_alpha_with_border_layer_order_and_fade() {
+    use bezel_core::domain::{
+        gradient::Fade,
+        storage::{RemotePath, Repeat},
+    };
+    let mut r = crate::testkit::renderer();
+    let window = |shape, fade| {
+        element(
+            BoxF::new(8.0, 8.0, 48.0, 48.0),
+            ElementKind::Shape {
+                shape,
+                video_window: true,
+                fade,
+                fill: Some(solid(RED)),
+                stroke: Some((WHITE, 2.0)),
+            },
+        )
+    };
+    let background = Background::DeviceVideo {
+        path: RemotePath::parse("sd/video/demo.mp4").unwrap(),
+        repeat: Repeat::Loop,
+        color: GREEN,
+    };
+    let mut t = theme(
+        64,
+        64,
+        background,
+        vec![window(ShapeKind::Rect { radius: 8.0 }, None)],
+    );
+    let scene = Scene::empty();
+    // Preview must not poison the cached layer sent to the physical screen.
+    let preview = render(&mut r, &t, &scene);
+    assert_eq!(px(&preview, 32, 32).a, 255);
+    let f = render_over(&mut r, &t, &scene, Backdrop::OnDevice);
+    assert_px(&f, 32, 32, CLEAR, 0);
+    assert_px(&f, 2, 2, GREEN, 0);
+    assert_px(&f, 8, 8, GREEN, 0);
+    assert_px(&f, 9, 32, WHITE, 0);
+    let rect = element(
+        BoxF::new(24.0, 24.0, 16.0, 16.0),
+        ElementKind::Shape {
+            shape: ShapeKind::Rect { radius: 0.0 },
+            fill: Some(solid(RED)),
+            stroke: None,
+            video_window: false,
+            fade: None,
+        },
+    );
+    t.elements.push(rect.clone());
+    let f = render_over(&mut r, &t, &scene, Backdrop::OnDevice);
+    assert_px(&f, 32, 32, RED, 0);
+    t.elements = vec![rect, window(ShapeKind::Ellipse, None)];
+    let f = render_over(&mut r, &t, &scene, Backdrop::OnDevice);
+    assert_px(&f, 32, 32, CLEAR, 0);
+    assert_px(&f, 8, 8, GREEN, 0);
+    t.elements = vec![window(
+        ShapeKind::Rect { radius: 0.0 },
+        Some(Fade {
+            angle: 0.0,
+            start: 1.0,
+            end: 0.0,
+        }),
+    )];
+    let f = render_over(&mut r, &t, &scene, Backdrop::OnDevice);
+    assert!(px(&f, 16, 32).a < 60 && px(&f, 48, 32).a > 200);
+    t.elements[0].opacity = 0.5;
+    let f = render_over(&mut r, &t, &scene, Backdrop::OnDevice);
+    assert!(px(&f, 16, 32).a > 140);
+    t.elements[0].visible = false;
+    let f = render_over(&mut r, &t, &scene, Backdrop::OnDevice);
+    assert_px(&f, 32, 32, CLEAR, 0); // No visible windows: video fills the screen.
+}
+
+#[test]
+fn ordinary_shape_linear_transparency_blends_and_rotates() {
+    use bezel_core::domain::gradient::Fade;
+    let mut r = crate::testkit::renderer();
+    let mut t = theme(
+        64,
+        32,
+        Background::Color(CLEAR),
+        vec![element(
+            BoxF::new(0.0, 0.0, 64.0, 32.0),
+            ElementKind::Shape {
+                shape: ShapeKind::Rect { radius: 0.0 },
+                fill: Some(solid(RED)),
+                stroke: None,
+                video_window: false,
+                fade: Some(Fade {
+                    angle: 0.0,
+                    start: 1.0,
+                    end: 0.0,
+                }),
+            },
+        )],
+    );
+    let f = render(&mut r, &t, &Scene::empty());
+    assert!(px(&f, 0, 16).a > 250 && px(&f, 63, 16).a < 5);
+    assert!((i16::from(px(&f, 32, 16).a) - 128).abs() < 5);
+    if let ElementKind::Shape { fade, .. } = &mut t.elements[0].kind {
+        fade.as_mut().unwrap().angle = 90.0;
+    }
+    let f = render(&mut r, &t, &Scene::empty());
+    assert!(px(&f, 32, 0).a > 250 && px(&f, 32, 31).a < 5);
 }

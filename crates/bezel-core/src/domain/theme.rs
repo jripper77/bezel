@@ -101,6 +101,15 @@ pub enum Fit {
 /// What the canvas shows under the elements.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Background {
+    /// Video already stored on the screen, played without host decoding.
+    DeviceVideo {
+        /// Exact internal/SD video path.
+        path: super::storage::RemotePath,
+        /// Loop or play once.
+        repeat: super::storage::Repeat,
+        /// Color outside video windows (ignored when there are no windows).
+        color: Rgba,
+    },
     /// A solid color.
     Color(Rgba),
     /// A still image.
@@ -319,6 +328,10 @@ pub enum ElementKind {
     },
     /// A filled shape.
     Shape {
+        /// Clear this shape to reveal the device video underneath.
+        video_window: bool,
+        /// Linear opacity across the whole shape, including its outline.
+        fade: Option<super::gradient::Fade>,
         /// Geometry.
         shape: ShapeKind,
         /// Fill (none = outline only).
@@ -489,7 +502,7 @@ impl Theme {
                 out.push(asset.clone());
                 out.extend(poster.clone());
             }
-            Background::Color(_) => {}
+            Background::Color(_) | Background::DeviceVideo { .. } => {}
         }
         for e in &self.elements {
             match &e.kind {

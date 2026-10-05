@@ -72,6 +72,8 @@ use crate::ports::{
 pub enum VideoState {
     /// The theme has no video background.
     NoVideo,
+    /// The exact device file selected by the theme is missing.
+    StoredMissing(RemotePath),
     /// Not started on a screen ([`ThemeRuntime::start_video`]): frames show
     /// the poster. Previews stay here.
     NotStarted,
@@ -239,6 +241,14 @@ impl fmt::Debug for ThemeRuntime {
     }
 }
 
+/// Exact device selection; the outside color does not restart playback.
+fn stored_video(theme: &Theme) -> Option<(&RemotePath, &Repeat)> {
+    match &theme.background {
+        Background::DeviceVideo { path, repeat, .. } => Some((path, repeat)),
+        _ => None,
+    }
+}
+
 /// The theme's video asset and orientation, when its background is a video.
 fn video_of(theme: &Theme) -> Option<(&AssetRef, Orientation)> {
     match &theme.background {
@@ -266,6 +276,9 @@ fn framing_of(theme: &Theme) -> VideoFraming {
 
 /// How a theme's video is shown before it is started on a screen.
 fn unstarted(theme: &Theme) -> VideoState {
+    if matches!(theme.background, Background::DeviceVideo { .. }) {
+        return VideoState::NotStarted;
+    }
     match video_of(theme) {
         Some(_) => VideoState::NotStarted,
         None => VideoState::NoVideo,
@@ -475,7 +488,9 @@ impl ThemeRuntime {
     fn swap_theme(&mut self, theme: Theme) {
         let mut histories = Histories::new(&theme.history_lengths());
         histories.adopt(&self.scene.histories);
-        if video_of(&theme) != video_of(&self.scene.theme) {
+        if video_of(&theme) != video_of(&self.scene.theme)
+            || stored_video(&theme) != stored_video(&self.scene.theme)
+        {
             self.video = unstarted(&theme);
             self.host = None;
         }
@@ -620,6 +635,29 @@ impl ThemeRuntime {
         self.host = None;
         self.video = unstarted(&self.scene.theme);
         self.screen = Some(screen.identity().model);
+        if let Some((path, repeat)) = stored_video(&self.scene.theme) {
+            let path = path.clone();
+            let repeat = *repeat;
+            let state = if !screen.identity().model.capabilities.video_playback {
+                VideoState::NoPlayback
+            } else if let Some(storage) = screen.storage() {
+                match presence(storage, &path)? {
+                    Presence::Absent => VideoState::StoredMissing(path),
+                    Presence::Stored(_) => {
+                        storage.play_video(&path, repeat)?;
+                        self.playing = Some(path.clone());
+                        VideoState::OnDevice(path)
+                    }
+                }
+            } else {
+                VideoState::NoPlayback
+            };
+            if !matches!(state, VideoState::OnDevice(_)) {
+                self.stop_played(screen)?;
+            }
+            self.video = state;
+            return Ok(&self.video);
+        }
         let video = match video_of(&self.scene.theme) {
             Some((asset, _)) => asset.clone(),
             None => {

@@ -931,3 +931,79 @@ fn the_host_decodes_the_video_with_its_framing() {
     assert_eq!(r.pictures[1].pixel(0, 40), Some(padded));
     assert_eq!(r.seen, ["picture 30", "picture 0"]);
 }
+
+#[test]
+fn exact_screen_video_selection_loops_without_assets_upload_or_host_decoder() {
+    let clip = path("sd/video/vendor.mp4");
+    let (connector, mut screen) = turing_88(stored("sd/video/vendor.mp4"));
+    let mut theme = video_theme("unused.mp4");
+    theme.background = Background::DeviceVideo {
+        path: clip.clone(),
+        repeat: Repeat::Loop,
+        color: Rgba::BLACK,
+    };
+    assert!(theme.assets().is_empty());
+    let mut rt = runtime(theme.clone());
+    assert_eq!(
+        rt.start_video(screen.as_mut(), None)
+            .expect("valid test state"),
+        &VideoState::OnDevice(clip.clone())
+    );
+    assert_eq!(
+        calls(&connector),
+        [
+            StorageCall::Size(clip.clone()),
+            StorageCall::PlayVideo(clip.clone(), Repeat::Loop)
+        ]
+    );
+    let mut r = Recorder::default();
+    rt.render(&mut r, TIME, Duration::ZERO)
+        .expect("valid test state");
+    assert_eq!(r.seen, ["on-device"]);
+    // Outside color changes keep playback; loop changes restart with the right flag.
+    if let Background::DeviceVideo { color, .. } = &mut theme.background {
+        *color = Rgba::WHITE;
+    }
+    rt.replace_theme(theme.clone());
+    assert_eq!(rt.video(), &VideoState::OnDevice(clip.clone()));
+    if let Background::DeviceVideo { repeat, .. } = &mut theme.background {
+        *repeat = Repeat::Once;
+    }
+    rt.replace_theme(theme.clone());
+    assert_eq!(rt.video(), &VideoState::NotStarted);
+    rt.start_video(screen.as_mut(), None)
+        .expect("valid test state");
+    assert_eq!(
+        calls(&connector).last(),
+        Some(&StorageCall::PlayVideo(clip.clone(), Repeat::Once))
+    );
+    theme.background = Background::Color(Rgba::BLACK);
+    rt.replace_theme(theme);
+    rt.start_video(screen.as_mut(), None)
+        .expect("valid test state");
+    assert_eq!(calls(&connector).last(), Some(&StorageCall::Stop));
+}
+
+#[test]
+fn exact_screen_video_reports_missing_and_unsupported_screens() {
+    let clip = path("internal/video/missing.mp4");
+    let (_, mut screen) = turing_88(FakeStorage::default());
+    let mut theme = video_theme("unused.mp4");
+    theme.background = Background::DeviceVideo {
+        path: clip.clone(),
+        repeat: Repeat::Loop,
+        color: Rgba::BLACK,
+    };
+    let mut rt = runtime(theme);
+    assert_eq!(
+        rt.start_video(screen.as_mut(), None)
+            .expect("valid test state"),
+        &VideoState::StoredMissing(clip)
+    );
+    let (_, mut small) = weact();
+    assert_eq!(
+        rt.start_video(small.as_mut(), None)
+            .expect("valid test state"),
+        &VideoState::NoPlayback
+    );
+}

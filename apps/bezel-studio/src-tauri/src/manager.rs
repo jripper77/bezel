@@ -173,6 +173,7 @@ impl Shown {
 fn video_of(theme: &Theme) -> Option<AssetRef> {
     match &theme.background {
         Background::Video { asset, .. } => Some(asset.clone()),
+        Background::DeviceVideo { path, .. } => Some(AssetRef(format!("screen://{path}"))),
         Background::Color(_) | Background::Image { .. } => None,
     }
 }

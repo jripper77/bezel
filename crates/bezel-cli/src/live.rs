@@ -325,6 +325,9 @@ fn quoted(text: &str) -> String {
 fn video_line(state: &VideoState, theme: &Path, runtime: &ThemeRuntime) -> Option<String> {
     let line = match state {
         VideoState::NoVideo | VideoState::NotStarted => return None,
+        VideoState::StoredMissing(path) => {
+            format!("warning: the selected screen video is missing: {path}")
+        }
         VideoState::OnDevice(path) => format!("the screen plays {path} under the theme"),
         VideoState::VideoMissing(missing) => match put_hint(theme, runtime, missing) {
             Some(put) => format!(

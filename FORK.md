@@ -9,19 +9,22 @@ The original project remains upstream. `main` follows the original; `windows-imp
 - **LibreHardwareMonitor sensors:** retain WMI support and fall back to the fixed `http://127.0.0.1:8085/data.json` endpoint when WMI fails. Requests disable proxies and redirects, have a 2-second timeout and a 4 MiB response limit. Enable LibreHardwareMonitor's Remote Web Server. Studio does not launch or configure the helper automatically.
 - **Vector icons:** Media > Icons includes 6,220 offline Tabler Icons 3.48.0 under the MIT license, with search, click and drag insertion. SVGs render at the requested resolution. The inspector edits color, opacity, outline width and shadow blur/color/opacity. Paint and effects persist in SVG assets; each edit is undoable and independent of other copies. The MIT notice is embedded in each generated asset.
 
+- **Dates and clocks:** system/Italian/English/Portuguese language per object, readable format presets, custom patterns, live examples and normal/uppercase/title case. These settings round-trip in theme.json; old clock fields remain readable. Runtime date language follows the system independently of Studio's UI language.
+- **Editor clipboard:** Ctrl+C/Ctrl+V and toolbar buttons copy single or multiple objects within the current theme. Properties and asset references are preserved, copies get unique names/IDs and a small position offset, and each paste is one undo step. Text fields retain native shortcuts. Opening another theme clears the object clipboard.
+
 ## Validation already performed
 
 - Actual Windows PC and Turing Smart Screen 8.8 Rev C ROM 1.90: full frame transfers and live updates completed after the serial change. Python on the same hardware served as the comparison.
 - Actual LibreHardwareMonitor 0.9.6: CPU temperature, fan speed and power were read through the local server.
-- 26 renderer tests, 183 Studio tests and 271 UI unit tests passed; clippy passed without warnings for renderer and Studio.
+- 137 core tests, 26 renderer tests, 183 Studio tests, 50 theme tests and 274 UI unit tests passed; clippy passed without warnings for renderer and Studio.
 - Icon browser tests passed in four light/dark and English/Portuguese configurations, using the native Content Security Policy; they cover search, drag insertion, inspector edits and Undo. Native Rust tests check colored translucent shadow pixels.
+- Clock and clipboard browser tests passed in all four light/dark and English/Portuguese configurations. Native tests verify Italian date rendering and backward-compatible theme persistence.
 - Other screen models and Linux runtime behavior have not been physically verified for these additions.
 
 ## Pending
 
 - Reliable login startup of the correct Studio executable and the sensor helper.
-- Italian weekday/month names and configurable date language. The existing clock pattern field can change formatting, but the current build supports English and Portuguese names.
 
-The serial fix, sensor fallback and icon additions are separate commits so they can be reviewed independently. No upstream pull request has been submitted yet.
+The serial fix, sensor fallback, icon additions, dates and editor clipboard are separate commits so they can be reviewed independently. No upstream pull request has been submitted yet.
 
 Bezel remains GPL-3.0-or-later. Tabler SVGs retain their MIT notice; see `apps/bezel-studio/src/assets/tabler/LICENSE`.

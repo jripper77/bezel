@@ -413,6 +413,8 @@ pub struct AssetDto {
     pub kind: &'static str,
     /// Small PNG preview of images.
     pub data_url: Option<String>,
+    /// Original catalog SVG with editable paint and effects, when applicable.
+    pub icon_svg: Option<String>,
     /// Size of the file, bytes.
     pub bytes: u64,
     /// A GIF of several pictures: it can be a video background.
@@ -1211,6 +1213,7 @@ mod tests {
             reference: "assets/a.mp4".into(),
             kind: "video",
             data_url: None,
+            icon_svg: None,
             bytes: 2048,
             animated: false,
             poster: Some("assets/a-poster.png".into()),

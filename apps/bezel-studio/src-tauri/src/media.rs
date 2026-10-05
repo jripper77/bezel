@@ -14,7 +14,7 @@ use image::{AnimationDecoder as _, ImageFormat, RgbaImage};
 pub const THUMBNAIL_SIDE: u32 = 96;
 
 /// Extensions the image picker offers (the formats the renderer decodes).
-pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif"];
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "svg"];
 
 /// Extensions the picker of files to send to a screen offers: the images
 /// screens show and the videos ffmpeg converts.
@@ -42,7 +42,7 @@ pub fn extension_of(name: &str) -> String {
 pub fn kind_of(asset: &AssetRef) -> &'static str {
     let extension = extension_of(&asset.0);
     match extension.as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" => "image",
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" => "image",
         "ttf" | "otf" | "ttc" => "font",
         e if VIDEO_EXTENSIONS.contains(&e) => "video",
         _ => "other",
@@ -70,6 +70,9 @@ pub fn png_of(frame: &Frame) -> Option<Vec<u8>> {
 /// A PNG data URL of the image scaled to fit [`THUMBNAIL_SIDE`], or `None`
 /// when the bytes are not a decodable image.
 pub fn thumbnail_data_url(bytes: &[u8]) -> Option<String> {
+    if let Some(png) = bezel_render::svg_thumbnail(bytes, THUMBNAIL_SIDE) {
+        return Some(format!("data:image/png;base64,{}", STANDARD.encode(png)));
+    }
     let image = image::load_from_memory(bytes).ok()?;
     let small = image.thumbnail(THUMBNAIL_SIDE, THUMBNAIL_SIDE);
     let mut png = Cursor::new(Vec::new());

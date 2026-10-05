@@ -122,9 +122,11 @@
         <section class="panel" role="tabpanel" id="panel-media" aria-labelledby="tab-media" hidden>
           <div class="subtabs" role="tablist" data-i18n-aria-label="library.media">
             <button type="button" role="tab" id="subtab-media-theme" aria-controls="media-theme" aria-selected="true" data-subtab="theme" data-i18n="media.thisTheme"></button>
-            <button type="button" role="tab" id="subtab-media-collection" aria-controls="media-collection" aria-selected="false" tabindex="-1" data-subtab="collection" data-i18n="media.collection"></button>
+              <button type="button" role="tab" id="subtab-media-collection" aria-controls="media-collection" aria-selected="false" tabindex="-1" data-subtab="collection" data-i18n="media.collection"></button>
+              <button type="button" role="tab" id="subtab-media-icons" aria-controls="media-icons" aria-selected="false" tabindex="-1" data-subtab="icons" data-i18n="media.icons"></button>
           </div>
-          <div role="tabpanel" id="media-theme" aria-labelledby="subtab-media-theme">
+            <div role="tabpanel" id="media-icons" aria-labelledby="subtab-media-icons" hidden></div>
+            <div role="tabpanel" id="media-theme" aria-labelledby="subtab-media-theme">
             <div class="button-row">
               <button type="button" class="text-button" id="media-add" data-i18n="media.add"></button>
               <button type="button" class="text-button" id="media-add-video" data-i18n="media.addVideo"></button>

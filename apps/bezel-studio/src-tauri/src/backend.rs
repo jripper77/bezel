@@ -841,7 +841,7 @@ impl Backend {
 
     /// Adds the image file at `path`, whose content is `bytes`.
     pub(crate) fn add_image_bytes(&self, path: &Path, bytes: Vec<u8>) -> UiResult<AddedDto> {
-        if image::guess_format(&bytes).is_err() {
+        if image::guess_format(&bytes).is_err() && bezel_render::svg_size(&bytes).is_none() {
             return Err(UiError::new(ErrorCode::NotAnImage).arg("file", path.display()));
         }
         let name = path
@@ -850,6 +850,26 @@ impl Backend {
             .unwrap_or_default();
         let asset = self.studio().add_asset(&name, bytes);
         Ok(AddedDto { reference: asset.0 })
+    }
+
+    /// Adds a vector icon chosen in the offline media catalog.
+    pub fn add_icon(&self, name: &str, svg: String) -> UiResult<AddedDto> {
+        if name.is_empty()
+            || name.len() > 100
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            || svg.len() > 128 * 1024
+            || bezel_render::svg_size(svg.as_bytes()).is_none()
+        {
+            return Err(UiError::new(ErrorCode::NotAnImage).arg("file", name));
+        }
+        self.add_image_bytes(
+            Path::new(&format!("tabler-{name}.svg")),
+            format!(
+                "<!--\n{}\n-->\n{svg}",
+                include_str!("../../src/assets/tabler/LICENSE")
+            )
+            .into_bytes(),
+        )
     }
 
     /// The theme's assets with previews (images only: videos are not
@@ -876,6 +896,7 @@ impl Backend {
                         reference: asset.0.clone(),
                         kind,
                         data_url: None,
+                        icon_svg: None,
                         bytes: bytes.len() as u64,
                         animated: false,
                         poster: known.and_then(|k| k.poster.clone()).or(named).map(|p| p.0),
@@ -892,6 +913,11 @@ impl Backend {
             .map(|(dto, image)| match image {
                 Some(bytes) => AssetDto {
                     data_url: thumbnail_data_url(&bytes),
+                    icon_svg: (dto.reference.starts_with("assets/tabler-")
+                        && extension_of(&dto.reference) == "svg"
+                        && bytes.len() <= 132 * 1024)
+                        .then(|| String::from_utf8(bytes.clone()).ok())
+                        .flatten(),
                     animated: extension_of(&dto.reference) == "gif" && is_animated_gif(&bytes),
                     ..dto
                 },
@@ -2467,5 +2493,32 @@ static_text:
         let ondas = ondas.unwrap();
         assert!(ondas.animated && ondas.data_url.is_some());
         assert_eq!(ondas.poster.as_deref(), Some("assets/ondas-poster.png"));
+    }
+
+    #[test]
+    fn vector_icons_preserve_the_svg_and_have_rendered_thumbnails() {
+        let f = fixture("vector-icons");
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="8" fill="#38bdf8"/></svg>"##;
+        let added = f.backend.add_icon("cpu", svg.to_string()).unwrap();
+        assert_eq!(added.reference, "assets/tabler-cpu.svg");
+        let studio = f.backend.studio();
+        let asset = AssetRef(added.reference);
+        let stored = studio.assets().get(&asset).unwrap();
+        let stored = std::str::from_utf8(stored).unwrap();
+        assert!(stored.contains("MIT License"));
+        assert!(stored.ends_with(svg));
+        drop(studio);
+        let assets = f.backend.assets();
+        assert_eq!(assets[0].kind, "image");
+        assert!(assets[0].icon_svg.as_deref().unwrap().ends_with(svg));
+        assert!(
+            assets[0]
+                .data_url
+                .as_deref()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
+        assert!(f.backend.add_icon("../escape", svg.into()).is_err());
+        assert!(f.backend.add_icon("broken", "not SVG".into()).is_err());
     }
 }

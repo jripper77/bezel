@@ -34,6 +34,7 @@ struct DecodedFrame {
 
 /// A decoded image or animation.
 struct Decoded {
+    svg: Option<resvg::usvg::Tree>,
     width: u32,
     height: u32,
     frames: Vec<DecodedFrame>,
@@ -49,6 +50,7 @@ impl Decoded {
             .map(|f| Duration::from_millis(u64::from(f.delay_ms)))
             .collect();
         Some(Self {
+            svg: None,
             width: first.pixels.width(),
             height: first.pixels.height(),
             timeline: Timeline::new(delays),
@@ -147,6 +149,16 @@ pub(crate) fn plan(fit: Fit, image: (u32, u32), area: BoxF) -> Option<Plan> {
 }
 
 fn decode(bytes: &[u8]) -> Result<Decoded, String> {
+    if let Some(tree) = crate::svg::tree(bytes) {
+        let size = tree.size().to_int_size();
+        return Ok(Decoded {
+            svg: Some(tree),
+            width: size.width(),
+            height: size.height(),
+            frames: Vec::new(),
+            timeline: None,
+        });
+    }
     let format = image::guess_format(bytes).map_err(|e| e.to_string())?;
     if format == ImageFormat::Gif {
         return decode_gif(bytes);
@@ -190,6 +202,18 @@ fn decode_gif(bytes: &[u8]) -> Result<Decoded, String> {
 fn scale(source: &Decoded, plan: &Plan) -> Option<Scaled> {
     let (cx, cy, cw, ch) = plan.crop;
     let (w, h) = plan.size;
+    if let Some(tree) = &source.svg {
+        let mut pixels = Pixmap::new(w, h)?;
+        let sx = w as f32 / cw as f32;
+        let sy = h as f32 / ch as f32;
+        let transform =
+            tiny_skia::Transform::from_row(sx, 0.0, 0.0, sy, -(cx as f32) * sx, -(cy as f32) * sy);
+        resvg::render(tree, transform, &mut pixels.as_mut());
+        return Some(Scaled {
+            frames: vec![pixels],
+            timeline: None,
+        });
+    }
     let mut frames = Vec::with_capacity(source.frames.len());
     for frame in &source.frames {
         let view = imageops::crop_imm(&frame.pixels, cx, cy, cw, ch);
@@ -322,6 +346,51 @@ impl ImageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vectors_render_at_target_resolution_and_cache_invalidates_after_color_change() {
+        let asset = AssetRef("assets/icon.svg".into());
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect x="1.1" y="1" width="0.2" height="22" fill="#ff0000"/></svg>"##.to_vec();
+        let mut assets = BTreeMap::from([(asset.clone(), svg)]);
+        let mut cache = ImageCache::default();
+        let mut diagnostics = Diagnostics::default();
+        let (large, _) = cache
+            .placed(
+                &asset,
+                Fit::Contain,
+                area(240.0, 240.0),
+                &assets,
+                &mut diagnostics,
+            )
+            .expect("SVG rendered");
+        let pixels = large.frame_at(Duration::ZERO).expect("still SVG");
+        assert_eq!(pixels.width(), 240);
+        assert_eq!(pixels.pixel(11, 100).expect("edge").alpha(), 255);
+        assert_eq!(
+            pixels.pixel(10, 100).expect("transparent neighbor").alpha(),
+            0
+        );
+        let changed = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="#00ff00"/></svg>"##.to_vec();
+        assets.insert(asset.clone(), changed);
+        let (green, _) = cache
+            .placed(
+                &asset,
+                Fit::Fill,
+                area(240.0, 240.0),
+                &assets,
+                &mut diagnostics,
+            )
+            .expect("updated SVG");
+        assert_eq!(
+            green
+                .frame_at(Duration::ZERO)
+                .expect("still")
+                .pixel(100, 100)
+                .expect("center")
+                .green(),
+            255
+        );
+    }
 
     fn area(w: f32, h: f32) -> BoxF {
         BoxF::new(10.0, 20.0, w, h)

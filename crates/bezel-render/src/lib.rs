@@ -25,6 +25,7 @@ mod paint;
 mod path;
 mod renderer;
 mod shape;
+mod svg;
 mod text;
 
 #[cfg(test)]
@@ -34,6 +35,7 @@ mod testkit;
 
 pub use fonts::font_files;
 pub use renderer::SkiaRenderer;
+pub use svg::{svg_size, svg_thumbnail};
 pub use text::SystemFonts;
 
 #[cfg(test)]

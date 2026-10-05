@@ -17,6 +17,7 @@ cosmic-text = "0.19"
 # tests); the same version cosmic-text uses, so no second copy is compiled.
 fontdb = "0.23"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+resvg = { version = "0.48.1", default-features = false }
 
 [lints]
 workspace = true

@@ -257,6 +257,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::new_theme,
             commands::import_theme,
             commands::add_image,
+            commands::add_icon,
             commands::add_media,
             commands::list_assets,
             commands::list_fonts,

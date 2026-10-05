@@ -362,6 +362,12 @@ pub async fn add_media<R: Runtime>(
     blocking(&state, move |b| b.add_media(&path).map(Some)).await
 }
 
+/// Adds an offline vector icon as a theme asset.
+#[tauri::command]
+pub async fn add_icon(state: State<'_, Shared>, name: String, svg: String) -> UiResult<AddedDto> {
+    blocking(&state, move |b| b.add_icon(&name, svg)).await
+}
+
 /// The theme's assets with previews.
 #[tauri::command]
 pub async fn list_assets(state: State<'_, Shared>) -> UiResult<Vec<AssetDto>> {

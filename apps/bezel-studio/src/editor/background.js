@@ -5,7 +5,7 @@
 /** Videos a background takes (the backend's list). */
 export const VIDEO_EXTENSIONS = Object.freeze(['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi']);
 /** Pictures the renderer draws (a GIF may also move). */
-export const IMAGE_EXTENSIONS = Object.freeze(['png', 'jpg', 'jpeg', 'gif']);
+export const IMAGE_EXTENSIONS = Object.freeze(['png', 'jpg', 'jpeg', 'gif', 'svg']);
 
 /** The lowercase extension of a file name or path (`''` without one). */
 export function extensionOf(name) {

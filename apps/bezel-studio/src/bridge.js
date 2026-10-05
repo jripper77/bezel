@@ -397,6 +397,7 @@ function tauriBridge(invoke, tauri = {}) {
     newTheme: (screen, name, orientation) => invoke('new_theme', { screen, name, orientation }),
     importTheme: () => invoke('import_theme'),
     addImage: () => invoke('add_image'),
+    addIcon: (name, svg) => invoke('add_icon', { name, svg }),
     // A dropped file's path, or `null` to ask with the native dialog.
     addMedia: (path = null) => invoke('add_media', { path }),
     assets: () => invoke('list_assets'),

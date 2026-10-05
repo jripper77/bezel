@@ -26,6 +26,7 @@
     "allow-new-theme",
     "allow-import-theme",
     "allow-add-image",
+    "allow-add-icon",
     "allow-add-media",
     "allow-list-assets",
     "allow-list-fonts",

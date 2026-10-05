@@ -10,6 +10,7 @@ import { backgroundOf, fileNameOf, mediaItems, moves, videoFacts } from '../edit
 import { warningText } from '../messages.js';
 import { formatBytes, wireSubtabs } from './storage.js';
 import { SHOW_ALL, axisOf, countText, emptyState, filterThemes, rememberedFilter, scopeIn, screenLabel, thumbnailKey } from '../theme-filter.js';
+import { createIconPicker } from './icon-picker.js';
 
 export { axisOf };
 
@@ -424,7 +425,11 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
 
   // "This theme" | "Collection" (D-2026-10-01-gif-sticker-search-5): the
   // collection is where GIFs and stickers are searched on KLIPY.
-  wireSubtabs($('panel-media').querySelector('.subtabs'), (name) => actions.mediaSubtab?.(name));
+  const iconPicker = createIconPicker({ store, canvas, stage, t, add: actions.addIcon });
+  wireSubtabs($('panel-media').querySelector('.subtabs'), (name) => {
+    if (name === 'icons') void iconPicker.show();
+    actions.mediaSubtab?.(name);
+  });
   $('gif-search-open').addEventListener('click', () => actions.searchGifs());
 
   // -------------------------------------------------------------- screen --
@@ -522,6 +527,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
     selectTab: (name) => selectTab(tabs.find((x) => x.dataset.tab === name)),
     /** The UI's language changed: every panel is drawn again. */
     retranslate() {
+      iconPicker.retranslate();
       renderWidgets();
       renderSensors();
       renderLayers();

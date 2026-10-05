@@ -1,3 +1,4 @@
+import { iconSvg } from './icon-catalog.js';
 // Bezel Studio: wires the store, the bridge and the views together.
 import { applyTranslations, pickLocale, translator } from './i18n/index.js';
 import { createBridge } from './bridge.js';
@@ -138,6 +139,7 @@ const library = createLibrary({
     refreshThemes: () => refreshThemes(),
     importTheme: () => importTheme(),
     addImage: () => addImage(),
+    addIcon: (item, svg, at, size) => addIcon(item, svg, at, size),
     addVideo: () => addMedia(),
     searchGifs: () => void gifSearch.open(),
     mediaSubtab: (name) => {
@@ -228,6 +230,7 @@ const motionAllowed = () => !document.hidden && !reducedMotion?.matches;
 
 const inspector = createInspector({
   root: $('inspector'),
+  editIcon: (id, asset, paint) => editIcon(id, asset, paint),
   store,
   t,
   sensors: { catalog: () => labelledCatalog(), fonts: () => state.fonts },
@@ -699,6 +702,39 @@ async function addImage() {
   } catch (e) {
     fail(e);
   }
+}
+
+async function addIcon(item, svg, at, size) {
+  try {
+    const theme = store.getState().theme;
+    const added = await bridge.addIcon(item.id, svg);
+    if (store.getState().theme !== theme) return;
+    store.beginGesture();
+    try {
+      store.dispatch('add', { widget: 'image', ...at, name: item.name.replaceAll('-', ' ') });
+      const id = store.getState().selection[0];
+      store.dispatch('update', { id, patch: {
+        kind: { asset: added.ref, fit: 'contain' },
+        frame: { x: at.x - size / 2, y: at.y - size / 2, width: size, height: size },
+      } });
+    } finally { store.endGesture(); }
+    await refreshAssets();
+  } catch (e) { fail(e); }
+}
+
+/** A new asset version makes Undo restore the prior icon without changing its copies. */
+async function editIcon(id, asset, paint) {
+  try {
+    const theme = store.getState().theme;
+    const { default: catalog } = await import('./assets/tabler/icons.js');
+    const item = catalog.icons.find((icon) => icon.id === paint.id);
+    if (!item) return;
+    const added = await bridge.addIcon(item.id, iconSvg(item, paint.color, paint.stroke, paint));
+    const current = store.getState();
+    if (current.theme !== theme || !current.theme.elements.some((e) => e.id === id && e.kind.asset === asset)) return;
+    store.dispatch('update', { id, patch: { kind: { asset: added.ref } } });
+    await refreshAssets();
+  } catch (e) { fail(e); }
 }
 
 /** What adding `added` (an `add_media` answer) tells: its play time and size, or why it has no poster. */

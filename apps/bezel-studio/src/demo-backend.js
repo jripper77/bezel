@@ -1385,9 +1385,14 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       images.push(ref);
       return Promise.resolve({ ref });
     },
+    addIcon: (name, svg) => {
+      const ref = `assets/tabler-${name}-${posters.size + 1}.svg`;
+      posters.set(ref, `data:image/svg+xml,${encodeURIComponent(svg)}`);
+      return Promise.resolve({ ref });
+    },
     assets: () => Promise.resolve([
       ...images.map((ref) => ({ ref, kind: 'image' })),
-      ...[...posters].map(([ref, dataUrl]) => ({ ref, kind: 'image', dataUrl, bytes: 184_320 })),
+      ...[...posters].map(([ref, dataUrl]) => ({ ref, kind: 'image', dataUrl, bytes: 184_320, iconSvg: dataUrl.startsWith('data:image/svg+xml,') ? decodeURIComponent(dataUrl.split(',', 2)[1]) : null })),
       ...[...videos.values()].map((v) => ({ ...v })),
     ]),
     /** A video, GIF or picture: dropped (`source`), else picked in the dialog. */

@@ -616,3 +616,14 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
 @keyframes popover-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 @keyframes thumb-wait { from { opacity: 0.55; } to { opacity: 1; } }
+
+/* Offline vector icons in the media library. */
+#icon-search { width: 100%; margin-bottom: 10px; }
+.icon-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.icon-option { display: grid; gap: 4px; min-width: 0; font-size: 12px; }
+.icon-option input, .icon-option select { width: 100%; min-width: 0; }
+.icon-option input[type="color"] { height: 30px; padding: 2px; }
+.icon-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+.icon-choice { display: grid; justify-items: center; align-content: start; gap: 6px; padding: 10px 4px; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: #18212e; color: #fff; cursor: grab; }
+.icon-choice:hover { border-color: var(--accent); }
+.icon-choice span { font-size: 10px; width: 100%; overflow-wrap: anywhere; text-align: center; }

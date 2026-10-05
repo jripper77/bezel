@@ -1,6 +1,7 @@
 // The right inspector: the theme when nothing is selected, one element's
 // properties, or align/distribute tools for several. Every edit is one
 // store command (one undo step).
+import { readIcon } from '../icon-catalog.js';
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { checkField, colorField as colorInputs, numberField, rangeField, segmented, selectField, textField } from './fields.js';
@@ -45,7 +46,7 @@ function choice(id, label, value, options, onChange) {
   return el('div', { class: 'field' }, [el('span', { text: label }), group]);
 }
 
-export function createInspector({ root, store, t, sensors, minRefresh, video = NO_VIDEO_ACTIONS }) {
+export function createInspector({ root, store, t, sensors, minRefresh, editIcon = () => {}, video = NO_VIDEO_ACTIONS }) {
   const update = (id, patch) => store.dispatch('update', { id, patch });
   // A framing slider being dragged: its moves are one gesture (one undo
   // step), and the form is not drawn again under the pointer meanwhile.
@@ -378,12 +379,18 @@ export function createInspector({ root, store, t, sensors, minRefresh, video = N
 
   function imageForm(e, assets) {
     const k = e.kind;
+    const paint = readIcon(assets.find((a) => a.ref === k.asset)?.iconSvg);
+    const change = (patch) => editIcon(e.id, k.asset, { ...paint, ...patch });
     const options = assets.filter((a) => a.kind === 'image').map((a) => [a.ref, a.ref.split('/').pop()]);
     if (k.asset && !options.some(([r]) => r === k.asset)) options.push([k.asset, k.asset]);
     return [
       options.length
         ? selectField(t('inspector.asset'), k.asset, [['', t('inspector.noImage')], ...options], (v) => update(e.id, { kind: { asset: v } }))
         : el('p', { class: 'hint', text: t('inspector.addMediaFirst') }),
+      paint && colorField(t('inspector.color'), paint.color, (color) => change({ color })),
+      paint?.style === 'outline' && numberField(t('inspector.strokeWidth'), paint.stroke, (stroke) => change({ stroke: Math.min(4, Math.max(0.5, stroke)) }), { min: 0.5, max: 4, step: 0.5 }),
+      paint && numberField(t('icons.shadow'), paint.shadow, (shadow) => change({ shadow: Math.min(4, Math.max(0, shadow)) }), { min: 0, max: 4, step: 0.5 }),
+      paint && paint.shadow > 0 && colorField(t('icons.shadowColor'), paint.shadowColor, (shadowColor) => change({ shadowColor })),
       selectField(t('inspector.fit'), k.fit, ['fill', 'contain', 'cover', 'none'].map((f) => [f, t(`fit.${f}`)]), (v) => update(e.id, { kind: { fit: v } })),
     ];
   }

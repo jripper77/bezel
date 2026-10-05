@@ -20,8 +20,8 @@ use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, keys};
 use crate::provider::{FanRole, cpu_core_voltage, describe, fan_role, optional_fan, slug};
 
 /// Shown for the LHM-backed keys when the namespace is missing.
-pub(crate) const HINT: &str = "run LibreHardwareMonitor (its WMI provider \
-     root\\LibreHardwareMonitor) to read CPU temperature, fans and power";
+pub(crate) const HINT: &str = "run LibreHardwareMonitor; for version 0.9.6 enable \
+     Options > Remote Web Server > Run on port 8085 to read CPU temperature, fans and power";
 
 /// CPU temperature sensor names, best first: AMD's `Core (Tctl/Tdie)`, then
 /// the package sensor Intel and newer AMD report, then per-core summaries.

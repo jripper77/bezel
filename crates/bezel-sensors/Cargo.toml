@@ -24,9 +24,11 @@ rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"]
 
 [target.'cfg(windows)'.dependencies]
 sysinfo = { version = "0.39.6", default-features = false, features = ["system", "disk", "network"] }
-# LibreHardwareMonitor publishes its sensors in WMI (root\LibreHardwareMonitor).
+# LibreHardwareMonitor: legacy WMI or the local web server in recent releases.
 wmi = "0.18.4"
 serde = { workspace = true }
+serde_json = { workspace = true }
+ureq = { version = "3.4.2", default-features = false }
 # gpu.fps: RivaTuner Statistics Server's named shared memory, opened and
 # copied read-only (D-2026-09-30-release-polish-4).
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_System_SystemInformation"] }

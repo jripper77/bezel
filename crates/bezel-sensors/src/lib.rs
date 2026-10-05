@@ -6,8 +6,8 @@
 //! the CPU temperature picked by priority), RAPL, memory, network, disks and
 //! mounts, and AMD GPUs through amdgpu's sysfs files. NVIDIA GPUs come from
 //! NVML, loaded at run time. On Windows, sysinfo measures CPU, memory,
-//! disks and network, and LibreHardwareMonitor's WMI namespace (when it
-//! runs) the temperatures, fans and power. On both, `gpu.fps` comes from a
+//! disks and network, and LibreHardwareMonitor's WMI namespace or local
+//! web server the temperatures, fans and power. On both, `gpu.fps` comes from a
 //! frame-rate overlay already running (MangoHud's logs on Linux, RivaTuner
 //! Statistics Server's shared memory on Windows) and `net.ping` from a probe
 //! thread of its own, which sends packets only while a shown value uses the

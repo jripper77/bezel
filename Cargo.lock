@@ -452,9 +452,11 @@ dependencies = [
  "nvml-wrapper",
  "rustix",
  "serde",
+ "serde_json",
  "socket2",
  "sysinfo",
  "tracing",
+ "ureq",
  "windows-sys 0.61.2",
  "wmi",
 ]

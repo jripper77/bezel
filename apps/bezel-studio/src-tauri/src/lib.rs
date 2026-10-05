@@ -4254,7 +4254,11 @@ mod tests {
                 for pulled in graph.deps(parent, for_a_desktop) {
                     let to = graph.name(pulled);
                     let klipy = from == KLIPY_ADAPTER && to == KLIPY_HTTP;
-                    if !network(pulled) || klipy {
+                    // The Windows sensor adapter reads LHM's fixed loopback
+                    // endpoint, with proxies and redirects disabled. The
+                    // studio's external requests still go through KLIPY.
+                    let local_sensors = from == "bezel-sensors" && to == "ureq";
+                    if !network(pulled) || klipy || local_sensors {
                         continue;
                     }
                     let through = if parent == direct {

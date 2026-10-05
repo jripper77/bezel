@@ -1,8 +1,9 @@
 //! Windows providers (D-2026-09-30-sensors-3): sysinfo for CPU usage and
 //! clocks, memory, disks, network and system; LibreHardwareMonitor's WMI
-//! namespace, when it runs, for temperatures, fans and power. NVIDIA GPUs
+//! namespace or local web server for temperatures, fans and power. NVIDIA GPUs
 //! come from NVML like on Linux.
 
+mod lhm_http;
 mod sys;
 mod wmi;
 

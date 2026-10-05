@@ -1,6 +1,7 @@
 //! LibreHardwareMonitor over WMI. A `WMIConnection` belongs to the COM
 //! apartment of the thread that opened it (it is not `Send`), so one worker
-//! thread owns it, re-queries every second and publishes the rows; a sample
+//! thread owns it, re-queries every second and publishes the rows, falling
+//! back to the loopback web server in releases without WMI; a sample
 //! only copies the latest rows and never waits on WMI. When LHM is not
 //! running the worker keeps retrying, so starting LHM later brings the CPU
 //! temperature and power back without restarting Bezel.
@@ -75,6 +76,7 @@ fn query(conn: &WMIConnection) -> Result<(Vec<Row>, HashMap<String, String>), St
 
 fn worker(latest: Shared, ready: mpsc::Sender<()>, stop: mpsc::Receiver<()>) {
     let mut conn: Option<WMIConnection> = None;
+    let http = super::lhm_http::Reader::new();
     loop {
         if conn.is_none() {
             conn = WMIConnection::with_namespace_path(NAMESPACE)
@@ -85,6 +87,12 @@ fn worker(latest: Shared, ready: mpsc::Sender<()>, stop: mpsc::Receiver<()>) {
             Some(c) => query(c),
             None => Err(HINT.to_string()),
         };
+        // Recent LHM releases no longer publish WMI. Keep the existing
+        // mapping and worker, but fall back to its read-only local JSON.
+        let answer = answer.or_else(|_| {
+            conn = None;
+            http.query()
+        });
         let (rows, hardware) = match answer {
             Ok((rows, hardware)) => (Ok(rows), hardware),
             Err(why) => {

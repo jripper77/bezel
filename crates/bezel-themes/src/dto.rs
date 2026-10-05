@@ -285,6 +285,24 @@ pub struct FormatDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ContentDto {
+    /// Current weather at a saved location.
+    Weather {
+        /// Displayed city.
+        city: String,
+        /// Latitude.
+        latitude: f64,
+        /// Longitude.
+        longitude: f64,
+        /// Condition language; absent follows the system.
+        #[serde(default)]
+        language: Option<String>,
+        /// Fahrenheit instead of Celsius.
+        #[serde(default)]
+        fahrenheit: bool,
+        /// Show the vector condition icon.
+        #[serde(default = "yes", rename = "showIcon")]
+        show_icon: bool,
+    },
     /// Fixed text.
     Static {
         /// The text.
@@ -752,6 +770,21 @@ fn kind_dto(k: &ElementKind) -> KindDto {
                     prefix: prefix.clone(),
                     suffix: suffix.clone(),
                 },
+                TextContent::Weather(w) => ContentDto::Weather {
+                    city: w.city.clone(),
+                    latitude: w.latitude,
+                    longitude: w.longitude,
+                    language: w.language.map(|l| {
+                        match l {
+                            Language::Italian => "it",
+                            Language::English => "en",
+                            Language::PortugueseBr => "pt-BR",
+                        }
+                        .to_string()
+                    }),
+                    fahrenheit: w.fahrenheit,
+                    show_icon: w.show_icon,
+                },
                 TextContent::Clock {
                     pattern,
                     language,
@@ -885,6 +918,32 @@ fn kind(k: &KindDto) -> R<ElementKind> {
                     prefix: prefix.clone(),
                     suffix: suffix.clone(),
                 },
+                ContentDto::Weather {
+                    city,
+                    latitude,
+                    longitude,
+                    language,
+                    fahrenheit,
+                    show_icon,
+                } => {
+                    if !bezel_core::domain::weather::valid(city, *latitude, *longitude) {
+                        return err("invalid weather location");
+                    }
+                    TextContent::Weather(bezel_core::domain::weather::Weather {
+                        city: city.clone(),
+                        latitude: *latitude,
+                        longitude: *longitude,
+                        language: match language.as_deref() {
+                            None | Some("") => None,
+                            Some("it") => Some(Language::Italian),
+                            Some("en") => Some(Language::English),
+                            Some("pt-BR") => Some(Language::PortugueseBr),
+                            _ => return err("invalid weather language"),
+                        },
+                        fahrenheit: *fahrenheit,
+                        show_icon: *show_icon,
+                    })
+                }
                 ContentDto::Clock {
                     pattern,
                     language,

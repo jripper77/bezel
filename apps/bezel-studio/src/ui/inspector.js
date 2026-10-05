@@ -46,7 +46,7 @@ function choice(id, label, value, options, onChange) {
   return el('div', { class: 'field' }, [el('span', { text: label }), group]);
 }
 
-export function createInspector({ root, store, t, sensors, minRefresh, editIcon = () => {}, video = NO_VIDEO_ACTIONS }) {
+export function createInspector({ root, store, t, sensors, minRefresh, editIcon = () => {}, searchCities = async () => [], video = NO_VIDEO_ACTIONS }) {
   const update = (id, patch) => store.dispatch('update', { id, patch });
   // A framing slider being dragged: its moves are one gesture (one undo
   // step), and the form is not drawn again under the pointer meanwhile.
@@ -278,6 +278,29 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       nodes.push(el('datalist', { id: 'clock-patterns' }, CLOCK_PATTERNS.map((p) => el('option', { value: p }))));
       nodes.push(el('p', { id: 'clock-preview', class: 'hint', text: t('clock.preview', { value: formatClock(c.pattern, new Date(), c.language, c.casing) }) }));
       nodes.push(el('p', { class: 'hint', text: t('inspector.patternHelp') }));
+    }
+    if (c.type === 'weather') {
+      let query = c.city;
+      const results = el('div', { id: 'weather-results', role: 'status', 'aria-live': 'polite' });
+      const search = el('button', { type: 'button', class: 'text-button', text: t('weather.search'), onclick: async () => {
+        search.disabled = true;
+        results.textContent = t('weather.loading');
+        try {
+          const cities = await searchCities(query);
+          if (!root.contains(results)) return;
+          results.replaceChildren();
+          if (!cities.length) results.textContent = t('weather.empty');
+          for (const city of cities) results.append(el('button', { type: 'button', class: 'text-button', text: [city.name, city.region, city.country].filter(Boolean).join(', '), onclick: () => update(e.id, { kind: { content: { city: city.name, latitude: city.latitude, longitude: city.longitude } } }) }));
+        } catch { if (root.contains(results)) results.textContent = t('weather.error'); }
+        finally { search.disabled = false; }
+      } });
+      nodes.push(el('p', { class: 'hint', text: t('weather.location', { city: c.city }) }));
+      nodes.push(textField(t('weather.city'), query, (value) => { query = value; }));
+      nodes.push(search, results);
+      nodes.push(selectField(t('weather.language'), c.language ?? '', [['', t('clock.system')], ['it', t('language.it')], ['en', t('language.en')], ['pt-BR', t('language.pt-BR')]], (language) => update(e.id, { kind: { content: { language: language || null } } })));
+      nodes.push(checkField(t('inspector.fahrenheit'), c.fahrenheit, (fahrenheit) => update(e.id, { kind: { content: { fahrenheit } } })));
+      nodes.push(checkField(t('weather.icon'), c.showIcon !== false, (showIcon) => update(e.id, { kind: { content: { showIcon } } })));
+      nodes.push(el('p', { class: 'hint', text: t('weather.source') }));
     }
     if (c.type === 'sensor') {
       nodes.push(sensorPicker(e.id, c.key, (key) => ({ kind: { content: { key } } })));

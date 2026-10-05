@@ -1,3 +1,4 @@
+import { weatherText } from './weather-format.js';
 import { formatClock } from './clock-format.js';
 // An approximate renderer for demo mode (browser only). The real preview is
 // the Rust renderer's frame; this only has to look plausible and be fast.
@@ -32,6 +33,8 @@ function drawText(ctx, e, t) {
   if (k.content.type === 'clock') {
     const d = new Date(t * 1000);
     text = formatClock(k.content.pattern, d, k.content.language, k.content.casing);
+  } else if (k.content.type === 'weather') {
+    text = weatherText(k.content, 20, 3);
   } else if (k.content.type === 'sensor') {
     text = `${k.content.prefix ?? ''}${Math.round(fraction(t, e.id) * 100)}${k.content.format?.showUnit === false ? '' : '%'}${k.content.suffix ?? ''}`;
   }
@@ -39,10 +42,25 @@ function drawText(ctx, e, t) {
   ctx.font = `${s.font?.italic ? 'italic ' : ''}${s.font?.weight ?? 400} ${s.size}px ${s.font?.family ?? 'sans-serif'}, sans-serif`;
   ctx.textAlign = s.align === 'center' ? 'center' : s.align === 'right' ? 'right' : 'left';
   ctx.textBaseline = s.valign === 'top' ? 'top' : s.valign === 'bottom' ? 'bottom' : 'middle';
-  const f = e.frame;
+  let f = e.frame;
+  if (k.content.type === 'weather' && k.content.showIcon !== false) {
+    const side = Math.min(s.size * 2, f.height, f.width * 0.3);
+    ctx.save();
+    ctx.translate(f.x, f.y + (f.height - side) / 2);
+    ctx.scale(side / 24, side / 24);
+    ctx.strokeStyle = paint(s.paint); ctx.lineWidth = 1.6;
+    ctx.stroke(new Path2D('M5 16C-1 16 1 8 7 10C8 3 19 5 18 11C24 10 24 16 19 16Z'));
+    ctx.restore();
+    f = { ...f, x: f.x + side + s.size * 0.3, width: Math.max(0, f.width - side - s.size * 0.3) };
+  }
   const x = s.align === 'center' ? f.x + f.width / 2 : s.align === 'right' ? f.x + f.width : f.x;
   const y = s.valign === 'top' ? f.y : s.valign === 'bottom' ? f.y + f.height : f.y + f.height / 2;
-  ctx.fillText(text, x, y, f.width);
+  if (k.content.type === 'weather') {
+    const lines = text.split('\n'); const lineHeight = Math.ceil(s.size * 1.2);
+    const top = s.valign === 'top' ? f.y : s.valign === 'bottom' ? f.y + f.height - lines.length * lineHeight : f.y + (f.height - lines.length * lineHeight) / 2;
+    ctx.textBaseline = 'top';
+    lines.forEach((line, i) => ctx.fillText(line, x, top + i * lineHeight, f.width));
+  } else ctx.fillText(text, x, y, f.width);
 }
 
 function drawElement(ctx, e, t) {

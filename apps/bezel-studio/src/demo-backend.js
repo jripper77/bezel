@@ -1272,6 +1272,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       return Promise.resolve({ model: panel.models[0].name });
     },
     catalog: () => Promise.resolve(DEMO_SENSORS.map(([key, category, label, quantity]) => ({ key, category, label, quantity, source: 'demo' }))),
+    searchWeatherCities: async (query) => [{ name: query.trim(), region: 'Lazio', country: 'Italia', latitude: 41.9, longitude: 12.5 }],
     sample: () => {
       const t = now();
       const readings = {};

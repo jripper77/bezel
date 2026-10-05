@@ -12,6 +12,7 @@
     "allow-quit-app",
     "allow-sensor-catalog",
     "allow-sample-sensors",
+    "allow-search-weather-cities",
     "allow-editor-session",
     "allow-render-preview",
     "allow-video-auto",

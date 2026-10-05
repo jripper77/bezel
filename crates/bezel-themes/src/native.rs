@@ -416,6 +416,41 @@ mod tests {
     }
 
     #[test]
+    fn weather_location_round_trips_and_rejects_bad_coordinates() {
+        use bezel_core::domain::weather::Weather;
+        let (mut theme, _) = every_kind();
+        let weather = Weather {
+            city: "Roma".into(),
+            latitude: 41.9028,
+            longitude: 12.4964,
+            language: Some(bezel_core::domain::clock::Language::Italian),
+            fahrenheit: true,
+            show_icon: true,
+        };
+        let element = theme
+            .elements
+            .iter_mut()
+            .find(|e| matches!(e.kind, ElementKind::Text { .. }))
+            .unwrap();
+        let ElementKind::Text { content, .. } = &mut element.kind else {
+            unreachable!()
+        };
+        *content = TextContent::Weather(weather);
+        let dto = ThemeDto::from(&theme);
+        assert_eq!(Theme::try_from(&dto).unwrap(), theme);
+        let mut json = serde_json::to_value(dto).unwrap();
+        let content = &mut json["elements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|e| e["kind"]["content"]["type"] == "weather")
+            .unwrap()["kind"]["content"];
+        content["latitude"] = serde_json::json!(91);
+        let bad: ThemeDto = serde_json::from_value(json).unwrap();
+        assert!(Theme::try_from(&bad).is_err());
+    }
+
+    #[test]
     fn clock_options_round_trip_and_old_themes_follow_system() {
         use bezel_core::domain::clock::{ClockCase, Language};
         let (mut theme, _) = every_kind();

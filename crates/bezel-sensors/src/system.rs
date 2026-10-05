@@ -62,6 +62,7 @@ impl SystemSensors {
         let (mut providers, gpus) = platform();
         providers.push(Box::new(crate::fps::provider(&options)));
         providers.push(Box::new(crate::ping::Ping::new(&options.ping_host)));
+        providers.push(Box::new(crate::weather::WeatherProvider::default()));
         Self::assemble(providers, gpus)
     }
 

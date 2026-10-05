@@ -56,3 +56,5 @@ mod tests {
         golden::composition(&mut renderer);
     }
 }
+
+mod weather;

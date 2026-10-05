@@ -311,6 +311,7 @@ function tauriBridge(invoke, tauri = {}) {
     leaveDesktopMode: (key, confirmed) => invoke('leave_desktop_mode', { key, confirmed }),
     catalog: () => invoke('sensor_catalog'),
     sample: () => invoke('sample_sensors'),
+    searchWeatherCities: (query) => invoke('search_weather_cities', { query }),
     session: () => invoke('editor_session'),
     /**
      * Renders the theme for the preview: `render_preview {theme, motion}`.

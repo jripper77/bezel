@@ -208,6 +208,8 @@ pub struct Binding {
 /// What a text element prints.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TextContent {
+    /// Current weather at a saved location.
+    Weather(super::weather::Weather),
     /// Fixed text.
     Static(String),
     /// A sensor value, formatted, with optional text around it.
@@ -494,7 +496,8 @@ impl Theme {
     /// The sensors the visible elements show: what running this theme
     /// wants measured (hidden elements are not drawn).
     pub fn sensor_keys(&self) -> BTreeSet<SensorKey> {
-        self.elements
+        let mut keys: BTreeSet<SensorKey> = self
+            .elements
             .iter()
             .filter(|e| e.visible)
             .filter_map(|e| match &e.kind {
@@ -508,7 +511,17 @@ impl Theme {
                 | ElementKind::Graph { binding, .. } => Some(binding.key.clone()),
                 _ => None,
             })
-            .collect()
+            .collect();
+        for e in self.elements.iter().filter(|e| e.visible) {
+            if let ElementKind::Text {
+                content: TextContent::Weather(weather),
+                ..
+            } = &e.kind
+            {
+                keys.extend(weather.keys());
+            }
+        }
+        keys
     }
 
     /// The images of the image elements a frame shows: visible, not fully

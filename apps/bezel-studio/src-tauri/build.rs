@@ -10,6 +10,7 @@ const COMMANDS: &[&str] = &[
     "quit_app",
     "sensor_catalog",
     "sample_sensors",
+    "search_weather_cities",
     "editor_session",
     "render_preview",
     "video_auto",

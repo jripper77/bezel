@@ -229,6 +229,7 @@ const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const motionAllowed = () => !document.hidden && !reducedMotion?.matches;
 
 const inspector = createInspector({
+  searchCities: (query) => bridge.searchWeatherCities(query),
   root: $('inspector'),
   editIcon: (id, asset, paint) => editIcon(id, asset, paint),
   store,

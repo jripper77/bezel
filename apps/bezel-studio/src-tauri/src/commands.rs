@@ -125,6 +125,18 @@ pub async fn sample_sensors(state: State<'_, Shared>) -> UiResult<SampleDto> {
     blocking(&state, |b| Ok(b.sample())).await
 }
 
+/// Search weather locations on the blocking pool, only on explicit user search.
+#[tauri::command]
+pub async fn search_weather_cities(
+    state: State<'_, Shared>,
+    query: String,
+) -> UiResult<Vec<bezel_sensors::weather::City>> {
+    blocking(&state, move |_| {
+        bezel_sensors::weather::search_cities(&query).map_err(UiError::system)
+    })
+    .await
+}
+
 /// The sensors the library's list shows now (empty while it is hidden):
 /// measured with the theme's, `net.ping` only while one shows it.
 #[tauri::command]
@@ -1086,3 +1098,4 @@ mod tests {
         assert_eq!(confirm_of(false), Confirm::No);
     }
 }
+

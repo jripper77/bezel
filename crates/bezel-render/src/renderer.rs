@@ -216,6 +216,7 @@ fn value_fraction(binding: &Binding, context: &RenderContext<'_>) -> Option<f64>
 fn text_of(content: &TextContent, context: &RenderContext<'_>) -> String {
     match content {
         TextContent::Static(text) => text.clone(),
+        TextContent::Weather(w) => w.text(context.snapshot, context.language),
         TextContent::Sensor {
             key,
             format,
@@ -426,6 +427,24 @@ impl SkiaRenderer {
         let area = element.frame;
         match &element.kind {
             ElementKind::Text { content, style } => {
+                let mut area = area;
+                if let TextContent::Weather(w) = content
+                    && w.show_icon
+                {
+                    let side = (style.size * 2.0).min(area.height).min(area.width * 0.3);
+                    let code = match context.snapshot.get(&w.keys()[1]) {
+                        bezel_core::domain::sensor::Reading::Value(v) => v as u16,
+                        _ => 999,
+                    };
+                    crate::weather::draw(
+                        layer,
+                        BoxF::new(area.x, area.y + (area.height - side) / 2.0, side, side),
+                        code,
+                        &style.paint,
+                    );
+                    area.x += side + style.size * 0.3;
+                    area.width = (area.width - side - style.size * 0.3).max(0.0);
+                }
                 let text = text_of(content, context);
                 let job = TextJob {
                     text: &text,

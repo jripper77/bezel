@@ -1014,3 +1014,81 @@ pub(crate) fn composition(r: &mut SkiaRenderer) {
     );
     assert!(f.as_rgba().is_empty());
 }
+
+#[test]
+fn weather_text_and_vector_icons_render_without_external_assets() {
+    fn weather_frame(
+        r: &mut SkiaRenderer,
+        name: &str,
+        content: TextContent,
+        style: TextStyle,
+        frame: BoxF,
+        scene: &Scene,
+    ) -> Frame {
+        shot(
+            r,
+            name,
+            &theme(
+                300,
+                120,
+                Background::Color(BLACK),
+                vec![text(content, style, frame)],
+            ),
+            scene,
+        )
+    }
+    use bezel_core::domain::clock::Language;
+    use bezel_core::domain::weather::Weather;
+    let mut renderer = crate::testkit::renderer();
+    let mut w = Weather {
+        city: "Roma".into(),
+        latitude: 41.9,
+        longitude: 12.5,
+        language: Some(Language::Italian),
+        fahrenheit: false,
+        show_icon: false,
+    };
+    let [temperature, code] = w.keys();
+    let scene = Scene::empty()
+        .with(temperature.as_str(), 20.0)
+        .with(code.as_str(), 3.0);
+    let full = BoxF::new(0.0, 0.0, 300.0, 120.0);
+    let style = style(24.0, HAlign::Left, VAlign::Middle);
+    let actual = weather_frame(
+        &mut renderer,
+        "weather_text",
+        TextContent::Weather(w.clone()),
+        style.clone(),
+        full,
+        &scene,
+    );
+    let expected = weather_frame(
+        &mut renderer,
+        "weather_expected",
+        stat("Roma\n20\u{00b0}C\nNuvoloso"),
+        style.clone(),
+        full,
+        &scene,
+    );
+    assert_eq!(actual, expected);
+    w.show_icon = true;
+    let cloudy = weather_frame(
+        &mut renderer,
+        "weather_cloudy",
+        TextContent::Weather(w.clone()),
+        style.clone(),
+        full,
+        &scene,
+    );
+    assert_ne!(cloudy, actual);
+    let scene = scene.with(code.as_str(), 0.0);
+    let sunny = weather_frame(
+        &mut renderer,
+        "weather_sunny",
+        TextContent::Weather(w),
+        style,
+        full,
+        &scene,
+    );
+    assert_ne!(sunny, cloudy);
+}

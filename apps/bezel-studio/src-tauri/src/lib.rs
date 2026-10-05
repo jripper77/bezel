@@ -243,6 +243,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::quit_app,
             commands::sensor_catalog,
             commands::sample_sensors,
+            commands::search_weather_cities,
             commands::editor_session,
             commands::render_preview,
             commands::video_auto,

@@ -22,6 +22,15 @@ impl SensorKey {
         (!key.is_empty() && !key.chars().any(char::is_whitespace)).then_some(Self(key))
     }
 
+    /// Weather keys contain only a fixed prefix, numeric coordinates and suffix.
+    pub(super) fn weather(latitude: f64, longitude: f64) -> [Self; 2] {
+        let base = format!("weather.{latitude:.6}:{longitude:.6}");
+        [
+            Self(format!("{base}.temperature")),
+            Self(format!("{base}.code")),
+        ]
+    }
+
     /// The key text.
     pub fn as_str(&self) -> &str {
         &self.0

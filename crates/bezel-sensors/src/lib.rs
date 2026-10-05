@@ -44,6 +44,7 @@ mod system;
 #[cfg(test)]
 #[cfg(target_os = "linux")]
 mod testing;
+pub mod weather;
 
 #[cfg(windows)]
 mod windows;

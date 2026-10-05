@@ -386,7 +386,7 @@ fn imports_every_widget_kind() {
     ));
     let clock = |name: &str| match &find(&theme, name).kind {
         ElementKind::Text {
-            content: TextContent::Clock { pattern },
+            content: TextContent::Clock { pattern, .. },
             ..
         } => pattern.clone(),
         other => panic!("{other:?}"),

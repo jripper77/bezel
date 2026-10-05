@@ -659,7 +659,11 @@ impl Importer {
         let data = md.text("DataName").unwrap_or_default();
         let sub = md.text("SubName");
         if let Some(pattern) = self.clock_pattern(data, sub) {
-            return Some(TextContent::Clock { pattern });
+            return Some(TextContent::Clock {
+                pattern,
+                language: None,
+                casing: Default::default(),
+            });
         }
         let sensor = self.sensor(data, sub, fahrenheit)?;
         Some(TextContent::Sensor {

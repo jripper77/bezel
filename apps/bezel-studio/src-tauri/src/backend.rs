@@ -408,7 +408,7 @@ impl Backend {
         self.settings
             .update(|s| s.language = chosen.map(|l| language_slug(l).to_string()));
         let language = chosen.unwrap_or(self.system_language);
-        self.studio().set_language(language);
+        self.studio().set_language(self.system_language);
         Ok(language)
     }
 
@@ -1170,7 +1170,7 @@ mod tests {
         assert_eq!(chosen, Language::PortugueseBr);
         assert_eq!(f.backend.preferences().language, Some("pt-BR"));
         assert_eq!(f.backend.texts().untitled, "Sem título");
-        assert_eq!(f.backend.studio().language(), Language::PortugueseBr);
+        assert_eq!(f.backend.studio().language(), Language::English);
         let json = std::fs::read_to_string(f.backend.settings.path()).unwrap();
         assert!(json.contains("\"language\": \"pt-BR\""), "{json}");
 
@@ -1434,7 +1434,15 @@ mod tests {
         ];
         let mut addresses: Vec<&str> = code
             .iter()
-            .map(|source| source.split("#[cfg(test)]\nmod tests {").next().unwrap())
+            .map(|source| {
+                source
+                    .split("#[cfg(test)]\nmod tests {")
+                    .next()
+                    .unwrap()
+                    .split("#[cfg(test)]\r\nmod tests {")
+                    .next()
+                    .unwrap()
+            })
             .flat_map(|source| {
                 source
                     .match_indices("https://")

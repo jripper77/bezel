@@ -42,6 +42,17 @@ pub fn texts(language: Language) -> Texts {
             videos: "Vídeos e GIFs animados",
             untitled: "Sem título",
         },
+        Language::Italian => Texts {
+            show: "Apri Bezel",
+            hide: "Nascondi finestra",
+            live: "In diretta sullo schermo",
+            quit: "Esci",
+            themes: "Temi",
+            images: "Immagini",
+            media: "Immagini e video",
+            videos: "Video e GIF animate",
+            untitled: "Senza titolo",
+        },
         Language::English => Texts {
             show: "Open Bezel",
             hide: "Hide the window",
@@ -60,6 +71,7 @@ pub fn texts(language: Language) -> Texts {
 pub fn language_slug(language: Language) -> &'static str {
     match language {
         Language::PortugueseBr => "pt-BR",
+        Language::Italian => "it",
         Language::English => "en",
     }
 }

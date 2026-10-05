@@ -1,3 +1,4 @@
+import { formatClock } from './clock-format.js';
 // An approximate renderer for demo mode (browser only). The real preview is
 // the Rust renderer's frame; this only has to look plausible and be fast.
 
@@ -30,7 +31,7 @@ function drawText(ctx, e, t) {
   let text = k.content.text ?? '';
   if (k.content.type === 'clock') {
     const d = new Date(t * 1000);
-    text = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    text = formatClock(k.content.pattern, d, k.content.language, k.content.casing);
   } else if (k.content.type === 'sensor') {
     text = `${k.content.prefix ?? ''}${Math.round(fraction(t, e.id) * 100)}${k.content.format?.showUnit === false ? '' : '%'}${k.content.suffix ?? ''}`;
   }

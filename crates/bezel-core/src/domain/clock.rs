@@ -28,17 +28,82 @@ pub enum Language {
     English,
     /// Brazilian Portuguese.
     PortugueseBr,
+    /// Italian.
+    Italian,
 }
 
 /// The language of day and month names for a locale such as `pt-BR` (the
 /// driving adapter reads the system's): Portuguese for any `pt` locale,
-/// English otherwise.
+/// Italian for any `it` locale, English otherwise.
 pub fn language_of(locale: Option<&str>) -> Language {
     match locale {
         Some(l) if l.to_ascii_lowercase().starts_with("pt") => Language::PortugueseBr,
+        Some(l) if l.to_ascii_lowercase().starts_with("it") => Language::Italian,
         _ => Language::English,
     }
 }
+
+/// Letter case applied to the complete formatted date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ClockCase {
+    /// Preserve the pattern and the natural day/month spelling.
+    #[default]
+    Normal,
+    /// All letters uppercase.
+    Upper,
+    /// Capitalise each word, preserving the other letters.
+    Title,
+}
+
+/// Apply a clock element's case without changing numeric fields.
+pub fn clock_case(text: &str, casing: ClockCase) -> String {
+    match casing {
+        ClockCase::Normal => text.to_string(),
+        ClockCase::Upper => text.to_uppercase(),
+        ClockCase::Title => {
+            let mut start = true;
+            let mut out = String::new();
+            for c in text.chars() {
+                if c.is_alphabetic() {
+                    if start {
+                        out.extend(c.to_uppercase());
+                    } else {
+                        out.push(c);
+                    }
+                    start = false;
+                } else {
+                    out.push(c);
+                    start = true;
+                }
+            }
+            out
+        }
+    }
+}
+
+const IT_DAYS: [&str; 7] = [
+    "lunedì",
+    "martedì",
+    "mercoledì",
+    "giovedì",
+    "venerdì",
+    "sabato",
+    "domenica",
+];
+const IT_MONTHS: [&str; 12] = [
+    "gennaio",
+    "febbraio",
+    "marzo",
+    "aprile",
+    "maggio",
+    "giugno",
+    "luglio",
+    "agosto",
+    "settembre",
+    "ottobre",
+    "novembre",
+    "dicembre",
+];
 
 const EN_DAYS: [&str; 7] = [
     "Monday",
@@ -91,6 +156,8 @@ const PT_MONTHS: [&str; 12] = [
 fn day_name(t: &LocalTime, lang: Language, short: bool) -> String {
     let i = usize::from(t.weekday.min(6));
     match (lang, short) {
+        (Language::Italian, false) => IT_DAYS[i].to_string(),
+        (Language::Italian, true) => IT_DAYS[i].chars().take(3).collect(),
         (Language::English, false) => EN_DAYS[i].to_string(),
         (Language::English, true) => EN_DAYS[i][..3].to_string(),
         (Language::PortugueseBr, false) => PT_DAYS[i].to_string(),
@@ -101,6 +168,7 @@ fn day_name(t: &LocalTime, lang: Language, short: bool) -> String {
 fn month_name(t: &LocalTime, lang: Language, short: bool) -> String {
     let i = usize::from(t.month.clamp(1, 12) - 1);
     let full = match lang {
+        Language::Italian => IT_MONTHS[i],
         Language::English => EN_MONTHS[i],
         Language::PortugueseBr => PT_MONTHS[i],
     };
@@ -168,6 +236,25 @@ mod tests {
         second: 9,
         weekday: 2,
     };
+
+    #[test]
+    fn italian_names_and_unicode_case() {
+        assert_eq!(language_of(Some("IT_it")), Language::Italian);
+        assert_eq!(
+            format_clock("%A %e %B", &T, Language::Italian),
+            "mercoledì 30 settembre"
+        );
+        assert_eq!(format_clock("%a %b", &T, Language::Italian), "mer set");
+        assert_eq!(
+            clock_case("lunedì 5 ottobre", ClockCase::Upper),
+            "LUNEDÌ 5 OTTOBRE"
+        );
+        assert_eq!(
+            clock_case("lunedì 5 ottobre", ClockCase::Title),
+            "Lunedì 5 Ottobre"
+        );
+        assert_eq!(clock_case("14:30 AM", ClockCase::Title), "14:30 AM");
+    }
 
     #[test]
     fn numeric_directives() {

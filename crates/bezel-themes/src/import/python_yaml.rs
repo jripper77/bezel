@@ -801,6 +801,8 @@ impl Importer {
             let format = Self::text_of(block, "FORMAT").unwrap_or_else(|| "medium".into());
             return TextContent::Clock {
                 pattern: self.cldr(&format, date),
+                language: None,
+                casing: Default::default(),
             };
         }
         TextContent::Sensor {

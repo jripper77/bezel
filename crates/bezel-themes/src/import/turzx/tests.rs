@@ -514,7 +514,7 @@ fn maps_every_layer_kind() {
     let time = by_name("Data: TIME");
     assert!(matches!(
         &time.kind,
-        ElementKind::Text { content: TextContent::Clock { pattern }, .. } if pattern == "%H:%M:%S"
+        ElementKind::Text { content: TextContent::Clock { pattern, .. }, .. } if pattern == "%H:%M:%S"
     ));
     let foo = by_name("Data: FOO");
     assert!(matches!(

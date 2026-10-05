@@ -565,7 +565,6 @@ fn compose(folders: &Folders, adapters: Adapters, simulate: bool) -> Backend {
     let fonts = renderer.font_families();
     let settings = SettingsFile::new(folders.config.join("settings.json"));
     let system_language = clock::language();
-    let language = settings.load().language().unwrap_or(system_language);
     let ffmpeg = settings.load().ffmpeg_path.map(PathBuf::from);
     let cache = &folders.cache;
     let copies = if simulate {
@@ -583,8 +582,13 @@ fn compose(folders: &Folders, adapters: Adapters, simulate: bool) -> Backend {
     // Screens that cannot play videos get the theme's video decoded here by
     // the storage tab's converter.
     let measured = sensors(settings.load().sensor_options());
-    let studio = Studio::new(measured, Box::new(renderer), language, starting_theme())
-        .with_host_decoding(storage.shared_media(), cache.join("playing"));
+    let studio = Studio::new(
+        measured,
+        Box::new(renderer),
+        system_language,
+        starting_theme(),
+    )
+    .with_host_decoding(storage.shared_media(), cache.join("playing"));
     Backend {
         bus,
         connector,

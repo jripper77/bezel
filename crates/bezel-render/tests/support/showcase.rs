@@ -157,6 +157,8 @@ fn header() -> Vec<(BoxF, ElementKind)> {
             text(
                 TextContent::Clock {
                     pattern: "%H:%M".into(),
+                    language: None,
+                    casing: Default::default(),
                 },
                 clock,
             ),
@@ -166,6 +168,8 @@ fn header() -> Vec<(BoxF, ElementKind)> {
             text(
                 TextContent::Clock {
                     pattern: "%A, %e %B".into(),
+                    language: None,
+                    casing: Default::default(),
                 },
                 date,
             ),

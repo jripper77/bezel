@@ -1,5 +1,6 @@
 //! `theme.json`, schema 1: serde shapes and their mapping to the core model.
 
+use bezel_core::domain::clock::{ClockCase, Language};
 use bezel_core::domain::frame::Rgba;
 use bezel_core::domain::framing::{FramingPosition, Permille, VideoFit, VideoFraming, Zoom};
 use bezel_core::domain::geometry::{Orientation, Size};
@@ -306,6 +307,12 @@ pub enum ContentDto {
     Clock {
         /// Pattern.
         pattern: String,
+        /// Explicit clock language; absent follows the system.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+        /// Normal (absent), upper or title.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        casing: Option<String>,
     },
 }
 
@@ -745,8 +752,25 @@ fn kind_dto(k: &ElementKind) -> KindDto {
                     prefix: prefix.clone(),
                     suffix: suffix.clone(),
                 },
-                TextContent::Clock { pattern } => ContentDto::Clock {
+                TextContent::Clock {
+                    pattern,
+                    language,
+                    casing,
+                } => ContentDto::Clock {
                     pattern: pattern.clone(),
+                    language: language.map(|l| {
+                        match l {
+                            Language::English => "en",
+                            Language::PortugueseBr => "pt-BR",
+                            Language::Italian => "it",
+                        }
+                        .to_string()
+                    }),
+                    casing: match casing {
+                        ClockCase::Normal => None,
+                        ClockCase::Upper => Some("upper".into()),
+                        ClockCase::Title => Some("title".into()),
+                    },
                 },
             },
             style: style_dto(style),
@@ -861,8 +885,25 @@ fn kind(k: &KindDto) -> R<ElementKind> {
                     prefix: prefix.clone(),
                     suffix: suffix.clone(),
                 },
-                ContentDto::Clock { pattern } => TextContent::Clock {
+                ContentDto::Clock {
+                    pattern,
+                    language,
+                    casing,
+                } => TextContent::Clock {
                     pattern: pattern.clone(),
+                    language: match language.as_deref() {
+                        None | Some("") => None,
+                        Some("en") => Some(Language::English),
+                        Some("pt-BR") => Some(Language::PortugueseBr),
+                        Some("it") => Some(Language::Italian),
+                        Some(other) => return err(format!("bad clock language {other:?}")),
+                    },
+                    casing: match casing.as_deref() {
+                        None | Some("normal") => ClockCase::Normal,
+                        Some("upper") => ClockCase::Upper,
+                        Some("title") => ClockCase::Title,
+                        Some(other) => return err(format!("bad clock casing {other:?}")),
+                    },
                 },
             },
             style: style(s)?,

@@ -345,9 +345,21 @@ fn bound_texts(r: &mut SkiaRenderer, full: BoxF) {
     );
     let clock = TextContent::Clock {
         pattern: "%H:%M %a".into(),
+        language: None,
+        casing: Default::default(),
     };
     assert_eq!(TIME.hour, 21);
     assert!(same(r, clock, "21:05 Wed", &centered));
+    assert!(same(
+        r,
+        TextContent::Clock {
+            pattern: "%a %b".into(),
+            language: Some(bezel_core::domain::clock::Language::Italian),
+            casing: bezel_core::domain::clock::ClockCase::Upper
+        },
+        "MER SET",
+        &centered
+    ));
     assert!(
         !same(r, stat("21:05"), "21:06", &centered),
         "different text differs"

@@ -318,6 +318,8 @@ mod tests {
                     ElementKind::Text {
                         content: TextContent::Clock {
                             pattern: "%H:%M".into(),
+                            language: None,
+                            casing: Default::default(),
                         },
                         style,
                     },
@@ -411,6 +413,65 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bezel-themes-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn clock_options_round_trip_and_old_themes_follow_system() {
+        use bezel_core::domain::clock::{ClockCase, Language};
+        let (mut theme, _) = every_kind();
+        let content = theme
+            .elements
+            .iter_mut()
+            .find_map(|e| match &mut e.kind {
+                ElementKind::Text {
+                    content: c @ TextContent::Clock { .. },
+                    ..
+                } => Some(c),
+                _ => None,
+            })
+            .unwrap();
+        *content = TextContent::Clock {
+            pattern: "%A %e %B".into(),
+            language: Some(Language::Italian),
+            casing: ClockCase::Upper,
+        };
+        let bytes = manifest(&theme).unwrap();
+        assert_eq!(parse_manifest(&bytes).unwrap(), theme);
+        let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let clock = json["elements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|e| e["kind"]["content"]["type"] == "clock")
+            .unwrap();
+        clock["kind"]["content"]
+            .as_object_mut()
+            .unwrap()
+            .remove("language");
+        clock["kind"]["content"]
+            .as_object_mut()
+            .unwrap()
+            .remove("casing");
+        let old = parse_manifest(&serde_json::to_vec(&json).unwrap()).unwrap();
+        assert!(old.elements.iter().any(|e| matches!(
+            &e.kind,
+            ElementKind::Text {
+                content: TextContent::Clock {
+                    language: None,
+                    casing: ClockCase::Normal,
+                    ..
+                },
+                ..
+            }
+        )));
+        let clock = json["elements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|e| e["kind"]["content"]["type"] == "clock")
+            .unwrap();
+        clock["kind"]["content"]["language"] = serde_json::json!("invalid");
+        assert!(parse_manifest(&serde_json::to_vec(&json).unwrap()).is_err());
     }
 
     #[test]

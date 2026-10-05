@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+use super::clock::{ClockCase, Language};
 use super::frame::Rgba;
 use super::framing::VideoFraming;
 use super::geometry::{Orientation, Size};
@@ -224,6 +225,10 @@ pub enum TextContent {
     Clock {
         /// Pattern, e.g. `%H:%M`.
         pattern: String,
+        /// None follows the runtime system language.
+        language: Option<Language>,
+        /// Letter case of the resulting text.
+        casing: ClockCase,
     },
 }
 

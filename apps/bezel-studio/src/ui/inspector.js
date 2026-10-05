@@ -1,3 +1,4 @@
+import { CLOCK_PATTERNS, formatClock } from '../clock-format.js';
 // The right inspector: the theme when nothing is selected, one element's
 // properties, or align/distribute tools for several. Every edit is one
 // store command (one undo step).
@@ -12,7 +13,6 @@ import { ROTATIONS, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, framingOf, framingPercents, r
 import { formatBytes } from './storage.js';
 
 const BOUND = ['value', 'bar', 'ring', 'needle', 'graph'];
-const CLOCK_PATTERNS = ['%H:%M', '%H:%M:%S', '%I:%M %p', '%d/%m/%Y', '%A', '%a %d %b', '%B %Y'];
 /** "Frame on canvas": a frame's corners around a move cross. */
 const FRAME_ICON = ['M4 9V4h5', 'M15 4h5v5', 'M20 15v5h-5', 'M9 20H4v-5', 'M12 8v8', 'M8 12h8'];
 
@@ -268,8 +268,15 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     const nodes = [];
     if (c.type === 'static') nodes.push(textField(t('inspector.text'), c.text, (v) => update(e.id, { kind: { content: { text: v } } })));
     if (c.type === 'clock') {
+      nodes.push(selectField(t('clock.language'), c.language ?? '', [['', t('clock.system')], ['it', t('language.it')], ['en', t('language.en')], ['pt-BR', t('language.pt-BR')]], (language) => update(e.id, { kind: { content: { language: language || null } } })));
+      nodes.push(selectField(t('clock.format'), CLOCK_PATTERNS.includes(c.pattern) ? c.pattern : 'custom', [...CLOCK_PATTERNS.map((pattern) => [pattern, formatClock(pattern, new Date(), c.language, c.casing)]), ['custom', t('clock.custom')]], (pattern) => {
+        if (pattern === 'custom') root.querySelector('[list="clock-patterns"]')?.focus();
+        else update(e.id, { kind: { content: { pattern } } });
+      }));
+      nodes.push(selectField(t('clock.casing'), c.casing ?? 'normal', ['normal', 'upper', 'title'].map((value) => [value, t(`clock.${value}`)]), (casing) => update(e.id, { kind: { content: { casing } } })));
       nodes.push(textField(t('inspector.pattern'), c.pattern, (v) => update(e.id, { kind: { content: { pattern: v } } }), { list: 'clock-patterns' }));
       nodes.push(el('datalist', { id: 'clock-patterns' }, CLOCK_PATTERNS.map((p) => el('option', { value: p }))));
+      nodes.push(el('p', { id: 'clock-preview', class: 'hint', text: t('clock.preview', { value: formatClock(c.pattern, new Date(), c.language, c.casing) }) }));
       nodes.push(el('p', { class: 'hint', text: t('inspector.patternHelp') }));
     }
     if (c.type === 'sensor') {

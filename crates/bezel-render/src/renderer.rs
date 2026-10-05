@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use bezel_core::domain::animation::Timeline;
-use bezel_core::domain::clock::format_clock;
+use bezel_core::domain::clock::{clock_case, format_clock};
 use bezel_core::domain::frame::{Frame, Rgba};
 use bezel_core::domain::geometry::Size;
 use bezel_core::domain::sensor::{format_reading, fraction};
@@ -227,7 +227,14 @@ fn text_of(content: &TextContent, context: &RenderContext<'_>) -> String {
             let value = format_reading(&reading, quantity, *format);
             format!("{prefix}{value}{suffix}")
         }
-        TextContent::Clock { pattern } => format_clock(pattern, &context.time, context.language),
+        TextContent::Clock {
+            pattern,
+            language,
+            casing,
+        } => clock_case(
+            &format_clock(pattern, &context.time, language.unwrap_or(context.language)),
+            *casing,
+        ),
     }
 }
 

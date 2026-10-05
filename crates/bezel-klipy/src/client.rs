@@ -323,7 +323,7 @@ fn too_large(limit: u64) -> BezelError {
 const fn locale(language: Language) -> Option<&'static str> {
     match language {
         Language::PortugueseBr => Some("BR"),
-        Language::English => None,
+        Language::English | Language::Italian => None,
     }
 }
 

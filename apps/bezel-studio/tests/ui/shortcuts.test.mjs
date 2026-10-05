@@ -5,6 +5,8 @@ import { shortcutFor, usesArrows } from '../../src/shortcuts.js';
 const key = (k, mods = {}) => ({ key: k, ...mods });
 
 test('editing shortcuts', () => {
+  assert.deepEqual(shortcutFor(key('c', { ctrlKey: true }), null), { type: 'copy' });
+  assert.deepEqual(shortcutFor(key('V', { metaKey: true }), null), { type: 'paste' });
   assert.deepEqual(shortcutFor(key('z', { ctrlKey: true }), null), { type: 'undo' });
   assert.deepEqual(shortcutFor(key('Z', { ctrlKey: true, shiftKey: true }), null), { type: 'redo' });
   assert.deepEqual(shortcutFor(key('y', { metaKey: true }), null), { type: 'redo' });
@@ -23,6 +25,9 @@ test('arrows nudge by 1, or 10 with shift', () => {
 
 test('typing in a field keeps its keys, except save', () => {
   const input = { tagName: 'INPUT' };
+  for (const focused of [input, { tagName: 'TEXTAREA' }, { tagName: 'SELECT' }, { isContentEditable: true }]) {
+    for (const k of ['c', 'v']) assert.equal(shortcutFor(key(k, { ctrlKey: true }), focused), null);
+  }
   assert.equal(shortcutFor(key('Delete'), input), null);
   assert.equal(shortcutFor(key('z', { ctrlKey: true }), { tagName: 'DIV', isContentEditable: true }), null);
   assert.deepEqual(shortcutFor(key('s', { ctrlKey: true }), input), { type: 'save' });

@@ -379,6 +379,9 @@ function refreshChrome(reason) {
   reportUnsaved();
   $('undo').disabled = !store.canUndo();
   $('redo').disabled = !store.canRedo();
+  $('copy').disabled = !store.getState().selection.length;
+  $('paste').disabled = !store.canPaste();
+  if (reason === 'copy') return;
   if (document.activeElement !== $('theme-name')) $('theme-name').value = theme.name;
   $('save').classList.toggle('dirty', store.isDirty());
   $('status-main').textContent = store.isDirty() ? t('status.unsaved') : t('status.saved');
@@ -914,13 +917,15 @@ bridge.onQuitRequested(async () => {
 
 // ---------------------------------------------------------- chrome -----
 // The editor's own controls bring it back from the storage manager.
-for (const id of ['undo', 'redo', 'zoom-in', 'zoom-out', 'zoom-fit', 'orient-vertical', 'orient-horizontal', 'orient-turn']) {
+for (const id of ['undo', 'redo', 'copy', 'paste', 'zoom-in', 'zoom-out', 'zoom-fit', 'orient-vertical', 'orient-horizontal', 'orient-turn']) {
   $(id).addEventListener('click', () => {
     if (storageWide()) $('subtab-device').click();
   });
 }
 $('undo').addEventListener('click', () => store.undo());
 $('redo').addEventListener('click', () => store.redo());
+$('copy').addEventListener('click', () => store.copySelection());
+$('paste').addEventListener('click', () => store.paste());
 $('save').addEventListener('click', () => save());
 $('zoom-in').addEventListener('click', () => canvasView.setZoom(canvasView.zoom() * 1.25));
 $('zoom-out').addEventListener('click', () => canvasView.setZoom(canvasView.zoom() / 1.25));
@@ -954,6 +959,8 @@ document.addEventListener('keydown', (evt) => {
     case 'redo': store.redo(); break;
     case 'save': save(); break;
     case 'saveAs': save(true); break;
+    case 'copy': store.copySelection(); break;
+    case 'paste': store.paste(); break;
     case 'remove': if (ids.length) store.dispatch('remove', { ids }); break;
     case 'duplicate': if (ids.length) store.dispatch('duplicate', { ids }); break;
     case 'selectAll': store.select(store.getState().theme.elements.map((e) => e.id)); break;

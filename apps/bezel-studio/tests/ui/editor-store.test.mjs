@@ -223,3 +223,52 @@ test('new elements and copies are named in the language the UI asks for', () => 
   s.dispatch('duplicate', { ids: [1] });
   assert.equal(s.getState().theme.elements.at(-1).name, 'Clock (cópia)');
 });
+
+
+test('clipboard snapshots multiple objects, preserves appearance and groups paste history', () => {
+  const s = createStore(DEMO_THEME);
+  s.select([2, 1]);
+  const originals = structuredClone(selectedElements(s.getState()));
+  s.copySelection();
+  assert.equal(s.isDirty(), false);
+  assert.equal(s.canUndo(), false);
+  assert.equal(s.canPaste(), true);
+  s.dispatch('update', { id: 1, patch: { opacity: 0.2, kind: { style: { color: '#abcdef' } } } });
+  const before = s.getState().theme;
+  s.paste();
+  const copies = selectedElements(s.getState());
+  assert.equal(copies.length, 2);
+  for (const [i, e] of copies.entries()) {
+    assert.deepEqual(e.kind, originals[i].kind);
+    assert.equal(e.opacity, originals[i].opacity);
+    assert.deepEqual(e.frame, { ...originals[i].frame, x: originals[i].frame.x + 16, y: originals[i].frame.y + 16 });
+    assert.notEqual(e.id, originals[i].id);
+    assert.notEqual(e.name, originals[i].name);
+  }
+  const pasted = s.getState().theme;
+  s.undo();
+  assert.equal(s.getState().theme, before);
+  s.redo();
+  assert.equal(s.getState().theme, pasted);
+  s.paste();
+  assert.equal(selectedElements(s.getState())[0].frame.x, originals[0].frame.x + 32);
+  assert.equal(new Set(s.getState().theme.elements.map(e => e.name)).size, s.getState().theme.elements.length);
+  s.load(DEMO_THEME);
+  assert.equal(s.canPaste(), false);
+  s.paste();
+  assert.equal(s.isDirty(), false);
+});
+
+test('clipboard keeps SVG asset and clock options after the source is removed', () => {
+  const theme = structuredClone(DEMO_THEME);
+  theme.elements[0].kind = { type: 'image', asset: 'assets/tabler/fan.svg', fit: 'contain' };
+  theme.elements[1].kind = { type: 'text', content: { type: 'clock', pattern: '%A', language: 'it', casing: 'upper' } };
+  const s = createStore(theme);
+  s.paste();
+  assert.equal(s.canUndo(), false);
+  s.select([1, 2]);
+  s.copySelection();
+  s.dispatch('remove', { ids: [1, 2] });
+  s.paste();
+  assert.deepEqual(selectedElements(s.getState()).map(e => e.kind), theme.elements.slice(0, 2).map(e => e.kind));
+});

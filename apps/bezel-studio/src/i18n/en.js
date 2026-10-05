@@ -928,6 +928,8 @@ export default {
   'top.noScreen': 'No screen connected',
   'top.orientation': 'Screen orientation',
   'top.preferences': 'Preferences',
+  'top.copy': 'Copy (Ctrl+C)',
+  'top.paste': 'Paste (Ctrl+V)',
   'top.redo': 'Redo (Ctrl+Shift+Z)',
   'top.save': 'Save',
   'top.screen': 'Screen',

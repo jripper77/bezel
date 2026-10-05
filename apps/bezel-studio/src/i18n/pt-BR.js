@@ -928,6 +928,8 @@ export default {
   'top.noScreen': 'Nenhuma tela conectada',
   'top.orientation': 'Orientação da tela',
   'top.preferences': 'Preferências',
+  'top.copy': 'Copiar (Ctrl+C)',
+  'top.paste': 'Colar (Ctrl+V)',
   'top.redo': 'Refazer (Ctrl+Shift+Z)',
   'top.save': 'Salvar',
   'top.screen': 'Tela',

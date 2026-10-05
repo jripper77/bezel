@@ -55,9 +55,13 @@ export const commands = {
   },
 
   duplicate(theme, { ids, offset = 16, names = ENGLISH }) {
+    return commands.paste(theme, { elements: theme.elements.filter((e) => ids.includes(e.id)), offset, names });
+  },
+
+  paste(theme, { elements, offset = 16, names = ENGLISH }) {
     let next = theme;
     const created = [];
-    for (const e of theme.elements.filter((el) => ids.includes(el.id))) {
+    for (const e of elements) {
       const id = nextId(next);
       const copy = { ...clone(e), id, name: uniqueName(next, names.copy(e.name)), locked: false, frame: { ...e.frame, x: e.frame.x + offset, y: e.frame.y + offset } };
       next = { ...next, elements: [...next.elements, copy] };
@@ -177,6 +181,8 @@ export function createStore(theme, { names = ENGLISH } = {}) {
   let past = [];
   let future = [];
   let gesture = null;
+  let clipboard = [];
+  let pasteCount = 0;
   // Themes are immutable, so "dirty" is "not the theme last saved or loaded":
   // undoing back to it makes the editor clean again.
   let saved = state.theme;
@@ -245,6 +251,20 @@ export function createStore(theme, { names = ENGLISH } = {}) {
       return state;
     },
 
+    copySelection() {
+      const selected = selectedElements(state);
+      if (!selected.length) return;
+      clipboard = clone(selected);
+      pasteCount = 0;
+      emit('copy');
+    },
+    canPaste: () => clipboard.length > 0,
+    paste() {
+      if (!clipboard.length) return state;
+      pasteCount += 1;
+      return this.dispatch('paste', { elements: clipboard, offset: 16 * pasteCount });
+    },
+
     canUndo: () => past.length > 0,
     canRedo: () => future.length > 0,
     undo() {
@@ -270,6 +290,8 @@ export function createStore(theme, { names = ENGLISH } = {}) {
       past = [];
       future = [];
       saved = state.theme;
+      clipboard = [];
+      pasteCount = 0;
       emit('load');
       return state;
     },

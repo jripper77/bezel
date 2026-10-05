@@ -10,6 +10,11 @@ turing-smart-screen-python. Releases ship deb, rpm and AppImage packages for
 Linux, MSI and setup installers for Windows, and the `bezel` command line for
 both.
 
+This repository is a personal Windows-focused fork of
+[slipalison/bezel](https://github.com/slipalison/bezel). The release links below
+refer to the original project; changes specific to this fork are described in
+[FORK.md](FORK.md).
+
 ## Install and documentation
 
 Download from the [releases page](https://github.com/slipalison/bezel/releases)
@@ -21,6 +26,42 @@ when the computer shuts down, and troubleshooting.
 
 The installers are not signed: Windows SmartScreen may ask you to confirm
 (*More info → Run anyway*); see [Install Bezel](docs/user/install.md).
+
+## Windows Light runtime and sensors
+
+This fork adds a lightweight background runtime and integrated hardware sensors:
+
+- **Close Studio to Light.** In Preferences, **Use Bezel Light when closing
+  Studio** is enabled by default. When a theme is live, the window's X handles
+  unsaved changes, starts or resumes Light with the saved theme, and exits
+  Studio to free the editor's memory. Turn the switch off to keep live Studio
+  in the tray. Cancelling the unsaved-changes dialog keeps Studio open; if
+  Light cannot start, Studio stays open and shows the error. **Quit** stops
+  both runtimes.
+- **Open Studio from Light.** Light runs without a WebView and has a native
+  tray menu with **Open Studio** and **Quit**; double-click also opens Studio.
+  Opening Studio directly pauses Light and transfers control of the screen.
+  Keep `bezel.exe` and `bezel-studio.exe` in the same installation folder.
+- **Integrated Windows sensors.** The bundled headless helper uses
+  LibreHardwareMonitorLib 0.9.6 for CPU temperatures, power and fan readings,
+  without opening the Libre GUI or its web server. Run
+  `configure-sensors.cmd` as administrator once with your normal Windows
+  account; only the helper needs elevation. Studio and Light remain
+  unelevated. The helper starts on demand and stops after 30 seconds without
+  active clients. External Libre WMI or its local web server remains a
+  fallback. See the [sensor helper documentation](apps/bezel-sensors-helper/README.md).
+- **Start Light at login.** Save a theme and select its live screen in Studio,
+  then use `start-light.cmd` beside the executables. For login setup, run
+  `configure-startup.cmd` as administrator after checking the installation
+  paths. Setup also configures the sensor helper, backs up the existing Bezel
+  startup entry, and removes the three legacy Turing startup tasks named in
+  the [Windows setup guide](scripts/windows/README.md). A real sign-out or
+  reboot check remains pending.
+
+Other additions include offline Tabler and hardware icons, Italian icon search,
+configurable dates and clocks, object copy/paste, weather widgets, ring gradients,
+stored screen videos as backgrounds, and shaped windows. See
+[the fork's changes and validation](FORK.md) for details.
 
 ## Bezel Studio
 
@@ -34,9 +75,11 @@ window to design themes and drive the screen.
 - **Vertical or horizontal**: one click in the top bar turns the theme (the
   layout follows: a vertical stack becomes a horizontal row), and *Rotate 180°*
   when the cable comes out the other side.
-- **Live**: the switch shows the theme on the screen while you edit; closing the
-  window keeps it running from the tray. *Start with the computer* (Screen panel)
-  brings it back at login.
+- **Live**: the switch shows the theme on the screen while you edit. On Windows,
+  closing the window hands the saved theme to Light by default; disable
+  **Use Bezel Light when closing Studio** to keep Studio in the tray. On Linux,
+  live Studio stays in the tray. *Start with the computer* (Screen panel)
+  brings Studio back at login; Windows Light login setup is described above.
 - **Themes**: bundled ones for each screen size, your own library, and import of
   the vendor app's `.turtheme` and turing-smart-screen-python themes.
 - **Video backgrounds**: the canvas plays the video (up to 15 pictures a

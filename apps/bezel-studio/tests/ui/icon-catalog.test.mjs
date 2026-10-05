@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterIcons, iconSvg, iconUrl, readIcon } from '../../src/icon-catalog.js';
+import { filterIcons, iconSvg, iconUrl, readIcon, loadIconCatalog } from '../../src/icon-catalog.js';
 
 import catalog from '../../src/assets/tabler/icons.js';
 
@@ -44,4 +44,23 @@ test('icon paint and shadow persist in SVG and old icons remain editable', () =>
   for (const shadow of [-1, 5, NaN]) assert.throws(() => iconSvg(item, '#ffffff', 2, { shadow }));
   assert.throws(() => iconSvg(item, '#ffffff', 2, { shadowColor: 'red' }));
   assert.ok(!iconSvg(item).includes('feDropShadow'));
+});
+
+
+test('hardware collection adds pumps and Italian electrical searches find primary symbols', async () => {
+  const all = await loadIconCatalog();
+  assert.equal(all.icons.length, 6595);
+  assert.equal(new Set(all.icons.map(i => i.id)).size, all.icons.length);
+  assert.equal((await loadIconCatalog()), all);
+  assert.ok(filterIcons(all.icons, 'fulmine').some(i => i.id === 'bolt'));
+  assert.ok(filterIcons(all.icons, 'fulmine per elettricit\u00e0').some(i => i.id === 'bolt'));
+  assert.ok(['bolt', 'bolt-filled', 'mdi-lightning-bolt', 'mdi-flash'].includes(filterIcons(all.icons, 'fulmine')[0].id));
+  assert.ok(filterIcons(all.icons, 'pompa di raffreddamento').some(i => i.id === 'mdi-water-pump'));
+  for (const q of ['pompa', 'radiatore', 'valvola', 'tubi', 'flusso', 'liquido', 'acqua']) assert.ok(filterIcons(all.icons, q).length, q);
+  assert.equal(filterIcons(all.icons, '', 'all', 'mdi').length, 375);
+  assert.equal(filterIcons(all.icons, '', 'outline', 'mdi').length, 0);
+  assert.equal(filterIcons(all.icons, '', 'all', 'tabler').length, 6220);
+  const pump = all.icons.find(i => i.id === 'mdi-water-pump');
+  const svg = iconSvg(pump, '#38bdf880', 2, { shadow: 1.5, shadowColor: '#00000080' });
+  assert.deepEqual(readIcon(svg), { id: pump.id, style: 'filled', color: '#38bdf880', stroke: 2, shadow: 1.5, shadowColor: '#00000080' });
 });

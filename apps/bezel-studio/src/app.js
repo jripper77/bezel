@@ -1,4 +1,4 @@
-import { iconSvg } from './icon-catalog.js';
+import { iconSvg, loadIconCatalog } from './icon-catalog.js';
 // Bezel Studio: wires the store, the bridge and the views together.
 import { applyTranslations, pickLocale, translator } from './i18n/index.js';
 import { createBridge } from './bridge.js';
@@ -730,7 +730,7 @@ async function addIcon(item, svg, at, size) {
 async function editIcon(id, asset, paint) {
   try {
     const theme = store.getState().theme;
-    const { default: catalog } = await import('./assets/tabler/icons.js');
+    const catalog = await loadIconCatalog();
     const item = catalog.icons.find((icon) => icon.id === paint.id);
     if (!item) return;
     const added = await bridge.addIcon(item.id, iconSvg(item, paint.color, paint.stroke, paint));

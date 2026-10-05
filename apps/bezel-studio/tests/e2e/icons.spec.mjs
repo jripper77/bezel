@@ -65,3 +65,32 @@ test('offline icons search, insert as SVG and undo in one step', async ({ page, 
   await page.screenshot({ path: test.info().outputPath('media-icons.png') });
   expect(errors).toEqual([]);
 });
+
+
+test('electrical aliases and hardware pump icons remain editable and undoable', async ({ page, t }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await page.getByRole('tab', { name: t('library.media'), exact: true }).click();
+  await page.getByRole('tab', { name: t('media.icons'), exact: true }).click();
+  const search = page.locator('#icon-search');
+  await search.fill('fulmine per elettricit\u00e0');
+  await expect(page.locator('[data-icon="bolt"]')).toBeVisible();
+  await search.fill('pompa di raffreddamento');
+  await page.locator('#icon-source').selectOption('mdi');
+  await page.locator('[data-icon="mdi-water-pump"]').click();
+  const detail = page.locator('#inspector');
+  const asset = detail.getByRole('combobox', { name: t('inspector.asset'), exact: true });
+  await expect(asset).toHaveValue(/mdi-water-pump.*\.svg$/);
+  const original = await asset.inputValue();
+  await detail.locator('input[type="color"]').first().fill('#ff0000');
+  await detail.locator('input[type="color"]').first().press('Tab');
+  await expect(asset).not.toHaveValue(original);
+  await expect(detail.getByLabel(t('inspector.strokeWidth'), { exact: true })).toHaveCount(0);
+  await detail.getByLabel(t('icons.shadow'), { exact: true }).fill('2');
+  await detail.getByLabel(t('icons.shadow'), { exact: true }).press('Tab');
+  await expect(detail.getByLabel(t('icons.shadow'), { exact: true })).toHaveValue('2');
+  await page.locator('#undo').click(); await page.locator('#undo').click();
+  await expect(asset).toHaveValue(original);
+  await expectAccessible(page);
+  expect(errors).toEqual([]);
+});

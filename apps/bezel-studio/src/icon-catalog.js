@@ -5,15 +5,40 @@ const ALIASES = {
   processore: ['cpu'], memoria: ['device-sd-card', 'database'], ram: ['device-sd-card', 'database'],
   rete: ['network', 'wifi', 'ethernet'], disco: ['device-harddisk', 'database'],
   schermo: ['device-desktop', 'device-monitor'], gpu: ['device-desktop', 'cpu'],
+  fulmine: ['bolt', 'lightning-bolt', 'flash'], fulmini: ['bolt', 'lightning-bolt', 'flash'],
+  elettricita: ['bolt', 'lightning-bolt', 'flash', 'power', 'electric'], elettrico: ['bolt', 'lightning-bolt', 'flash', 'power', 'electric'],
+  pompa: ['water-pump'], pompe: ['water-pump'], pump: ['water-pump'],
+  raffreddamento: ['water-pump', 'radiator', 'fan', 'propeller', 'coolant', 'snowflake'],
+  liquido: ['water-pump', 'droplet', 'water', 'coolant'], acqua: ['water-pump', 'droplet', 'water'],
+  radiatore: ['radiator'], tubi: ['pipe', 'pipeline'], circuito: ['pipe', 'pipeline', 'network'],
+  valvola: ['valve'], flusso: ['water-pump', 'pipe', 'gauge'],
   energia: ['bolt', 'power', 'battery'], potenza: ['bolt', 'power'],
   luce: ['bulb', 'sun'], led: ['bulb', 'rgb'], orologio: ['clock'],
 };
 
 /** Searches every icon, accepting hardware terms in Italian as well. */
-export function filterIcons(icons, query = '', style = 'all') {
-  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return icons.filter((item) => (style === 'all' || item.style === style)
+export function filterIcons(icons, query = '', style = 'all', source = 'all') {
+  const stop = new Set(['di', 'del', 'della', 'da', 'per', 'la', 'il', 'lo', 'le', 'gli', 'un', 'una', 'the', 'of', 'for']);
+  const words = query.normalize('NFD').replace(/\p{M}/gu, '').trim().toLowerCase().split(/[^a-z0-9-]+/).filter((word) => word && !stop.has(word));
+  const found = icons.filter((item) => (style === 'all' || item.style === style)
+    && (source === 'all' || (item.provider ?? 'tabler') === source)
     && words.every((word) => (ALIASES[word] ?? [word]).some((term) => item.id.includes(term))));
+  // Primary symbols precede decorated variants, e.g. bolt before calendar-bolt.
+  const score = (item) => words.reduce((sum, word) => {
+    const id = item.id.replace(/^mdi-/, '').replace(/-filled$/, '');
+    const terms = ALIASES[word] ?? [word];
+    return sum + Math.min(...terms.map((term) => id === term ? 0 : id.startsWith(term) ? 1 : 2));
+  }, 0);
+  return words.length ? found.sort((a, b) => score(a) - score(b)) : found;
+}
+
+let catalogPromise;
+/** Both licensed collections are embedded; no runtime downloads. */
+export function loadIconCatalog() {
+  catalogPromise ??= Promise.all([import('./assets/tabler/icons.js'), import('./assets/mdi/icons.js')])
+    .then(([tabler, mdi]) => ({ icons: [...tabler.default.icons, ...mdi.default.icons] }))
+    .catch((error) => { catalogPromise = null; throw error; });
+  return catalogPromise;
 }
 
 /** Paint and effects stay in the SVG, including the editable values. */
@@ -44,7 +69,7 @@ export function readIcon(svg) {
   const cls = attr('class') ?? '';
   let id = attr('data-bezel-icon') ?? cls.match(/(?:^|\s)icon-tabler-([a-z0-9-]+)(?:\s|$)/)?.[1];
   if (!id || !/^[a-z0-9-]+$/.test(id)) return null;
-  const style = cls.includes('icons-tabler-filled') ? 'filled' : 'outline';
+  const style = cls.includes('icons-tabler-filled') || cls.includes('icons-mdi-filled') ? 'filled' : 'outline';
   if (style === 'filled' && !attr('data-bezel-icon')) id += '-filled';
   const color = attr('data-bezel-color') ?? attr(style === 'filled' ? 'fill' : 'stroke');
   const stroke = Number(attr('data-bezel-stroke') ?? attr('stroke-width') ?? 2);

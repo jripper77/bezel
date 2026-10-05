@@ -862,14 +862,33 @@ impl Backend {
         {
             return Err(UiError::new(ErrorCode::NotAnImage).arg("file", name));
         }
-        self.add_image_bytes(
-            Path::new(&format!("tabler-{name}.svg")),
-            format!(
-                "<!--\n{}\n-->\n{svg}",
-                include_str!("../../src/assets/tabler/LICENSE")
+        if name.starts_with("mdi-") {
+            let Some(root_end) = svg
+                .find("<svg")
+                .and_then(|start| svg[start..].find('>').map(|end| start + end + 1))
+            else {
+                return Err(UiError::new(ErrorCode::NotAnImage).arg("file", name));
+            };
+            let mut svg = svg;
+            svg.insert_str(
+                root_end,
+                &format!(
+                    "<metadata><![CDATA[{}\n{}]]></metadata>",
+                    include_str!("../../src/assets/mdi/LICENSE"),
+                    include_str!("../../src/assets/mdi/NOTICE")
+                ),
+            );
+            self.add_image_bytes(Path::new(&format!("{name}.svg")), svg.into_bytes())
+        } else {
+            self.add_image_bytes(
+                Path::new(&format!("tabler-{name}.svg")),
+                format!(
+                    "<!--\n{}\n-->\n{svg}",
+                    include_str!("../../src/assets/tabler/LICENSE")
+                )
+                .into_bytes(),
             )
-            .into_bytes(),
-        )
+        }
     }
 
     /// The theme's assets with previews (images only: videos are not
@@ -913,7 +932,8 @@ impl Backend {
             .map(|(dto, image)| match image {
                 Some(bytes) => AssetDto {
                     data_url: thumbnail_data_url(&bytes),
-                    icon_svg: (dto.reference.starts_with("assets/tabler-")
+                    icon_svg: ((dto.reference.starts_with("assets/tabler-")
+                        || dto.reference.starts_with("assets/mdi-"))
                         && extension_of(&dto.reference) == "svg"
                         && bytes.len() <= 132 * 1024)
                         .then(|| String::from_utf8(bytes.clone()).ok())
@@ -2501,6 +2521,31 @@ static_text:
         let ondas = ondas.unwrap();
         assert!(ondas.animated && ondas.data_url.is_some());
         assert_eq!(ondas.poster.as_deref(), Some("assets/ondas-poster.png"));
+    }
+
+    #[test]
+    fn material_icons_keep_their_own_license_and_render_as_svg() {
+        let f = fixture("material-icons");
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" data-bezel-icon="mdi-water-pump" fill="#38bdf8"><path d="M4 4h16v16H4z"/></svg>"##;
+        let added = f.backend.add_icon("mdi-water-pump", svg.into()).unwrap();
+        assert_eq!(added.reference, "assets/mdi-water-pump.svg");
+        let studio = f.backend.studio();
+        let stored = studio.assets().get(&AssetRef(added.reference)).unwrap();
+        assert!(bezel_render::svg_size(stored).is_some());
+        let text = std::str::from_utf8(stored).unwrap();
+        assert!(text.contains("Apache License"));
+        assert!(text.contains("Pictogrammers"));
+        assert!(text.contains("SVG root fill changed"));
+        drop(studio);
+        let assets = f.backend.assets();
+        assert!(assets[0].icon_svg.is_some());
+        assert!(
+            assets[0]
+                .data_url
+                .as_deref()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
     }
 
     #[test]

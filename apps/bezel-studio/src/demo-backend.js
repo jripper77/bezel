@@ -1387,7 +1387,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       return Promise.resolve({ ref });
     },
     addIcon: (name, svg) => {
-      const ref = `assets/tabler-${name}-${posters.size + 1}.svg`;
+      const ref = `assets/${name.startsWith('mdi-') ? name : `tabler-${name}`}-${posters.size + 1}.svg`;
       posters.set(ref, `data:image/svg+xml,${encodeURIComponent(svg)}`);
       return Promise.resolve({ ref });
     },

@@ -1,6 +1,6 @@
 import { el } from './dom.js';
 import { makeDraggable } from './dragdrop.js';
-import { filterIcons, iconSvg, iconUrl } from '../icon-catalog.js';
+import { filterIcons, iconSvg, iconUrl, loadIconCatalog } from '../icon-catalog.js';
 
 /** Searchable offline catalog under Media > Icons. */
 export function createIconPicker({ store, canvas, stage, t, add }) {
@@ -12,6 +12,7 @@ export function createIconPicker({ store, canvas, stage, t, add }) {
   let query = '';
   let color = '#ffffff';
   let style = 'all';
+  let source = 'all';
   let size = 64;
   let stroke = 2;
   const search = el('input', { type: 'search', id: 'icon-search', oninput: () => { query = search.value; limit = PAGE; render(); } });
@@ -21,6 +22,7 @@ export function createIconPicker({ store, canvas, stage, t, add }) {
     onchange: () => { size = Math.round(Math.min(1024, Math.max(8, Number(sizeInput.value) || 64))); sizeInput.value = size; } });
   const strokeInput = el('input', { type: 'number', min: 0.5, max: 4, step: 0.5, value: stroke,
     onchange: () => { stroke = Math.min(4, Math.max(0.5, Number(strokeInput.value) || 2)); strokeInput.value = stroke; render(); } });
+  const sourceInput = el('select', { id: 'icon-source', onchange: () => { source = sourceInput.value; limit = PAGE; render(); } });
   const count = el('p', { class: 'hint', role: 'status' });
   const grid = el('div', { class: 'icon-grid', id: 'icon-grid' });
   const more = el('button', { type: 'button', class: 'text-button', onclick: () => { limit += PAGE; render(); } });
@@ -29,10 +31,10 @@ export function createIconPicker({ store, canvas, stage, t, add }) {
 
   function render() {
     if (!catalog) return;
-    const found = filterIcons(catalog.icons, query, style);
+    const found = filterIcons(catalog.icons, query, style, source);
     count.textContent = t('icons.count', { shown: Math.min(limit, found.length), count: found.length });
     grid.replaceChildren(...found.slice(0, limit).map((item) => {
-      const label = item.name.replaceAll('-', ' ');
+      const label = item.name.replaceAll('-', ' ') + (item.provider === 'mdi' ? ' (MDI)' : '');
       const svg = iconSvg(item, color, stroke);
       const button = el('button', { type: 'button', class: 'icon-choice', title: `${label} (${item.style})`,
         'aria-label': `${label} (${item.style})`, dataset: { icon: item.id } }, [
@@ -56,8 +58,10 @@ export function createIconPicker({ store, canvas, stage, t, add }) {
     styleInput.value = style;
     more.textContent = t('icons.more');
     notice.textContent = t('icons.notice');
+    sourceInput.replaceChildren(...[['all', t('icons.all')], ['tabler', t('icons.tabler')], ['mdi', t('icons.mdi')]].map(([value, text]) => el('option', { value, text })));
+    sourceInput.value = source;
     host.replaceChildren(search,
-      el('div', { class: 'icon-options' }, [field('icons.style', styleInput), field('icons.color', colorInput),
+      el('div', { class: 'icon-options' }, [field('icons.source', sourceInput), field('icons.style', styleInput), field('icons.color', colorInput),
         field('icons.size', sizeInput), field('icons.stroke', strokeInput)]), count, grid, more, notice);
     render();
   }
@@ -69,7 +73,7 @@ export function createIconPicker({ store, canvas, stage, t, add }) {
     loading = (async () => {
       try {
         // Embedded modules are allowed by Studio's script policy; local fetch is not.
-        catalog = (await import('../assets/tabler/icons.js')).default;
+        catalog = await loadIconCatalog();
         render();
       } catch {
         count.textContent = t('icons.error');

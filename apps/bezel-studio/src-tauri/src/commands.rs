@@ -1098,4 +1098,3 @@ mod tests {
         assert_eq!(confirm_of(false), Confirm::No);
     }
 }
-

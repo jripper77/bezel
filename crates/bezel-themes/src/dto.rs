@@ -198,6 +198,17 @@ pub enum FitDto {
 pub enum PaintDto {
     /// `#rrggbbaa`.
     Solid(String),
+    /// Gradient along a ring scale.
+    Arc {
+        /// Must be `arc`.
+        scale: String,
+        /// Color at zero.
+        start: String,
+        /// Color at full scale.
+        end: String,
+        /// Position of the half-color blend, 0..=100.
+        transition: f32,
+    },
     /// A linear gradient.
     Linear {
         /// Angle, degrees.
@@ -302,6 +313,15 @@ pub enum ContentDto {
         /// Show the vector condition icon.
         #[serde(default = "yes", rename = "showIcon")]
         show_icon: bool,
+        /// Outline (default) or filled condition icon.
+        #[serde(default = "outline_icon", rename = "iconStyle")]
+        icon_style: String,
+        /// Distance from icon to text, pixels; absent is automatic.
+        #[serde(default, rename = "iconGap", skip_serializing_if = "Option::is_none")]
+        icon_gap: Option<f32>,
+        /// Icon side, pixels; absent follows text size.
+        #[serde(default, rename = "iconSize", skip_serializing_if = "Option::is_none")]
+        icon_size: Option<f32>,
     },
     /// Fixed text.
     Static {
@@ -426,6 +446,9 @@ pub enum KindDto {
     /// Ring gauge.
     #[serde(rename_all = "camelCase")]
     Ring {
+        /// Show the complete ring for appearance testing.
+        #[serde(default)]
+        test_full: bool,
         /// Binding.
         binding: BindingDto,
         /// Start angle.
@@ -586,6 +609,16 @@ fn framing(d: Option<&FramingDto>) -> R<Option<VideoFraming>> {
 fn paint_dto(p: &Paint) -> PaintDto {
     match p {
         Paint::Solid(c) => PaintDto::Solid(to_hex(*c)),
+        Paint::Arc {
+            start,
+            end,
+            transition,
+        } => PaintDto::Arc {
+            scale: "arc".into(),
+            start: to_hex(*start),
+            end: to_hex(*end),
+            transition: transition * 100.0,
+        },
         Paint::Linear { angle, stops } => PaintDto::Linear {
             angle: *angle,
             stops: stops.iter().map(|(pos, c)| (*pos, to_hex(*c))).collect(),
@@ -596,6 +629,21 @@ fn paint_dto(p: &Paint) -> PaintDto {
 fn paint(p: &PaintDto) -> R<Paint> {
     Ok(match p {
         PaintDto::Solid(c) => Paint::Solid(color(c)?),
+        PaintDto::Arc {
+            scale,
+            start,
+            end,
+            transition,
+        } => {
+            if scale != "arc" || !transition.is_finite() || !(0.0..=100.0).contains(transition) {
+                return Err(DtoError("invalid arc gradient scale or transition".into()));
+            }
+            Paint::Arc {
+                start: color(start)?,
+                end: color(end)?,
+                transition: transition / 100.0,
+            }
+        }
         PaintDto::Linear { angle, stops } => Paint::Linear {
             angle: *angle,
             stops: stops
@@ -784,6 +832,13 @@ fn kind_dto(k: &ElementKind) -> KindDto {
                     }),
                     fahrenheit: w.fahrenheit,
                     show_icon: w.show_icon,
+                    icon_style: match w.icon_style {
+                        bezel_core::domain::weather::IconStyle::Outline => "outline",
+                        bezel_core::domain::weather::IconStyle::Filled => "filled",
+                    }
+                    .into(),
+                    icon_gap: w.icon_gap,
+                    icon_size: w.icon_size,
                 },
                 TextContent::Clock {
                     pattern,
@@ -845,6 +900,7 @@ fn kind_dto(k: &ElementKind) -> KindDto {
             segments: segments_dto(*segments),
         },
         ElementKind::Ring {
+            test_full,
             binding,
             start_angle,
             sweep,
@@ -855,6 +911,7 @@ fn kind_dto(k: &ElementKind) -> KindDto {
             cap,
             segments,
         } => KindDto::Ring {
+            test_full: *test_full,
             binding: binding_dto(binding),
             start_angle: *start_angle,
             sweep: *sweep,
@@ -925,9 +982,17 @@ fn kind(k: &KindDto) -> R<ElementKind> {
                     language,
                     fahrenheit,
                     show_icon,
+                    icon_style,
+                    icon_gap,
+                    icon_size,
                 } => {
                     if !bezel_core::domain::weather::valid(city, *latitude, *longitude) {
                         return err("invalid weather location");
+                    }
+                    if icon_gap.is_some_and(|v| !v.is_finite() || !(0.0..=256.0).contains(&v))
+                        || icon_size.is_some_and(|v| !v.is_finite() || !(1.0..=512.0).contains(&v))
+                    {
+                        return err("invalid weather icon dimensions");
                     }
                     TextContent::Weather(bezel_core::domain::weather::Weather {
                         city: city.clone(),
@@ -942,6 +1007,13 @@ fn kind(k: &KindDto) -> R<ElementKind> {
                         },
                         fahrenheit: *fahrenheit,
                         show_icon: *show_icon,
+                        icon_style: match icon_style.as_str() {
+                            "outline" => bezel_core::domain::weather::IconStyle::Outline,
+                            "filled" => bezel_core::domain::weather::IconStyle::Filled,
+                            _ => return err("invalid weather icon style"),
+                        },
+                        icon_gap: *icon_gap,
+                        icon_size: *icon_size,
                     })
                 }
                 ContentDto::Clock {
@@ -1006,6 +1078,7 @@ fn kind(k: &KindDto) -> R<ElementKind> {
             segments: segments(*s),
         },
         KindDto::Ring {
+            test_full,
             binding: b,
             start_angle,
             sweep,
@@ -1016,6 +1089,7 @@ fn kind(k: &KindDto) -> R<ElementKind> {
             round_caps,
             segments: s,
         } => ElementKind::Ring {
+            test_full: *test_full,
             binding: binding(b)?,
             start_angle: *start_angle,
             sweep: *sweep,
@@ -1170,4 +1244,8 @@ impl TryFrom<&ThemeDto> for Theme {
             },
         })
     }
+}
+
+fn outline_icon() -> String {
+    "outline".into()
 }

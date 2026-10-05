@@ -1,10 +1,10 @@
 //! Small vector condition icons, independent of installed fonts or assets.
 use crate::{layer::Layer, paint::paint_for};
 use bezel_core::domain::theme::{BoxF, Paint};
-use bezel_core::domain::weather::family;
+use bezel_core::domain::weather::{IconStyle, family};
 use tiny_skia::{PathBuilder, Stroke};
 
-pub(crate) fn draw(layer: &mut Layer<'_>, area: BoxF, code: u16, color: &Paint) {
+pub(crate) fn draw(layer: &mut Layer<'_>, area: BoxF, code: u16, color: &Paint, style: IconStyle) {
     let Some(paint) = paint_for(color, area) else {
         return;
     };
@@ -86,6 +86,9 @@ pub(crate) fn draw(layer: &mut Layer<'_>, area: BoxF, code: u16, color: &Paint) 
         path.line_to(x + 5.0 * s, y + 19.0 * s);
     }
     if let Some(path) = path.finish() {
+        if style == IconStyle::Filled {
+            layer.fill(&path, &paint);
+        }
         layer.stroke(
             &path,
             &paint,

@@ -2,8 +2,9 @@
 //! (`None` when the sensor is unavailable, drawn as empty / at rest).
 
 use bezel_core::domain::frame::Rgba;
+use bezel_core::domain::gradient::arc_color;
 use bezel_core::domain::theme::{BoxF, Cap, Direction, Paint, Segments};
-use tiny_skia::{LineCap, Path, PathBuilder, Rect, Stroke};
+use tiny_skia::{LineCap, Path, PathBuilder, Pixmap, Rect, Stroke};
 
 use crate::layer::Layer;
 use crate::paint::{paint_for, solid};
@@ -138,7 +139,61 @@ pub(crate) fn draw_ring(
         layer.stroke(&path, &track, &stroke);
     }
     let filled = fraction.unwrap_or(0.0) as f32 * sweep;
-    if let (Some(fill), Some(path)) = (paint_for(style.fill, area), arcs(filled)) {
+    let Some(path) = arcs(filled) else {
+        return;
+    };
+    if let Paint::Arc {
+        start,
+        end,
+        transition,
+    } = style.fill
+    {
+        // Stroke once to obtain coverage: no seams between adjacent colors,
+        // including translucent rings, round caps and separated blocks.
+        let Some(outline) = path.stroke(&stroke, 1.0) else {
+            return;
+        };
+        let Some(mask) = layer.mask_of(&outline) else {
+            return;
+        };
+        let width = layer.pixmap.width();
+        let Some(mut image) = Pixmap::new(width, layer.pixmap.height()) else {
+            return;
+        };
+        for (index, (pixel, coverage)) in image
+            .data_mut()
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(mask.data())
+            .enumerate()
+        {
+            if *coverage == 0 {
+                continue;
+            }
+            let x = (index % width as usize) as f32 + layer.x as f32 + 0.5 - cx;
+            let y = (index / width as usize) as f32 + layer.y as f32 + 0.5 - cy;
+            let mut angle =
+                ((y.atan2(x).to_degrees() + 90.0 - style.start_angle) * dir).rem_euclid(360.0);
+            // Round caps extend past the angular span; retain the endpoint color.
+            if angle > filled {
+                angle = if 360.0 - angle < angle - filled {
+                    0.0
+                } else {
+                    filled
+                };
+            }
+            let c = arc_color(*start, *end, angle / sweep, *transition);
+            pixel.copy_from_slice(&[
+                c.r,
+                c.g,
+                c.b,
+                ((u16::from(c.a) * u16::from(*coverage) + 127) / 255) as u8,
+            ]);
+        }
+        crate::composite::premultiply(image.data_mut());
+        layer.blit(image.as_ref(), layer.x, layer.y);
+    } else if let Some(fill) = paint_for(style.fill, area) {
         layer.stroke(&path, &fill, &stroke);
     }
 }

@@ -1,0 +1,33 @@
+import { test, expect, watchErrors, expectAccessible } from './helpers.mjs';
+
+test('ring arc gradient, full-scale test, copy and Undo', async ({ page, t }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('button', { name: t('library.addWidget', { name: t('widget.ring') }), exact: true }).click();
+  const detail = page.locator('#inspector');
+  const checkbox = detail.getByRole('checkbox', { name: t('ring.testFull'), exact: true });
+  await expect(checkbox).not.toBeChecked();
+  await checkbox.check();
+  await detail.getByRole('combobox', { name: t('ring.fillMode'), exact: true }).selectOption('arc');
+  const colorInput = (key) => detail.locator('input[type="text"]').and(detail.getByLabel(t(key), { exact: true }));
+  await colorInput('ring.startColor').fill('#0000ff');
+  await colorInput('ring.startColor').press('Tab');
+  await colorInput('ring.endColor').fill('#ff0000');
+  await colorInput('ring.endColor').press('Tab');
+  await detail.getByRole('slider', { name: new RegExp(t('ring.transition')) }).fill('25');
+  await detail.getByRole('slider', { name: new RegExp(t('ring.transition')) }).dispatchEvent('change');
+  await page.locator('#copy').click(); await page.locator('#paste').click();
+  await expect(checkbox).toBeChecked();
+  await expect(colorInput('ring.startColor')).toHaveValue('#0000ff');
+  await expect(colorInput('ring.endColor')).toHaveValue('#ff0000');
+  await expect(detail.getByRole('slider', { name: new RegExp(t('ring.transition')) })).toHaveValue('25');
+  await checkbox.uncheck();
+  await page.locator('#undo').click();
+  await expect(checkbox).toBeChecked();
+  await detail.getByRole('combobox', { name: t('ring.fillMode'), exact: true }).selectOption('solid');
+  await expect(detail.getByRole('slider', { name: new RegExp(t('ring.transition')) })).toHaveCount(0);
+  await expect(checkbox).toBeChecked();
+  await expectAccessible(page);
+  expect(errors).toEqual([]);
+});

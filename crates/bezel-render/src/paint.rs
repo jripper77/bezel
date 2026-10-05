@@ -28,6 +28,7 @@ pub(crate) fn solid(c: Rgba) -> tiny_skia::Paint<'static> {
 pub(crate) fn paint_for(paint: &Paint, area: BoxF) -> Option<tiny_skia::Paint<'static>> {
     match paint {
         Paint::Solid(c) => Some(solid(*c)),
+        Paint::Arc { start, .. } => Some(solid(*start)),
         Paint::Linear { angle, stops } => linear(*angle, stops, area).map(with_shader),
     }
 }

@@ -1025,6 +1025,7 @@ impl Importer {
             frame,
             true,
             ElementKind::Ring {
+                test_full: false,
                 binding,
                 start_angle: ((start + 90.0).rem_euclid(360.0)) as f32,
                 sweep: sweep as f32,

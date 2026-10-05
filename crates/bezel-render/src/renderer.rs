@@ -431,7 +431,20 @@ impl SkiaRenderer {
                 if let TextContent::Weather(w) = content
                     && w.show_icon
                 {
-                    let side = (style.size * 2.0).min(area.height).min(area.width * 0.3);
+                    let gap = w
+                        .icon_gap
+                        .unwrap_or(style.size * 0.3)
+                        .clamp(0.0, area.width.max(0.0));
+                    let side = w
+                        .icon_size
+                        .unwrap_or(style.size * 2.0)
+                        .min(area.height)
+                        .min((area.width - gap).max(0.0))
+                        .min(if w.icon_size.is_none() {
+                            area.width * 0.3
+                        } else {
+                            area.width
+                        });
                     let code = match context.snapshot.get(&w.keys()[1]) {
                         bezel_core::domain::sensor::Reading::Value(v) => v as u16,
                         _ => 999,
@@ -441,9 +454,10 @@ impl SkiaRenderer {
                         BoxF::new(area.x, area.y + (area.height - side) / 2.0, side, side),
                         code,
                         &style.paint,
+                        w.icon_style,
                     );
-                    area.x += side + style.size * 0.3;
-                    area.width = (area.width - side - style.size * 0.3).max(0.0);
+                    area.x += side + gap;
+                    area.width = (area.width - side - gap).max(0.0);
                 }
                 let text = text_of(content, context);
                 let job = TextJob {
@@ -554,6 +568,7 @@ impl SkiaRenderer {
 
 fn draw_ring(layer: &mut Layer<'_>, element: &Element, context: &RenderContext<'_>) {
     let ElementKind::Ring {
+        test_full,
         binding,
         start_angle,
         sweep,
@@ -580,7 +595,11 @@ fn draw_ring(layer: &mut Layer<'_>, element: &Element, context: &RenderContext<'
     gauges::draw_ring(
         layer,
         element.frame,
-        value_fraction(binding, context),
+        if *test_full {
+            Some(1.0)
+        } else {
+            value_fraction(binding, context)
+        },
         &style,
     );
 }

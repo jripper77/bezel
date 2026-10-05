@@ -187,6 +187,7 @@ fn cpu(top: f32) -> Option<Vec<(BoxF, ElementKind)>> {
         HAlign::Right,
     );
     let ring = ElementKind::Ring {
+        test_full: false,
         binding: binding(keys::CPU_USAGE, 100.0)?,
         start_angle: -135.0,
         sweep: 270.0,
@@ -310,6 +311,7 @@ fn ram(top: f32) -> Option<Vec<(BoxF, ElementKind)>> {
 fn gauge(top: f32) -> Option<Vec<(BoxF, ElementKind)>> {
     let at = |x, y, w, h| BoxF::new(x, y, w, h);
     let dial = ElementKind::Ring {
+        test_full: false,
         binding: binding(keys::CPU_TEMPERATURE, 100.0)?,
         start_angle: -120.0,
         sweep: 240.0,

@@ -29,3 +29,5 @@ pub mod storage;
 pub mod theme;
 
 pub mod weather;
+
+pub mod gradient;

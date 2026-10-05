@@ -726,6 +726,7 @@ fn ring(
     segments: Option<Segments>,
 ) -> ElementKind {
     ElementKind::Ring {
+        test_full: false,
         binding: binding(keys::CPU_USAGE),
         start_angle: start,
         sweep,
@@ -1047,6 +1048,9 @@ fn weather_text_and_vector_icons_render_without_external_assets() {
         language: Some(Language::Italian),
         fahrenheit: false,
         show_icon: false,
+        icon_style: Default::default(),
+        icon_gap: None,
+        icon_size: None,
     };
     let [temperature, code] = w.keys();
     let scene = Scene::empty()
@@ -1081,6 +1085,18 @@ fn weather_text_and_vector_icons_render_without_external_assets() {
         &scene,
     );
     assert_ne!(cloudy, actual);
+    w.icon_style = bezel_core::domain::weather::IconStyle::Filled;
+    w.icon_size = Some(64.0);
+    w.icon_gap = Some(20.0);
+    let configured = weather_frame(
+        &mut renderer,
+        "weather_configured",
+        TextContent::Weather(w.clone()),
+        style.clone(),
+        full,
+        &scene,
+    );
+    assert_ne!(configured, cloudy);
     let scene = scene.with(code.as_str(), 0.0);
     let sunny = weather_frame(
         &mut renderer,
@@ -1091,4 +1107,85 @@ fn weather_text_and_vector_icons_render_without_external_assets() {
         &scene,
     );
     assert_ne!(sunny, cloudy);
+}
+
+#[test]
+fn arc_gradient_full_test_direction_midpoint_caps_and_segments() {
+    let mut r = crate::testkit::renderer();
+    let make = |cw, test, mid, cap, segments| {
+        let mut k = ring(0.0, 270.0, cw, cap, segments);
+        if let ElementKind::Ring {
+            fill, test_full, ..
+        } = &mut k
+        {
+            *fill = Paint::Arc {
+                start: BLUE,
+                end: RED,
+                transition: mid,
+            };
+            *test_full = test;
+        }
+        k
+    };
+    for cw in [true, false] {
+        let dir = if cw { 1.0 } else { -1.0 };
+        let full = ring_frame(
+            &mut r,
+            "ring_gradient_test_full",
+            make(cw, true, 0.5, Cap::Butt, None),
+            None,
+        );
+        let normal = ring_frame(
+            &mut r,
+            "ring_gradient_sensor",
+            make(cw, false, 0.5, Cap::Butt, None),
+            Some(40.0),
+        );
+        assert!(close(on_ring(&normal, dir * 180.0), GRAY, 0));
+        assert!(on_ring(&full, dir * 180.0).r > on_ring(&full, dir * 180.0).b);
+        assert!(close(
+            on_ring(&full, dir * 135.0),
+            Rgba::opaque(128, 0, 128),
+            8
+        ));
+        let shifted = ring_frame(
+            &mut r,
+            "ring_gradient_midpoint",
+            make(cw, true, 0.25, Cap::Butt, None),
+            Some(0.0),
+        );
+        assert!(on_ring(&shifted, dir * 135.0).r > on_ring(&full, dir * 135.0).r + 30);
+    }
+    let caps = ring_frame(
+        &mut r,
+        "ring_gradient_caps",
+        make(true, true, 0.5, Cap::Round, None),
+        Some(0.0),
+    );
+    assert!(close(on_ring(&caps, -5.0), BLUE, 4));
+    assert!(close(on_ring(&caps, 275.0), RED, 4));
+    let segmented = ring_frame(
+        &mut r,
+        "ring_gradient_segments",
+        make(
+            true,
+            true,
+            0.5,
+            Cap::Butt,
+            Some(Segments {
+                count: 3,
+                gap: 10.0,
+            }),
+        ),
+        Some(0.0),
+    );
+    assert!(close(on_ring(&segmented, 85.0), BLACK, 0));
+    assert!(on_ring(&segmented, 220.0).r > 200);
+    // Ordinary rings also support testing, and resume their real value when off.
+    let mut k = ring(0.0, 360.0, true, Cap::Butt, None);
+    if let ElementKind::Ring { test_full, .. } = &mut k {
+        *test_full = true;
+    }
+    let full = ring_frame(&mut r, "ring_solid_test_full", k, Some(0.0));
+    assert!(close(on_ring(&full, 270.0), GREEN, 0));
 }

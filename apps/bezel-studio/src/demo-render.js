@@ -44,14 +44,17 @@ function drawText(ctx, e, t) {
   ctx.textBaseline = s.valign === 'top' ? 'top' : s.valign === 'bottom' ? 'bottom' : 'middle';
   let f = e.frame;
   if (k.content.type === 'weather' && k.content.showIcon !== false) {
-    const side = Math.min(s.size * 2, f.height, f.width * 0.3);
+    const gap = Math.min(k.content.iconGap ?? s.size * 0.3, f.width);
+    const side = Math.min(k.content.iconSize ?? s.size * 2, f.height, Math.max(0, f.width - gap), k.content.iconSize == null ? f.width * 0.3 : f.width);
     ctx.save();
     ctx.translate(f.x, f.y + (f.height - side) / 2);
     ctx.scale(side / 24, side / 24);
     ctx.strokeStyle = paint(s.paint); ctx.lineWidth = 1.6;
-    ctx.stroke(new Path2D('M5 16C-1 16 1 8 7 10C8 3 19 5 18 11C24 10 24 16 19 16Z'));
+    const cloud = new Path2D('M5 16C-1 16 1 8 7 10C8 3 19 5 18 11C24 10 24 16 19 16Z');
+    if (k.content.iconStyle === 'filled') ctx.fill(cloud);
+    ctx.stroke(cloud);
     ctx.restore();
-    f = { ...f, x: f.x + side + s.size * 0.3, width: Math.max(0, f.width - side - s.size * 0.3) };
+    f = { ...f, x: f.x + side + gap, width: Math.max(0, f.width - side - gap) };
   }
   const x = s.align === 'center' ? f.x + f.width / 2 : s.align === 'right' ? f.x + f.width : f.x;
   const y = s.valign === 'top' ? f.y : s.valign === 'bottom' ? f.y + f.height : f.y + f.height / 2;
@@ -91,20 +94,41 @@ function drawElement(ctx, e, t) {
     }
     case 'ring': {
       const r = Math.min(f.width, f.height) / 2 - k.thickness / 2;
+      if (r <= 0) break;
       const cx = f.x + f.width / 2;
       const cy = f.y + f.height / 2;
       const start = ((k.startAngle - 90) * Math.PI) / 180;
+      const direction = k.clockwise === false ? -1 : 1;
       const sweep = (k.sweep * Math.PI) / 180;
+      const value = k.testFull ? 1 : frac;
       ctx.lineWidth = k.thickness;
       ctx.lineCap = k.roundCaps ? 'round' : 'butt';
       ctx.strokeStyle = paint(k.track);
       ctx.beginPath();
-      ctx.arc(cx, cy, r, start, start + sweep);
+      ctx.arc(cx, cy, r, start, start + direction * sweep, direction < 0);
       ctx.stroke();
-      ctx.strokeStyle = paint(k.fill);
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, start, start + sweep * frac);
-      ctx.stroke();
+      if (k.fill?.scale === 'arc') {
+        const p = k.fill;
+        const gradient = ctx.createConicGradient(start, cx, cy);
+        const span = Math.min(1, k.sweep / 360);
+        const mid = Math.min(100, Math.max(0, p.transition)) / 100;
+        const half = (a, b) => {
+          const channel = (i) => Math.round((parseInt(a.slice(i, i + 2), 16) + parseInt(b.slice(i, i + 2), 16)) / 2).toString(16).padStart(2, '0');
+          return `#${[1, 3, 5, 7].map(channel).join('')}`;
+        };
+        const stops = [[0, p.start], [mid * span, half(p.start, p.end)], [span, p.end], [1, p.end]];
+        if (direction < 0) {
+          stops.forEach((stop) => { stop[0] = 1 - stop[0]; });
+          stops.reverse();
+        }
+        for (const [position, hex] of stops) gradient.addColorStop(position, color(hex));
+        ctx.strokeStyle = gradient;
+      } else ctx.strokeStyle = paint(k.fill);
+      if (value > 0) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, start, start + direction * sweep * value, direction < 0);
+        ctx.stroke();
+      }
       break;
     }
     case 'needle': {

@@ -2,6 +2,16 @@
 use super::clock::Language;
 use super::sensor::{Reading, SensorKey, Snapshot};
 
+/// Appearance of automatic condition icons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IconStyle {
+    /// Stroked outlines.
+    #[default]
+    Outline,
+    /// Filled shapes.
+    Filled,
+}
+
 /// A portable weather object. Coordinates are selected by city search.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Weather {
@@ -17,6 +27,12 @@ pub struct Weather {
     pub fahrenheit: bool,
     /// Show the condition icon beside the text.
     pub show_icon: bool,
+    /// Automatic icon appearance.
+    pub icon_style: IconStyle,
+    /// Gap to text in pixels; None preserves the automatic legacy spacing.
+    pub icon_gap: Option<f32>,
+    /// Icon size in pixels; None follows the text size.
+    pub icon_size: Option<f32>,
 }
 
 /// Valid coordinates and a bounded city label.
@@ -133,6 +149,9 @@ mod tests {
             language: Some(Language::Italian),
             fahrenheit: true,
             show_icon: true,
+            icon_style: Default::default(),
+            icon_gap: None,
+            icon_size: None,
         };
         let mut snapshot = Snapshot::default();
         assert!(

@@ -59,6 +59,15 @@ impl BoxF {
 pub enum Paint {
     /// One color.
     Solid(Rgba),
+    /// Gradient along a ring scale, independent of its current value.
+    Arc {
+        /// Color at zero.
+        start: Rgba,
+        /// Color at full scale.
+        end: Rgba,
+        /// Position of the half-color blend, 0..=1.
+        transition: f32,
+    },
     /// A linear gradient across the element's box.
     Linear {
         /// Direction in degrees: 0 = left→right, 90 = top→bottom.
@@ -334,6 +343,8 @@ pub enum ElementKind {
     },
     /// A ring/arc gauge inscribed in the box.
     Ring {
+        /// Temporarily show the full scale to inspect its appearance.
+        test_full: bool,
         /// Value and range.
         binding: Binding,
         /// Start angle in degrees, 0 = 12 o'clock, clockwise positive.

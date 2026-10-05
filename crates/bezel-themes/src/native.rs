@@ -364,6 +364,7 @@ mod tests {
                 el(
                     8,
                     ElementKind::Ring {
+                        test_full: false,
                         binding: binding("cpu.usage"),
                         start_angle: -135.0,
                         sweep: 270.0,
@@ -426,6 +427,9 @@ mod tests {
             language: Some(bezel_core::domain::clock::Language::Italian),
             fahrenheit: true,
             show_icon: true,
+            icon_style: bezel_core::domain::weather::IconStyle::Filled,
+            icon_gap: Some(18.0),
+            icon_size: Some(64.0),
         };
         let element = theme
             .elements
@@ -446,6 +450,63 @@ mod tests {
             .find(|e| e["kind"]["content"]["type"] == "weather")
             .unwrap()["kind"]["content"];
         content["latitude"] = serde_json::json!(91);
+        let bad: ThemeDto = serde_json::from_value(json).unwrap();
+        assert!(Theme::try_from(&bad).is_err());
+    }
+
+    #[test]
+    fn ring_gradient_and_full_test_round_trip_with_legacy_defaults() {
+        let (mut theme, _) = every_kind();
+        let k = theme
+            .elements
+            .iter_mut()
+            .find_map(|e| {
+                if matches!(e.kind, ElementKind::Ring { .. }) {
+                    Some(&mut e.kind)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        if let ElementKind::Ring {
+            fill, test_full, ..
+        } = k
+        {
+            *fill = Paint::Arc {
+                start: Rgba::opaque(0, 0, 255),
+                end: Rgba::opaque(255, 0, 0),
+                transition: 0.25,
+            };
+            *test_full = true;
+        }
+        let dto = ThemeDto::from(&theme);
+        assert_eq!(Theme::try_from(&dto).unwrap(), theme);
+        let mut json = serde_json::to_value(dto).unwrap();
+        let ring = json["elements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|e| e["kind"]["type"] == "ring")
+            .unwrap();
+        assert_eq!(ring["kind"]["testFull"], true);
+        assert_eq!(ring["kind"]["fill"]["transition"].as_f64(), Some(25.0));
+        ring["kind"].as_object_mut().unwrap().remove("testFull");
+        let legacy: ThemeDto = serde_json::from_value(json.clone()).unwrap();
+        let legacy = Theme::try_from(&legacy).unwrap();
+        assert!(legacy.elements.iter().any(|e| matches!(
+            e.kind,
+            ElementKind::Ring {
+                test_full: false,
+                ..
+            }
+        )));
+        let ring = json["elements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|e| e["kind"]["type"] == "ring")
+            .unwrap();
+        ring["kind"]["fill"]["transition"] = serde_json::json!(101);
         let bad: ThemeDto = serde_json::from_value(json).unwrap();
         assert!(Theme::try_from(&bad).is_err());
     }

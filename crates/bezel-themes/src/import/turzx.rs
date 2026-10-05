@@ -1051,6 +1051,7 @@ impl Importer {
             BoxF::new(x - pen / 2.0, y - pen / 2.0, diameter + pen, diameter + pen),
             visible,
             ElementKind::Ring {
+                test_full: false,
                 binding,
                 start_angle: px(if reverse { start + sweep } else { start }),
                 sweep: px(sweep),

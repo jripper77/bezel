@@ -300,6 +300,11 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       nodes.push(selectField(t('weather.language'), c.language ?? '', [['', t('clock.system')], ['it', t('language.it')], ['en', t('language.en')], ['pt-BR', t('language.pt-BR')]], (language) => update(e.id, { kind: { content: { language: language || null } } })));
       nodes.push(checkField(t('inspector.fahrenheit'), c.fahrenheit, (fahrenheit) => update(e.id, { kind: { content: { fahrenheit } } })));
       nodes.push(checkField(t('weather.icon'), c.showIcon !== false, (showIcon) => update(e.id, { kind: { content: { showIcon } } })));
+      if (c.showIcon !== false) {
+        nodes.push(selectField(t('weather.iconStyle'), c.iconStyle ?? 'outline', [['outline', t('icons.outline')], ['filled', t('icons.filled')]], (iconStyle) => update(e.id, { kind: { content: { iconStyle } } })));
+        nodes.push(numberField(t('weather.iconGap'), c.iconGap ?? s.size * 0.3, (iconGap) => update(e.id, { kind: { content: { iconGap: Math.max(0, Math.min(256, iconGap)) } } }), { min: 0, max: 256, step: 'any' }));
+        nodes.push(numberField(t('weather.iconSize'), c.iconSize ?? 0, (size) => update(e.id, { kind: { content: { iconSize: size <= 0 ? null : Math.min(512, size) } } }), { min: 0, max: 512 }));
+      }
       nodes.push(el('p', { class: 'hint', text: t('weather.source') }));
     }
     if (c.type === 'sensor') {
@@ -357,11 +362,35 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     ]);
   }
 
+  function ringFillFields(e) {
+    const p = e.kind.fill;
+    const arc = p?.scale === 'arc';
+    const linear = typeof p === 'object' && Boolean(p?.stops);
+    const start = arc ? p.start : typeof p === 'string' ? p : p?.stops?.[0]?.[1] ?? '#38bdf8ff';
+    const end = arc ? p.end : p?.stops?.at(-1)?.[1] ?? '#f97316ff';
+    const modes = [['solid', t('ring.solid')], ['arc', t('ring.arc')]];
+    if (linear) modes.push(['linear', t('ring.importedLinear')]);
+    const setArc = (patch) => update(e.id, { kind: { fill: { scale: 'arc', start, end, transition: p?.transition ?? 50, ...patch } } });
+    return el('div', {}, [
+      selectField(t('ring.fillMode'), arc ? 'arc' : linear ? 'linear' : 'solid', modes, (v) => {
+        if (v === 'arc') setArc({});
+        else if (v === 'solid') update(e.id, { kind: { fill: start } });
+      }),
+      arc ? el('div', {}, [
+        colorField(t('ring.startColor'), start, (v) => setArc({ start: v })),
+        colorField(t('ring.endColor'), end, (v) => setArc({ end: v })),
+        rangeField(t('ring.transition'), p.transition ?? 50, (v) => setArc({ transition: v }), { min: 0, max: 100, step: 1, format: (v) => `${v}%` }),
+        el('p', { class: 'hint', text: t('ring.transitionHint') }),
+      ]) : !linear && colorField(t('inspector.fill'), start, (v) => update(e.id, { kind: { fill: v } })),
+    ]);
+  }
+
   function ringForm(e) {
     const k = e.kind;
     return [
       sensorPicker(e.id, k.binding.key, (key) => ({ kind: { binding: { key } } })),
       rangeFields(e.id, k.binding),
+      checkField(t('ring.testFull'), Boolean(k.testFull), (v) => update(e.id, { kind: { testFull: v } })),
       el('div', { class: 'field-row' }, [
         numberField(t('inspector.startAngle'), k.startAngle, (v) => update(e.id, { kind: { startAngle: v } }), { min: -360, max: 360 }),
         numberField(t('inspector.sweep'), k.sweep, (v) => update(e.id, { kind: { sweep: v } }), { min: 1, max: 360 }),
@@ -369,7 +398,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       numberField(t('inspector.thickness'), k.thickness, (v) => update(e.id, { kind: { thickness: Math.max(1, v) } }), { min: 1 }),
       checkField(t('inspector.clockwise'), k.clockwise !== false, (v) => update(e.id, { kind: { clockwise: v } })),
       checkField(t('inspector.roundCaps'), Boolean(k.roundCaps), (v) => update(e.id, { kind: { roundCaps: v } })),
-      colorField(t('inspector.fill'), typeof k.fill === 'string' ? k.fill : '#38bdf8ff', (v) => update(e.id, { kind: { fill: v } })),
+      ringFillFields(e),
       trackField(e),
       segmentsFields(e),
     ];

@@ -43,6 +43,9 @@ const RESTART_RETURN: Duration = Duration::from_secs(30);
 const RESTART_POLL: Duration = Duration::from_millis(500);
 /// Looks at the bus within [`RESTART_RETURN`].
 const RESTART_POLLS: u128 = RESTART_RETURN.as_millis() / RESTART_POLL.as_millis();
+/// Windows may enumerate the SoC before its COM port can be opened.
+const OPEN_RETRIES: usize = 12;
+const OPEN_RETRY_STEP: Duration = Duration::from_millis(250);
 
 /// Connects to real screens through the host's serial ports and USB.
 #[derive(Debug, Clone, Copy, Default)]
@@ -129,7 +132,9 @@ trait SerialPorts {
             return Err(in_use(others));
         }
         match (self.try_open(endpoint, flow), this) {
-            (Err(BezelError::Transport(_)), Some(this)) => Err(in_use(vec![this])),
+            (Err(BezelError::Transport(_) | BezelError::AccessDenied { .. }), Some(this)) => {
+                Err(in_use(vec![this]))
+            }
             (opened, _) => opened,
         }
     }
@@ -278,7 +283,20 @@ where
         display: &Endpoint,
         models: &[&'static DeviceModel],
     ) -> Result<Box<dyn ScreenLink>> {
-        let wire = self.ports.open(display, Flow::None)?;
+        let mut retries = if cfg!(windows) { OPEN_RETRIES } else { 0 };
+        let wire = loop {
+            match self.ports.open(display, Flow::None) {
+                Ok(wire) => break wire,
+                Err(error @ BezelError::AccessDenied { .. }) if retries > 0 => {
+                    // Retry only opening the port: no HELLO, MCU poke or
+                    // restart is sent while Windows refuses access.
+                    tracing::debug!(%error, retries, "rev C COM port not ready; retrying open");
+                    self.pause.pause(OPEN_RETRY_STEP);
+                    retries -= 1;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         Ok(Box::new(TuringRevC::connect(wire, &self.pause, models)?))
     }
 
@@ -419,8 +437,14 @@ pub fn access_error(address: &str, e: &std::io::Error) -> BezelError {
     let text = e.to_string();
     let lower = text.to_lowercase();
     if e.kind() == std::io::ErrorKind::PermissionDenied
+        || e.get_ref()
+            .and_then(|inner| inner.downcast_ref::<serialport::Error>())
+            .is_some_and(|inner| {
+                inner.kind() == serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied)
+            })
         || lower.contains("permission denied")
         || lower.contains("access is denied")
+        || lower.contains("accesso negato")
     {
         BezelError::AccessDenied {
             address: address.to_string(),
@@ -1090,6 +1114,83 @@ mod tests {
         assert_eq!(err, in_use);
         assert_eq!(host.ports.log(), ["open /dev/ttyACM1"]);
         assert!(host.pause.taken().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_new_windows_com_port_retries_access_denied_before_hello() {
+        let denied = BezelError::AccessDenied {
+            address: SOC.into(),
+            reason: "Accesso negato.".into(),
+        };
+        let host = fake_host(
+            ScriptedBus::new([]),
+            ScriptedPorts::new([Err(denied), answering()]),
+        );
+        let screen = rev_c(Some(soc(SOC, &[1, 2])), Some(mcu()));
+        let link = host.connect_rev_c(&screen, &screen.candidates).unwrap();
+        assert_eq!(link.identity().firmware.as_deref(), Some(HELLO_88));
+        assert_eq!(
+            host.ports.log(),
+            [format!("open {SOC}"), format!("open {SOC}")]
+        );
+        assert_eq!(host.pause.taken().first(), Some(&OPEN_RETRY_STEP));
+        let journal = entries(&host.ports.journal);
+        assert!(journal[0].starts_with("open"));
+        assert_eq!(journal[1], "pause 250ms");
+        assert!(journal[2].starts_with("open"));
+        assert!(
+            journal[3].starts_with("send"),
+            "HELLO only after a successful open"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_com_port_that_stays_denied_fails_without_a_restart() {
+        let denied = BezelError::AccessDenied {
+            address: SOC.into(),
+            reason: "Accesso negato.".into(),
+        };
+        let host = fake_host(
+            ScriptedBus::new([]),
+            ScriptedPorts::new((0..=OPEN_RETRIES).map(|_| Err(denied.clone()))),
+        );
+        let screen = rev_c(Some(soc(SOC, &[1, 2])), Some(mcu()));
+        let error = host
+            .connect_rev_c(&screen, &screen.candidates)
+            .err()
+            .unwrap();
+        assert_eq!(error, denied);
+        assert_eq!(host.ports.log().len(), OPEN_RETRIES + 1);
+        assert!(
+            host.ports
+                .log()
+                .iter()
+                .all(|entry| entry == &format!("open {SOC}"))
+        );
+        assert_eq!(host.pause.taken(), vec![OPEN_RETRY_STEP; OPEN_RETRIES]);
+        assert!(
+            entries(&host.ports.journal)
+                .iter()
+                .all(|entry| !entry.starts_with("send"))
+        );
+    }
+
+    #[test]
+    fn wrapped_localized_permission_errors_keep_their_kind() {
+        // The Windows backend maps ERROR_ACCESS_DENIED to NoDevice and
+        // preserves only the localized FormatMessageW text.
+        for kind in [
+            serialport::ErrorKind::NoDevice,
+            serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied),
+        ] {
+            let error = std::io::Error::other(serialport::Error::new(kind, "Accesso negato."));
+            assert!(matches!(
+                access_error("COM6", &error),
+                BezelError::AccessDenied { .. }
+            ));
+        }
     }
 
     #[test]

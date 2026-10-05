@@ -67,6 +67,14 @@ pub fn is_stall(e: &io::Error) -> bool {
 /// How long a write may make no progress before it fails: the SoC reads
 /// while it writes to its flash or the memory card, which can stall.
 const WRITE_STALL: Duration = Duration::from_secs(10);
+/// Reads remain short even though Windows uses the same timeout for writes.
+const READ_TIMEOUT: Duration = Duration::from_millis(10);
+/// Bound Windows WriteFile requests, without changing the byte stream or
+/// the driver's protocol framing. Unix keeps its existing write path.
+#[cfg(windows)]
+const WRITE_CHUNK: usize = 64 * 1024;
+#[cfg(not(windows))]
+const WRITE_CHUNK: usize = usize::MAX;
 /// Pause between two looks at the bytes still queued for the device.
 const DRAIN_POLL: Duration = Duration::from_millis(1);
 
@@ -76,13 +84,14 @@ const DRAIN_POLL: Duration = Duration::from_millis(1);
 /// no bytes, one stalled for `stall` ([`Stalled`]) and any other error fail.
 fn write_patiently(
     mut bytes: &[u8],
+    max_write: usize,
     stall: Duration,
     mut now: impl FnMut() -> Instant,
     mut write: impl FnMut(&[u8]) -> io::Result<usize>,
 ) -> io::Result<()> {
     let mut progress = now();
     while !bytes.is_empty() {
-        match write(bytes) {
+        match write(&bytes[..bytes.len().min(max_write)]) {
             Ok(0) => {
                 return Err(io::Error::new(
                     io::ErrorKind::WriteZero,
@@ -157,7 +166,7 @@ fn settings(path: &str, flow: Flow) -> serialport::SerialPortBuilder {
             .stop_bits(serialport::StopBits::One)
             .flow_control(flow)
             .dtr_on_open(true)
-            .timeout(Duration::from_millis(10)),
+            .timeout(READ_TIMEOUT),
     )
 }
 
@@ -204,23 +213,84 @@ impl Drop for SerialWire {
 }
 
 impl Wire for SerialWire {
-    /// Writes every byte and waits until they left. The port's 10 ms timeout
-    /// only paces reads: a write that makes no progress for [`WRITE_STALL`]
+    /// Writes every byte and waits until they left. On Windows serialport
+    /// applies its timeout to both reads and writes: use [`WRITE_STALL`]
+    /// during writes, then restore [`READ_TIMEOUT`] even after a failed write.
+    /// A write that makes no progress for [`WRITE_STALL`]
     /// fails, and so does a drain whose queue stops shrinking for as long
     /// ([`drain_watching`]; the kernel's own drain can block forever, and a
     /// signal such as Ctrl+C cuts it short). Seen on
     /// the 8.8" during a memory-card upload.
     fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
-        write_patiently(bytes, WRITE_STALL, Instant::now, |rest| {
-            self.port.write(rest)
-        })?;
+        let started = Instant::now();
+        let mut written = 0usize;
+        let mut calls = 0usize;
+        tracing::debug!(bytes = bytes.len(), "serial send: write started");
+        #[cfg(windows)]
+        self.port
+            .set_timeout(WRITE_STALL)
+            .map_err(io::Error::other)?;
+        let result = write_patiently(bytes, WRITE_CHUNK, WRITE_STALL, Instant::now, |request| {
+            calls += 1;
+            let result = self.port.write(request);
+            match &result {
+                Ok(n) => written += n,
+                Err(e) => tracing::debug!(
+                    written,
+                    remaining = bytes.len() - written,
+                    requested = request.len(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    error = %e,
+                    os_error = ?e.raw_os_error(),
+                    "serial send: write error"
+                ),
+            }
+            result
+        });
+        // Do not let a write timeout turn subsequent reads into 10 s waits.
+        #[cfg(windows)]
+        let restored = self
+            .port
+            .set_timeout(READ_TIMEOUT)
+            .map_err(io::Error::other);
+        if let Err(e) = result {
+            tracing::debug!(
+                written,
+                total = bytes.len(),
+                calls,
+                elapsed_ms = started.elapsed().as_millis(),
+                queued = ?self.port.bytes_to_write(),
+                error = %e,
+                "serial send: write failed"
+            );
+            #[cfg(windows)]
+            if let Err(restore_error) = restored {
+                tracing::warn!(error = %restore_error, "serial read timeout not restored");
+            }
+            return Err(e);
+        }
+        #[cfg(windows)]
+        restored?;
+        tracing::debug!(
+            written,
+            calls,
+            elapsed_ms = started.elapsed().as_millis(),
+            "serial send: write completed; drain started"
+        );
         let port = &self.port;
-        drain_watching(
+        let result = drain_watching(
             WRITE_STALL,
             Instant::now,
             || port.bytes_to_write().map_err(io::Error::other),
             || std::thread::sleep(DRAIN_POLL),
-        )
+        );
+        tracing::debug!(
+            bytes = bytes.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            result = ?result,
+            "serial send: drain finished"
+        );
+        result
     }
 
     fn receive(&mut self, max: usize, timeout: Duration) -> io::Result<Vec<u8>> {
@@ -390,7 +460,7 @@ mod tests {
         let mut script = VecDeque::from(script);
         let mut taken = Vec::new();
         let mut writes = 0;
-        let result = write_patiently(bytes, stall, ticking(), |rest| {
+        let result = write_patiently(bytes, usize::MAX, stall, ticking(), |rest| {
             writes += 1;
             let n = script.pop_front().unwrap_or(Ok(rest.len()))?;
             taken.extend_from_slice(&rest[..n.min(rest.len())]);
@@ -449,6 +519,31 @@ mod tests {
         let (result, _, writes) = write_with(b"", WRITE_STALL, vec![]);
         result.unwrap();
         assert_eq!(writes, 0, "nothing to write");
+    }
+
+    #[test]
+    fn a_full_frame_survives_bounded_short_writes_without_repeated_bytes() {
+        // A ROM 1.90 BGRA frame, already framed by the driver. Request
+        // boundaries must not add, omit or repeat bytes, even when the port
+        // accepts only part of a request or briefly times out.
+        let raw: Vec<u8> = (0..480 * 1920 * 4).map(|i| (i % 251) as u8).collect();
+        let frame = crate::protocol::turing_rev_c::blocks(&raw);
+        let mut taken = Vec::new();
+        let mut calls = 0;
+        let result = write_patiently(&frame, 64 * 1024, WRITE_STALL, ticking(), |request| {
+            calls += 1;
+            assert!(request.len() <= 64 * 1024);
+            if calls % 7 == 0 {
+                // This scripted timeout took no bytes.
+                return Err(failure(io::ErrorKind::TimedOut));
+            }
+            let n = request.len().min(15_001);
+            taken.extend_from_slice(&request[..n]);
+            Ok(n)
+        });
+        result.unwrap();
+        assert_eq!(taken, frame);
+        assert!(calls > 100, "progress can outlast the stall interval");
     }
 
     /// Drains watching a queue that reports `script` in order (then 0),

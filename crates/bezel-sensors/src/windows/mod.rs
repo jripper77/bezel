@@ -3,6 +3,7 @@
 //! namespace or local web server for temperatures, fans and power. NVIDIA GPUs
 //! come from NVML like on Linux.
 
+mod embedded;
 mod lhm_http;
 mod sys;
 mod wmi;

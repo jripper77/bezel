@@ -1,0 +1,84 @@
+[
+  {
+    "package": "blacksharp.core",
+    "version": "1.0.7",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/blacksharp.core/1.0.7/blacksharp.core.1.0.7.nupkg",
+    "notices": [],
+    "authors": "BlackSharp.Core",
+    "license": "MPL-2.0",
+    "licenseUrl": "https://licenses.nuget.org/MPL-2.0",
+    "projectUrl": "https://github.com/Blacktempel/BlackSharp"
+  },
+  {
+    "package": "diskinfotoolkit",
+    "version": "1.1.2",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/diskinfotoolkit/1.1.2/diskinfotoolkit.1.1.2.nupkg",
+    "notices": [],
+    "authors": "DiskInfoToolkit",
+    "license": "MPL-2.0",
+    "licenseUrl": "https://licenses.nuget.org/MPL-2.0",
+    "projectUrl": "https://github.com/Blacktempel/DiskInfoToolkit"
+  },
+  {
+    "package": "ramspdtoolkit-ndd",
+    "version": "1.4.2",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/ramspdtoolkit-ndd/1.4.2/ramspdtoolkit-ndd.1.4.2.nupkg",
+    "notices": [],
+    "authors": "RAMSPDToolkit-NDD",
+    "license": "MPL-2.0",
+    "licenseUrl": "https://licenses.nuget.org/MPL-2.0",
+    "projectUrl": "https://github.com/Blacktempel/RAMSPDToolkit"
+  },
+  {
+    "package": "hidsharp",
+    "version": "2.6.4",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/hidsharp/2.6.4/hidsharp.2.6.4.nupkg",
+    "notices": [
+      "hidsharp-2.6.4-LICENSE.txt"
+    ],
+    "authors": "James F. Bellinger",
+    "license": "LICENSE.txt",
+    "licenseUrl": "https://aka.ms/deprecateLicenseUrl",
+    "projectUrl": "https://software.seekye.com/hidsharp"
+  },
+  {
+    "package": "system.memory",
+    "version": "4.6.3",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/system.memory/4.6.3/system.memory.4.6.3.nupkg",
+    "notices": [],
+    "authors": "Microsoft",
+    "license": "MIT",
+    "licenseUrl": "https://licenses.nuget.org/MIT",
+    "projectUrl": "https://github.com/dotnet/maintenance-packages"
+  },
+  {
+    "package": "system.buffers",
+    "version": "4.6.1",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/system.buffers/4.6.1/system.buffers.4.6.1.nupkg",
+    "notices": [],
+    "authors": "Microsoft",
+    "license": "MIT",
+    "licenseUrl": "https://licenses.nuget.org/MIT",
+    "projectUrl": "https://github.com/dotnet/maintenance-packages"
+  },
+  {
+    "package": "system.numerics.vectors",
+    "version": "4.6.1",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/system.numerics.vectors/4.6.1/system.numerics.vectors.4.6.1.nupkg",
+    "notices": [],
+    "authors": "Microsoft",
+    "license": "MIT",
+    "licenseUrl": "https://licenses.nuget.org/MIT",
+    "projectUrl": "https://github.com/dotnet/maintenance-packages"
+  },
+  {
+    "package": "system.runtime.compilerservices.unsafe",
+    "version": "6.1.2",
+    "package_url": "https://api.nuget.org/v3-flatcontainer/system.runtime.compilerservices.unsafe/6.1.2/system.runtime.compilerservices.unsafe.6.1.2.nupkg",
+    "notices": [],
+    "authors": "Microsoft",
+    "license": "MIT",
+    "licenseUrl": "https://licenses.nuget.org/MIT",
+    "projectUrl": "https://github.com/dotnet/maintenance-packages"
+  }
+]

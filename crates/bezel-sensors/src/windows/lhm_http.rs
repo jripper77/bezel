@@ -51,7 +51,7 @@ struct Node {
     children: Vec<Node>,
 }
 
-fn parse(json: &str) -> Result<(Vec<Row>, HashMap<String, String>), String> {
+pub(super) fn parse(json: &str) -> Result<(Vec<Row>, HashMap<String, String>), String> {
     let root: Node = serde_json::from_str(json)
         .map_err(|e| format!("LibreHardwareMonitor invalid data.json: {e}"))?;
     let mut rows = Vec::new();

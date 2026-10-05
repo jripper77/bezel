@@ -77,21 +77,23 @@ fn query(conn: &WMIConnection) -> Result<(Vec<Row>, HashMap<String, String>), St
 fn worker(latest: Shared, ready: mpsc::Sender<()>, stop: mpsc::Receiver<()>) {
     let mut conn: Option<WMIConnection> = None;
     let http = super::lhm_http::Reader::new();
+    let embedded = super::embedded::Reader::new();
     loop {
-        if conn.is_none() {
-            conn = WMIConnection::with_namespace_path(NAMESPACE)
-                .map_err(|e| tracing::debug!("LibreHardwareMonitor namespace: {e}"))
-                .ok();
-        }
-        let answer = match &conn {
-            Some(c) => query(c),
-            None => Err(HINT.to_string()),
-        };
-        // Recent LHM releases no longer publish WMI. Keep the existing
-        // mapping and worker, but fall back to its read-only local JSON.
-        let answer = answer.or_else(|_| {
-            conn = None;
-            http.query()
+        let answer = embedded.query().or_else(|_| {
+            if conn.is_none() {
+                conn = WMIConnection::with_namespace_path(NAMESPACE)
+                    .map_err(|e| tracing::debug!("LibreHardwareMonitor namespace: {e}"))
+                    .ok();
+            }
+            let answer = match &conn {
+                Some(c) => query(c),
+                None => Err(HINT.to_string()),
+            };
+            // External Libre remains compatible when the bundled helper is unavailable.
+            answer.or_else(|_| {
+                conn = None;
+                http.query()
+            })
         });
         let (rows, hardware) = match answer {
             Ok((rows, hardware)) => (Ok(rows), hardware),

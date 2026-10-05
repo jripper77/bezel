@@ -338,6 +338,8 @@ impl Backend {
     pub fn preferences(&self) -> PreferencesDto {
         let settings = self.settings.load();
         PreferencesDto {
+            light_on_close: settings.light_on_close.unwrap_or(true),
+            light_runtime: cfg!(windows),
             theme_filter: ThemeFilterDto {
                 scope: settings.themes_shown(),
                 axis: settings.themes_axis(),

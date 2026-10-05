@@ -157,6 +157,7 @@ test('images, live mode and fonts', async () => {
 test('the window hides while live, asks over unsaved edits, else closes', async () => {
   const seen = [];
   const demo = createDemoBackend('turing88', fixed, { onWindow: (state) => seen.push(state) });
+  await demo.setLightOnClose(false);
   const asked = [];
   const stop = await demo.onCloseRequested(() => asked.push('asked'));
   assert.equal(demo.windowState(), 'open');
@@ -184,6 +185,7 @@ test('the window hides while live, asks over unsaved edits, else closes', async 
 test('quitting from the tray shows the window and asks over unsaved edits', async () => {
   const seen = [];
   const demo = createDemoBackend('turing88', fixed, { onWindow: (state) => seen.push(state) });
+  await demo.setLightOnClose(false);
   const asked = [];
   await demo.onQuitRequested(() => asked.push('asked'));
   await demo.setLive(true, '/dev/ttyACM1');
@@ -695,4 +697,26 @@ test('the standby scenarios: an 8.8" without a card, one set to turn off, one wi
   assert.equal((await createDemoBackend('standbyOff').standbyOverview('/dev/ttyACM1')).choice, 'off');
   // What the standby demo reads and adds of the storage stays inside the backend.
   assert.equal(createDemoBackend('turing88').standbyStorage, undefined);
+});
+
+test('Light is the default on close and unsaved live edits can cancel before handoff', async () => {
+  const demo = createDemoBackend('turing88', fixed);
+  assert.equal((await demo.preferences()).lightOnClose, true);
+  await demo.setLive(true, '/dev/ttyACM1');
+  await demo.setUnsaved(true);
+  let asked = 0;
+  await demo.onCloseRequested(() => { asked++; });
+  demo.requestClose();
+  assert.equal(asked, 1);
+  assert.equal(demo.windowState(), 'open');
+  await demo.setUnsaved(false);
+  await demo.closeWindow();
+  assert.equal(demo.windowState(), 'closed');
+  await demo.setLightOnClose(false);
+  assert.equal((await demo.preferences()).lightOnClose, false);
+  demo.requestClose();
+  assert.equal(demo.windowState(), 'hidden');
+  await demo.setLightOnClose(true);
+  demo.requestClose();
+  assert.equal(demo.windowState(), 'closed');
 });

@@ -29,6 +29,9 @@ use bezel_sensors::{FakeSensors, SensorOptions, SystemSensors};
 use bezel_themes::FsThemeStore;
 use clap::Parser;
 
+#[cfg(windows)]
+mod light_tray;
+
 /// The simulated bus of `--fake`: a Turing 8.8" and a Turing USB panel in
 /// desktop mode.
 fn fake_bus() -> FakeBus {
@@ -105,14 +108,24 @@ fn renderer_for(cli: &Cli, bundled: Option<&Path>) -> SkiaRenderer {
 
 /// `bezel render`, `bezel run` and `bezel import`.
 fn themes(cli: &Cli) -> anyhow::Result<String> {
-    let bundled = bundled_dir();
-    let mut renderer = renderer_for(cli, bundled.as_deref());
-    let mut sensors = sensor_source(cli.fake, cli.command.sensor_settings());
+    if matches!(cli.command, Command::Run { tray: true, .. }) {
+        #[cfg(windows)]
+        return light_tray::run(std::env::args_os().collect());
+        #[cfg(not(windows))]
+        anyhow::bail!("--tray is currently supported on Windows only");
+    }
     let stop = Arc::new(AtomicBool::new(false));
     if matches!(cli.command, Command::Run { .. }) {
         let flag = Arc::clone(&stop);
         ctrlc::set_handler(move || flag.store(true, Ordering::SeqCst))?;
     }
+    themes_with_stop(cli, stop)
+}
+
+fn themes_with_stop(cli: &Cli, stop: Arc<AtomicBool>) -> anyhow::Result<String> {
+    let bundled = bundled_dir();
+    let mut renderer = renderer_for(cli, bundled.as_deref());
+    let mut sensors = sensor_source(cli.fake, cli.command.sensor_settings());
     let mut pace = SleepPace::new(stop);
     let mut log = std::io::stderr();
     let mut media = FfmpegTranscoder::new(cli.command.ffmpeg().map(Path::to_path_buf));

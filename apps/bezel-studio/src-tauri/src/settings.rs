@@ -20,6 +20,8 @@ use crate::texts::parse_language;
 pub struct Settings {
     /// Location of the last theme opened or saved.
     pub last_theme: Option<String>,
+    /// Use the light Windows runtime after closing the editor; absent means enabled.
+    pub light_on_close: Option<bool>,
     /// Key of the screen that was live when the app last changed it.
     pub live_screen: Option<String>,
     /// The orientation last used with each screen (`portrait`, `landscape`…),
@@ -163,6 +165,18 @@ mod tests {
         std::fs::write(file.path(), b"{ broken").unwrap();
         assert_eq!(file.load(), Settings::default());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_settings_enable_light_and_explicit_off_round_trips() {
+        let old: Settings = serde_json::from_str(r#"{"lastTheme":"saved.bezeltheme"}"#).unwrap();
+        assert!(old.light_on_close.unwrap_or(true));
+        let off: Settings = serde_json::from_str(r#"{"lightOnClose":false}"#).unwrap();
+        assert_eq!(off.light_on_close, Some(false));
+        assert_eq!(
+            serde_json::from_str::<Settings>(&serde_json::to_string(&off).unwrap()).unwrap(),
+            off
+        );
     }
 
     #[test]

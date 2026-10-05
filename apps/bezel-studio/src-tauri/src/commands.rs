@@ -418,7 +418,8 @@ pub fn close_window<R: Runtime>(
     state: State<'_, Shared>,
 ) -> UiResult<()> {
     let live = state.studio().live_key().is_some();
-    match crate::on_close(live, false) {
+    crate::prepare_light_on_close(&window, &state).map_err(UiError::system)?;
+    match crate::on_close_for_runtime(live, false, crate::returns_to_light(&window)) {
         crate::OnClose::Hide => window.hide(),
         crate::OnClose::Ask | crate::OnClose::Close => window.destroy(),
     }
@@ -427,8 +428,8 @@ pub fn close_window<R: Runtime>(
 
 /// Ends the app once the UI settled its unsaved edits (the tray's Quit).
 #[tauri::command]
-pub fn quit_app<R: Runtime>(app: AppHandle<R>) {
-    app.exit(0);
+pub fn quit_app<R: Runtime>(app: AppHandle<R>) -> UiResult<()> {
+    crate::exit_bezel(&app).map_err(UiError::system)
 }
 
 /// Whether Bezel starts at login.
@@ -450,6 +451,14 @@ pub fn set_autostart<R: Runtime>(app: AppHandle<R>, on: bool) -> UiResult<()> {
 }
 
 // --------------------------------------------------------- preferences --
+
+/// Remembers whether closing Studio hands control to the light runtime.
+#[tauri::command]
+pub fn set_light_on_close(state: State<'_, Shared>, on: bool) {
+    state
+        .settings
+        .update(|settings| settings.light_on_close = Some(on));
+}
 
 /// The language chosen in the settings and the system's.
 #[tauri::command]

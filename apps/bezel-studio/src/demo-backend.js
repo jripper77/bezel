@@ -1246,6 +1246,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   let windowState = 'open';
   // The language the user chose (`null`: the system's, from the browser).
   let language = null;
+  let lightOnClose = true;
   const systemLanguage = pickLocale(hooks.languages ?? []);
   const sensorOptions = { pingHost: null, mangohudDir: null };
   const closeListeners = new Set();
@@ -1415,7 +1416,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       return Promise.resolve();
     },
     closeWindow: () => {
-      windowGoes(live ? 'hidden' : 'closed');
+      windowGoes(live && !lightOnClose ? 'hidden' : 'closed');
       return Promise.resolve();
     },
     onCloseRequested: (cb) => {
@@ -1424,7 +1425,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     },
     /** The window's close button. */
     requestClose: () => {
-      if (live) windowGoes('hidden');
+      if (live && !lightOnClose) windowGoes('hidden');
       else if (unsaved) for (const cb of closeListeners) cb();
       else windowGoes('closed');
     },
@@ -1446,7 +1447,10 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       for (const cb of quitListeners) cb();
     },
     windowState: () => windowState,
+    setLightOnClose: (on) => { lightOnClose = on; return Promise.resolve(); },
     preferences: () => Promise.resolve({
+      lightOnClose,
+      lightRuntime: true,
       language,
       systemLanguage,
       pingHost: sensorOptions.pingHost ?? DEMO_PING_HOST,

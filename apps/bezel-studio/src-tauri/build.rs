@@ -47,6 +47,7 @@ const COMMANDS: &[&str] = &[
     "close_window",
     "preferences",
     "set_language",
+    "set_light_on_close",
     "set_sensor_options",
     "pick_folder",
     "show_sensors",

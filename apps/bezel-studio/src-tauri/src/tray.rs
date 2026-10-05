@@ -63,12 +63,19 @@ fn hide_main_window(app: &AppHandle) {
 fn quit(app: &AppHandle) {
     let unsaved = app.try_state::<Unsaved>().is_some_and(|u| u.get());
     match crate::on_quit(unsaved) {
-        crate::OnQuit::Exit => app.exit(0),
+        crate::OnQuit::Exit => {
+            if crate::exit_bezel(app).is_err() {
+                diag::report(DiagCode::LightNotStopped);
+                crate::show_main_window(app);
+            }
+        }
         crate::OnQuit::Ask => {
             crate::show_main_window(app);
             if app.emit(crate::QUIT_EVENT, ()).is_err() {
                 diag::report(DiagCode::UnsavedEditsNotAskedBeforeQuitting);
-                app.exit(0);
+                if crate::exit_bezel(app).is_err() {
+                    diag::report(DiagCode::LightNotStopped);
+                }
             }
         }
     }

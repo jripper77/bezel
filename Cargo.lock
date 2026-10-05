@@ -360,6 +360,7 @@ dependencies = [
  "bezel-core",
  "bezel-devices",
  "bezel-media",
+ "bezel-power",
  "bezel-render",
  "bezel-sensors",
  "bezel-themes",
@@ -370,7 +371,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sys-locale",
+ "tao",
+ "tauri-winres",
  "tracing-subscriber",
+ "tray-icon",
 ]
 
 [[package]]

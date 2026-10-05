@@ -289,6 +289,9 @@ pub enum Command {
     /// Show a theme on the screen with live sensors until Ctrl+C, then hand
     /// the screen back to its standalone mode.
     Run {
+        /// Keep a light tray icon; Studio can take control and return it on exit (Windows).
+        #[arg(long)]
+        tray: bool,
         /// Screen to use.
         #[command(flatten)]
         target: Target,

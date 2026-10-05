@@ -105,6 +105,76 @@ pub fn on_close(live: bool, unsaved: bool) -> OnClose {
     }
 }
 
+/// When light is waiting, close the editor instead of keeping its renderer in the tray.
+pub fn on_close_for_runtime(live: bool, unsaved: bool, return_to_light: bool) -> OnClose {
+    on_close(live && !return_to_light, unsaved)
+}
+
+pub(crate) fn returns_to_light<R: Runtime>(manager: &impl Manager<R>) -> bool {
+    #[cfg(windows)]
+    return manager
+        .try_state::<bezel_power::handoff::StudioSession>()
+        .is_some()
+        && manager
+            .try_state::<Shared>()
+            .is_some_and(|backend| backend.settings.load().light_on_close.unwrap_or(true));
+    #[cfg(not(windows))]
+    {
+        let _ = manager;
+        false
+    }
+}
+
+/// Start Light while Studio still owns the screen, so it waits for normal cleanup.
+pub(crate) fn prepare_light_on_close<R: Runtime>(
+    manager: &impl Manager<R>,
+    backend: &Shared,
+) -> std::io::Result<()> {
+    #[cfg(windows)]
+    if returns_to_light(manager) && backend.studio().live_key().is_some() {
+        let settings = backend.settings.load();
+        let theme = settings.last_theme.as_deref().ok_or_else(|| {
+            std::io::Error::other("Save the theme before switching to Bezel Light")
+        })?;
+        let screen = settings.live_screen.as_deref().ok_or_else(|| {
+            std::io::Error::other("Select a live screen before switching to Bezel Light")
+        })?;
+        let mut args = vec![
+            std::ffi::OsString::from("run"),
+            theme.into(),
+            "--screen".into(),
+            screen.into(),
+            "--tray".into(),
+        ];
+        for (option, value) in [
+            ("--ffmpeg", settings.ffmpeg_path.as_deref()),
+            ("--ping-host", settings.ping_host.as_deref()),
+            ("--mangohud-dir", settings.mangohud_dir.as_deref()),
+        ] {
+            if let Some(value) = value {
+                args.extend([option.into(), value.into()]);
+            }
+        }
+        let executable = std::env::current_exe()?.with_file_name("bezel.exe");
+        if let Some(session) = manager.try_state::<bezel_power::handoff::StudioSession>() {
+            session.start_light(&executable, &args)?;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (manager, backend);
+    Ok(())
+}
+
+/// Explicit Quit stops both runtimes; closing the editor hands control to Light.
+pub(crate) fn exit_bezel<R: Runtime>(app: &AppHandle<R>) -> std::io::Result<()> {
+    #[cfg(windows)]
+    if let Some(session) = app.try_state::<bezel_power::handoff::StudioSession>() {
+        session.stop_light()?;
+    }
+    app.exit(0);
+    Ok(())
+}
+
 /// Event asking the UI to settle unsaved edits before the app quits (the
 /// tray's Quit); the UI then calls `quit_app`.
 pub const QUIT_EVENT: &str = "quit-requested";
@@ -222,7 +292,8 @@ pub fn run() -> Result<(), tauri::Error> {
                 .try_state::<Shared>()
                 .is_some_and(|b| b.studio().live_key().is_some());
             let unsaved = window.try_state::<Unsaved>().is_some_and(|u| u.get());
-            match on_close(live, unsaved) {
+            let return_to_light = returns_to_light(window);
+            match on_close_for_runtime(live, unsaved, return_to_light) {
                 OnClose::Hide => {
                     api.prevent_close();
                     // Best effort: a window that cannot hide stays open, and
@@ -234,6 +305,13 @@ pub fn run() -> Result<(), tauri::Error> {
                     Ok(()) => api.prevent_close(),
                     Err(_) => diag::report(DiagCode::UnsavedEditsNotAsked),
                 },
+                OnClose::Close if return_to_light => {
+                    // Even clean closes go through the UI so launch failures stay visible.
+                    api.prevent_close();
+                    if window.emit(CLOSE_EVENT, ()).is_err() {
+                        diag::report(DiagCode::UnsavedEditsNotAsked);
+                    }
+                }
                 OnClose::Close => {}
             }
         })
@@ -279,6 +357,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::set_unsaved,
             commands::close_window,
             commands::preferences,
+            commands::set_light_on_close,
             commands::set_language,
             commands::set_sensor_options,
             commands::pick_folder,
@@ -409,6 +488,17 @@ struct Start<R: Runtime> {
 /// and says nothing else (`tests::the_app_setup_sends_nothing_at_start`
 /// watches that bus).
 fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(windows)]
+    if !start.simulate {
+        let executable = std::env::current_exe()?;
+        if executable.parent().is_some() {
+            let directory = bezel_power::handoff::runtime_directory(&executable)?;
+            let session =
+                bezel_power::handoff::enter_studio(&directory, std::time::Duration::from_secs(30))
+                    .inspect_err(|_| diag::report(DiagCode::LightNotReleased))?;
+            app.manage(session);
+        }
+    }
     // Each part that fails says so, before the app says it did not start.
     let folders =
         (start.folders)(app.handle()).inspect_err(|_| diag::report(DiagCode::FoldersNotFound))?;
@@ -1325,6 +1415,9 @@ mod tests {
         assert_eq!(on_close(true, true), OnClose::Hide, "the edits stay");
         assert_eq!(on_close(false, true), OnClose::Ask);
         assert_eq!(on_close(false, false), OnClose::Close);
+        assert_eq!(on_close_for_runtime(true, false, true), OnClose::Close);
+        assert_eq!(on_close_for_runtime(true, true, true), OnClose::Ask);
+        assert_eq!(on_close_for_runtime(true, false, false), OnClose::Hide);
     }
 
     #[test]

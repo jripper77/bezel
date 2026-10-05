@@ -49,6 +49,7 @@
     "allow-close-window",
     "allow-preferences",
     "allow-set-language",
+    "allow-set-light-on-close",
     "allow-set-sensor-options",
     "allow-pick-folder",
     "allow-show-sensors",

@@ -52,6 +52,27 @@ export function createPreferences({ t, bridge, onLanguage, notify }) {
     ]);
   }
 
+  function runtimeSection() {
+    if (!prefs.lightRuntime) return null;
+    const input = el('input', { id: 'prefs-light-on-close', type: 'checkbox', role: 'switch',
+      checked: prefs.lightOnClose, 'aria-describedby': 'prefs-light-hint' });
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      try {
+        await bridge.setLightOnClose(input.checked);
+        prefs.lightOnClose = input.checked;
+      } catch (e) {
+        input.checked = prefs.lightOnClose;
+        notify(errorText(t, e));
+      } finally { input.disabled = false; }
+    });
+    return el('section', { class: 'prefs-section', 'aria-labelledby': 'prefs-runtime-title' }, [
+      el('h3', { id: 'prefs-runtime-title', text: t('prefs.runtimeTitle') }),
+      el('label', { class: 'check', for: 'prefs-light-on-close' }, [input, el('span', { text: t('prefs.lightOnClose') })]),
+      el('p', { id: 'prefs-light-hint', class: 'hint', text: t('prefs.lightHint') }),
+    ]);
+  }
+
   function pingField() {
     const input = el('input', {
       id: 'prefs-ping-host', type: 'text', value: typedHost ?? prefs.pingHost, spellcheck: false, autocomplete: 'off',
@@ -138,7 +159,7 @@ export function createPreferences({ t, bridge, onLanguage, notify }) {
     const close = el('button', { type: 'button', class: 'icon-button dialog-close', title: t('dialog.close'), 'aria-label': t('dialog.close'), onclick: () => dialog.close() }, [icon(ICONS.close, 16)]);
     dialog.replaceChildren(
       el('div', { class: 'dialog-head' }, [el('h2', { id: 'prefs-title', text: t('prefs.title') }), close]),
-      el('div', { class: 'dialog-body' }, [languageField(), sensorsSection()]),
+      el('div', { class: 'dialog-body' }, [languageField(), runtimeSection(), sensorsSection()]),
       el('div', { class: 'dialog-actions' }, [el('button', { type: 'button', class: 'primary-button', text: t('prefs.done'), onclick: () => dialog.close() })]),
     );
     if (focused) (dialog.querySelector(`#${focused}`) ?? dialog.querySelector('#prefs-mangohud-choose'))?.focus();

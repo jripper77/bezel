@@ -25,6 +25,7 @@
 
 #[cfg(all(target_os = "linux", any(test, feature = "fake")))]
 pub mod fake;
+pub mod handoff;
 mod logind;
 mod session;
 

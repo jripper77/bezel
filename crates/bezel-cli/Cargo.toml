@@ -23,6 +23,7 @@ bezel-sensors = { workspace = true }
 bezel-render = { workspace = true }
 bezel-themes = { workspace = true }
 bezel-media = { workspace = true }
+bezel-power = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4.6.7", features = ["derive"] }
@@ -37,6 +38,13 @@ ctrlc = { version = "3.5.2", features = ["termination"] }
 
 [dev-dependencies]
 assert_cmd = "2"
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = { version = "0.25.1", default-features = false }
+tao = { version = "0.37.1", default-features = false }
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres = "0.3.6"
 
 [lints]
 workspace = true

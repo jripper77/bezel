@@ -248,6 +248,9 @@ test('quitting from the tray over unsaved edits shows the window and asks', asyn
   // Live and hidden in the tray with unsaved edits: Quit shows the window
   // and asks; Cancel keeps the app, Discard ends it.
   await page.goto('/index.html?demo=turing88');
+  await page.getByRole('button', { name: t('top.preferences') }).click();
+  await page.getByRole('switch', { name: t('prefs.lightOnClose') }).uncheck();
+  await page.getByRole('button', { name: t('prefs.done') }).click();
   await page.getByRole('tab', { name: t('library.layers') }).click();
   await page.getByRole('button', { name: /^CPU/ }).click();
   await page.keyboard.press('Delete');
@@ -657,5 +660,38 @@ test('a live screen that drops is connected again by itself', async ({ page, t }
   await expect(page.locator('#toast')).toHaveText(t('restart.doneLive'), { timeout: 5_000 });
   await expect(page.locator('#status-device')).toHaveText(t('status.live'));
   await expect(page.getByRole('switch')).toBeChecked();
+  expect(errors).toEqual([]);
+});
+
+
+test('the Light switch persists and protects unsaved live edits on close', async ({ page, t }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=turing88');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.getByRole('button', { name: t('top.preferences') }).click();
+  const toggle = page.getByRole('switch', { name: t('prefs.lightOnClose') });
+  await expect(toggle).toBeChecked();
+  await expectAccessible(page);
+  await toggle.uncheck();
+  await page.getByRole('button', { name: t('prefs.done') }).click();
+  await page.getByRole('button', { name: t('top.preferences') }).click();
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await page.getByRole('button', { name: t('prefs.done') }).click();
+  await page.getByRole('switch').click({ force: true });
+  await expect(page.getByRole('switch')).toBeChecked();
+  await page.getByRole('tab', { name: t('library.layers') }).click();
+  await page.getByRole('button', { name: /^CPU/ }).click();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('#status-main')).toHaveText(t('status.unsaved'));
+  const close = () => page.evaluate(() => window.dispatchEvent(new Event('bezel-demo-close')));
+  const dialog = page.getByRole('dialog', { name: t('unsaved.title') });
+  await close();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: t('dialog.cancel') }).click();
+  expect(await page.locator('html').getAttribute('data-demo-window')).toBeNull();
+  await close();
+  await dialog.getByRole('button', { name: t('unsaved.discard') }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-demo-window', 'closed');
   expect(errors).toEqual([]);
 });

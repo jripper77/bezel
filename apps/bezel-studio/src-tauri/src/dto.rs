@@ -437,6 +437,8 @@ pub struct SavedDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreferencesDto {
+    pub light_on_close: bool,
+    pub light_runtime: bool,
     /// The language the user chose (`pt-BR` or `en`); `None` follows the
     /// system.
     pub language: Option<&'static str>,

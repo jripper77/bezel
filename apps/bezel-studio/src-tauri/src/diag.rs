@@ -51,6 +51,10 @@ pub enum DiagCode {
     PluginNotStarted,
     /// The app's folders (settings, data, cache) were not found.
     FoldersNotFound,
+    /// The light runtime did not release the screen for Studio.
+    LightNotReleased,
+    /// The light runtime did not stop after an explicit Quit.
+    LightNotStopped,
     /// The tray icon was not added.
     TrayNotAdded,
     /// The screen and the sensors are simulated (`BEZEL_FAKE=1`).
@@ -178,11 +182,12 @@ pub enum DiagCode {
 
 impl DiagCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 58] = [
+    pub const ALL: [Self; 59] = [
         Self::Panicked,
         Self::NotStarted,
         Self::PluginNotStarted,
         Self::FoldersNotFound,
+        Self::LightNotReleased,
         Self::TrayNotAdded,
         Self::Simulated,
         Self::DmabufRendererOn,
@@ -246,6 +251,8 @@ impl DiagCode {
             Self::NotStarted => "the app did not start",
             Self::PluginNotStarted => "the app did not start: a plugin did not start",
             Self::FoldersNotFound => "the app's folders were not found",
+            Self::LightNotReleased => "the light runtime did not release the screen",
+            Self::LightNotStopped => "the light runtime did not stop",
             Self::TrayNotAdded => "the tray icon was not added",
             Self::Simulated => "BEZEL_FAKE=1, simulated Turing 8.8\" and sensors",
             Self::DmabufRendererOn => "could not restart with the DMA-BUF renderer off",

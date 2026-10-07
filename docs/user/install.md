@@ -2,7 +2,13 @@
 
 [Português (Brasil)](pt-BR/install.md)
 
-Download from the [releases page](https://github.com/slipalison/bezel/releases).
+This Windows development fork currently has no published binary releases.
+See the [fork's build instructions](../../README.md#build-and-setup-on-windows) to build
+its changes; future packages will appear on
+[this fork's releases page](https://github.com/jripper77/bezel/releases).
+The package instructions below describe the inherited installer formats and
+apply when such packages are available. Upstream packages do not include this
+fork's modifications.
 Each release has these files (`<version>` is the release number, such as `1.0.0`):
 
 | System | File | Contents |
@@ -102,4 +108,4 @@ LibreHardwareMonitor.
 
 ## From source
 
-See *Build from source* in the project [README](../../README.md#build-from-source).
+See the Windows build instructions in the project [README](../../README.md#build-and-setup-on-windows).

@@ -1,4 +1,4 @@
-﻿# Windows improvements in this fork
+# Bezel Evo ? Windows improvements
 
 This is a personal development fork of [slipalison/bezel](https://github.com/slipalison/bezel), based on `3f6144fe7dce7c14f2d79a8f23bbe27e0315e353`.
 The original project remains upstream. `main` follows the original; `windows-improvements` carries the locally tested changes.

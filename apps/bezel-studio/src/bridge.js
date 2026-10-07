@@ -310,7 +310,9 @@ function tauriBridge(invoke, tauri = {}) {
     listDevices: () => invoke('list_devices'),
     leaveDesktopMode: (key, confirmed) => invoke('leave_desktop_mode', { key, confirmed }),
     catalog: () => invoke('sensor_catalog'),
+    selectScreen: (screen) => invoke('select_screen', { screen }),
     sample: () => invoke('sample_sensors'),
+    restartLibre: () => invoke('restart_libre_reader'),
     searchWeatherCities: (query) => invoke('search_weather_cities', { query }),
     session: () => invoke('editor_session'),
     /**
@@ -422,6 +424,7 @@ function tauriBridge(invoke, tauri = {}) {
     managerOverview: (screen) => invoke('manager_overview', { screen }),
     /** A file's thumbnail from its local copy, as a `data:` URL, or `null`. @returns {Promise<string|null>} */
     managerThumbnail: (screen, path) => invoke('manager_thumbnail', { screen, path }),
+    videoPreview: ({ asset = null, screen = null, path = null }) => invoke('video_preview', { asset, screen, path }),
     /** @returns {Promise<PlanReadyDto|PlanRefusedDto>} */
     planMove: (screen, paths, to, overwrite = []) => invoke('plan_move', { screen, paths, to, overwrite }),
     /** @returns {Promise<PlanReadyDto|PlanRefusedDto>} */
@@ -536,6 +539,7 @@ export function createBridge(win) {
     onStandby: (writes) => root?.setAttribute('data-demo-standby', JSON.stringify(writes)),
     languages: win.navigator?.languages ?? [],
     hold: params.has('hold'),
+    libre: params.get('libre'),
   });
   win.addEventListener?.(DEMO_CLOSE_EVENT, () => demo.requestClose());
   win.addEventListener?.(DEMO_QUIT_EVENT, () => demo.requestQuit());

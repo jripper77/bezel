@@ -10,6 +10,7 @@ pub mod live;
 mod messages;
 mod screen;
 mod sensors;
+mod shutdown;
 pub mod standby;
 pub mod storage;
 pub mod theme;
@@ -289,6 +290,9 @@ pub enum Command {
     /// Show a theme on the screen with live sensors until Ctrl+C, then hand
     /// the screen back to its standalone mode.
     Run {
+        /// Studio settings containing per-screen theme files and Live choices.
+        #[arg(long, value_name = "JSON")]
+        screens_config: Option<PathBuf>,
         /// Keep a light tray icon; Studio can take control and return it on exit (Windows).
         #[arg(long)]
         tray: bool,

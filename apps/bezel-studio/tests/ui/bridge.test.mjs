@@ -360,3 +360,10 @@ test('the demo serves every call the app does', () => {
   const missing = Object.keys(tauri).filter((k) => typeof tauri[k] === 'function' && typeof demo[k] !== 'function' && !appOnly.includes(k));
   assert.deepEqual(missing, []);
 });
+
+test('Libre restart invokes only the configured reader command', async () => {
+  const calls = [];
+  const bridge = createBridge({ ...page(), __TAURI__: { core: { invoke: async (...args) => { calls.push(args); } } } });
+  await bridge.restartLibre();
+  assert.deepEqual(calls, [['restart_libre_reader']]);
+});

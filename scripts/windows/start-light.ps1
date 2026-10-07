@@ -23,6 +23,17 @@ try {
     if (-not $settings.liveScreen) { throw 'Select a screen in Studio first.' }
     # Wake the configured embedded reader. Only its task holds administrator rights.
     $snapshot = Join-Path $env:LOCALAPPDATA 'io.github.slipalison.bezel\sensors\hardware.json'
+    $heartbeat = Join-Path (Split-Path -Parent $snapshot) 'request'
+    $embedded = Test-Path -LiteralPath (Join-Path $AppDirectory 'sensors\bezel-sensors-helper.exe')
+    function Request-Sensors {
+        if ($embedded) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $heartbeat) -Force | Out-Null
+            $file = [IO.File]::Open($heartbeat, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+            $file.Dispose()
+            [IO.File]::SetLastWriteTimeUtc($heartbeat, [DateTime]::UtcNow)
+        }
+    }
+    Request-Sensors
     if (Test-Path -LiteralPath (Join-Path $AppDirectory 'sensors\bezel-sensors-helper.exe')) {
         $task = Get-ScheduledTask -TaskName 'Bezel-Sensors' -TaskPath '\' -ErrorAction SilentlyContinue
         if ($task) {
@@ -31,6 +42,7 @@ try {
         }
     }
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Request-Sensors
         if ((Test-Path -LiteralPath $snapshot) -and
             [DateTime]::UtcNow - (Get-Item -LiteralPath $snapshot).LastWriteTimeUtc -lt [TimeSpan]::FromSeconds(6)) { break }
         try {
@@ -43,7 +55,7 @@ try {
             break
         } catch { Start-Sleep -Seconds 2 }
     }
-    $arguments = 'run "{0}" --screen "{1}" --tray' -f $settings.lastTheme, $settings.liveScreen
+    $arguments = 'run "{0}" --screen "{1}" --screens-config "{2}" --tray' -f $settings.lastTheme, $settings.liveScreen, $settingsFile
     foreach ($option in @(@('ffmpegPath','--ffmpeg'), @('pingHost','--ping-host'), @('mangohudDir','--mangohud-dir'))) {
         $value = $settings.($option[0])
         if ($value) { $arguments += ' {0} "{1}"' -f $option[1], $value }

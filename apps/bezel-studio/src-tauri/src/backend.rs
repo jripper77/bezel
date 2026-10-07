@@ -275,8 +275,10 @@ impl Backend {
     /// Shows the edited theme on the live screen now (its video probed
     /// first when the screen is to start it).
     pub(crate) fn show_now(&self, time: LocalTime) -> bezel_core::Result<()> {
-        let probe = self.studio().live_video_to_probe();
-        self.learn_video(probe, Wait::No);
+        let probes = self.studio().live_videos_to_probe();
+        for probe in probes {
+            self.learn_video(Some(probe), Wait::No);
+        }
         let delivered = self.idle_studio().frame_for_screen(time, Instant::now());
         self.deliver(delivered)
     }
@@ -473,6 +475,9 @@ impl Backend {
     /// In the final state of a shutdown, `busy`: live mode and the
     /// remembered live screen stay as they are.
     pub fn set_live(&self, on: bool, screen: Option<&str>, time: LocalTime) -> UiResult<()> {
+        if on && let Some(key) = screen {
+            self.select_screen(key)?;
+        }
         // Stop first: a screen can only be opened once.
         let previous = {
             let mut studio = self.idle_studio();
@@ -483,7 +488,13 @@ impl Backend {
         };
         drop(previous);
         if !on {
-            self.settings.update(|s| s.live_screen = None);
+            let selected = self.studio().selected_screen().map(str::to_owned);
+            self.settings.update(|s| {
+                if let Some(key) = selected {
+                    s.live_screens.retain(|k| *k != key);
+                }
+                s.live_screen = s.live_screens.last().cloned();
+            });
             return Ok(());
         }
         let asked = screen.ok_or_else(|| UiError::new(ErrorCode::NoScreenChosen))?;
@@ -503,6 +514,9 @@ impl Backend {
         self.show_now(time)?;
         self.settings.update(|s| {
             s.live_screen = Some(key.clone());
+            if !s.live_screens.contains(&key) {
+                s.live_screens.push(key.clone());
+            }
             s.remember_orientation(&key, orientation);
         });
         Ok(())
@@ -512,8 +526,12 @@ impl Backend {
     /// first connected screen (an awake one first). Whether a screen is live
     /// after.
     pub fn toggle_live(&self, time: LocalTime) -> UiResult<bool> {
-        if self.studio().live_key().is_some() {
-            self.set_live(false, None, time)?;
+        if self.studio().any_live() {
+            self.idle_studio().stop_all();
+            self.settings.update(|s| {
+                s.live_screens.clear();
+                s.live_screen = None;
+            });
             return Ok(false);
         }
         let screen =
@@ -614,10 +632,50 @@ impl Backend {
     pub fn session(&self) -> SessionDto {
         let studio = self.studio();
         SessionDto {
+            screen: studio.selected_screen().map(str::to_owned),
             theme: ThemeDto::from(studio.theme()),
             location: studio.location().map(|l| l.0.clone()),
             min_refresh_seconds: MIN_REFRESH_SECONDS,
         }
+    }
+
+    pub fn select_screen(&self, key: &str) -> UiResult<SessionDto> {
+        let screen = self.find_screen(key)?;
+        let model = screen
+            .candidates
+            .first()
+            .copied()
+            .ok_or_else(|| UiError::new(ErrorCode::NoModel))?;
+        let settings = self.settings.load();
+        let orientation = settings
+            .orientation_for(key)
+            .unwrap_or_else(|| default_orientation(model));
+        let blank = Theme::blank(self.texts().untitled, model.panel, orientation);
+        let fresh = self.studio().select_screen(key, blank);
+        if fresh && let Some(path) = settings.screen_themes.get(key) {
+            let location = ThemeLocation(path.clone());
+            self.library.grant(&location);
+            if self.open_at(location).is_err() {
+                diag::report(DiagCode::LastThemeNotReopened);
+            }
+        }
+        let location = self.studio().location().cloned();
+        if let Some(location) = location {
+            self.remember_document(&location);
+        }
+        self.settings
+            .update(|s| s.selected_screen = Some(key.into()));
+        Ok(self.session())
+    }
+
+    fn remember_document(&self, location: &ThemeLocation) {
+        let selected = self.studio().selected_screen().map(str::to_owned);
+        self.settings.update(|s| {
+            s.last_theme = Some(location.0.clone());
+            if let Some(key) = selected {
+                s.screen_themes.insert(key, location.0.clone());
+            }
+        });
     }
 
     /// Takes the UI's theme and renders it at `now` ([`frame_bytes`]: its
@@ -715,9 +773,10 @@ impl Backend {
     fn open_at(&self, location: ThemeLocation) -> UiResult<ThemeDto> {
         let mut studio = self.studio();
         studio.open(self.store.as_ref(), location.clone())?;
-        self.settings
-            .update(|s| s.last_theme = Some(location.0.clone()));
-        Ok(ThemeDto::from(studio.theme()))
+        let theme = ThemeDto::from(studio.theme());
+        drop(studio);
+        self.remember_document(&location);
+        Ok(theme)
     }
 
     /// Saves the UI's theme: to `target` when given (a file picked in the
@@ -741,8 +800,7 @@ impl Backend {
         drop(studio);
         // Its gallery card shows it as saved.
         self.thumbnails.forget(&location);
-        self.settings
-            .update(|s| s.last_theme = Some(location.0.clone()));
+        self.remember_document(&location);
         Ok(SavedDto {
             location: location.0,
         })
@@ -948,13 +1006,34 @@ impl Backend {
             .collect()
     }
 
+    /// Preview only assets belonging to the current theme, never an arbitrary path.
+    pub fn media_video(&self, asset: &str) -> Option<String> {
+        let studio = self.studio();
+        let bytes = studio
+            .assets()
+            .get(&bezel_core::domain::theme::AssetRef(asset.into()))?;
+        crate::media::video_data_url(asset, bytes)
+    }
+
     // -------------------------------------------------------------- start --
 
     /// The theme the window starts with: the last one when it still opens,
     /// else a blank one for the first connected screen (in the orientation
     /// [`Self::new_theme`] picks for it).
     pub fn restore_theme(&self) {
-        if let Some(last) = self.settings.load().last_theme {
+        let settings = self.settings.load();
+        let selected = settings
+            .selected_screen
+            .as_ref()
+            .or(settings.live_screen.as_ref());
+        if let Some(key) = selected {
+            let blank = self.studio().theme().clone();
+            self.studio().select_screen(key, blank);
+        }
+        if let Some(last) = selected
+            .and_then(|k| settings.screen_themes.get(k).cloned())
+            .or(settings.last_theme)
+        {
             // The app's own record of a theme the window was allowed to open
             // or save last time: saving writes back to it again.
             let location = ThemeLocation(last.clone());
@@ -998,10 +1077,23 @@ impl Backend {
     /// saved by an older version as the MCU's port is replaced by the
     /// display's ([`Self::set_live`]; D-2026-10-01-live-screen-controls-2).
     pub fn restore_live(&self, time: LocalTime) {
-        if let Some(key) = self.settings.load().live_screen
-            && self.set_live(true, Some(&key), time).is_err()
-        {
-            diag::report(DiagCode::LiveNotRestored);
+        let settings = self.settings.load();
+        let keys = if settings.live_screens.is_empty() {
+            settings.live_screen.into_iter().collect()
+        } else {
+            settings.live_screens
+        };
+        for key in keys {
+            if self
+                .select_screen(&key)
+                .and_then(|_| self.set_live(true, Some(&key), time))
+                .is_err()
+            {
+                diag::report(DiagCode::LiveNotRestored);
+            }
+        }
+        if let Some(selected) = settings.selected_screen {
+            let _ = self.select_screen(&selected);
         }
     }
 
@@ -1013,13 +1105,17 @@ impl Backend {
     /// due.
     pub fn tick(&self, time: LocalTime, now: Instant) -> Instant {
         self.reconnect(now);
-        let probe = self.studio().live_video_to_probe();
-        self.learn_video(probe, Wait::No);
-        let delivered = self.studio().tick(time, now);
-        if self.deliver(delivered).is_err() {
-            diag::report(DiagCode::LiveFrameFailed);
+        let probes = self.studio().live_videos_to_probe();
+        for probe in probes {
+            self.learn_video(Some(probe), Wait::No);
         }
-        self.studio().next_due()
+        let deliveries = self.studio().tick_all(time, now);
+        for delivered in deliveries {
+            if self.deliver(delivered).is_err() {
+                diag::report(DiagCode::LiveFrameFailed);
+            }
+        }
+        self.studio().next_due_all()
     }
 
     /// Connects a live screen whose link failed again, when an attempt is
@@ -1028,12 +1124,15 @@ impl Backend {
     /// hung, outside the session's lock. Back, it shows the theme again
     /// under its new key, which is remembered.
     fn reconnect(&self, now: Instant) {
-        let Some(attempt) = self.studio().reconnect_due(now) else {
-            return;
-        };
-        let outcome = reopen_screen(self.bus.as_ref(), self.connector.as_ref(), attempt.screen());
-        let unwanted = self.studio().reconnected(attempt, outcome, Instant::now());
-        drop(unwanted);
+        let attempts = self.studio().reconnects_due(now);
+        for (key, attempt) in attempts {
+            let outcome =
+                reopen_screen(self.bus.as_ref(), self.connector.as_ref(), attempt.screen());
+            let unwanted =
+                self.studio()
+                    .reconnect_document(key.as_deref(), attempt, outcome, Instant::now());
+            drop(unwanted);
+        }
         let back = {
             let studio = self.studio();
             studio

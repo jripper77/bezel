@@ -13,6 +13,25 @@ use image::{AnimationDecoder as _, ImageFormat, RgbaImage};
 /// Longest side of a media thumbnail, pixels.
 pub const THUMBNAIL_SIDE: u32 = 96;
 
+/// Bound IPC memory usage when opening a video in the native WebView player.
+pub const VIDEO_PREVIEW_LIMIT: usize = 64 * 1024 * 1024;
+
+pub fn video_data_url(name: &str, bytes: &[u8]) -> Option<String> {
+    if bytes.len() > VIDEO_PREVIEW_LIMIT {
+        return None;
+    }
+    let mime = match extension_of(name).as_str() {
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mkv" => "video/x-matroska",
+        "avi" => "video/x-msvideo",
+        "gif" => "image/gif",
+        _ => return None,
+    };
+    Some(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
+}
+
 /// Extensions the image picker offers (the formats the renderer decodes).
 pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "svg"];
 
@@ -106,6 +125,16 @@ pub(crate) mod tests {
             );
         }
         assert!(BACKGROUND_EXTENSIONS.contains(&"gif"));
+    }
+
+    #[test]
+    fn video_preview_rejects_unrelated_assets_and_oversized_payloads() {
+        assert_eq!(
+            video_data_url("assets/a.MP4", b"clip").unwrap(),
+            "data:video/mp4;base64,Y2xpcA=="
+        );
+        assert!(video_data_url("assets/config.json", b"secret").is_none());
+        assert!(video_data_url("assets/movie.mp4", &vec![0; VIDEO_PREVIEW_LIMIT + 1]).is_none());
     }
 
     /// A GIF of `count` 2x2 pictures.

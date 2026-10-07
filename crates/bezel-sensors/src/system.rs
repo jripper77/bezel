@@ -38,8 +38,8 @@ impl Default for SensorOptions {
 }
 
 /// Measures this machine by composing the platform's providers. Discovery
-/// happens once, when it is built; the catalog is then fixed and every
-/// `sample` returns a reading (possibly unavailable) for each entry.
+/// starts when it is built; providers can add sensors when hardware becomes
+/// ready later. Previously discovered keys remain available in the catalog.
 /// `net.ping` sends packets only while [`SensorSource::want`] says it is
 /// shown; until the first `want`, nothing is.
 pub struct SystemSensors {
@@ -143,6 +143,19 @@ fn platform() -> (Vec<Box<dyn Provider>>, Vec<FoundGpu>) {
 
 impl SensorSource for SystemSensors {
     fn catalog(&mut self) -> Result<Vec<SensorInfo>> {
+        let mut known: std::collections::HashSet<_> =
+            self.catalog.iter().map(|info| info.key.clone()).collect();
+        for info in self
+            .providers
+            .iter()
+            .flat_map(|provider| provider.catalog())
+        {
+            if known.insert(info.key.clone()) {
+                self.catalog.push(info);
+            }
+        }
+        self.catalog
+            .sort_by_key(|info| (info.category, rank(info.key.as_str())));
         Ok(self.catalog.clone())
     }
 
@@ -246,6 +259,41 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    #[test]
+    fn catalog_includes_hardware_ready_after_the_first_sample() {
+        use bezel_core::domain::sensor::{Category, Quantity};
+        struct Late(bool);
+        impl Provider for Late {
+            fn catalog(&self) -> Vec<SensorInfo> {
+                if !self.0 {
+                    return vec![];
+                }
+                crate::provider::describe(
+                    "lhm.psu.corsair.0.power.14",
+                    Category::Board,
+                    "Total Output",
+                    Quantity::Watts,
+                    "LibreHardwareMonitor",
+                )
+                .into_iter()
+                .collect()
+            }
+            fn sample(&mut self, _: Instant, _: &mut Snapshot) {
+                self.0 = true;
+            }
+        }
+        let mut sensors = SystemSensors::assemble(vec![Box::new(Late(false))], vec![]);
+        let initial = sensors.catalog().unwrap();
+        assert!(
+            !initial
+                .iter()
+                .any(|info| info.key.as_str() == "lhm.psu.corsair.0.power.14")
+        );
+        sensors.sample().unwrap();
+        assert_eq!(sensors.catalog().unwrap().len(), initial.len() + 1);
+        assert_eq!(sensors.catalog().unwrap().len(), initial.len() + 1);
     }
 
     #[test]

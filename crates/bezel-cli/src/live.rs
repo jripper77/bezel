@@ -67,6 +67,10 @@ pub trait Pace {
     fn wait(&mut self, duration: Duration);
     /// True once the user asked to stop (Ctrl+C).
     fn stopped(&self) -> bool;
+    /// True only when Windows is shutting down, rather than a normal stop.
+    fn shutting_down(&self) -> bool {
+        false
+    }
     /// Now, on the monotonic clock the loop runs on.
     fn now(&self) -> Instant;
 }
@@ -75,6 +79,7 @@ pub trait Pace {
 #[derive(Debug, Clone, Default)]
 pub struct SleepPace {
     stop: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
 }
 
 /// Longest sleep between two looks at the stop flag.
@@ -83,7 +88,15 @@ const SLICE: Duration = Duration::from_millis(50);
 impl SleepPace {
     /// A pace that stops once `stop` is set.
     pub fn new(stop: Arc<AtomicBool>) -> Self {
-        Self { stop }
+        Self {
+            stop,
+            shutdown: Arc::default(),
+        }
+    }
+
+    /// A Light worker whose open screen also handles Windows shutdown.
+    pub fn with_shutdown(stop: Arc<AtomicBool>, shutdown: Arc<AtomicBool>) -> Self {
+        Self { stop, shutdown }
     }
 }
 
@@ -100,7 +113,11 @@ impl Pace for SleepPace {
     }
 
     fn stopped(&self) -> bool {
-        self.stop.load(Ordering::SeqCst)
+        self.stop.load(Ordering::SeqCst) || self.shutting_down()
+    }
+
+    fn shutting_down(&self) -> bool {
+        self.shutdown.load(Ordering::SeqCst)
     }
 
     fn now(&self) -> Instant {
@@ -613,6 +630,9 @@ where
     B: DeviceBus + ?Sized,
     C: ScreenConnector + ?Sized,
 {
+    if pace.shutting_down() {
+        return Ok(String::new());
+    }
     let mut log = Messages::new(log);
     let loaded = load(kit.store, request.theme)?;
     write!(log, "{}", warning_lines(&loaded.warnings));
@@ -657,13 +677,25 @@ where
     };
     let Show { link, source, .. } = show;
     drop(source);
-    // Hand the screen back even when a frame failed.
-    let released = link.map(|mut link| link.release());
+    // Finish through the open link even when a frame failed. At shutdown,
+    // releasing afterwards could undo a saved video/album/keep choice.
+    let released = link.map(|mut link| {
+        if pace.shutting_down() {
+            crate::shutdown::finish(link.as_mut())
+        } else {
+            link.release()
+        }
+    });
     outcome.with_context(|| format!("stopped after {frames} frames"))?;
     let end = match released {
         Some(released) => {
-            released.context("could not hand the screen back")?;
-            "released"
+            if pace.shutting_down() {
+                released.context("could not apply the screen's shutdown action")?;
+                "shutdown applied"
+            } else {
+                released.context("could not hand the screen back")?;
+                "released"
+            }
         }
         None => "stopped while it was away",
     };
@@ -749,6 +781,53 @@ mod tests {
             start: Instant::now(),
             waited: Duration::ZERO,
         }
+    }
+
+    #[test]
+    fn windows_shutdown_finishes_the_live_link_instead_of_releasing_it() {
+        struct ShutdownPace(ScriptedPace);
+        impl Pace for ShutdownPace {
+            fn wait(&mut self, duration: Duration) {
+                self.0.wait(duration);
+            }
+            fn stopped(&self) -> bool {
+                self.0.stopped()
+            }
+            fn shutting_down(&self) -> bool {
+                self.stopped()
+            }
+            fn now(&self) -> Instant {
+                self.0.now()
+            }
+        }
+        let bus = FakeBus::new(vec![Endpoint {
+            address: DeviceAddress("COM3".into()),
+            transport: bezel_core::domain::device::Transport::Serial,
+            usb: bezel_core::domain::device::UsbId::new(0x1a86, 0xfe0c),
+            serial_number: None,
+            manufacturer: None,
+            product: None,
+            location: None,
+        }]);
+        let connector = FakeConnector::default();
+        let file = theme_file("shutdown", Size::new(320, 480), Orientation::Portrait, 1.0);
+        let (out, _) = run_on(
+            &(bus, connector.clone()),
+            &file,
+            &mut FakeSensors::default(),
+            &mut ShutdownPace(scripted(1)),
+            None,
+            &mut StubMedia::ready(),
+        );
+        assert!(out.unwrap().contains("shutdown applied"));
+        let log = connector.log();
+        assert_eq!(log.frames.len(), 1);
+        assert_eq!(log.releases, 0);
+        assert_eq!(
+            log.storage.calls,
+            vec![bezel_devices::fake::StorageCall::TurnOffNow]
+        );
+        std::fs::remove_dir_all(file).unwrap();
     }
 
     /// Sensors whose catalog works and whose samples fail after `ok` of them.

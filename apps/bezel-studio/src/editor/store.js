@@ -200,6 +200,12 @@ export function createStore(theme, { names = ENGLISH } = {}) {
 
   return {
     getState: () => state,
+    capture: () => ({ state, past, future, saved, clipboard, pasteCount }),
+    restore(document) {
+      ({ state, past, future, saved, clipboard, pasteCount } = document);
+      gesture = null;
+      emit('load');
+    },
     isDirty: () => state.theme !== saved,
     markSaved() {
       saved = state.theme;

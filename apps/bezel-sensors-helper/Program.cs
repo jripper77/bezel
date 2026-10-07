@@ -1,6 +1,7 @@
 // Bezel sensor helper: GPL-3.0-or-later. LibreHardwareMonitorLib is MPL-2.0.
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Security.Principal;
@@ -12,6 +13,8 @@ using LibreHardwareMonitor.Hardware;
 internal static class Program
 {
     private static string logPath;
+    private static readonly Dictionary<string, string> hardwareHealth = new Dictionary<string, string>();
+    private static readonly Dictionary<string, DateTime> hardwareLoggedAt = new Dictionary<string, DateTime>();
 
     private static int Main(string[] args)
     {
@@ -36,7 +39,7 @@ internal static class Program
         bool created;
         using (Mutex mutex = new Mutex(true, "Local\\BezelSensors-" + identity.User.Value, out created))
         {
-            if (!created) return 0;
+            if (!created) { Log("Another sensor helper instance is already running; exiting"); return 0; }
             Computer computer = null;
             try
             {
@@ -51,8 +54,10 @@ internal static class Program
                 computer.IsStorageEnabled = true;
                 computer.IsNetworkEnabled = true;
                 computer.IsBatteryEnabled = true;
+                Log("Opening hardware; pid=" + Process.GetCurrentProcess().Id + "; helper=" + typeof(Program).Assembly.Location + "; library=" + typeof(Computer).Assembly.GetName().Version);
+                Stopwatch opening = Stopwatch.StartNew();
                 computer.Open();
-                Log("Started LibreHardwareMonitorLib " + typeof(Computer).Assembly.GetName().Version);
+                Log("Started LibreHardwareMonitorLib " + typeof(Computer).Assembly.GetName().Version + "; openMs=" + opening.ElapsedMilliseconds + "; hardwareCount=" + computer.Hardware.Count);
                 DateTime started = DateTime.UtcNow;
                 string heartbeat = Path.Combine(folder, "request");
                 JavaScriptSerializer json = new JavaScriptSerializer();
@@ -70,30 +75,40 @@ internal static class Program
                         snapshot["Children"] = children;
                         Publish(output, json.Serialize(snapshot));
                     }
-                    catch (Exception error) { Log("Sample failed: " + error.GetType().Name + ": " + error.Message); }
+                    catch (Exception error) { Log("Sample failed: " + error.ToString()); }
                     if (once) break;
                     DateTime requested = File.Exists(heartbeat) ? File.GetLastWriteTimeUtc(heartbeat) : started;
-                    if (DateTime.UtcNow - requested > TimeSpan.FromSeconds(30))
+                    if (ShouldStop(started, requested, DateTime.UtcNow))
                     {
-                        Log("No Bezel clients; stopping");
+                        Log("No Bezel clients; stopping; heartbeatAgeSeconds=" + (DateTime.UtcNow - requested).TotalSeconds.ToString("F1", CultureInfo.InvariantCulture));
                         break;
                     }
                     Thread.Sleep(1000);
                 } while (true);
                 return File.Exists(output) ? 0 : 4;
             }
-            catch (Exception error) { Log("Startup failed: " + error.GetType().Name + ": " + error.Message); return 1; }
+            catch (Exception error) { Log("Startup failed: " + error.ToString()); return 1; }
             finally
             {
-                try { if (computer != null) computer.Close(); } catch (Exception error) { Log("Cleanup failed: " + error.GetType().Name); }
+                try { if (computer != null) computer.Close(); } catch (Exception error) { Log("Cleanup failed: " + error.ToString()); }
+                Log("Helper stopped; pid=" + Process.GetCurrentProcess().Id);
                 mutex.ReleaseMutex();
             }
         }
     }
 
+    // A heartbeat from a previous session must not cancel the startup grace period.
+    private static bool ShouldStop(DateTime started, DateTime requested, DateTime now)
+    {
+        return now - (requested > started ? requested : started) > TimeSpan.FromSeconds(30);
+    }
+
     private static object ReadHardware(IHardware hardware)
     {
-        hardware.Update();
+        Stopwatch update = Stopwatch.StartNew();
+        try { hardware.Update(); }
+        catch (Exception error) { Log("Hardware update failed; id=" + hardware.Identifier + "; elapsedMs=" + update.ElapsedMilliseconds + "; " + error.ToString()); throw; }
+        LogHardware(hardware, update.ElapsedMilliseconds);
         List<object> children = new List<object>();
         foreach (ISensor sensor in hardware.Sensors)
         {
@@ -128,14 +143,56 @@ internal static class Program
         try
         {
             if (File.Exists(logPath) && new FileInfo(logPath).Length > 1024 * 1024)
-                File.WriteAllText(logPath, String.Empty);
-            File.AppendAllText(logPath, DateTime.UtcNow.ToString("o") + " " + message + Environment.NewLine);
+            {
+                string previous = logPath + ".1";
+                if (File.Exists(previous)) File.Delete(previous);
+                File.Move(logPath, previous);
+            }
+            File.AppendAllText(logPath, DateTime.UtcNow.ToString("o") + " pid=" + Process.GetCurrentProcess().Id + " " + message + Environment.NewLine);
         }
         catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static bool HasValue(ISensor sensor)
+    {
+        return sensor.Value.HasValue && !float.IsNaN(sensor.Value.Value) && !float.IsInfinity(sensor.Value.Value);
+    }
+
+    private static void LogHardware(IHardware hardware, long elapsedMs)
+    {
+        string id = hardware.Identifier.ToString();
+        int valid = 0;
+        List<string> missing = new List<string>();
+        List<string> values = new List<string>();
+        foreach (ISensor sensor in hardware.Sensors)
+        {
+            if (HasValue(sensor)) valid++;
+            else missing.Add(sensor.Identifier.ToString());
+            if (id.StartsWith("/psu/corsair/", StringComparison.Ordinal))
+                values.Add(sensor.Identifier + "=" + (HasValue(sensor) ? sensor.Value.Value.ToString("R", CultureInfo.InvariantCulture) : "missing"));
+        }
+        string state = "valid=" + valid + "/" + hardware.Sensors.Length + "; missing=[" + String.Join(",", missing.ToArray()) + "]";
+        string previous;
+        DateTime last;
+        if (!hardwareHealth.TryGetValue(id, out previous) || previous != state ||
+            !hardwareLoggedAt.TryGetValue(id, out last) || DateTime.UtcNow - last >= TimeSpan.FromSeconds(30))
+        {
+            Log("Hardware sample; id=" + id + "; updateMs=" + elapsedMs + "; " + state +
+                (values.Count > 0 ? "; corsair=[" + String.Join(",", values.ToArray()) + "]" : ""));
+            hardwareHealth[id] = state;
+            hardwareLoggedAt[id] = DateTime.UtcNow;
+        }
     }
 
     private static int SelfTest()
     {
+        DateTime started = new DateTime(2026, 10, 6, 20, 0, 0, DateTimeKind.Utc);
+        if (ShouldStop(started, started.AddDays(-1), started.AddSeconds(1))) return 1;
+        if (ShouldStop(started, started, started.AddSeconds(30))) return 1;
+        if (!ShouldStop(started, started.AddDays(-1), started.AddSeconds(31))) return 1;
+        if (ShouldStop(started, started.AddSeconds(25), started.AddSeconds(40))) return 1;
+        if (!ShouldStop(started, started.AddSeconds(25), started.AddSeconds(56))) return 1;
         JavaScriptSerializer serializer = new JavaScriptSerializer();
         Dictionary<string, object> sensor = new Dictionary<string, object>();
         sensor["SensorId"] = "/intelcpu/0/temperature/0";

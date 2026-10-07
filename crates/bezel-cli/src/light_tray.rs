@@ -119,6 +119,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> anyhow::Result<String> {
     ctrlc::set_handler(move || flag.store(true, Ordering::SeqCst))?;
     let mut worker: Option<std::thread::JoinHandle<anyhow::Result<String>>> = None;
     let mut stop = Arc::new(AtomicBool::new(false));
+    let shutdown = Arc::new(AtomicBool::new(false));
     let mut pending_open = false;
     let mut opening: Option<(std::process::Child, Instant)> = None;
     let mut visible = true;
@@ -127,6 +128,29 @@ pub(super) fn run(arguments: Vec<OsString>) -> anyhow::Result<String> {
     let studio_exe = directory.join("bezel-studio.exe");
     let mut fatal = None;
     event_loop.run_return(|event, _, flow| {
+        // Tao delivers LoopDestroyed synchronously inside WM_ENDSESSION,
+        // then exits the process. Finish BEFORE returning from this callback.
+        // The query/cancel phase does not deliver it and must leave Light live.
+        if matches!(event, Event::LoopDestroyed) && bezel_power::session_ending() {
+            shutdown.store(true, Ordering::SeqCst);
+            stop.store(true, Ordering::SeqCst);
+            let deadline = Instant::now() + Duration::from_millis(3500);
+            while worker.as_ref().is_some_and(|thread| !thread.is_finished())
+                && Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if worker.as_ref().is_some_and(|thread| !thread.is_finished()) {
+                eprintln!("bezel light: shutdown deadline reached; screen sleep timer remains the fallback");
+            } else if let Some(thread) = worker.take() {
+                match thread.join() {
+                    Ok(Ok(summary)) => eprint!("{summary}"),
+                    Ok(Err(error)) => eprintln!("bezel light: shutdown failed: {error:#}"),
+                    Err(_) => eprintln!("bezel light: shutdown worker panicked"),
+                }
+            }
+            return;
+        }
         *flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100));
         let wants_open = match event {
             Event::UserEvent(Action::Menu(ref event)) if event.id == *quit.id() => {
@@ -224,6 +248,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> anyhow::Result<String> {
             reload_saved = false;
             stop = Arc::new(AtomicBool::new(false));
             let flag = Arc::clone(&stop);
+            let ending = Arc::clone(&shutdown);
             let folder = runtime_directory.clone();
             match std::thread::Builder::new()
                 .name("bezel-light-render".into())
@@ -234,7 +259,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> anyhow::Result<String> {
                     if handoff::studio_active(&folder)? {
                         return Ok(String::new());
                     }
-                    crate::themes_with_stop(&cli, flag)
+                    crate::themes_with_shutdown(&cli, flag, ending)
                 }) {
                 Ok(thread) => worker = Some(thread),
                 Err(error) => {

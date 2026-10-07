@@ -35,11 +35,15 @@ mod fps;
 mod gpu;
 #[cfg(any(windows, test))]
 mod lhm;
+mod libre_control;
 #[cfg(target_os = "linux")]
 mod linux;
 mod nvidia;
 mod ping;
 mod provider;
+#[cfg(windows)]
+mod sensor_log;
+mod shared;
 mod system;
 #[cfg(test)]
 #[cfg(target_os = "linux")]
@@ -50,4 +54,6 @@ pub mod weather;
 mod windows;
 
 pub use fake::FakeSensors;
+pub use libre_control::restart_libre_reader;
+pub use shared::SharedSensors;
 pub use system::{SensorOptions, SystemSensors};

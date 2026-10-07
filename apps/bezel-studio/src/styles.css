@@ -47,7 +47,11 @@
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
 button, input, select { font: inherit; color: inherit; }
+/* Windows native popups can use a light background despite the dark page. */
+select option, select optgroup { background-color: var(--surface-2); color: var(--text); }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.video-preview-dialog { width: min(850px, 90vw); }
+.video-preview-player { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #000; }
 [hidden] { display: none !important; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .spacer { flex: 1; }
@@ -172,6 +176,9 @@ button, input, select { font: inherit; color: inherit; }
 .notice p { margin: 6px 0; font-size: 0.85rem; }
 .notice ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 0.85rem; overflow-wrap: anywhere; }
 .button-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.background-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 16px 0 6px; flex-wrap: wrap; }
+.inspector .background-heading h3 { margin: 0; }
+.background-heading .text-button { font-size: 0.75rem; padding: 4px 8px; }
 .button-row.pairs { display: grid; grid-template-columns: 1fr 1fr; }
 .button-row.pairs .text-button { padding: 0 8px; gap: 4px; font-size: 0.9rem; white-space: nowrap; }
 .button-row.pairs .text-button svg { width: 14px; height: 14px; }
@@ -272,6 +279,15 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------ statusbar -- */
 .statusbar { display: flex; gap: 16px; padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.statusbar { align-items: center; }
+#status-libre:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.status-dot[data-state="ok"] { background: #22c55e; }
+.status-dot[data-state="partial"], .status-dot[data-state="restarting"] { background: #f59e0b; }
+.status-dot[data-state="error"] { background: #ef4444; }
+.status-restart { font: inherit; color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; cursor: pointer; }
+.status-restart:hover { border-color: var(--accent); }
+.status-restart:disabled { opacity: 0.5; cursor: wait; }
 .toast { position: fixed; bottom: 36px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; box-shadow: var(--shadow); max-width: 70ch; }
 
 .screen-card { display: grid; gap: 4px; padding: 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-2); margin-bottom: 10px; }

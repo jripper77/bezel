@@ -8,6 +8,7 @@
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { errorText } from '../messages.js';
+import { openVideoPreview } from './video-preview.js';
 import {
   CACHE_LIMITS, KIND_FILTERS, ORIGIN_FILTERS, SORTS, actionsFor, baseName, cleanupGroups, emptySelection, findingText, formatBytes,
   formatExactBytes, formatLimit, formatSent, hasCopy, isBezel, keyAction, otherMedium, placeText, planRefusalText, precheckedPaths,
@@ -17,7 +18,7 @@ import {
 /** How far a press travels before it is a drag, px. */
 const DRAG_THRESHOLD = 4;
 /** The order of the side toolbar. */
-const ACTIONS = Object.freeze(['move', 'copy', 'rename', 'play', 'background', 'boot', 'associate', 'delete']);
+const ACTIONS = Object.freeze(['move', 'copy', 'rename', 'preview', 'play', 'background', 'boot', 'associate', 'delete']);
 /** Icons of the manager's own actions (24x24, stroked). */
 export const GLYPHS = Object.freeze({
   move: ['M4 12h14', 'M13 6l6 6-6 6'],
@@ -27,7 +28,7 @@ export const GLYPHS = Object.freeze({
   box: ['M4 7h16v13H4z', 'M3 4h18v3H3z', 'M10 11h4'],
 });
 const ACTION_ICONS = Object.freeze({
-  move: GLYPHS.move, copy: ICONS.copy, rename: GLYPHS.rename, play: ICONS.play, background: ICONS.film, boot: ICONS.power, associate: GLYPHS.link, delete: ICONS.trash,
+  move: GLYPHS.move, copy: ICONS.copy, rename: GLYPHS.rename, preview: ICONS.film, play: ICONS.play, background: ICONS.film, boot: ICONS.power, associate: GLYPHS.link, delete: ICONS.trash,
 });
 
 let dialogs = 0;
@@ -166,6 +167,7 @@ export function createManagerView({ t, locale, bridge, host }) {
 
   // ------------------------------------------------------------- toolbar --
   function actionLabel(name, medium) {
+    if (name === 'preview') return t('videoPreview.open');
     if (name === 'move' || name === 'copy') return t(`storage.action.${name}To.${otherMedium(medium)}`);
     return t(`storage.action.${name}`);
   }
@@ -187,7 +189,9 @@ export function createManagerView({ t, locale, bridge, host }) {
     if (!column?.count) return;
     const can = allowed(medium);
     for (const [name, button] of Object.entries(column.buttons)) {
-      const { enabled, reason } = can[name];
+      const { enabled, reason } = name === 'preview'
+        ? { enabled: selectedFiles(medium).length === 1 && selectedFiles(medium)[0].kind === 'video', reason: 'videoOnly' }
+        : can[name];
       button.disabled = !enabled;
       button.title = enabled ? '' : t(`storage.reason.${reason}`);
     }
@@ -203,6 +207,7 @@ export function createManagerView({ t, locale, bridge, host }) {
   function run(name, medium) {
     const chosen = selectedFiles(medium);
     switch (name) {
+      case 'preview': return openVideoPreview({ t, name: chosen[0].name, load: () => bridge.videoPreview({ screen: host.key(), path: chosen[0].path }), associate: hasCopy(chosen[0]) ? null : () => associate(chosen[0]) });
       case 'move':
       case 'copy':
         return transfer(name, medium, chosen.map((f) => f.path));

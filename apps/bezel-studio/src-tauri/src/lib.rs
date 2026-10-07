@@ -131,7 +131,7 @@ pub(crate) fn prepare_light_on_close<R: Runtime>(
     backend: &Shared,
 ) -> std::io::Result<()> {
     #[cfg(windows)]
-    if returns_to_light(manager) && backend.studio().live_key().is_some() {
+    if returns_to_light(manager) && backend.studio().any_live() {
         let settings = backend.settings.load();
         let theme = settings.last_theme.as_deref().ok_or_else(|| {
             std::io::Error::other("Save the theme before switching to Bezel Light")
@@ -145,6 +145,8 @@ pub(crate) fn prepare_light_on_close<R: Runtime>(
             "--screen".into(),
             screen.into(),
             "--tray".into(),
+            "--screens-config".into(),
+            backend.settings.path().as_os_str().to_owned(),
         ];
         for (option, value) in [
             ("--ffmpeg", settings.ffmpeg_path.as_deref()),
@@ -290,7 +292,7 @@ pub fn run() -> Result<(), tauri::Error> {
             };
             let live = window
                 .try_state::<Shared>()
-                .is_some_and(|b| b.studio().live_key().is_some());
+                .is_some_and(|b| b.studio().any_live());
             let unsaved = window.try_state::<Unsaved>().is_some_and(|u| u.get());
             let return_to_light = returns_to_light(window);
             match on_close_for_runtime(live, unsaved, return_to_light) {
@@ -320,7 +322,9 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::leave_desktop_mode,
             commands::quit_app,
             commands::sensor_catalog,
+            commands::select_screen,
             commands::sample_sensors,
+            commands::restart_libre_reader,
             commands::search_weather_cities,
             commands::editor_session,
             commands::render_preview,
@@ -339,6 +343,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::add_icon,
             commands::add_media,
             commands::list_assets,
+            commands::video_preview,
             commands::list_fonts,
             commands::get_autostart,
             commands::set_autostart,
@@ -506,12 +511,15 @@ fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::e
     // Before the window asks for it: the last theme, or a blank one for the
     // connected screen.
     backend.restore_theme();
+    // Restore every screen before exposing the session to the webview:
+    // selecting a background document must not race the first preview.
+    backend.restore_live(clock::now());
     app.manage(Arc::clone(&backend));
     // Its own state, which asks nothing of KLIPY until a search.
     let gifs: SharedGifs = Arc::new(gifs(&folders, start.gif_source));
     app.manage(gifs);
     app.manage(Unsaved::default());
-    let live = backend.studio().live_key().is_some();
+    let live = backend.studio().any_live();
     let live_item = (start.tray)(app.handle(), live, &backend.texts())
         .inspect_err(|_| diag::report(DiagCode::TrayNotAdded))?;
     power::watch_shutdowns(Arc::clone(&backend), start.logind);
@@ -790,12 +798,11 @@ fn start_refresh_loop(backend: Shared, live_item: LiveSync) {
             if backend.studio().refresh_catalog().is_err() {
                 diag::report(DiagCode::SensorCatalogNotRead);
             }
-            backend.restore_live(clock::now());
             loop {
                 let due = backend.tick(clock::now(), Instant::now());
                 // Not under the session's lock: the menu waits for the main
                 // thread.
-                let live = backend.studio().live_key().is_some();
+                let live = backend.studio().any_live();
                 live_item(live);
                 std::thread::sleep(sleep_until(due, Instant::now()));
             }

@@ -101,6 +101,15 @@ The card is missing or not FAT32 on an MBR partition table:
 `bezel sensors` prints why. On Windows, run LibreHardwareMonitor as
 administrator. See [Sensors](sensors.md#when-a-value-is-unavailable).
 
+With the bundled Windows reader, Studio's status bar shows **Libre reading**
+with a green dot. Yellow means at least one hardware device has no readings;
+red means no Libre readings are available. Hover over the status for the
+affected device. Optional missing sensors do not turn a healthy device yellow.
+**Restart Libre** restarts the configured Bezel sensor reader; the status
+updates when readings return. This can recover a Corsair PSU whose USB
+readings stopped, even when its computed Total Output still reports `0 W`.
+The restart requires the `Bezel-Sensors` task created by `configure-sensors.cmd`.
+
 ## Game FPS shows `—`
 
 No tool is measuring a game, or the game is paused: [Game FPS](fps.md).

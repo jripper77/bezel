@@ -12,11 +12,21 @@ Run the installation's `configure-sensors.cmd` as administrator once with the no
 
 The helper atomically replaces `%LOCALAPPDATA%\io.github.slipalison.bezel\sensors\hardware.json` roughly once per second. Bezel reads it on its sensor worker, with a 4 MiB limit and a six-second freshness limit; rendering does not wait for hardware access. The existing sensor IDs, tree, aliases, types and raw units are preserved. Missing values stay unavailable. External WMI/loopback Libre remains a fallback when the bundled snapshot is unavailable.
 
-Bezel updates the local `request` heartbeat while its sensor provider is alive. The helper stops after 30 seconds without a client, and both CLI and Studio can wake the scheduled task when needed. It is single-instance for the current user. No window or tray icon is added by the helper. Errors go to a bounded local `helper.log` beside the snapshot.
+Bezel updates the local `request` heartbeat while its sensor provider is alive. The helper grants 30 seconds after hardware initialization for clients to connect, even when a heartbeat from a previous login exists. After that it stops after 30 seconds without a client. The login launcher updates the heartbeat before waking the task and while waiting for sensors; both CLI and Studio can also wake the scheduled task when needed. It is single-instance for the current user. No window or tray icon is added by the helper. Errors go to a bounded local `helper.log` beside the snapshot.
 
 Only `/.../name` aliases are imported from the old Libre settings. The helper reads hardware and sensor values and never calls the fan-control API; persisted control modes and software values are ignored. CAM can continue managing cooling and lighting.
 
 ## Diagnostics and rollback
+
+Diagnostics are kept beside `hardware.json`: `helper.log` records hardware update times,
+exceptions with stack traces, missing sensor IDs, and Corsair values on a health change
+or every 30 seconds. `reader.log` records the source used by Bezel (embedded, WMI or
+HTTP), fallback errors, Corsair readings, and each restart request and scheduler result.
+Reader entries use `atUnixMillis` (UTC milliseconds since the Unix epoch) and the
+process ID; helper entries use UTC timestamps and the process ID. Each log rotates
+at 1 MiB and retains one previous file with a `.1` suffix. A successful scheduler
+start is logged separately from the reader's actual health: it does not guarantee
+that the PSU resumed reading.
 
 The helper accepts `--once`, `--output PATH`, and `--names PATH`. `--self-test` checks invariant number serialization and rejects restoring control modes. The production executable requires elevation through its manifest; the build can be checked with an unelevated console compilation of the same source before configuring the privileged task.
 

@@ -308,7 +308,10 @@ impl Backend {
             diag::report(DiagCode::ShutdownJobNotStopped);
             return;
         }
-        let live = self.live_link_for_shutdown(deadline);
+        let mut live_links = Vec::new();
+        while let Some(link) = self.live_link_for_shutdown(deadline) {
+            live_links.push(link);
+        }
         let catalog = match self.storage.archive().load() {
             Ok(catalog) => catalog,
             Err(_) => {
@@ -316,9 +319,11 @@ impl Backend {
                 return;
             }
         };
-        let had_live = live.is_some();
-        if let Some(mut link) = live.filter(|_| Instant::now() < deadline) {
-            self.apply(link.as_mut());
+        let had_live = !live_links.is_empty();
+        for mut link in live_links {
+            if Instant::now() < deadline {
+                self.apply(link.as_mut());
+            }
         }
         let screens = discover_screens(self.bus.as_ref()).unwrap_or_else(|_| {
             diag::report(DiagCode::ShutdownScreensNotListed);

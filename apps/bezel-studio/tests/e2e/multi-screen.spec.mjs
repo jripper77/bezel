@@ -1,0 +1,30 @@
+import { test, expect, watchErrors } from './helpers.mjs';
+
+test('screen switching retains independent drafts, Undo and Live', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto('/index.html?demo=two');
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await expect(page.locator('#screen-select option')).toHaveCount(2);
+  const options = await page.locator('#screen-select option').evaluateAll((nodes) => nodes.map((n) => n.value));
+  const first = await page.locator('#screen-select').inputValue();
+  const second = options.find((v) => v !== first);
+  await page.locator('#theme-name').fill('First draft');
+  await page.locator('#theme-name').press('Tab');
+  await page.locator('#live').press('Space');
+  await expect(page.locator('#live')).toBeChecked();
+  await page.locator('#screen-select').selectOption(second);
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await expect(page.locator('#live')).not.toBeChecked();
+  await page.locator('#theme-name').fill('Second draft');
+  await page.locator('#theme-name').press('Tab');
+  await page.locator('#live').press('Space');
+  await page.locator('#screen-select').selectOption(first);
+  await expect(page.locator('#theme-name')).toHaveValue('First draft');
+  await expect(page.locator('#live')).toBeChecked();
+  await page.locator('#undo').click();
+  await expect(page.locator('#theme-name')).toHaveValue('Demo');
+  await page.locator('#screen-select').selectOption(second);
+  await expect(page.locator('#theme-name')).toHaveValue('Second draft');
+  await expect(page.locator('#live')).toBeChecked();
+  expect(errors).toEqual([]);
+});

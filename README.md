@@ -15,6 +15,10 @@ This repository is a personal Windows-focused fork of
 refer to the original project; changes specific to this fork are described in
 [FORK.md](FORK.md).
 
+Thanks to Alison Amorim ([@slipalison](https://github.com/slipalison)) for
+creating Bezel and sharing its code, protocol research and editor. This fork
+builds on that work; the original project remains upstream.
+
 ## Install and documentation
 
 Download from the [releases page](https://github.com/slipalison/bezel/releases)
@@ -30,6 +34,14 @@ The installers are not signed: Windows SmartScreen may ask you to confirm
 ## Windows Light runtime and sensors
 
 This fork adds a lightweight background runtime and integrated hardware sensors:
+
+- **Multiple screens.** Studio remembers a theme and orientation for each
+  screen. Light can run the saved active screens together with
+  `--screens-config`, sharing the sensor worker across displays.
+- **Libre status and diagnostics.** Studio shows the reader's health and
+  offers a restart of the configured helper. Bounded helper and reader logs
+  record unavailable sensors and fallback errors. A heartbeat from a previous
+  login no longer causes the helper to exit immediately at startup.
 
 - **Close Studio to Light.** In Preferences, **Use Bezel Light when closing
   Studio** is enabled by default. When a theme is live, the window's X handles
@@ -55,8 +67,20 @@ This fork adds a lightweight background runtime and integrated hardware sensors:
   `configure-startup.cmd` as administrator after checking the installation
   paths. Setup also configures the sensor helper, backs up the existing Bezel
   startup entry, and removes the three legacy Turing startup tasks named in
-  the [Windows setup guide](scripts/windows/README.md). A real sign-out or
-  reboot check remains pending.
+  the [Windows setup guide](scripts/windows/README.md). If you move or rename
+  the installation folder, rerun setup to update the login entry and helper
+  task. Windows may also assign a different COM port after reconnecting a
+  display; select its current port in Studio. Login testing exposed both
+  stale paths and changed ports; these were corrected on the test PC. The
+  next login still needs to confirm the updated configuration.
+
+- **Local video previews.** **Media → This theme → Preview** and
+  **Screen → Storage → Preview** open a player with play, pause, seek and loop
+  controls. Storage previews use the associated local copy; missing copies
+  can be linked through **Associate original file…**. Previewing does not
+  change the theme or start playback on the screen. Files up to 64 MiB are
+  supported; codecs depend on WebView. Videos stored only on the device
+  cannot be retrieved through the current protocol.
 
 Other additions include offline Tabler and hardware icons, Italian icon search,
 configurable dates and clocks, object copy/paste, weather widgets, ring gradients,

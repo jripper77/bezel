@@ -320,6 +320,21 @@ impl Mapping {
         self.entries.iter().map(|(info, _)| info.clone()).collect()
     }
 
+    /// Discover sensors arriving after startup without forgetting temporarily
+    /// missing devices or the keys already bound to a theme.
+    pub(crate) fn refresh(&mut self, rows: &[Row], hardware: &HashMap<String, String>) {
+        let mut known: std::collections::HashSet<_> = self
+            .entries
+            .iter()
+            .map(|(info, _)| info.key.clone())
+            .collect();
+        for entry in Self::discover(Some(rows), hardware).entries {
+            if known.insert(entry.0.key.clone()) {
+                self.entries.push(entry);
+            }
+        }
+    }
+
     /// A reading for every entry from the latest rows, or `why` they are missing.
     pub(crate) fn readings(&self, rows: Result<&[Row], &str>) -> Vec<(SensorInfo, Reading)> {
         let rows = match rows {
@@ -450,6 +465,31 @@ mod tests {
             .find(|(i, _)| i.key.as_str() == key)
             .map(|(_, r)| r)
             .unwrap()
+    }
+
+    #[test]
+    fn late_libre_start_discovers_corsair_and_keeps_it_across_outages() {
+        let mut mapping = Mapping::discover(None, &HashMap::new());
+        let corsair = row("/psu/corsair/0/power/14", "Total Output", "Power", 250.0);
+        let key = "lhm.psu.corsair.0.power.14";
+        assert!(
+            !mapping
+                .catalog()
+                .iter()
+                .any(|info| info.key.as_str() == key)
+        );
+        let rows = vec![corsair];
+        mapping.refresh(&rows, &HashMap::new());
+        assert_eq!(reading(&mapping, &rows, key), Reading::Value(250.0));
+        let count = mapping.catalog().len();
+        mapping.refresh(&[], &HashMap::new());
+        assert!(matches!(
+            reading(&mapping, &[], key),
+            Reading::Unavailable(_)
+        ));
+        mapping.refresh(&rows, &HashMap::new());
+        assert_eq!(mapping.catalog().len(), count);
+        assert_eq!(reading(&mapping, &rows, key), Reading::Value(250.0));
     }
 
     #[test]

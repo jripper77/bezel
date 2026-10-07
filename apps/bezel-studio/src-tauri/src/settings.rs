@@ -24,6 +24,10 @@ pub struct Settings {
     pub light_on_close: Option<bool>,
     /// Key of the screen that was live when the app last changed it.
     pub live_screen: Option<String>,
+    pub selected_screen: Option<String>,
+    /// Last opened/saved file and Live choice for each display.
+    pub screen_themes: BTreeMap<String, String>,
+    pub live_screens: Vec<String>,
     /// The orientation last used with each screen (`portrait`, `landscape`…),
     /// by screen key.
     pub screen_orientations: BTreeMap<String, String>,

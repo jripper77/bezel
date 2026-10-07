@@ -6,6 +6,7 @@ import { createStore } from './editor/store.js';
 import { isHorizontal, isTurned, orientationOf } from './editor/geometry.js';
 import { createCanvasView } from './ui/canvas.js';
 import { createLibrary } from './ui/library.js';
+import { openVideoPreview } from './ui/video-preview.js';
 import { createInspector } from './ui/inspector.js';
 import { createConfirm, createStoragePanel, formatBytes, wireSubtabs } from './ui/storage.js';
 import { el, icon } from './ui/dom.js';
@@ -23,6 +24,7 @@ import { errorText, sensorLabel } from './messages.js';
 import { backgroundOf, droppable, fileNameOf, videoFacts } from './editor/background.js';
 import { framingOf, framingPercents } from './editor/video-framing.js';
 import { liveScreenIn } from './live-screen.js';
+import { libreStatus } from './libre-status.js';
 
 const bridge = createBridge(window);
 const $ = (id) => document.getElementById(id);
@@ -96,6 +98,12 @@ const session = await bridge.session().catch(() => null);
 const names = { widget: (widget) => t(`widget.${widget}`), copy: (name) => t('layers.copyOf', { name }) };
 const store = createStore(session?.theme ?? { schema: 1, name: t('themes.untitled'), canvas: { width: 1920, height: 480 }, orientation: 'landscape', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] }, { names });
 state.location = session?.location ?? null;
+state.screen = session?.screen ?? null;
+const screenDocuments = new Map();
+let switchingScreen = false;
+let previewWork = Promise.resolve();
+let autoWork = Promise.resolve();
+let liveWork = Promise.resolve();
 // The fastest refresh a theme may ask for comes from the backend (the
 // core's); without a backend nothing refreshes faster than once a second.
 const minRefresh = () => session?.minRefreshSeconds ?? 1;
@@ -141,6 +149,7 @@ const library = createLibrary({
     addImage: () => addImage(),
     addIcon: (item, svg, at, size) => addIcon(item, svg, at, size),
     addVideo: () => addMedia(),
+    previewVideo: (asset) => openVideoPreview({ t, name: fileNameOf(asset.ref), gif: asset.animated, load: () => bridge.videoPreview({ asset: asset.ref }) }),
     searchGifs: () => void gifSearch.open(),
     mediaSubtab: (name) => {
       if (name === 'collection') void collection.show();
@@ -304,13 +313,16 @@ function autoKey(theme) {
 
 /** Asks the backend what Auto is when the video, the theme's turn or the live screen changed. */
 async function refreshAuto() {
+  if (switchingScreen) return;
+  const screen = state.screen;
   const theme = store.getState().theme;
   const key = autoKey(theme);
   if (key === state.auto.key) return;
   state.auto = { key, value: null };
   if (key === null) return;
-  const value = await bridge.videoAuto(theme).catch(() => null);
-  if (state.auto.key !== key) return;
+  autoWork = bridge.videoAuto(theme).catch(() => null);
+  const value = await autoWork;
+  if (state.auto.key !== key || screen !== state.screen || switchingScreen) return;
   state.auto = { key, value };
   inspector.contextChanged();
   canvasView.drawOverlay();
@@ -326,9 +338,14 @@ const animation = createPreviewAnimation({
 });
 
 async function drawPreview() {
+  if (switchingScreen) return;
+  const screen = state.screen;
   const started = performance.now();
   try {
-    const frame = await bridge.render(store.getState().theme, { motion: motionAllowed() });
+    const work = bridge.render(store.getState().theme, { motion: motionAllowed() });
+    previewWork = work.catch(() => {});
+    const frame = await work;
+    if (screen !== state.screen || switchingScreen) return;
     canvasView.drawFrame(frame);
     $('status-render').textContent = t('status.render', { ms: Math.round(frame.millis) });
     animation.shown({ nextMs: frame.nextMs ?? null, elapsed: performance.now() - started });
@@ -351,9 +368,12 @@ reducedMotion?.addEventListener?.('change', () => {
 
 let liveTimer = null;
 function pushLive() {
-  if (!state.live) return;
+  if (!state.live || switchingScreen) return;
   clearTimeout(liveTimer);
-  liveTimer = setTimeout(() => bridge.pushTheme(store.getState().theme).catch((e) => fail(e)), 150);
+  liveTimer = setTimeout(() => {
+    if (switchingScreen) return;
+    liveWork = bridge.pushTheme(store.getState().theme).catch((e) => fail(e));
+  }, 150);
 }
 
 // The canvas is fitted again whenever the theme turns between vertical and
@@ -375,7 +395,7 @@ function refreshOrientation(theme) {
 let reportedUnsaved = null;
 
 function reportUnsaved() {
-  const unsaved = store.isDirty();
+  const unsaved = store.isDirty() || [...screenDocuments.values()].some((d) => d.editor.state.theme !== d.editor.saved);
   if (unsaved === reportedUnsaved) return;
   reportedUnsaved = unsaved;
   bridge.setUnsaved(unsaved).catch(() => { reportedUnsaved = null; });
@@ -432,16 +452,49 @@ async function loadCatalog() {
 }
 
 async function sampleLoop() {
+  const screen = state.screen;
   try {
     const s = await bridge.sample();
+    // Libre can finish opening hardware after Studio's initial catalog.
+    const knownSensors = new Set(state.catalog.map((sensor) => sensor.key));
+    if (Object.keys(s.readings).some((key) => !knownSensors.has(key))) await loadCatalog();
     library.updateReadings(s.readings);
-    syncLive(s);
+    if (!switchingScreen && screen === state.screen) syncLive(s);
     $('status-sensors').textContent = t('status.sensors', { ms: Math.round(s.sampleMillis) });
+    updateLibreStatus(s.readings);
   } catch {
     $('status-sensors').textContent = t('status.sensorsError');
+    updateLibreStatus(null);
   }
   setTimeout(sampleLoop, 1000);
 }
+
+let libreRestarting = false;
+function updateLibreStatus(readings) {
+  const health = libreStatus(state.catalog, readings);
+  $('status-libre').hidden = !health;
+  if (!health) return;
+  const status = libreRestarting ? 'restarting' : health.state;
+  $('status-libre-dot').dataset.state = status;
+  $('status-libre-label').textContent = t(`status.libre.${status}`);
+  $('status-libre').title = health.failed.length
+    ? t('status.libreMissing', { hardware: health.failed.join(', ') })
+    : t('status.libre.ok');
+  $('restart-libre').disabled = libreRestarting;
+}
+$('restart-libre').addEventListener('click', async () => {
+  if (libreRestarting) return;
+  libreRestarting = true;
+  updateLibreStatus(null);
+  try {
+    await bridge.restartLibre();
+    toast(t('status.libreRestarted'));
+  } catch (e) {
+    fail(e);
+  } finally {
+    libreRestarting = false;
+  }
+});
 
 // ---------------------------------------------------------- screens ----
 const currentScreen = () => state.screens.find((s) => s.key === state.screen) ?? null;
@@ -452,6 +505,9 @@ function renderScreenSelect() {
     const model = s.models.length === 1 ? s.models[0] : null;
     return el('option', { value: s.key, text: model ? `${model.name} · ${model.width}×${model.height}` : s.key, selected: s.key === state.screen });
   });
+  if (state.screen && !state.screens.some((s) => s.key === state.screen)) {
+    options.push(el('option', { value: state.screen, text: state.screen, selected: true }));
+  }
   if (options.length === 0) options.push(el('option', { value: '', text: t('top.noScreen') }));
   select.replaceChildren(...options);
   const current = state.screens.find((s) => s.key === state.screen);
@@ -481,7 +537,7 @@ async function refreshScreens() {
     state.desktopMode = [];
     state.screenError = e;
   }
-  if (!state.screens.some((s) => s.key === state.screen)) state.screen = state.screens[0]?.key ?? null;
+  if (!state.screen) state.screen = state.screens[0]?.key ?? null;
   renderScreenSelect();
   // ffmpeg may have been installed or located since the video was added.
   const bg = store.getState().theme.background;
@@ -550,11 +606,43 @@ async function setLive(on) {
   renderScreenSelect();
 }
 
-$('screen-select').addEventListener('change', (evt) => {
-  state.screen = evt.target.value || null;
-  if (state.live) setLive(true);
-  renderScreenSelect();
-});
+async function switchScreen(key) {
+  if (!key || switchingScreen || key === state.screen) return;
+  const previous = state.screen;
+  let selected = false;
+  switchingScreen = true;
+  $('screen-select').disabled = true;
+  clearTimeout(liveTimer);
+  try {
+    await Promise.all([previewWork, autoWork, liveWork]);
+    await bridge.pushTheme(store.getState().theme);
+    const opened = await bridge.selectScreen(key);
+    screenDocuments.set(previous, { editor: store.capture(), location: state.location });
+    state.screen = key;
+    selected = true;
+    const document = screenDocuments.get(key);
+    screenDocuments.delete(key);
+    state.location = document?.location ?? opened.location;
+    state.live = false;
+    $('live').checked = false;
+    state.liveVideo = null;
+    state.reconnecting = null;
+    if (document) store.restore(document.editor);
+    else store.load(opened.theme);
+    syncLive(await bridge.sample());
+    await Promise.all([refreshAssets(), refreshThemes()]);
+    canvasView.fit();
+  } catch (e) {
+    if (!selected) state.screen = previous;
+    fail(e);
+  } finally {
+    switchingScreen = false;
+    $('screen-select').disabled = false;
+    renderScreenSelect();
+    renderNow();
+  }
+}
+$('screen-select').addEventListener('change', (evt) => switchScreen(evt.target.value));
 $('live').addEventListener('change', (evt) => setLive(evt.target.checked));
 
 // A panel in desktop mode goes back to USB monitor mode only after a dialog
@@ -654,6 +742,18 @@ async function settleUnsaved() {
   });
   if (answer === 'save') return save();
   return answer === 'discard';
+}
+
+async function settleAllDocuments() {
+  const original = state.screen;
+  if (!(await settleUnsaved())) return false;
+  const dirty = [...screenDocuments].filter(([, d]) => d.editor.state.theme !== d.editor.saved).map(([key]) => key);
+  for (const key of dirty) {
+    await switchScreen(key);
+    if (state.screen !== key || !(await settleUnsaved())) return false;
+  }
+  if (original !== state.screen) await switchScreen(original);
+  return true;
 }
 
 async function openTheme(location) {
@@ -913,13 +1013,13 @@ async function save(saveAs = false) {
 
 // The window's close button with unsaved edits (and no screen live).
 bridge.onCloseRequested(async () => {
-  if (await settleUnsaved()) await bridge.closeWindow().catch((e) => fail(e));
+  if (await settleAllDocuments()) await bridge.closeWindow().catch((e) => fail(e));
 }).catch(() => {});
 
 // The tray's Quit with unsaved edits: the window is shown, and the app ends
 // once the edits are saved or discarded.
 bridge.onQuitRequested(async () => {
-  if (await settleUnsaved()) await bridge.quitApp().catch((e) => fail(e));
+  if (await settleAllDocuments()) await bridge.quitApp().catch((e) => fail(e));
 }).catch(() => {});
 
 // ---------------------------------------------------------- chrome -----
@@ -1003,6 +1103,13 @@ library.renderWidgets();
 refreshChrome('load');
 canvasView.fit();
 await Promise.all([loadCatalog(), refreshScreens(), refreshThemes(), refreshAssets(), refreshTools()]);
+if (state.screen) {
+  try {
+    const opened = await bridge.selectScreen(state.screen);
+    state.location = opened.location;
+    store.load(opened.theme);
+  } catch (e) { fail(e); }
+}
 bridge.getAutostart().then((on) => { state.autostart = on; renderScreenSelect(); }).catch(() => {});
 bridge.fonts().then((f) => { if (f?.length) state.fonts = f; }).catch(() => {});
 inspector.render(state.assets);

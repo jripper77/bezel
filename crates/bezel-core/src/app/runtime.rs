@@ -731,6 +731,15 @@ impl ThemeRuntime {
             }
         }
         let snapshot = sensors.sample()?;
+        // A hardware reader may become ready after the first sample. Refresh
+        // units for those new keys as well, including raw Libre power sensors.
+        if snapshot
+            .iter()
+            .any(|(key, _)| self.scene.quantities.get(key).is_none())
+            && let Ok(catalog) = sensors.catalog()
+        {
+            self.use_catalog(&catalog);
+        }
         self.scene.histories.push(&snapshot);
         self.scene.snapshot = snapshot;
         Ok(())

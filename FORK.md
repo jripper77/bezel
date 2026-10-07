@@ -5,6 +5,26 @@ The original project remains upstream. `main` follows the original; `windows-imp
 
 ## Implemented
 
+- **Multiple displays and sensor sharing:** Studio remembers per-screen themes,
+  orientation and live selection. Light's `--screens-config` starts the saved
+  active screens together and shares sensor sampling rather than creating a
+  separate hardware reader for each screen.
+- **Libre diagnostics and startup:** Studio reports reader health and can restart
+  the configured task. Bounded logs describe source selection, missing readings
+  and helper updates. A previous session's heartbeat no longer cancels the
+  helper's startup grace period; the login launcher maintains a heartbeat while
+  waiting for sensors. Moving the installation requires updating its Windows
+  startup paths; changed COM ports require updating the saved screen selection.
+- **Local video preview dialogs:** Media and Storage offer a separate player
+  without editing the theme or opening the serial link. Storage reads only the
+  catalogued local copy and offers original-file association when absent. The
+  player releases its source on close and ignores late loading responses.
+  Payloads are limited to 64 MiB, codecs depend on WebView, and device-only
+  videos cannot be downloaded through the current protocol.
+- **Windows shutdown:** Light applies the saved shutdown action through the
+  worker's existing screen connection instead of releasing it afterwards.
+  Screens without stored-media standby support are turned off.
+
 - **Windows light tray and Studio handoff:** `bezel run --tray` adds a native tray menu with Open Studio and Quit, plus double-click to open the editor. The light process keeps no WebView and pauses its render worker while Studio owns the display. Opening Studio directly also yields the light connection cleanly before restoring live mode. Closing the editor with light waiting asks about unsaved edits, fully exits Studio and resumes light with the saved theme, screen and sensor options. Per-user OS file locks coordinate ownership and release automatically on process exit; no protocol bytes or other processes are changed. Studio preferences now include a Windows-only Light-on-close switch, enabled by default (including older settings). Closing standalone Studio starts the saved theme in Light before releasing display ownership; with the switch off, live Studio stays in the tray. Cancelled unsaved-edit dialogs never launch Light, launch failures keep Studio open, and explicit Quit stops both runtimes. Ordinary CLI runs retain their existing behavior. Windows CLI resources include the Common Controls v6 manifest required by the tray dependencies.
 - **Windows serial I/O:** bounded 64 KiB writes, transfer diagnostics and a Windows write timeout; retry transient access-denied errors when opening a port. Read timeouts are restored after sending. Turing Rev C framing and command bytes are unchanged.
 - **Integrated Windows hardware sensors:** the bundled headless .NET Framework helper embeds unmodified LibreHardwareMonitorLib 0.9.6 and its nine library/runtime DLLs, with original licenses, dependency metadata and hashes. An elevated per-user `Bezel-Sensors` task reads hardware; CLI and Studio stay unelevated and wake only this configured task on demand. The helper publishes an atomic per-user local snapshot, and exits after 30 seconds without Bezel clients. The sensor worker prioritizes snapshots with a six-second freshness limit and 4 MiB bound; WMI and the fixed external `http://127.0.0.1:8085/data.json` remain fallbacks. Sensor IDs, raw units and custom names stay compatible. Only name aliases are imported: persisted fan-control settings are ignored and the helper never invokes control APIs. One-time setup verifies CPU temperature before disabling the previous external Libre login task. It does not install hardware drivers.
@@ -20,6 +40,14 @@ The original project remains upstream. `main` follows the original; `windows-imp
 - **Stored screen video backgrounds and shape windows:** Screen > Storage offers **Set as background** for a single selected video, even while the theme is live. It saves the exact device path and loop flag without downloading, uploading or decoding the file on the host. The theme inspector exposes looping, replacement and the outside color when windows are shown. Shapes can reveal the full-screen device video through rectangular, rounded or elliptical windows; all windows share its playback and keep the original video coordinates. A linear transparency mask offers start/end opacity and direction for normal shapes and video windows, including their borders. Layer order, element opacity, Undo, clipboard and theme persistence are preserved. The editor displays an explicitly labelled placeholder because the protocol cannot read back decoded frames. Selected device files are protected as theme videos by cleanup.
 
 ## Validation already performed
+
+- Latest Windows update: 100 CLI library tests, 141 core tests, 63 sensor tests
+  (one ignored) and 187 Studio tests passed. All 282 UI unit tests and 28 browser
+  checks for multiple screens, Libre health/restart and video previews passed
+  across light/dark and English/Portuguese configurations.
+- On the test PC, correcting the renamed installation's login path and the
+  8.8-inch screen's changed COM port restored both displays and 449 sensor
+  readings. Confirmation at the next Windows login remains pending.
 
 - Actual Windows PC and Turing Smart Screen 8.8 Rev C ROM 1.90: full frame transfers and live updates completed after the serial change. Python on the same hardware served as the comparison.
 - Actual LibreHardwareMonitor 0.9.6: CPU temperature, fan speed and power were read through the local server.

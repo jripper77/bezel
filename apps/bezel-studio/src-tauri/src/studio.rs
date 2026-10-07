@@ -546,6 +546,11 @@ pub enum Resume {
 
 /// One editing session.
 pub struct Studio {
+    shared_sensors: bezel_sensors::SharedSensors,
+    shared_renderer: SharedRenderer,
+    serial_counter: Arc<std::sync::atomic::AtomicU64>,
+    selected_screen: Option<String>,
+    documents: BTreeMap<String, Studio>,
     sensors: Box<dyn SensorSource>,
     renderer: Box<dyn FrameRenderer>,
     language: Language,
@@ -579,6 +584,32 @@ pub struct Studio {
     shutting_down: bool,
 }
 
+#[derive(Clone)]
+struct SharedRenderer(Arc<Mutex<Box<dyn FrameRenderer>>>);
+impl FrameRenderer for SharedRenderer {
+    fn render(
+        &mut self,
+        theme: &Theme,
+        assets: &BTreeMap<AssetRef, Vec<u8>>,
+        context: bezel_core::ports::RenderContext<'_>,
+    ) -> Result<Frame> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .render(theme, assets, context)
+    }
+    fn animation(
+        &mut self,
+        asset: &AssetRef,
+        assets: &BTreeMap<AssetRef, Vec<u8>>,
+    ) -> Option<bezel_core::domain::animation::Timeline> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .animation(asset, assets)
+    }
+}
+
 /// A video (or an animated GIF) added to the session for a background: its
 /// poster and how long it plays, as learnt when it was added.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -590,6 +621,120 @@ pub struct AddedVideo {
 }
 
 impl Studio {
+    /// Switch the editor document without stopping any live screen.
+    pub fn select_screen(&mut self, key: &str, blank: Theme) -> bool {
+        if self.selected_screen.as_deref() == Some(key) {
+            return false;
+        }
+        let Some(previous) = self.selected_screen.clone() else {
+            self.selected_screen = Some(key.into());
+            return false;
+        };
+        let existed = self.documents.contains_key(key);
+        let mut next = self.documents.remove(key).unwrap_or_else(|| {
+            let mut studio = Self::from_shared(
+                self.shared_sensors.clone(),
+                self.shared_renderer.clone(),
+                self.language,
+                blank,
+            );
+            studio.catalog = self.catalog.clone();
+            studio.serial_counter = Arc::clone(&self.serial_counter);
+            studio.runtime.use_catalog(&studio.catalog);
+            if let Some(host) = &self.host {
+                studio.host = Some(HostDecoding {
+                    media: Arc::clone(&host.media),
+                    dir: host
+                        .dir
+                        .join(format!("screen-{}", key.replace(['/', '\\', ':'], "_"))),
+                });
+            }
+            studio
+        });
+        std::mem::swap(&mut self.sensors, &mut next.sensors);
+        std::mem::swap(&mut self.runtime, &mut next.runtime);
+        std::mem::swap(&mut self.listed, &mut next.listed);
+        std::mem::swap(&mut self.sample_millis, &mut next.sample_millis);
+        std::mem::swap(&mut self.location, &mut next.location);
+        std::mem::swap(&mut self.live, &mut next.live);
+        std::mem::swap(&mut self.generation, &mut next.generation);
+        std::mem::swap(&mut self.live_error, &mut next.live_error);
+        std::mem::swap(&mut self.host, &mut next.host);
+        std::mem::swap(&mut self.videos, &mut next.videos);
+        std::mem::swap(&mut self.video, &mut next.video);
+        std::mem::swap(&mut self.posters, &mut next.posters);
+        std::mem::swap(&mut self.serials, &mut next.serials);
+        std::mem::swap(&mut self.origin, &mut next.origin);
+        self.documents.insert(previous, next);
+        for studio in self.documents.values_mut() {
+            studio.show_sensors(Wanted::nothing());
+            let wanted = if studio.any_live() {
+                studio.wanted().clone()
+            } else {
+                Wanted::nothing()
+            };
+            studio.sensors.want(&wanted);
+        }
+        self.selected_screen = Some(key.into());
+        !existed
+    }
+
+    pub fn selected_screen(&self) -> Option<&str> {
+        self.selected_screen.as_deref()
+    }
+    pub fn any_live(&self) -> bool {
+        self.live.is_some() || self.documents.values().any(Self::any_live)
+    }
+    pub fn stop_all(&mut self) {
+        drop(self.stop_live());
+        for studio in self.documents.values_mut() {
+            studio.stop_all();
+        }
+    }
+    pub fn reconnects_due(&mut self, now: Instant) -> Vec<(Option<String>, Attempt)> {
+        let mut attempts = Vec::new();
+        if let Some(a) = self.reconnect_due(now) {
+            attempts.push((self.selected_screen.clone(), a));
+        }
+        for (key, studio) in &mut self.documents {
+            if let Some(a) = studio.reconnect_due(now) {
+                attempts.push((Some(key.clone()), a));
+            }
+        }
+        attempts
+    }
+    pub fn reconnect_document(
+        &mut self,
+        key: Option<&str>,
+        attempt: Attempt,
+        outcome: Result<(Screen, Box<dyn ScreenLink>)>,
+        now: Instant,
+    ) -> Option<Box<dyn ScreenLink>> {
+        if key == self.selected_screen.as_deref() {
+            return self.reconnected(attempt, outcome, now);
+        }
+        if let Some(studio) = key.and_then(|k| self.documents.get_mut(k)) {
+            return studio.reconnected(attempt, outcome, now);
+        }
+        outcome.ok().map(|(_, link)| link)
+    }
+    pub fn tick_all(&mut self, time: LocalTime, now: Instant) -> Vec<Result<Option<Delivery>>> {
+        let mut deliveries = vec![self.tick(time, now)];
+        for studio in self.documents.values_mut() {
+            if studio.any_live() {
+                deliveries.push(studio.tick(time, now));
+            }
+        }
+        deliveries
+    }
+    pub fn next_due_all(&self) -> Instant {
+        self.documents
+            .values()
+            .filter(|s| s.any_live())
+            .map(Self::next_due)
+            .fold(self.next_due(), Instant::min)
+    }
+
     /// A session editing `theme`. Without [`Self::with_host_decoding`] a
     /// screen that cannot play videos shows the poster.
     pub fn new(
@@ -598,12 +743,28 @@ impl Studio {
         language: Language,
         theme: Theme,
     ) -> Self {
+        let shared_sensors = bezel_sensors::SharedSensors::new(sensors);
+        let shared_renderer = SharedRenderer(Arc::new(Mutex::new(renderer)));
+        Self::from_shared(shared_sensors, shared_renderer, language, theme)
+    }
+
+    fn from_shared(
+        shared_sensors: bezel_sensors::SharedSensors,
+        shared_renderer: SharedRenderer,
+        language: Language,
+        theme: Theme,
+    ) -> Self {
         let posters = posters_of(&theme);
         let mut runtime = ThemeRuntime::new(theme, BTreeMap::new(), language);
         runtime.limit_refresh(MAX_REFRESH);
         let mut studio = Self {
-            sensors,
-            renderer,
+            sensors: Box::new(shared_sensors.clone()),
+            renderer: Box::new(shared_renderer.clone()),
+            shared_sensors,
+            shared_renderer,
+            serial_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            selected_screen: None,
+            documents: BTreeMap::new(),
             language,
             runtime,
             catalog: Vec::new(),
@@ -642,6 +803,9 @@ impl Studio {
     /// starts again with the same theme and assets (graph histories start
     /// over, and the live screen's video is started again).
     pub fn set_language(&mut self, language: Language) {
+        for document in self.documents.values_mut() {
+            document.set_language(language);
+        }
         if language == self.language {
             return;
         }
@@ -671,7 +835,7 @@ impl Studio {
     /// Measures with `sensors` from now on (its options changed), and reads
     /// its catalog.
     pub fn replace_sensors(&mut self, sensors: Box<dyn SensorSource>) -> Result<&[SensorInfo]> {
-        self.sensors = sensors;
+        self.shared_sensors.replace(sensors);
         self.refresh_catalog()
     }
 
@@ -709,6 +873,16 @@ impl Studio {
     pub fn sample(&mut self) -> Result<()> {
         let started = Instant::now();
         self.runtime.sample(self.sensors.as_mut())?;
+        let known: std::collections::HashSet<_> =
+            self.catalog.iter().map(|info| &info.key).collect();
+        if self
+            .runtime
+            .snapshot()
+            .iter()
+            .any(|(key, _)| !known.contains(key))
+        {
+            self.refresh_catalog()?;
+        }
         self.sample_millis = started.elapsed().as_secs_f64() * 1000.0;
         Ok(())
     }
@@ -779,7 +953,9 @@ impl Studio {
         // The old copy goes before a new one of the same name is written.
         self.video = None;
         self.video = asset.map(|asset| {
-            self.serials += 1;
+            self.serials = self
+                .serial_counter
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             ThemeVideo::new(asset, self.serials)
         });
     }
@@ -912,10 +1088,32 @@ impl Studio {
         self.video_to_probe()
     }
 
+    pub fn live_videos_to_probe(&mut self) -> Vec<VideoProbe> {
+        let mut probes: Vec<_> = self.live_video_to_probe().into_iter().collect();
+        for document in self.documents.values_mut() {
+            probes.extend(document.live_video_to_probe());
+        }
+        probes
+    }
+
     /// What probing the theme's video said ([`VideoProbe::run`]); nothing
     /// when the theme has another video by then (even under the same name),
     /// or it was probed meanwhile.
     pub fn probed(&mut self, probed: Probed) {
+        if !self
+            .video
+            .as_ref()
+            .is_some_and(|v| v.serial == probed.serial)
+        {
+            if let Some(studio) = self
+                .documents
+                .values_mut()
+                .find(|s| s.video.as_ref().is_some_and(|v| v.serial == probed.serial))
+            {
+                studio.probed(probed);
+                return;
+            }
+        }
         let current = self
             .video
             .as_ref()
@@ -1007,6 +1205,19 @@ impl Studio {
     /// otherwise (another video, poster or framing meanwhile) it is dropped.
     /// Whether it was put.
     pub fn poster_taken(&mut self, taken: TakenPoster) -> bool {
+        if !self
+            .video
+            .as_ref()
+            .is_some_and(|v| v.serial == taken.serial)
+        {
+            if let Some(studio) = self
+                .documents
+                .values_mut()
+                .find(|s| s.video.as_ref().is_some_and(|v| v.serial == taken.serial))
+            {
+                return studio.poster_taken(taken);
+            }
+        }
         let Background::Video {
             poster: Some(poster),
             framing,
@@ -1190,6 +1401,7 @@ impl Studio {
     /// opens the port again (D-2026-10-01-live-screen-controls-3).
     pub fn is_live(&self, key: &str) -> bool {
         self.live.as_ref().is_some_and(|l| l.answers_to(key))
+            || self.documents.values().any(|s| s.is_live(key))
     }
 
     /// Why the live screen stopped, until the next `go_live`.
@@ -1217,6 +1429,15 @@ impl Studio {
 
     /// The theme video the live screen `key` could play but does not store.
     pub fn missing_video(&self, key: &str) -> Option<MissingVideo> {
+        if !self.live.as_ref().is_some_and(|live| live.key == key) {
+            if let Some(document) = self
+                .documents
+                .values()
+                .find(|document| document.is_live(key))
+            {
+                return document.missing_video(key);
+            }
+        }
         if !self.is_live(key) {
             return None;
         }
@@ -1232,18 +1453,24 @@ impl Studio {
         self.live
             .as_ref()
             .is_some_and(|l| matches!(l.slot, Slot::Presenting))
+            || self.documents.values().any(Self::presenting)
     }
 
     /// The live link of `key`, or why it cannot be had. In the final state
     /// of a shutdown no screen's link can be had, live or not.
     fn link_of(&mut self, key: &str) -> Result<Option<&mut Box<dyn ScreenLink>>> {
+        if !self.live.as_ref().is_some_and(|l| l.answers_to(key)) {
+            if let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key)) {
+                return studio.link_of(key);
+            }
+        }
         if self.shutting_down {
             return Err(BezelError::InUse {
                 address: key.to_string(),
                 holders: vec![SHUTTING_DOWN.to_string()],
             });
         }
-        if !self.is_live(key) {
+        if !self.live.as_ref().is_some_and(|l| l.answers_to(key)) {
             return Ok(None);
         }
         let Some(live) = self.live.as_mut() else {
@@ -1274,6 +1501,9 @@ impl Studio {
     /// [`Self::take_for_shutdown`]).
     pub fn enter_final_state(&mut self) {
         self.shutting_down = true;
+        for studio in self.documents.values_mut() {
+            studio.enter_final_state();
+        }
     }
 
     /// The shutdown was cancelled: the final state ends. A live screen whose
@@ -1281,6 +1511,9 @@ impl Studio {
     /// as at the app's start); one being connected again goes on.
     pub fn leave_final_state(&mut self) -> Option<Box<dyn ScreenLink>> {
         self.shutting_down = false;
+        for studio in self.documents.values_mut() {
+            drop(studio.leave_final_state());
+        }
         if self
             .live
             .as_ref()
@@ -1295,6 +1528,12 @@ impl Studio {
     /// it; in its place the live screen keeps [`Slot::ShutDown`], so that
     /// nothing else reaches it. Only in the final state: nothing otherwise.
     pub fn take_for_shutdown(&mut self) -> ForShutdown {
+        for studio in self.documents.values_mut() {
+            match studio.take_for_shutdown() {
+                ForShutdown::Nothing => {}
+                result => return result,
+            }
+        }
         if !self.shutting_down {
             return ForShutdown::Nothing;
         }
@@ -1322,6 +1561,11 @@ impl Studio {
     /// the screen. `None` when `key` is not live; `InUse` while its link is
     /// out, and in the final state of a shutdown.
     pub fn lend_live_link(&mut self, key: &str) -> Result<Option<Box<dyn ScreenLink>>> {
+        if !self.live.as_ref().is_some_and(|l| l.answers_to(key)) {
+            if let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key)) {
+                return studio.lend_live_link(key);
+            }
+        }
         if self.link_of(key)?.is_none() {
             return Ok(None);
         }
@@ -1337,6 +1581,11 @@ impl Studio {
         link: Box<dyn ScreenLink>,
         resume: Resume,
     ) -> Option<Box<dyn ScreenLink>> {
+        if !self.live.as_ref().is_some_and(|l| l.answers_to(key)) {
+            if let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key)) {
+                return studio.return_live_link(key, link, resume);
+            }
+        }
         if !self.is_live(key) {
             return Some(link);
         }
@@ -1520,6 +1769,19 @@ impl Studio {
         outcome: &Result<()>,
         now: Instant,
     ) -> Option<Box<dyn ScreenLink>> {
+        if !self
+            .live
+            .as_ref()
+            .is_some_and(|l| l.answers_to(&delivery.key))
+        {
+            if let Some(studio) = self
+                .documents
+                .values_mut()
+                .find(|s| s.is_live(&delivery.key))
+            {
+                return studio.presented(delivery, outcome, now);
+            }
+        }
         let Delivery {
             key, link, turn, ..
         } = delivery;
@@ -1924,6 +2186,43 @@ mod tests {
             Language::English,
             theme_88(),
         )
+    }
+
+    #[test]
+    fn two_screen_documents_keep_their_theme_and_live_frames() {
+        let first = FakeConnector::default();
+        let second = FakeConnector::default();
+        let mut s = studio();
+        s.refresh_catalog().unwrap();
+        s.select_screen("one", theme_88());
+        s.go_live(
+            "one".into(),
+            open_screen(&FakeBus::turing_88(), &first, None).unwrap(),
+        );
+        assert!(s.select_screen(
+            "two",
+            Theme::blank("Second", Size::new(480, 1920), Orientation::Portrait)
+        ));
+        s.go_live(
+            "two".into(),
+            open_screen(&FakeBus::turing_88(), &second, None).unwrap(),
+        );
+        assert_eq!(s.theme().name, "Second");
+        let now = Instant::now();
+        for frame in s.tick_all(TIME, now) {
+            show(&mut s, frame, now).unwrap();
+        }
+        assert_eq!(first.log().frames.len(), 1);
+        assert_eq!(second.log().frames.len(), 1);
+        s.select_screen("one", theme_88());
+        assert_eq!(s.theme().name, "T");
+        assert_eq!(s.live_key(), Some("one"));
+        assert!(s.is_live("two"));
+        drop(s.stop_live());
+        assert!(s.any_live());
+        assert!(!s.is_live("one"));
+        s.stop_all();
+        assert!(!s.any_live());
     }
 
     #[test]

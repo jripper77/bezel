@@ -333,6 +333,7 @@ impl SampleDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionDto {
+    pub screen: Option<String>,
     /// The theme.
     pub theme: ThemeDto,
     /// Where it lives.

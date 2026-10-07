@@ -18,8 +18,8 @@ pub(crate) const COUNTER_RESET: &str = "counter reset or no time elapsed";
 pub(crate) const NOT_SUPPORTED_YET: &str = "not supported yet";
 
 /// One family of sensors (CPU times, hwmon chips, one GPU, ...). Providers
-/// discover what they offer when they are built; `sample` then reads every
-/// sensor of that catalog, never more, and reports what it cannot read as
+/// discover what they offer when they are built or hardware becomes ready;
+/// `sample` reports what it cannot read as
 /// [`Reading::Unavailable`].
 pub(crate) trait Provider: Send {
     /// The sensors this provider reports.

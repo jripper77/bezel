@@ -390,6 +390,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
         details ? el('small', { text: details }) : null,
       ]),
       el('div', { class: 'actions' }, [
+        moving && el('button', { type: 'button', class: 'text-button', text: t('videoPreview.open'), onclick: () => actions.previewVideo(a) }),
         el('button', { type: 'button', class: 'text-button', text: t('media.useBackground'), onclick: () => store.dispatch('setTheme', { patch: { background: backgroundOf(a) } }) }),
         a.kind === 'image' && el('button', { type: 'button', class: 'text-button', text: t('media.addImage'), onclick: () => {
           const { x, y } = center();

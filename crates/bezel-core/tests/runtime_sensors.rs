@@ -22,6 +22,38 @@ fn key(text: &str) -> SensorKey {
     SensorKey::new(text).expect("key")
 }
 
+#[test]
+fn a_late_power_sensor_recovers_its_value_and_watt_unit() {
+    use bezel_core::domain::sensor::{Category, Quantity, Reading, SensorInfo, Snapshot};
+    use bezel_core::ports::SensorSource;
+    struct Late(bool);
+    impl SensorSource for Late {
+        fn catalog(&mut self) -> bezel_core::Result<Vec<SensorInfo>> {
+            if !self.0 {
+                return Ok(vec![]);
+            }
+            Ok(vec![SensorInfo {
+                key: key("lhm.psu.corsair.0.power.14"),
+                category: Category::Board,
+                label: "Total Output".into(),
+                quantity: Quantity::Watts,
+                source: "LibreHardwareMonitor".into(),
+            }])
+        }
+        fn sample(&mut self) -> bezel_core::Result<Snapshot> {
+            self.0 = true;
+            let mut snapshot = Snapshot::default();
+            snapshot.insert(key("lhm.psu.corsair.0.power.14"), Reading::Value(250.0));
+            Ok(snapshot)
+        }
+    }
+    let mut runtime = ThemeRuntime::new(without_ping(), BTreeMap::new(), Language::English);
+    runtime.sample(&mut Late(false)).expect("sample");
+    let sensor = key("lhm.psu.corsair.0.power.14");
+    assert_eq!(runtime.snapshot().get(&sensor), Reading::Value(250.0));
+    assert_eq!(runtime.quantities().get(&sensor), Some(Quantity::Watts));
+}
+
 fn element(id: u32, kind: ElementKind) -> Element {
     Element {
         id: ElementId(id),

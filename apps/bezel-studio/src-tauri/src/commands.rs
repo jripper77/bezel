@@ -106,7 +106,7 @@ pub async fn restart_screen(
     screen: String,
 ) -> UiResult<RestartedDto> {
     let result = blocking(&state, move |b| b.restart_screen(&screen, now())).await;
-    let live = state.studio().live_key().is_some();
+    let live = state.studio().any_live();
     if let Some(item) = app.try_state::<LiveItem>() {
         item.sync(live);
     }
@@ -119,10 +119,24 @@ pub async fn sensor_catalog(state: State<'_, Shared>) -> UiResult<Vec<SensorDto>
     blocking(&state, Backend::catalog).await
 }
 
+#[tauri::command]
+pub async fn select_screen(state: State<'_, Shared>, screen: String) -> UiResult<SessionDto> {
+    blocking(&state, move |b| b.select_screen(&screen)).await
+}
+
 /// The latest readings and the live screen's state.
 #[tauri::command]
 pub async fn sample_sensors(state: State<'_, Shared>) -> UiResult<SampleDto> {
     blocking(&state, |b| Ok(b.sample())).await
+}
+
+/// Restart the configured Windows hardware reader on the blocking pool.
+#[tauri::command]
+pub async fn restart_libre_reader(state: State<'_, Shared>) -> UiResult<()> {
+    blocking(&state, |_| {
+        bezel_sensors::restart_libre_reader().map_err(UiError::system)
+    })
+    .await
 }
 
 /// Search weather locations on the blocking pool, only on explicit user search.
@@ -226,7 +240,7 @@ pub async fn set_live(
     screen: Option<String>,
 ) -> UiResult<()> {
     let result = blocking(&state, move |b| b.set_live(on, screen.as_deref(), now())).await;
-    let live = state.studio().live_key().is_some();
+    let live = state.studio().any_live();
     if let Some(item) = app.try_state::<LiveItem>() {
         item.sync(live);
     }
@@ -386,6 +400,24 @@ pub async fn list_assets(state: State<'_, Shared>) -> UiResult<Vec<AssetDto>> {
     blocking(&state, |b| Ok(b.assets())).await
 }
 
+/// Preview a theme video or a catalogued copy; no device I/O or arbitrary paths.
+#[tauri::command]
+pub async fn video_preview(
+    state: State<'_, Shared>,
+    asset: Option<String>,
+    screen: Option<String>,
+    path: Option<String>,
+) -> UiResult<Option<String>> {
+    blocking(&state, move |b| match (asset, screen, path) {
+        (Some(asset), None, None) => Ok(b.media_video(&asset)),
+        (None, Some(screen), Some(path)) => Ok(b.manager_video(&screen, &path)),
+        _ => Err(crate::messages::UiError::new(
+            crate::messages::ErrorCode::InvalidInput,
+        )),
+    })
+    .await
+}
+
 /// Font families themes can use.
 #[tauri::command]
 pub fn list_fonts(state: State<'_, Shared>) -> Vec<String> {
@@ -417,7 +449,7 @@ pub fn close_window<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, Shared>,
 ) -> UiResult<()> {
-    let live = state.studio().live_key().is_some();
+    let live = state.studio().any_live();
     crate::prepare_light_on_close(&window, &state).map_err(UiError::system)?;
     match crate::on_close_for_runtime(live, false, crate::returns_to_light(&window)) {
         crate::OnClose::Hide => window.hide(),

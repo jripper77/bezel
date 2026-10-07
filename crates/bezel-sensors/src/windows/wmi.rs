@@ -78,11 +78,20 @@ fn worker(latest: Shared, ready: mpsc::Sender<()>, stop: mpsc::Receiver<()>) {
     let mut conn: Option<WMIConnection> = None;
     let http = super::lhm_http::Reader::new();
     let embedded = super::embedded::Reader::new();
+    let mut last_status = String::new();
+    let mut logged_at = Instant::now();
+    crate::sensor_log::log("reader.started", "Libre polling worker started");
     loop {
-        let answer = embedded.query().or_else(|_| {
+        let mut source = "embedded";
+        let mut failures = Vec::new();
+        let answer = embedded.query().or_else(|error| {
+            failures.push(format!("embedded: {error}"));
+            source = "wmi";
             if conn.is_none() {
                 conn = WMIConnection::with_namespace_path(NAMESPACE)
-                    .map_err(|e| tracing::debug!("LibreHardwareMonitor namespace: {e}"))
+                    .map_err(|e| {
+                        failures.push(format!("WMI namespace: {e}"));
+                    })
                     .ok();
             }
             let answer = match &conn {
@@ -90,11 +99,54 @@ fn worker(latest: Shared, ready: mpsc::Sender<()>, stop: mpsc::Receiver<()>) {
                 None => Err(HINT.to_string()),
             };
             // External Libre remains compatible when the bundled helper is unavailable.
-            answer.or_else(|_| {
+            answer.or_else(|error| {
+                failures.push(format!("WMI: {error}"));
+                source = "http";
                 conn = None;
                 http.query()
             })
         });
+        let status = match &answer {
+            Ok((rows, _)) => {
+                let valid = rows.iter().filter(|r| r.value.is_finite()).count();
+                let corsair_missing = rows
+                    .iter()
+                    .filter(|r| r.identifier.starts_with("/psu/corsair/") && !r.value.is_finite())
+                    .count();
+                format!(
+                    "source={source}; valid={valid}/{}; corsairMissing={corsair_missing}; fallback={}",
+                    rows.len(),
+                    failures.join(" | ")
+                )
+            }
+            Err(error) => format!("unavailable: {error}; {}", failures.join(" | ")),
+        };
+        if status != last_status || logged_at.elapsed() >= Duration::from_secs(30) {
+            let corsair = answer
+                .as_ref()
+                .ok()
+                .map(|(rows, _)| {
+                    rows.iter()
+                        .filter(|r| r.identifier.starts_with("/psu/corsair/"))
+                        .map(|r| {
+                            format!(
+                                "{}={}",
+                                r.identifier,
+                                if r.value.is_finite() {
+                                    r.value.to_string()
+                                } else {
+                                    "missing".into()
+                                }
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            crate::sensor_log::log("reader.health", &format!("{status}; corsair=[{corsair}]"));
+            last_status = status;
+            logged_at = Instant::now();
+        }
         let (rows, hardware) = match answer {
             Ok((rows, hardware)) => (Ok(rows), hardware),
             Err(why) => {
@@ -111,6 +163,7 @@ fn worker(latest: Shared, ready: mpsc::Sender<()>, stop: mpsc::Receiver<()>) {
         }
         let _ = ready.send(());
         if !matches!(stop.recv_timeout(REFRESH), Err(RecvTimeoutError::Timeout)) {
+            crate::sensor_log::log("reader.stopped", "Libre polling worker stopped");
             return;
         }
     }
@@ -157,6 +210,12 @@ impl Provider for Lhm {
 
     fn sample(&mut self, now: Instant, out: &mut Snapshot) {
         let guard = self.latest.lock();
+        if let Ok(Some(latest)) = guard.as_deref()
+            && now.saturating_duration_since(latest.at) <= STALE
+            && let Ok(rows) = &latest.rows
+        {
+            self.mapping.refresh(rows, &latest.hardware);
+        }
         let readings = match guard.as_deref() {
             Ok(Some(latest)) if now.saturating_duration_since(latest.at) > STALE => self
                 .mapping

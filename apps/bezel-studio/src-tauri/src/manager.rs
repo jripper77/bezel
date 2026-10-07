@@ -54,6 +54,10 @@ use crate::studio::Resume;
 /// Thumbnails of the local copies, made without the store's catalog: from a
 /// content id alone (D-2026-09-30-storage-manager-10).
 pub trait Pictures: Send + Sync {
+    /// Bounded read of a local video copy; stores without copies return none.
+    fn video_bytes(&self, _: &ContentId) -> Option<Vec<u8>> {
+        None
+    }
     /// The PNG thumbnail of `content` (kept, or made from its copy with
     /// `media`); `None` when there is no copy, or no ffmpeg for a video.
     fn thumbnail(
@@ -64,6 +68,19 @@ pub trait Pictures: Send + Sync {
 }
 
 impl Pictures for DiskArchive {
+    fn video_bytes(&self, content: &ContentId) -> Option<Vec<u8>> {
+        use std::io::Read as _;
+        let copy = self.copy_path(content).ok()??;
+        let file = std::fs::File::open(copy).ok()?;
+        if file.metadata().ok()?.len() > crate::media::VIDEO_PREVIEW_LIMIT as u64 {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        file.take(crate::media::VIDEO_PREVIEW_LIMIT as u64 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        (bytes.len() <= crate::media::VIDEO_PREVIEW_LIMIT).then_some(bytes)
+    }
     fn thumbnail(
         &self,
         content: &ContentId,
@@ -346,6 +363,13 @@ impl Backend {
                 None
             }
         }
+    }
+
+    /// Preview a catalogued local copy without opening the screen's serial port.
+    pub fn manager_video(&self, screen: &str, path: &str) -> Option<String> {
+        let content = self.storage.shown().file(screen, path)?.content.clone()?;
+        let bytes = self.storage.pictures().video_bytes(&content)?;
+        crate::media::video_data_url(path, &bytes)
     }
 
     // ------------------------------------------------------------- cache --

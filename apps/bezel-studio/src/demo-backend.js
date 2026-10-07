@@ -868,6 +868,7 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
       const found = listedBy.key === key && listedBy.paths.has(path) ? entryAt(path) : null;
       return Promise.resolve(found?.thumb ? demoFileThumbnail(found.path.split('/')[2], found.path.split('/')[1]) : null);
     },
+    videoPreview: () => Promise.resolve(null),
     planMove: (key, paths, to, overwrite = []) => blocked(key, to) ?? Promise.resolve(keepPlan(key, demoPlanAcross(planView(key), 'move', paths, to, overwrite))),
     planCopy: (key, paths, to, overwrite = []) => blocked(key, to) ?? Promise.resolve(keepPlan(key, demoPlanAcross(planView(key), 'copy', paths, to, overwrite))),
     planRename: (key, path, newName, overwrite = []) => blocked(key) ?? Promise.resolve(keepPlan(key, demoPlanRename(planView(key), path, newName, overwrite))),
@@ -1062,6 +1063,13 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
  *   `letGo` (tests)
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
+  let libreFailed = hooks.libre === 'partial' || hooks.libre === 'error';
+  let libreOffline = hooks.libre === 'error';
+  const libreSensors = hooks.libre ? [
+    { key: 'lhm.intelcpu.0.temperature.0', category: 'cpu', label: 'CPU Package', quantity: 'celsius', source: 'LibreHardwareMonitor' },
+    { key: 'lhm.psu.corsair.0.voltage.3', category: 'board', label: 'Corsair HX1500i Input', quantity: 'volts', source: 'LibreHardwareMonitor' },
+    { key: 'lhm.psu.corsair.0.power.14', category: 'board', label: 'Corsair HX1500i Total Output', quantity: 'watts', source: 'LibreHardwareMonitor' },
+  ] : [];
   const now = clock.now ?? (() => Date.now() / 1000);
   const delay = clock.delay ?? ((ms) => new Promise((resolve) => { setTimeout(resolve, ms); }));
   const chosen = SCENARIOS[scenario] ?? SCENARIOS.turing88;
@@ -1070,6 +1078,8 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   // switched back comes back as a screen).
   const devices = { screens: [...(chosen.screens ?? [])], desktopMode: [...(chosen.desktopMode ?? [])] };
   let live = false;
+  let selectedScreen = null;
+  const screenDocuments = new Map();
   let autostart = false;
   // The library: `Demo` first (the session's), the other screens' themes,
   // then what the user saves; each with the revision of its "files".
@@ -1272,7 +1282,12 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       devices.screens.push(structuredClone(DEMO_BACK_FROM_DESKTOP));
       return Promise.resolve({ model: panel.models[0].name });
     },
-    catalog: () => Promise.resolve(DEMO_SENSORS.map(([key, category, label, quantity]) => ({ key, category, label, quantity, source: 'demo' }))),
+    catalog: () => Promise.resolve([...DEMO_SENSORS.map(([key, category, label, quantity]) => ({ key, category, label, quantity, source: 'demo' })), ...libreSensors]),
+    restartLibre: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      libreFailed = false;
+      libreOffline = false;
+    },
     searchWeatherCities: async (query) => [{ name: query.trim(), region: 'Lazio', country: 'Italia', latitude: 41.9, longitude: 12.5 }],
     sample: () => {
       const t = now();
@@ -1295,9 +1310,24 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
         screenState.away -= 1;
         reconnecting = { attempt: 1, attempts: 3 };
       }
+      if (hooks.libre) {
+        readings['lhm.intelcpu.0.temperature.0'] = libreOffline ? { unavailable: 'No readings', display: '—' } : { value: 52, display: '52°C' };
+        readings['lhm.psu.corsair.0.voltage.3'] = libreFailed ? { unavailable: 'No readings', display: '—' } : { value: 230, display: '230 V' };
+        readings['lhm.psu.corsair.0.power.14'] = { value: libreFailed ? 0 : 158, display: libreFailed ? '0 W' : '158 W' };
+      }
       return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError, video: videoOfTheme(), reconnecting });
     },
-    session: () => Promise.resolve({ theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location, minRefreshSeconds: DEMO_MIN_REFRESH }),
+    session: () => Promise.resolve({ screen: selectedScreen, theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location, minRefreshSeconds: DEMO_MIN_REFRESH }),
+    selectScreen: async (key) => {
+      if (selectedScreen !== key) {
+        if (selectedScreen) screenDocuments.set(selectedScreen, { theme, live });
+        const document = screenDocuments.get(key);
+        screenDocuments.delete(key);
+        if (selectedScreen) { theme = document?.theme ?? structuredClone(DEMO_THEME); live = document?.live ?? false; }
+        selectedScreen = key;
+      }
+      return { screen: key, theme: structuredClone(theme), location: null, minRefreshSeconds: DEMO_MIN_REFRESH };
+    },
     /** The preview, like `render_preview`: a video background plays with `motion` (see the bridge). */
     render: (next, { motion = true } = {}) => {
       const started = performance.now();

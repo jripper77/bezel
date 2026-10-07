@@ -14,6 +14,25 @@ and shows the last theme you had live.
 The tray icon's menu has **Open Bezel**, **Live on the screen** (starts or
 stops the live theme) and **Quit**.
 
+## Multiple screens
+
+The screen selector opens a separate document for each screen. Switching
+keeps its edits and Undo history, and other screens with Live enabled keep
+running. Save a theme and enable Live on each screen you want to run.
+Studio remembers each screen's file and restores the live screens at startup.
+
+On Windows, Light runs all configured live screens in one process with a
+shared sensor reader. Closing Studio hands all of them back to Light when
+that preference is enabled. The launcher passes `--screens-config` with
+Studio's settings file; a plain `bezel run` still runs a single theme.
+
+When Windows shuts down or restarts, Light stops drawing and applies each
+connected rev C screen's saved shutdown choice (off, keep, video or album).
+Screens without those choices, including the 3.5-inch rev A, receive the
+screen-off command. Light waits at most 3.5 seconds; a configured hardware
+sleep timer remains the fallback if a device does not respond. Quitting Light
+or opening Studio still hands the screen back normally.
+
 ## As a service, without the app (Linux)
 
 `bezel-run@<theme>` is a systemd *user* service: it runs `bezel run <theme>` while

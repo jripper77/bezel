@@ -13,6 +13,15 @@ never formats it; see [Preparing an SD card](sd-card.md).
 
 ## In the app
 
+**Media → This theme → Preview** opens a local video player without changing the
+background. **Screen → Storage → Preview** does the same for a selected video
+with an associated local copy. Play, pause, seek and loop use the player's
+controls; closing the preview releases the video. This never starts playback
+on the physical screen. If the copy is missing, **Associate original file…**
+opens the existing association flow. The screen protocol does not retrieve
+videos stored only on the device. Local previews support files up to 64 MiB;
+playable codecs depend on WebView (MP4/H.264 and WebM are recommended).
+
 **Screen → Storage** fills the window: the internal memory and the SD card side
 by side, each with how full it is and its files. A file shows a thumbnail (or an
 icon for its kind), its size, and when Bezel sent it, or that Bezel did not send

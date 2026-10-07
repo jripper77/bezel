@@ -270,7 +270,12 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       textField(t('inspector.name'), theme.name, (v) => store.dispatch('setTheme', { patch: { name: v } })),
       el('p', { class: 'hint', text: t('inspector.canvas', { width: theme.canvas.width, height: theme.canvas.height }) }),
       selectField(t('inspector.orientation'), theme.orientation, ORIENTATIONS.map((o) => [o, t(`orientation.${o}`)]), (o) => store.dispatch('setOrientation', { orientation: o })),
-      el('h3', { text: t('inspector.background') }),
+      el('div', { class: 'background-heading' }, [
+        el('h3', { text: t('inspector.background') }),
+        theme.background.type !== 'color' && button(t('inspector.removeBackground'), () => store.dispatch('setTheme', {
+          patch: { background: { type: 'color', color: theme.background.color ?? '#0c0e16ff' } },
+        })),
+      ]),
       ...backgroundFields(theme.background, assets),
       el('h3', { text: t('inspector.refresh') }),
       rangeField(t('inspector.refreshSeconds'), theme.refreshSeconds, (v) => store.dispatch('setTheme', { patch: { refreshSeconds: v } }), { min: minRefresh(), max: 5, step: minRefresh(), format: (v) => t('unit.seconds', { value: v }) }),

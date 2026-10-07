@@ -123,10 +123,140 @@ fn themes(cli: &Cli) -> anyhow::Result<String> {
 }
 
 fn themes_with_stop(cli: &Cli, stop: Arc<AtomicBool>) -> anyhow::Result<String> {
+    themes_with_shutdown(cli, stop, Arc::default())
+}
+
+fn themes_with_shutdown(
+    cli: &Cli,
+    stop: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
+) -> anyhow::Result<String> {
+    if let Command::Run {
+        screens_config: Some(path),
+        ..
+    } = &cli.command
+    {
+        return multi_screens(cli, path, stop, shutdown);
+    }
+    let sensors = sensor_source(cli.fake, cli.command.sensor_settings());
+    themes_with_source(cli, stop, shutdown, sensors)
+}
+
+fn multi_screens(
+    cli: &Cli,
+    path: &Path,
+    stop: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
+) -> anyhow::Result<String> {
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+    let keys = saved["liveScreens"].as_array().cloned().unwrap_or_default();
+    if keys.is_empty() {
+        return themes_with_source(
+            cli,
+            stop,
+            shutdown,
+            sensor_source(cli.fake, cli.command.sensor_settings()),
+        );
+    }
+    let Command::Run {
+        frames,
+        ffmpeg,
+        settings,
+        ..
+    } = &cli.command
+    else {
+        anyhow::bail!("not a live command")
+    };
+    let shared = bezel_sensors::SharedSensors::new(sensor_source(cli.fake, Some(settings)));
+    let mut commands = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for key in keys.iter().filter_map(|k| k.as_str()) {
+        if !seen.insert(key.to_string()) {
+            continue;
+        }
+        let theme = saved["screenThemes"][key].as_str().or_else(|| {
+            (saved["liveScreen"].as_str() == Some(key))
+                .then(|| saved["lastTheme"].as_str())
+                .flatten()
+        });
+        let Some(theme) = theme else {
+            eprintln!("bezel light: {key} has no saved theme; skipped");
+            continue;
+        };
+        if !Path::new(theme).exists() {
+            eprintln!("bezel light: saved theme for {key} is missing; skipped");
+            continue;
+        }
+        commands.push(Cli {
+            fake: cli.fake,
+            verbose: cli.verbose,
+            command: Command::Run {
+                tray: false,
+                screens_config: None,
+                target: bezel_cli::Target {
+                    screen: Some(key.into()),
+                },
+                theme: theme.into(),
+                frames: *frames,
+                ffmpeg: ffmpeg.clone(),
+                settings: settings.clone(),
+            },
+        });
+    }
+    anyhow::ensure!(
+        !commands.is_empty(),
+        "No saved themes for the configured live screens"
+    );
+    std::thread::scope(|scope| -> anyhow::Result<String> {
+        let mut workers = Vec::new();
+        for command in commands {
+            let sensors = shared.clone();
+            let stop = Arc::clone(&stop);
+            let shutdown = Arc::clone(&shutdown);
+            workers.push(scope.spawn(move || {
+                loop {
+                    let result = themes_with_source(
+                        &command,
+                        Arc::clone(&stop),
+                        Arc::clone(&shutdown),
+                        Box::new(sensors.clone()),
+                    );
+                    if result.is_ok() || frames.is_some() || stop.load(Ordering::Relaxed) {
+                        break result;
+                    }
+                    if let Err(error) = &result {
+                        eprintln!("bezel light: screen worker will reconnect: {error:#}");
+                    }
+                    for _ in 0..20 {
+                        if stop.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }));
+        }
+        let mut summaries = String::new();
+        for worker in workers {
+            match worker.join() {
+                Ok(Ok(summary)) => summaries.push_str(&summary),
+                Ok(Err(error)) => eprintln!("bezel light: screen worker failed: {error:#}"),
+                Err(_) => eprintln!("bezel light: screen worker panicked"),
+            }
+        }
+        Ok(summaries)
+    })
+}
+
+fn themes_with_source(
+    cli: &Cli,
+    stop: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
+    mut sensors: Box<dyn SensorSource>,
+) -> anyhow::Result<String> {
     let bundled = bundled_dir();
     let mut renderer = renderer_for(cli, bundled.as_deref());
-    let mut sensors = sensor_source(cli.fake, cli.command.sensor_settings());
-    let mut pace = SleepPace::new(stop);
+    let mut pace = SleepPace::with_shutdown(stop, shutdown);
     let mut log = std::io::stderr();
     let mut media = FfmpegTranscoder::new(cli.command.ffmpeg().map(Path::to_path_buf));
     let mut kit = Rendering {

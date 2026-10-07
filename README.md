@@ -94,7 +94,8 @@ helper; the next Windows login must confirm the latest path and port fixes.
 
 ## Credits and licenses
 
-Bezel Evo is a derivative of **Bezel**, created by **Alison Amorim (@slipalison)**.
+Bezel Evo is a derivative of **Bezel**, created by
+**[Alison Amorim (@slipalison)](https://github.com/slipalison)**.
 The original code, editor, protocol research, bundled themes and inherited
 documentation remain credited to their authors. Thank you to Alison for making
 that work available. The rename identifies this fork; inherited components

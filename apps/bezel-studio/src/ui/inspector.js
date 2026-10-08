@@ -718,7 +718,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     if (sliding && store.isGesturing()) return;
     sliding = false;
     const { theme, selection } = store.getState();
-    const chosen = theme.elements.filter((e) => selection.includes(e.id));
+    const chosen = selection.map(id => theme.elements.find(e => e.id === id)).filter(Boolean);
     let nodes;
     if (chosen.length === 0) nodes = themeForm(theme, assets);
     else if (chosen.length === 1) nodes = elementForm(chosen[0], theme, assets);

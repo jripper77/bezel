@@ -117,14 +117,14 @@ test('reorder moves in the z-order and clamps', () => {
   assert.equal(s.getState(), before, 'unknown id changes nothing');
 });
 
-test('align to the selection or the canvas, distribute evenly', () => {
+test('align to the first selected object or the canvas, distribute evenly', () => {
   const t = structuredClone(DEMO_THEME);
   t.elements[2].locked = false;
   t.elements.forEach((e, i) => { e.frame = { x: 10 + i * 50, y: 10 * i, width: 40, height: 40 }; });
   t.elements[2].frame.x = 300;
   const s = createStore(t);
   s.dispatch('align', { ids: [1, 2, 3], edge: 'right' });
-  assert.deepEqual(s.getState().theme.elements.map((e) => e.frame.x), [300, 300, 300]);
+  assert.deepEqual(s.getState().theme.elements.map((e) => e.frame.x), [10, 10, 10]);
   s.dispatch('align', { ids: [1], edge: 'centerX' });
   assert.equal(frame(s, 1).x, 220, 'single element aligns to the canvas');
   for (const edge of ['left', 'top', 'bottom', 'centerY']) s.dispatch('align', { ids: [1, 2], edge });
@@ -271,4 +271,24 @@ test('clipboard keeps SVG asset and clock options after the source is removed', 
   s.dispatch('remove', { ids: [1, 2] });
   s.paste();
   assert.deepEqual(selectedElements(s.getState()).map(e => e.kind), theme.elements.slice(0, 2).map(e => e.kind));
+});
+
+test('all six alignments use selection order, leave the anchor fixed and undo once',()=>{
+ const original=structuredClone(DEMO_THEME);original.elements.forEach((e,i)=>{e.locked=false;e.frame={x:100+i*70,y:200+i*60,width:40+i*20,height:30+i*10};});
+ for(const ids of [[1,3,2],[3,1,2]])for(const edge of ['left','right','top','bottom','centerX','centerY']){
+  const s=createStore(original);s.select(ids);s.dispatch('align',{ids,edge});const anchor=frame(s,ids[0]);assert.deepEqual(anchor,original.elements.find(e=>e.id===ids[0]).frame);
+  for(const id of ids.slice(1)){const f=frame(s,id);
+   if(edge==='left')assert.equal(f.x,anchor.x);
+   if(edge==='right')assert.equal(f.x+f.width,anchor.x+anchor.width);
+   if(edge==='top')assert.equal(f.y,anchor.y);
+   if(edge==='bottom')assert.equal(f.y+f.height,anchor.y+anchor.height);
+   if(edge==='centerX')assert.equal(f.x+f.width/2,anchor.x+anchor.width/2);
+   if(edge==='centerY')assert.equal(f.y+f.height/2,anchor.y+anchor.height/2);
+  }
+  s.undo();assert.deepEqual(s.getState().theme,original);assert.deepEqual(s.getState().selection,ids);
+ }
+});
+test('locked reference stays usable without aligning the other selection to the canvas',()=>{
+ const t=structuredClone(DEMO_THEME);const s=createStore(t);s.dispatch('align',{ids:[3,1],edge:'left'});assert.equal(frame(s,1).x,t.elements[2].frame.x);assert.deepEqual(frame(s,3),t.elements[2].frame);
+ const anchor=frame(s,1);s.dispatch('align',{ids:[1,3],edge:'top'});assert.deepEqual(frame(s,1),anchor);assert.deepEqual(frame(s,3),t.elements[2].frame);
 });

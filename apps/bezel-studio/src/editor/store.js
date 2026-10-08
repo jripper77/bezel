@@ -287,11 +287,13 @@ export const commands = {
     const roots=selectionRoots(theme,ids);for(const e of front?roots:[...roots].reverse())next=commands.reorder(next,{id:e.id,index:front?next.elements.length:0}).theme;
     return {theme:next};
   },
-  /** Aligns boxes to the selection's bounds (or the canvas with one element). */
+  /** Aligns to the first selected root, which stays fixed; a lone root uses the canvas. */
   align(theme, { ids, edge }) {
-    const targets = selectionRoots(theme, ids).filter(e => !owners(theme, e).some(p => p.locked));
-    const bounds = targets.length > 1 ? unionBox(targets.map((e) => e.frame)) : { x: 0, y: 0, ...theme.canvas };
-    if (!bounds) return { theme };
+    const order = new Map(ids.map((id, i) => [id, i]));
+    const roots = selectionRoots(theme, ids).sort((a, b) => order.get(a.id) - order.get(b.id));
+    if (!roots.length) return { theme };
+    const bounds = roots.length > 1 ? roots[0].frame : { x: 0, y: 0, ...theme.canvas };
+    const targets = (roots.length > 1 ? roots.slice(1) : roots).filter(e => !owners(theme, e).some(p => p.locked));
     const place = (f) => {
       switch (edge) {
         case 'left': return { ...f, x: bounds.x };

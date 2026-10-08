@@ -481,3 +481,16 @@ Native Live/Light rendering and the demo both clip the cover with these radii.
 Checks: native asymmetric-cover pixels (including unaffected progress/text),
 theme round-trip, legacy compatibility and negative-radius rejection; accessible
 English/dark and Portuguese/light browser checks for switching, values and Undo.
+
+
+### Align to the first selected object (0.1.19)
+
+Multi-object edge/center alignment now uses the first selected root as a fixed
+reference, preserving click order independently from paint order. Other selected
+roots align to its box; groups/cards move their children with them. A locked
+reference stays usable and locked targets remain fixed. One selected root still
+aligns to the canvas. Each alignment remains one reversible Undo operation.
+Validation: all six edges/centers with reversed selection order, unequal sizes,
+locked references/targets, Undo, existing group/card/editor tests, and accessible
+browser checks for actual click order and both center axes.
+Includes the previously prepared 0.1.18 independent cover corner controls.

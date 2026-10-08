@@ -345,3 +345,23 @@ asset-placeholder fix, document state or delivery scheduling is reverted.
   references remain references, without downloading screen media.
 - This exposes existing behavior; no packaging, protocol or renderer changes.
   Validation: targeted browser action/visual check and Windows build.
+
+
+### Consistent object property sections (0.1.14)
+
+- Name and object type precede position/size, content/data, appearance,
+  membership, playback/animation and layer/object actions. Only relevant sections
+  appear; their order is stable across widget types. Multi-selection places
+  alignment first, grouping/membership next and object actions last.
+- Sensor/scale, text/date/weather location and image-asset controls are separated
+  from colors, typography, icon styles, outlines and other visual settings.
+  Card faces belong to content; timers and transitions belong to playback.
+  Group membership displays the owning group's name.
+- Native details/summary controls make sections keyboard-accessible and collapsible.
+  All sections initially open. Fold choices persist per widget type for the
+  current Studio session, including property edits and Undo, without modifying
+  the theme or its saved state. Detached DOM toggle events cannot overwrite them.
+- Validation: existing card/group/workspace and clock/weather/ring browser checks;
+  fold/edit/Undo/keyboard/accessibility regression in both languages/color schemes;
+  visual/order/overflow smoke checks for all 11 palette widgets at 1280x800 and
+  1000x700. Windows CLI/Studio build together; native rendering is unchanged.

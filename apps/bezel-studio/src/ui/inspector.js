@@ -288,7 +288,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     const k = e.kind;
     const s = k.style;
     const c = k.content;
-    const nodes = [];
+    const nodes = [], weatherAppearance = [];
     if (c.type === 'static') nodes.push(textField(t('inspector.text'), c.text, (v) => update(e.id, { kind: { content: { text: v } } })));
     if (c.type === 'clock') {
       nodes.push(selectField(t('clock.language'), c.language ?? '', [['', t('clock.system')], ['it', t('language.it')], ['en', t('language.en')], ['pt-BR', t('language.pt-BR')]], (language) => update(e.id, { kind: { content: { language: language || null } } })));
@@ -322,11 +322,11 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       nodes.push(search, results);
       nodes.push(selectField(t('weather.language'), c.language ?? '', [['', t('clock.system')], ['it', t('language.it')], ['en', t('language.en')], ['pt-BR', t('language.pt-BR')]], (language) => update(e.id, { kind: { content: { language: language || null } } })));
       nodes.push(checkField(t('inspector.fahrenheit'), c.fahrenheit, (fahrenheit) => update(e.id, { kind: { content: { fahrenheit } } })));
-      nodes.push(checkField(t('weather.icon'), c.showIcon !== false, (showIcon) => update(e.id, { kind: { content: { showIcon } } })));
+      weatherAppearance.push(checkField(t('weather.icon'), c.showIcon !== false, (showIcon) => update(e.id, { kind: { content: { showIcon } } })));
       if (c.showIcon !== false) {
-        nodes.push(selectField(t('weather.iconStyle'), c.iconStyle ?? 'outline', [['outline', t('icons.outline')], ['filled', t('icons.filled')]], (iconStyle) => update(e.id, { kind: { content: { iconStyle } } })));
-        nodes.push(numberField(t('weather.iconGap'), c.iconGap ?? s.size * 0.3, (iconGap) => update(e.id, { kind: { content: { iconGap: Math.max(0, Math.min(256, iconGap)) } } }), { min: 0, max: 256, step: 'any' }));
-        nodes.push(numberField(t('weather.iconSize'), c.iconSize ?? 0, (size) => update(e.id, { kind: { content: { iconSize: size <= 0 ? null : Math.min(512, size) } } }), { min: 0, max: 512 }));
+        weatherAppearance.push(selectField(t('weather.iconStyle'), c.iconStyle ?? 'outline', [['outline', t('icons.outline')], ['filled', t('icons.filled')]], (iconStyle) => update(e.id, { kind: { content: { iconStyle } } })));
+        weatherAppearance.push(numberField(t('weather.iconGap'), c.iconGap ?? s.size * 0.3, (iconGap) => update(e.id, { kind: { content: { iconGap: Math.max(0, Math.min(256, iconGap)) } } }), { min: 0, max: 256, step: 'any' }));
+        weatherAppearance.push(numberField(t('weather.iconSize'), c.iconSize ?? 0, (size) => update(e.id, { kind: { content: { iconSize: size <= 0 ? null : Math.min(512, size) } } }), { min: 0, max: 512 }));
       }
       nodes.push(el('p', { class: 'hint', text: t('weather.source') }));
     }
@@ -342,7 +342,9 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       nodes.push(checkField(t('inspector.showUnit'), c.format.showUnit !== false, (v) => update(e.id, { kind: { content: { format: { showUnit: v } } } })));
       nodes.push(checkField(t('inspector.fahrenheit'), c.format.fahrenheit, (v) => update(e.id, { kind: { content: { format: { fahrenheit: v } } } })));
     }
-    nodes.push(el('h3', { text: t('inspector.font') }));
+    const content = nodes.splice(0);
+    nodes.push(...weatherAppearance);
+    nodes.push(el('h4', { text: t('inspector.font') }));
     nodes.push(textField(t('inspector.fontFamily'), s.font.family, (v) => update(e.id, { kind: { style: { font: { family: v } } } }), { list: 'font-families' }));
     nodes.push(el('datalist', { id: 'font-families' }, sensors.fonts().map((f) => el('option', { value: f }))));
     nodes.push(el('div', { class: 'field-row' }, [
@@ -353,7 +355,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     nodes.push(segmented(t('inspector.align'), s.align, [['left', t('inspector.alignLeft')], ['center', t('inspector.alignCenter')], ['right', t('inspector.alignRight')]], (v) => update(e.id, { kind: { style: { align: v } } })));
     nodes.push(segmented(t('inspector.valign'), s.valign, [['top', t('inspector.valignTop')], ['middle', t('inspector.valignMiddle')], ['bottom', t('inspector.valignBottom')]], (v) => update(e.id, { kind: { style: { valign: v } } })));
     nodes.push(numberField(t('inspector.letterSpacing'), s.letterSpacing ?? 0, (v) => update(e.id, { kind: { style: { letterSpacing: v } } }), { step: 'any' }));
-    return nodes;
+    return { content, appearance: nodes };
   }
 
   const trackField = (e) => el('div', {}, [
@@ -363,15 +365,18 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
 
   function barForm(e) {
     const k = e.kind;
-    return [
+    const content = [
       sensorPicker(e.id, k.binding.key, (key) => ({ kind: { binding: { key } } })),
       rangeFields(e.id, k.binding),
+    ];
+    const appearance = [
       selectField(t('inspector.direction'), k.direction, ['leftToRight', 'rightToLeft', 'bottomToTop', 'topToBottom'].map((d) => [d, t(`dir.${d}`)]), (v) => update(e.id, { kind: { direction: v } })),
       colorField(t('inspector.fill'), typeof k.fill === 'string' ? k.fill : '#38bdf8ff', (v) => update(e.id, { kind: { fill: v } })),
       trackField(e),
       numberField(t('inspector.radius'), k.radius ?? 0, (v) => update(e.id, { kind: { radius: Math.max(0, v) } }), { min: 0 }),
       segmentsFields(e),
     ];
+    return { content, appearance };
   }
 
   function segmentsFields(e) {
@@ -410,9 +415,11 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
 
   function ringForm(e) {
     const k = e.kind;
-    return [
+    const content = [
       sensorPicker(e.id, k.binding.key, (key) => ({ kind: { binding: { key } } })),
       rangeFields(e.id, k.binding),
+    ];
+    const appearance = [
       checkField(t('ring.testFull'), Boolean(k.testFull), (v) => update(e.id, { kind: { testFull: v } })),
       el('div', { class: 'field-row' }, [
         numberField(t('inspector.startAngle'), k.startAngle, (v) => update(e.id, { kind: { startAngle: v } }), { min: -360, max: 360 }),
@@ -425,13 +432,16 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       trackField(e),
       segmentsFields(e),
     ];
+    return { content, appearance };
   }
 
   function needleForm(e) {
     const k = e.kind;
-    return [
+    const content = [
       sensorPicker(e.id, k.binding.key, (key) => ({ kind: { binding: { key } } })),
       rangeFields(e.id, k.binding),
+    ];
+    const appearance = [
       el('div', { class: 'field-row' }, [
         numberField(t('inspector.startAngle'), k.startAngle, (v) => update(e.id, { kind: { startAngle: v } }), { min: -360, max: 360 }),
         numberField(t('inspector.sweep'), k.sweep, (v) => update(e.id, { kind: { sweep: v } }), { min: 1, max: 360 }),
@@ -443,13 +453,16 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       colorField(t('inspector.color'), k.color, (v) => update(e.id, { kind: { color: v } })),
       numberField(t('inspector.lineWidth'), k.width, (v) => update(e.id, { kind: { width: Math.max(1, v) } }), { min: 1 }),
     ];
+    return { content, appearance };
   }
 
   function graphForm(e) {
     const k = e.kind;
-    return [
+    const content = [
       sensorPicker(e.id, k.binding.key, (key) => ({ kind: { binding: { key } } })),
       rangeFields(e.id, k.binding),
+    ];
+    const appearance = [
       checkField(t('inspector.autoscale'), Boolean(k.autoscale), (v) => update(e.id, { kind: { autoscale: v } })),
       segmented(t('inspector.style'), k.style, [['line', t('graph.line')], ['area', t('graph.area')], ['bars', t('graph.bars')]], (v) => update(e.id, { kind: { style: v } })),
       numberField(t('inspector.history'), k.history, (v) => update(e.id, { kind: { history: Math.min(Math.max(2, v), 3600) } }), { min: 2, max: 3600 }),
@@ -457,6 +470,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       k.style === 'area' && colorField(t('inspector.fill'), typeof k.fill === 'string' ? k.fill : '#38bdf840', (v) => update(e.id, { kind: { fill: v } })),
       numberField(t('inspector.lineWidth'), k.lineWidth, (v) => update(e.id, { kind: { lineWidth: Math.max(1, v) } }), { min: 1, step: 'any' }),
     ];
+    return { content, appearance };
   }
 
   function imageForm(e, assets) {
@@ -465,16 +479,19 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     const change = (patch) => editIcon(e.id, k.asset, { ...paint, ...patch });
     const options = assets.filter((a) => a.kind === 'image').map((a) => [a.ref, a.ref.split('/').pop()]);
     if (k.asset && !options.some(([r]) => r === k.asset)) options.push([k.asset, k.asset]);
-    return [
+    const content = [
       options.length
         ? selectField(t('inspector.asset'), k.asset, [['', t('inspector.noImage')], ...options], (v) => update(e.id, { kind: { asset: v } }))
         : el('p', { class: 'hint', text: t('inspector.addMediaFirst') }),
+    ];
+    const appearance = [
       paint && colorField(t('inspector.color'), paint.color, (color) => change({ color })),
       paint?.style === 'outline' && numberField(t('inspector.strokeWidth'), paint.stroke, (stroke) => change({ stroke: Math.min(4, Math.max(0.5, stroke)) }), { min: 0.5, max: 4, step: 0.5 }),
       paint && numberField(t('icons.shadow'), paint.shadow, (shadow) => change({ shadow: Math.min(4, Math.max(0, shadow)) }), { min: 0, max: 4, step: 0.5 }),
       paint && paint.shadow > 0 && colorField(t('icons.shadowColor'), paint.shadowColor, (shadowColor) => change({ shadowColor })),
       selectField(t('inspector.fit'), k.fit, ['fill', 'contain', 'cover', 'none'].map((f) => [f, t(`fit.${f}`)]), (v) => update(e.id, { kind: { fit: v } })),
     ];
+    return { content, appearance };
   }
 
   function shapeForm(e) {
@@ -512,8 +529,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
   function cardForm(e) {
     const c = e.card;
     const action = (key, command, disabled = false, args = {}) => el('button', { type: 'button', class: 'text-button', text: t(key), disabled, onclick: () => store.dispatch(command, { id: e.id, ...args }) });
-    return [
-      el('h3', { text: t('card.faces') }),
+    const content = [
       selectField(t('card.activeFace'), String(c.activeFace), c.faces.map((name, i) => [String(i), name]), value => store.dispatch('cardFace', { id: e.id, face: Number(value) })),
       textField(t('card.faceTitle'), c.faces[c.activeFace], name => {
         if (!name.trim()) return;
@@ -527,13 +543,16 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
         action('card.previous', 'reorderCardFace', c.activeFace === 0, { direction: -1 }),
         action('card.next', 'reorderCardFace', c.activeFace === c.faces.length - 1, { direction: 1 }),
       ]),
-      el('h3', { text: t('card.rotation') }),
+      el('p', { class: 'hint', text: t('card.help') }),
+    ];
+    const animation = [
+      el('h4', { text: t('card.rotation') }),
       checkField(t('card.autoRotate'), c.rotationSeconds != null, enabled => update(e.id, { card: { rotationSeconds: enabled ? 10 : null } })),
       ...(c.rotationSeconds != null ? [
         numberField(t('card.rotationSeconds'), c.rotationSeconds, value => update(e.id, { card: { rotationSeconds: Math.max(5, Math.min(3600, Math.round(value))) } }), { min: 5, max: 3600, step: 1 }),
         el('p', { class: 'hint', text: t('card.rotationHelp') }),
       ] : []),
-      el('h3', { text: t('card.animation') }),
+      el('h4', { text: t('card.animation') }),
       selectField(t('card.effect'), c.transition?.effect ?? 'none', ['none', 'fade', 'slide', 'flip'].map(value => [value, t(`card.effect.${value}`)]), effect => update(e.id, { card: { transition: { effect, direction: c.transition?.direction ?? 'left', durationMs: c.transition?.durationMs ?? 650, includeBase: c.transition?.includeBase ?? true } } })),
       ...(c.transition && c.transition.effect !== 'none' ? [
         rangeField(t('card.duration'), c.transition.durationMs, durationMs => update(e.id, { card: { transition: { durationMs } } }), { min: 150, max: 1500, step: 50, format: value => `${value} ms` }),
@@ -542,8 +561,8 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       ] : []),
       action('card.animateNext', 'cardFace', c.faces.length < 2, { face: (c.activeFace + 1) % c.faces.length }),
       el('p', { class: 'hint', text: t('card.animationHelp') }),
-      el('p', { class: 'hint', text: t('card.help') }),
     ];
+    return { content, animation };
   }
   function membershipForm(e, theme) {
     if (e.card) return [];
@@ -551,7 +570,6 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     if (!cards.length) return [];
     const parent = cards.find(p => p.id === e.cardMember?.parent);
     return [
-      el('h3', { text: t('card.membership') }),
       selectField(t('card.container'), parent ? String(parent.id) : '', [['', t('card.none')], ...cards.map(p => [String(p.id), p.name])], value => {
         const target = cards.find(p => String(p.id) === value);
         store.dispatch('attachCard', { ids: [e.id], parent: target?.id, face: target?.card.activeFace ?? null });
@@ -560,37 +578,63 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     ].filter(Boolean);
   }
 
-  // ------------------------------------------------------------ element --
+  // Fold states are UI-only and survive property edits/re-renders.
+  const sectionOpen = new Map();
+  function section(key, label, nodes, scope = 'object') {
+    const contents = nodes.filter(Boolean);
+    if (!contents.length) return null;
+    const stateKey = `${scope}.${key}`;
+    return el('details', { class: 'property-section', open: sectionOpen.get(stateKey) ?? true,
+      dataset: { section: key }, ontoggle: evt => {
+        if (root.contains(evt.currentTarget)) sectionOpen.set(stateKey, evt.currentTarget.open);
+      } }, [
+      el('summary', { onclick: evt => sectionOpen.set(stateKey, !evt.currentTarget.parentElement.open) }, [el('h3', { text: label })]),
+      el('div', { class: 'property-section-body' }, contents),
+    ]);
+  }
+
   function elementForm(e, theme, assets) {
-    const f = e.frame;
-    const setFrame = (patch) => store.dispatch('setFrame', { id: e.id, frame: { ...f, ...patch } });
-    const kindForms = { text: textForm, bar: barForm, ring: ringForm, needle: needleForm, graph: graphForm, shape: shapeForm };
-    const specific = e.isGroup ? [] : e.kind.type === 'image' ? imageForm(e, assets) : (kindForms[e.kind.type]?.(e) ?? []);
+    const f = e.frame, widget = widgetOf(e);
+    const setFrame = patch => store.dispatch('setFrame', { id: e.id, frame: { ...f, ...patch } });
+    const kindForms = { text: textForm, bar: barForm, ring: ringForm, needle: needleForm, graph: graphForm };
+    const specific = e.isGroup ? {} : e.kind.type === 'image' ? imageForm(e, assets) :
+      e.kind.type === 'shape' ? { appearance: shapeForm(e) } : kindForms[e.kind.type]?.(e) ?? {};
+    const card = e.card ? cardForm(e) : null;
+    const membership = membershipForm(e, theme);
+    const group = theme.elements.find(p => p.id === e.groupParent && p.isGroup);
+    if (group) membership.unshift(el('p', { class: 'hint', text: t('inspector.inGroup', { name: group.name }) }));
     return [
-      el('h2', { text: t(`widget.${widgetOf(e)}`) }),
-      textField(t('inspector.name'), e.name, (v) => v.trim() && update(e.id, { name: v.trim() })),
-      !e.isGroup && showAs(e, theme),
-      ...(e.card ? cardForm(e) : membershipForm(e, theme)),
-      el('h3', { text: t('inspector.position') }),
-      el('div', { class: 'field-row' }, [
-        numberField(t('inspector.x'), f.x, (v) => setFrame({ x: v })),
-        numberField(t('inspector.y'), f.y, (v) => setFrame({ y: v })),
-        numberField(t('inspector.width'), f.width, (v) => setFrame({ width: Math.max(4, v) }), { min: 4 }),
-        numberField(t('inspector.height'), f.height, (v) => setFrame({ height: Math.max(4, v) }), { min: 4 }),
+      el('h2', { text: t(`widget.${widget}`) }),
+      el('div', { class: 'property-identity' }, [
+        textField(t('inspector.name'), e.name, v => v.trim() && update(e.id, { name: v.trim() })),
+        el('p', { class: 'hint', text: t('inspector.objectType', { type: t(`widget.${widget}`) }) }),
       ]),
-      rangeField(t('inspector.opacity'), Math.round((e.opacity ?? 1) * 100), (v) => update(e.id, { opacity: v / 100 }), { format: (v) => `${v}%` }),
-      el('div', { class: 'field-row' }, [
-        checkField(t('inspector.visible'), e.visible !== false, (v) => update(e.id, { visible: v })),
-        checkField(t('inspector.locked'), Boolean(e.locked), (v) => update(e.id, { locked: v })),
-      ]),
-      ...(e.isGroup ? [el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids: [e.id] }) })] : [el('h3', { text: t('inspector.appearance') })]),
-      ...specific,
-      el('div', { class: 'actions' }, [
+      section('position', t('inspector.position'), [
+        el('div', { class: 'field-row' }, [
+          numberField(t('inspector.x'), f.x, v => setFrame({ x: v })),
+          numberField(t('inspector.y'), f.y, v => setFrame({ y: v })),
+          numberField(t('inspector.width'), f.width, v => setFrame({ width: Math.max(4, v) }), { min: 4 }),
+          numberField(t('inspector.height'), f.height, v => setFrame({ height: Math.max(4, v) }), { min: 4 }),
+        ]),
+        checkField(t('inspector.locked'), Boolean(e.locked), v => update(e.id, { locked: v })),
+      ], widget),
+      section('content', card ? t('card.faces') : t('inspector.content'), [
+        !e.isGroup && showAs(e, theme), ...(specific.content ?? []), ...(card?.content ?? []),
+      ], widget),
+      section('appearance', t('inspector.appearance'), [
+        ...(specific.appearance ?? []),
+        rangeField(t('inspector.opacity'), Math.round((e.opacity ?? 1) * 100), v => update(e.id, { opacity: v / 100 }), { format: v => `${v}%` }),
+        checkField(t('inspector.visible'), e.visible !== false, v => update(e.id, { visible: v })),
+      ], widget),
+      section('membership', t('inspector.membership'), membership, widget),
+      section('animation', t('inspector.animation'), card?.animation ?? [], widget),
+      section('actions', t('inspector.actions'), [el('div', { class: 'actions' }, [
+        e.isGroup && el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids: [e.id] }) }),
         el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('reorder', { id: e.id, index: theme.elements.length }) }, [t('inspector.front')]),
         el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('reorder', { id: e.id, index: 0 }) }, [t('inspector.back')]),
         el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('duplicate', { ids: [e.id] }) }, [icon(ICONS.copy, 16), t('inspector.duplicate')]),
         el('button', { type: 'button', class: 'text-button danger', onclick: () => store.dispatch('remove', { ids: [e.id] }) }, [icon(ICONS.trash, 16), t('inspector.delete')]),
-      ]),
+      ])], widget),
     ];
   }
 
@@ -598,10 +642,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     const tool = (edge, paths) => el('button', { type: 'button', class: 'icon-button', title: t(`align.${edge}`), 'aria-label': t(`align.${edge}`), onclick: () => store.dispatch('align', { ids, edge }) }, [icon(paths)]);
     return [
       el('h2', { text: t('inspector.multi', { count: ids.length }) }),
-      el('button', { type: 'button', class: 'text-button', text: t('group.create'), disabled: !canGroup(store.getState().theme, ids), title: t('group.scope'), onclick: () => store.dispatch('groupSelection', { ids }) }),
-      ...(store.getState().theme.elements.some(e => ids.includes(e.id) && e.isGroup) ? [el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids }) })] : []),
-      el('button', { type: 'button', class: 'text-button', text: t('card.group'), onclick: () => store.dispatch('cardFromSelection', { ids }) }),
-      el('h3', { text: t('inspector.alignTools') }),
+      section('position', t('inspector.alignTools'), [
       el('div', { class: 'button-row' }, [
         tool('left', ICONS.alignLeft), tool('centerX', ICONS.alignCenterX), tool('right', ICONS.alignRight),
         tool('top', ICONS.alignTop), tool('centerY', ICONS.alignCenterY), tool('bottom', ICONS.alignBottom),
@@ -610,10 +651,18 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
         el('button', { type: 'button', class: 'text-button', disabled: ids.length < 3, onclick: () => store.dispatch('distribute', { ids, axis: 'x' }) }, [icon(ICONS.distributeX, 16), t('align.distributeX')]),
         el('button', { type: 'button', class: 'text-button', disabled: ids.length < 3, onclick: () => store.dispatch('distribute', { ids, axis: 'y' }) }, [icon(ICONS.distributeY, 16), t('align.distributeY')]),
       ]),
+      ], 'selection'),
+      section('membership', t('inspector.membership'), [
+      el('button', { type: 'button', class: 'text-button', text: t('group.create'), disabled: !canGroup(store.getState().theme, ids), title: t('group.scope'), onclick: () => store.dispatch('groupSelection', { ids }) }),
+      ...(store.getState().theme.elements.some(e => ids.includes(e.id) && e.isGroup) ? [el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids }) })] : []),
+      el('button', { type: 'button', class: 'text-button', text: t('card.group'), onclick: () => store.dispatch('cardFromSelection', { ids }) }),
+      ], 'selection'),
+      section('actions', t('inspector.actions'), [
       el('div', { class: 'actions' }, [
         el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('duplicate', { ids }) }, [icon(ICONS.copy, 16), t('inspector.duplicate')]),
         el('button', { type: 'button', class: 'text-button danger', onclick: () => store.dispatch('remove', { ids }) }, [icon(ICONS.trash, 16), t('inspector.delete')]),
       ]),
+      ], 'selection'),
     ];
   }
 

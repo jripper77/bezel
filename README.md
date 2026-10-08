@@ -6,14 +6,11 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.13**. Ordinary object groups support movement,
-resizing, nested members, visibility, opacity, clipboard and Undo. Select objects
-with a mouse rectangle, then use **Group objects** (Ctrl+G); **Ungroup**
-(Ctrl+Shift+G) releases the members. Layers show each group and its indented
-objects; select a member there, or Ctrl-click it on the canvas, to edit it directly.
-Groups require objects from the same existing group/card face. Off-canvas objects
-have editor outlines and remain reachable through the surrounding workspace;
-the physical screen still clips to its canvas. Layer drag-and-drop remains available.
+Current development release: **0.1.14**. Object properties follow a consistent
+order: name/type, position and size, content/data, appearance, membership,
+playback/animation and layer/object actions. Sections can be collapsed and retain
+their state while editing; irrelevant sections are omitted. Sensor bindings,
+clock/weather configuration and image assets are separate from visual styling.
 
 In **Themes**, **Save as .bezeltheme...** opens a file dialog to save the current
 layout and its available assets wherever you choose (also Ctrl+Shift+S).

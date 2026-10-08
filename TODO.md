@@ -101,7 +101,7 @@ The existing themes remain usable without cards, states or automatic triggers.
 
 - [ ] Review the editor's main navigation and remove duplicated or misplaced
       controls while preserving existing workflows.
-- [ ] Group object properties by purpose with a consistent order: content/data,
+- [x] Group object properties by purpose with a consistent order: content/data,
       appearance, position/size, card membership and animation where applicable.
       Make common controls easy to find and show advanced controls in context.
 - [ ] Align labels, units, spacing and disabled states across widget types;

@@ -254,3 +254,30 @@ asset-placeholder fix, document state or delivery scheduling is reverted.
   and need no migration. Invalid/orphan references remain visible as root rows.
 - Validation: focused card/hierarchy unit tests and the card editor browser test,
   including face selection, nested membership, clipboard, Undo and accessibility.
+
+
+### Timed card rotation (0.1.10)
+
+- Optional `card.rotationSeconds` (5?3600, default absent/off) schedules one
+  next face at a time in the shared core runtime, independently for each card.
+  The interval includes transition time; rendering uses the configured effect.
+- The runtime renders transient face choices. The saved starting face, editor
+  document and Undo history remain intact. A manual face/configuration change
+  resets that card's interval; late frames/standby advance once without replaying
+  a queue of missed transitions. Hidden/single-face cards have no timer.
+- Studio pauses automatic rotation in both preview and Live while a card/member
+  is selected. Deselecting restarts from the selected starting face after a full
+  interval. Layer highlights describe the editing/starting face; they are not a
+  playback-position display. Light runs saved timers without an editor.
+- Timed inactive faces' sensors are sampled at the normal sensor cadence; incoming
+  GIFs are learned when that face becomes visible. Timer and renderer deadlines
+  share the existing scheduler and never start a per-frame sensor poll.
+- Old themes remain unchanged and load with timers disabled. Theme parsing
+  validates interval bounds; disabling rotation removes the optional setting.
+- Validation: core timer/cadence regressions, native card transition/preview tests,
+  theme serialization/range validation, JS playback/IPC tests, card editor browser
+  checks in both languages and color schemes, and strict Clippy with the existing
+  collapsible-if allowance. Three pre-existing i18n branding assertions still
+  expect the upstream Bezel name; translation-key parity and lookup checks pass.
+- Event priorities, media triggers and configurable override/return policies remain
+  planned; this release implements interval-based playback and editing pause.

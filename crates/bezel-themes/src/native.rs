@@ -651,9 +651,13 @@ mod tests {
     #[test]
     fn an_unassigned_image_survives_zip_and_folder_loading() {
         let (mut theme, assets) = every_kind();
-        theme.elements.push(el(99, ElementKind::Image {
-            asset: AssetRef(String::new()), fit: Fit::Contain,
-        }));
+        theme.elements.push(el(
+            99,
+            ElementKind::Image {
+                asset: AssetRef(String::new()),
+                fit: Fit::Contain,
+            },
+        ));
         let root = scratch("unassigned-image");
         for path in [root.join("folder"), root.join("placeholder.bezeltheme")] {
             let location = ThemeLocation(path.to_string_lossy().into());
@@ -1029,6 +1033,7 @@ mod tests {
             .card = Some(Card {
             faces: vec!["Metrics".into(), "Music".into()],
             active_face: 1,
+            rotation_seconds: None,
             transition: None,
         });
         let child = theme.elements.iter_mut().find(|e| e.id != parent).unwrap();
@@ -1053,7 +1058,29 @@ mod tests {
         });
         let bytes = manifest(&theme).unwrap();
         assert_eq!(parse_manifest(&bytes).unwrap(), theme);
+        let mut timed = theme.clone();
+        timed
+            .elements
+            .iter_mut()
+            .find(|e| e.id == parent)
+            .unwrap()
+            .card
+            .as_mut()
+            .unwrap()
+            .rotation_seconds = Some(10);
+        assert_eq!(parse_manifest(&manifest(&timed).unwrap()).unwrap(), timed);
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        for seconds in [0, 4, 3601] {
+            let mut bad = json.clone();
+            let parent = bad["elements"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|e| e["id"] == parent.0)
+                .unwrap();
+            parent["card"]["rotationSeconds"] = serde_json::json!(seconds);
+            assert!(parse_manifest(&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
         for membership in [
             serde_json::json!({"parent": 999999, "face": 0}),
             serde_json::json!({"parent": parent.0, "face": 2}),

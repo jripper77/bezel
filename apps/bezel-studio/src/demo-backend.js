@@ -1,3 +1,4 @@
+import { createCardTimers } from './editor/card-timer.js';
 import { createCardMotion } from './editor/card-motion.js';
 import { isShown } from './editor/cards.js';
 // An in-memory backend for demo mode: a simulated screen, sensors that move,
@@ -1066,6 +1067,7 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   const cards = createCardMotion();
+  const cardTimers = createCardTimers();
   let libreFailed = hooks.libre === 'partial' || hooks.libre === 'error';
   let libreOffline = hooks.libre === 'error';
   const libreSensors = hooks.libre ? [
@@ -1335,13 +1337,14 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       return { screen: key, theme: structuredClone(theme), location: null, minRefreshSeconds: DEMO_MIN_REFRESH };
     },
     /** The preview, like `render_preview`: a video background plays with `motion` (see the bridge). */
-    render: (next, { motion = true } = {}) => {
+    render: (next, { motion = true, cardRotation = true } = {}) => {
       const started = performance.now();
       const t = now();
-      const video = videoPicture(next, motion, t * 1000);
-      const transitions = cards.update(next, t * 1000, motion);
-      const frame = renderApprox(next, t, video, transitions);
-      const due = [demoNextChange(next, t * 1000), video?.nextMs ?? null, transitions.size ? 33 : null].filter((ms) => ms !== null);
+      const playback = cardTimers.update(next, t * 1000, cardRotation);
+      const video = videoPicture(playback.theme, motion, t * 1000);
+      const transitions = cards.update(playback.theme, t * 1000, motion);
+      const frame = renderApprox(playback.theme, t, video, transitions);
+      const due = [demoNextChange(playback.theme, t * 1000), playback.nextMs, video?.nextMs ?? null, transitions.size ? 33 : null].filter((ms) => ms !== null);
       return Promise.resolve({ ...frame, millis: performance.now() - started, nextMs: due.length ? Math.min(...due) : null });
     },
     /** What Auto is for the theme's video background, like `video_auto`. */

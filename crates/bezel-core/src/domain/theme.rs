@@ -443,6 +443,8 @@ pub struct Card {
     pub faces: Vec<String>,
     /// Face shown by the renderer.
     pub active_face: usize,
+    /// Automatic rotation interval, 5 to 3600 seconds; none disables it.
+    pub rotation_seconds: Option<u32>,
     /// Optional face transition; absent means an immediate switch.
     pub transition: Option<CardTransition>,
 }
@@ -604,8 +606,10 @@ impl Theme {
                     self.element(m.parent).is_some_and(|parent| {
                         parent.visible
                             && parent.card.as_ref().is_some_and(|card| {
-                                card.transition
-                                    .is_some_and(|t| t.effect != CardEffect::None)
+                                card.rotation_seconds.is_some()
+                                    || card
+                                        .transition
+                                        .is_some_and(|t| t.effect != CardEffect::None)
                             })
                     })
                 }))

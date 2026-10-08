@@ -1370,6 +1370,11 @@ impl Studio {
         Ok((frame, sooner(gifs, again)))
     }
 
+    /// Pause card timers in preview and Live while a card's objects are edited.
+    pub fn automatic_cards(&mut self, enabled: bool) {
+        self.runtime.automatic_cards(enabled);
+    }
+
     /// Whether the last preview/live frame avoided another native render.
     pub fn render_reused(&self) -> bool {
         self.runtime.render_reused()
@@ -2336,6 +2341,7 @@ mod tests {
             card: Some(Card {
                 faces: vec!["A".into(), "B".into()],
                 active_face: 0,
+                rotation_seconds: None,
                 transition: Some(CardTransition {
                     effect: CardEffect::Flip,
                     direction: CardDirection::Left,
@@ -2358,6 +2364,41 @@ mod tests {
             theme,
         )
     }
+    #[test]
+    fn native_card_timer_uses_flip_without_editing_saved_face_and_pauses_in_editor() {
+        let mut s = card_animation_studio();
+        let mut theme = s.theme().clone();
+        theme.elements[0].card.as_mut().unwrap().rotation_seconds = Some(5);
+        s.set_theme(theme.clone());
+        assert_eq!(
+            s.preview(TIME, at(&s, 0), Motion::Allowed).unwrap().1,
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            s.preview(TIME, at(&s, 5000), Motion::Allowed).unwrap().1,
+            Some(Duration::from_millis(33))
+        );
+        assert_eq!(s.theme(), &theme);
+        assert_eq!(
+            s.preview(TIME, at(&s, 5650), Motion::Allowed).unwrap().1,
+            Some(Duration::from_millis(4350))
+        );
+        s.automatic_cards(false);
+        s.preview(TIME, at(&s, 6000), Motion::Allowed).unwrap();
+        assert!(
+            s.preview(TIME, at(&s, 7000), Motion::Allowed)
+                .unwrap()
+                .1
+                .is_none()
+        );
+        s.automatic_cards(true);
+        assert_eq!(
+            s.preview(TIME, at(&s, 7100), Motion::Allowed).unwrap().1,
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(s.theme(), &theme);
+    }
+
     #[test]
     fn native_card_preview_schedules_frames_through_shared_renderer() {
         let mut s = card_animation_studio();

@@ -277,6 +277,8 @@ pub struct CardDto {
     #[serde(default)]
     pub active_face: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation_seconds: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<CardTransitionDto>,
 }
 
@@ -1271,6 +1273,7 @@ impl From<&Theme> for ThemeDto {
                     card: e.card.as_ref().map(|c| CardDto {
                         faces: c.faces.clone(),
                         active_face: c.active_face,
+                        rotation_seconds: c.rotation_seconds,
                         transition: c.transition.map(|t| CardTransitionDto {
                             effect: format!("{:?}", t.effect).to_lowercase(),
                             direction: format!("{:?}", t.direction).to_lowercase(),
@@ -1361,6 +1364,11 @@ impl TryFrom<&ThemeDto> for Theme {
                             use bezel_core::domain::theme::{
                                 CardDirection, CardEffect, CardTransition,
                             };
+                            if c.rotation_seconds
+                                .is_some_and(|seconds| !(5..=3600).contains(&seconds))
+                            {
+                                return err("card rotation interval must be 5 to 3600 seconds");
+                            }
                             let transition = c
                                 .transition
                                 .as_ref()
@@ -1395,6 +1403,7 @@ impl TryFrom<&ThemeDto> for Theme {
                             Ok(bezel_core::domain::theme::Card {
                                 faces: c.faces.clone(),
                                 active_face: c.active_face,
+                                rotation_seconds: c.rotation_seconds,
                                 transition,
                             })
                         })

@@ -1,5 +1,10 @@
 // English strings. Keys must match pt-BR.js (checked by tests/ui/i18n.test.mjs).
 export default {
+  "card.rotation": "Timed rotation",
+  "card.autoRotate": "Rotate faces automatically",
+  "card.rotationSeconds": "Seconds per face (5-3600)",
+  "card.rotationHelp": "Applies in Light, preview and Live. Includes transition time. Select a card or its object to pause rotation while editing; deselect to restart from the chosen face. Only the interval is saved.",
+
   "card.demo": "Create animation demo card",
   "card.demoMetrics": "METRICS",
   "card.demoDetails": "DETAILS",

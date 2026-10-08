@@ -180,6 +180,7 @@ impl Scene {
     fn draw(
         &self,
         renderer: &mut dyn FrameRenderer,
+        theme: &Theme,
         time: LocalTime,
         animation: Duration,
         backdrop: Backdrop<'_>,
@@ -194,7 +195,7 @@ impl Scene {
             backdrop,
         };
         renderer.set_content_revision(self.revision);
-        renderer.render(&self.theme, &self.assets, context)
+        renderer.render(theme, &self.assets, context)
     }
 }
 
@@ -229,6 +230,8 @@ pub struct ThemeRuntime {
     /// their frame of it.
     clock: Duration,
     renderer_change: Option<Duration>,
+    card_timers: super::card_timer::CardTimers,
+    card_rotation: bool,
     reuse_frames: bool,
     recent_frame: Option<RecentFrame>,
     render_reused: bool,
@@ -403,6 +406,8 @@ impl ThemeRuntime {
             timelines: BTreeMap::new(),
             clock: Duration::ZERO,
             renderer_change: None,
+            card_timers: super::card_timer::CardTimers::default(),
+            card_rotation: true,
             reuse_frames: false,
             recent_frame: None,
             render_reused: false,
@@ -419,6 +424,24 @@ impl ThemeRuntime {
             self.recent_frame = None;
         }
         self.reuse_frames = enabled;
+    }
+
+    /// Pause automatic face playback while editing. Saved faces remain unchanged.
+    pub fn automatic_cards(&mut self, enabled: bool) {
+        if self.card_rotation != enabled {
+            self.card_rotation = enabled;
+            self.recent_frame = None;
+            self.card_timers = super::card_timer::CardTimers::default();
+        }
+    }
+
+    fn advance_cards(&mut self, now: Duration) {
+        if self
+            .card_timers
+            .update(&self.scene.theme, now, self.card_rotation)
+        {
+            self.recent_frame = None;
+        }
     }
 
     /// Whether the last render reused a recent frame instead of drawing again.
@@ -447,7 +470,13 @@ impl ThemeRuntime {
             return Ok(recent.frame.clone());
         }
         self.recent_frame = None;
-        let frame = self.scene.draw(renderer, time, now, backdrop)?;
+        let frame = self.scene.draw(
+            renderer,
+            &self.card_timers.theme(&self.scene.theme),
+            time,
+            now,
+            backdrop,
+        )?;
         self.renderer_change = renderer.next_change();
         if eligible {
             // Never cross an image/transition boundary or hold a frame longer
@@ -845,6 +874,7 @@ impl ThemeRuntime {
         time: LocalTime,
         video: Duration,
     ) -> Result<Frame> {
+        self.advance_cards(self.clock);
         self.learn_animations(renderer);
         if matches!(self.video, VideoState::NoVideo) {
             return self.draw_frame(renderer, time, self.clock, Backdrop::Poster);
@@ -864,7 +894,13 @@ impl ThemeRuntime {
             (_, Some(picture)) => Backdrop::Frame(picture),
             _ => Backdrop::Poster,
         };
-        let frame = self.scene.draw(renderer, time, self.clock, backdrop)?;
+        let frame = self.scene.draw(
+            renderer,
+            &self.card_timers.theme(&self.scene.theme),
+            time,
+            self.clock,
+            backdrop,
+        )?;
         self.renderer_change = renderer.next_change();
         Ok(frame)
     }
@@ -878,7 +914,13 @@ impl ThemeRuntime {
         time: LocalTime,
         backdrop: Backdrop<'_>,
     ) -> Result<Frame> {
-        self.scene.draw(renderer, time, self.clock, backdrop)
+        self.scene.draw(
+            renderer,
+            &self.card_timers.theme(&self.scene.theme),
+            time,
+            self.clock,
+            backdrop,
+        )
     }
 
     // ------------------------------------------------------- live cadence --
@@ -984,12 +1026,13 @@ impl ThemeRuntime {
     /// When the visible animated images next change after `at`; `None`
     /// while none is shown. Known for the images the last render met.
     pub fn next_animation_change(&self, at: Duration) -> Option<Duration> {
-        self.scene
-            .theme
+        self.card_timers
+            .theme(&self.scene.theme)
             .shown_images()
             .filter_map(|asset| self.timelines.get(asset)?.as_ref())
             .map(|timeline| timeline.next_change(at))
             .chain(self.renderer_change)
+            .chain(self.card_timers.next)
             .min()
     }
 
@@ -1029,6 +1072,7 @@ impl ThemeRuntime {
         now: Duration,
         backdrop: Backdrop<'_>,
     ) -> Result<(Frame, Option<Duration>)> {
+        self.advance_cards(now);
         self.learn_animations(renderer);
         self.clock = now;
         let frame = self.draw_frame(renderer, time, now, backdrop)?;
@@ -1039,8 +1083,8 @@ impl ThemeRuntime {
     /// told yet.
     fn learn_animations(&mut self, renderer: &mut dyn FrameRenderer) {
         let unknown: Vec<AssetRef> = self
-            .scene
-            .theme
+            .card_timers
+            .theme(&self.scene.theme)
             .shown_images()
             .filter(|asset| !self.timelines.contains_key(*asset))
             .cloned()

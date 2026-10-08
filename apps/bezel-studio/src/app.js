@@ -346,7 +346,9 @@ async function drawPreview() {
   const screen = state.screen;
   const started = performance.now();
   try {
-    const work = bridge.render(store.getState().theme, { motion: motionAllowed() });
+    const { theme, selection } = store.getState();
+    const editingCard = theme.elements.some(e => selection.includes(e.id) && (e.card || e.cardMember));
+    const work = bridge.render(theme, { motion: motionAllowed(), cardRotation: !editingCard });
     previewWork = work.catch(() => {});
     const frame = await work;
     if (screen !== state.screen || switchingScreen) return;
@@ -423,6 +425,7 @@ function refreshChrome(reason) {
   void refreshAuto();
   inspector.render(state.assets);
   updateFramingReadout();
+  if (reason === 'select' && theme.elements.some(e => e.card?.rotationSeconds != null)) renderNow();
   if (reason !== 'select') {
     renderNow();
     pushLive();

@@ -1,5 +1,10 @@
 // Portuguese (Brazil) strings. Keys must match en.js (checked by tests/ui/i18n.test.mjs).
 export default {
+  "card.rotation": "Rotação temporizada",
+  "card.autoRotate": "Alternar faces automaticamente",
+  "card.rotationSeconds": "Segundos por face (5-3600)",
+  "card.rotationHelp": "Funciona no Light, na prévia e no Live, incluindo a transição. Selecione um cartão ou seu objeto para pausar durante a edição; desmarque para reiniciar na face escolhida. Apenas o intervalo é salvo.",
+
   "card.demo": "Criar cartão de demonstração",
   "card.demoMetrics": "MÉTRICAS",
   "card.demoDetails": "DETALHES",

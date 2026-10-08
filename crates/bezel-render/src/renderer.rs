@@ -1199,6 +1199,7 @@ mod tests {
         parent.card = Some(Card {
             faces: vec!["A".into(), "B".into()],
             active_face: 0,
+            rotation_seconds: None,
             transition: None,
         });
         let mut base = rect(BoxF::new(0.0, 0.0, 8.0, 8.0), Rgba::WHITE, 1.0);
@@ -1250,6 +1251,7 @@ mod tests {
             parent.card = Some(Card {
                 faces: vec!["A".into(), "B".into()],
                 active_face: 0,
+                rotation_seconds: None,
                 transition: Some(CardTransition {
                     effect,
                     direction: CardDirection::Left,
@@ -1354,6 +1356,7 @@ mod tests {
         parent.card = Some(Card {
             faces: vec!["A".into(), "B".into()],
             active_face: 0,
+            rotation_seconds: None,
             transition: Some(CardTransition {
                 effect: CardEffect::Flip,
                 direction: CardDirection::Left,
@@ -1487,6 +1490,7 @@ mod tests {
         parent.card = Some(Card {
             faces: vec!["A".into(), "B".into()],
             active_face: 0,
+            rotation_seconds: None,
             transition: Some(CardTransition {
                 effect: CardEffect::Flip,
                 direction: CardDirection::Left,

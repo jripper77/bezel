@@ -527,6 +527,12 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
         action('card.previous', 'reorderCardFace', c.activeFace === 0, { direction: -1 }),
         action('card.next', 'reorderCardFace', c.activeFace === c.faces.length - 1, { direction: 1 }),
       ]),
+      el('h3', { text: t('card.rotation') }),
+      checkField(t('card.autoRotate'), c.rotationSeconds != null, enabled => update(e.id, { card: { rotationSeconds: enabled ? 10 : null } })),
+      ...(c.rotationSeconds != null ? [
+        numberField(t('card.rotationSeconds'), c.rotationSeconds, value => update(e.id, { card: { rotationSeconds: Math.max(5, Math.min(3600, Math.round(value))) } }), { min: 5, max: 3600, step: 1 }),
+        el('p', { class: 'hint', text: t('card.rotationHelp') }),
+      ] : []),
       el('h3', { text: t('card.animation') }),
       selectField(t('card.effect'), c.transition?.effect ?? 'none', ['none', 'fade', 'slide', 'flip'].map(value => [value, t(`card.effect.${value}`)]), effect => update(e.id, { card: { transition: { effect, direction: c.transition?.direction ?? 'left', durationMs: c.transition?.durationMs ?? 650, includeBase: c.transition?.includeBase ?? true } } })),
       ...(c.transition && c.transition.effect !== 'none' ? [

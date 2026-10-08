@@ -333,9 +333,9 @@ function tauriBridge(invoke, tauri = {}) {
      * @param {{motion?: boolean}} [options]
      * @returns {Promise<PreviewFrameDto>}
      */
-    render: async (theme, { motion = true } = {}) => {
+    render: async (theme, { motion = true, cardRotation = true } = {}) => {
       const started = performance.now();
-      const frame = parseFrame(await invoke('render_preview', { theme, motion }));
+      const frame = parseFrame(await invoke('render_preview', { theme, motion, cardRotation }));
       return { ...frame, millis: performance.now() - started };
     },
     /**

@@ -808,12 +808,25 @@ impl Backend {
         now: Instant,
         motion: Motion,
     ) -> UiResult<Vec<u8>> {
+        self.render_cards(theme, time, now, motion, true)
+    }
+
+    /// Render with the editor's transient card-playback policy.
+    pub fn render_cards(
+        &self,
+        theme: &ThemeDto,
+        time: LocalTime,
+        now: Instant,
+        motion: Motion,
+        card_rotation: bool,
+    ) -> UiResult<Vec<u8>> {
         let started = Instant::now();
         let theme = theme_of(theme)?;
         let waiting = Instant::now();
         let mut studio = self.studio();
         let lock_ms = waiting.elapsed().as_secs_f64() * 1000.0;
         studio.set_theme(theme);
+        studio.automatic_cards(card_rotation);
         if let Some(probe) = studio.video_to_probe() {
             drop(studio);
             self.learn_video(Some(probe), Wait::No);

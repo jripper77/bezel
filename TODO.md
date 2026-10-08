@@ -62,8 +62,11 @@ The existing themes remain usable without cards, states or automatic triggers.
 - [x] Layers: show each card face as a container, with its objects indented below
       it. Show the shared base separately; keep selection, visibility, ordering
       and card membership understandable when switching faces.
-- [ ] Card timers: configure timed face rotation, duration, pause/manual override
-      and return behavior; coordinate with the trigger priorities above.
+- [x] Card timers: configure automatic face rotation (5?3600 seconds), using
+      the existing transition. Pause while editing a card/member in Studio;
+      keep runtime playback outside saved themes and Undo.
+- [ ] Coordinate timers with event priorities, explicit overrides and return
+      behavior when software/media triggers are introduced.
 - [ ] Software events: assess process start/stop, foreground application and media
       session events before choosing supported triggers. Implement only sources
       that are available reliably and without per-frame polling.

@@ -176,14 +176,21 @@ pub async fn render_preview(
     state: State<'_, Shared>,
     theme: ThemeDto,
     motion: Option<bool>,
+    card_rotation: Option<bool>,
 ) -> UiResult<Response> {
     let motion = match motion {
         Some(false) => Motion::Reduced,
         Some(true) | None => Motion::Allowed,
     };
     blocking(&state, move |b| {
-        b.render(&theme, now(), std::time::Instant::now(), motion)
-            .map(Response::new)
+        b.render_cards(
+            &theme,
+            now(),
+            std::time::Instant::now(),
+            motion,
+            card_rotation.unwrap_or(true),
+        )
+        .map(Response::new)
     })
     .await
 }

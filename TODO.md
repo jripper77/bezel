@@ -37,9 +37,11 @@ settings and are not clipped to the card bounds. Timers and entry/exit animation
       minimum display time, return behavior and sensor threshold hysteresis.
 - [x] Measure host frame-delivery rate, rendering and serial costs on the real
       8.8-inch screen; keep panel refresh distinct from host completion.
-- [x] Deliver independent per-display Studio workers and reusable native card faces.
-- [ ] Validate the 0.1.6 face cache on the user's device-video theme; compare cache
+- [x] Deliver independent per-display Studio workers; keep face caching optional after measurement.
+- [x] Validate the 0.1.6 face cache on the user's device-video theme; compare cache
       hits, face drawing/composition times, delivery cadence and long intervals.
+      Default restored to direct face drawing in 0.1.8: caching did not improve
+      overall delivery cadence and increased rendering variability.
 
 ## Software and media triggers
 
@@ -57,7 +59,7 @@ The existing themes remain usable without cards, states or automatic triggers.
 
 ## Existing features: corrections and extensions
 
-- [ ] Layers: show each card face as a container, with its objects indented below
+- [x] Layers: show each card face as a container, with its objects indented below
       it. Show the shared base separately; keep selection, visibility, ordering
       and card membership understandable when switching faces.
 - [ ] Card timers: configure timed face rotation, duration, pause/manual override

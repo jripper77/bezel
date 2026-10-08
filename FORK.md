@@ -239,3 +239,18 @@ selected for an A/B comparison by launching with `BEZEL_CARD_FACE_CACHE=1`.
 Use the same theme, Flip settings and face-switch sequence for both captures;
 the saved effect may differ from unsaved editor settings. No serial behavior,
 asset-placeholder fix, document state or delivery scheduling is reverted.
+
+
+### Card hierarchy in Layers (0.1.9)
+
+- Present each card with a separate shared base and every named face, including
+  empty and inactive faces; indent member objects and display member counts.
+- Highlight the active face. Its header selects the card; another face's header
+  switches the active face through the existing undoable command. Selecting a
+  member continues to open its face and select that object.
+- Keep object visibility, locking and rename controls. Member ordering arrows
+  operate between members of the same face or base, preserving membership.
+- The hierarchy is presentation only: saved themes retain their flat paint order
+  and need no migration. Invalid/orphan references remain visible as root rows.
+- Validation: focused card/hierarchy unit tests and the card editor browser test,
+  including face selection, nested membership, clipboard, Undo and accessibility.

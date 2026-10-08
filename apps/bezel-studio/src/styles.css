@@ -645,3 +645,15 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
 .icon-choice { display: grid; justify-items: center; align-content: start; gap: 6px; padding: 10px 4px; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: #18212e; color: #fff; cursor: grab; }
 .icon-choice:hover { border-color: var(--accent); }
 .icon-choice span { font-size: 10px; width: 100%; overflow-wrap: anywhere; text-align: center; }
+
+/* Card hierarchy in Layers; every face remains available for editing. */
+.layer-card { min-width: 0; }
+.layer-groups { list-style: none; padding: 0 0 0 10px; margin: 2px 0 8px; border-left: 1px solid var(--border); }
+.layer-group-heading { display: flex; align-items: center; gap: 6px; padding: 2px 4px; }
+.layer-group-heading small { color: var(--muted); }
+.layer-group-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; padding: 5px 4px; }
+button.layer-group-title { border: 0; background: transparent; text-align: left; cursor: pointer; color: var(--muted); }
+.active-face > .layer-group-heading { background: var(--accent-soft); border-radius: 6px; }
+.active-face .layer-group-title { color: var(--text); }
+.layer-children { margin-left: 8px; }
+.layer-row { min-width: 0; grid-template-columns: minmax(0, 1fr) auto auto auto auto; }

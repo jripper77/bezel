@@ -11,6 +11,7 @@ import { warningText } from '../messages.js';
 import { formatBytes, wireSubtabs } from './storage.js';
 import { SHOW_ALL, axisOf, countText, emptyState, filterThemes, rememberedFilter, scopeIn, screenLabel, thumbnailKey } from '../theme-filter.js';
 import { createIconPicker } from './icon-picker.js';
+import { layerGroups } from '../editor/layers.js';
 
 export { axisOf };
 
@@ -171,7 +172,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
   $('sensor-search').addEventListener('input', renderSensors);
 
   // -------------------------------------------------------------- layers --
-  function layerRow(e, index, total) {
+  function layerRow(e, index, total, neighbors = null) {
     const selected = store.getState().selection.includes(e.id);
     const name = editing === e.id
       ? el('input', {
@@ -195,12 +196,12 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
         ondblclick: () => { editing = e.id; renderLayers(); document.querySelector('.layer-list input')?.focus(); },
       }, [e.name, el('small', { text: t(`widget.${widgetOf(e)}`) })]);
     const btn = (label, paths, onclick, disabled = false, pressed = null) => el('button', { type: 'button', class: 'icon-button', title: label, 'aria-label': label, disabled, 'aria-pressed': pressed === null ? null : String(pressed), onclick }, [icon(paths)]);
-    return el('li', { class: `layer-row${selected ? ' selected' : ''}${e.visible === false ? ' hidden-el' : ''}` }, [
+    return el('li', { dataset: { elementId: e.id }, class: `layer-row${selected ? ' selected' : ''}${e.visible === false ? ' hidden-el' : ''}` }, [
       name,
       btn(e.visible === false ? t('layers.show') : t('layers.hide'), e.visible === false ? ICONS.eyeOff : ICONS.eye, () => store.dispatch('update', { id: e.id, patch: { visible: e.visible === false } }), false, e.visible !== false),
       btn(e.locked ? t('layers.unlock') : t('layers.lock'), e.locked ? ICONS.lock : ICONS.unlock, () => store.dispatch('update', { id: e.id, patch: { locked: !e.locked } }), false, Boolean(e.locked)),
-      btn(t('layers.up'), ICONS.up, () => store.dispatch('reorder', { id: e.id, index: index + 1 }), index === total - 1),
-      btn(t('layers.down'), ICONS.down, () => store.dispatch('reorder', { id: e.id, index: index - 1 }), index === 0),
+      btn(t('layers.up'), ICONS.up, () => store.dispatch('reorder', { id: e.id, index: neighbors ? neighbors.up : index + 1 }), neighbors ? neighbors.up == null : index === total - 1),
+      btn(t('layers.down'), ICONS.down, () => store.dispatch('reorder', { id: e.id, index: neighbors ? neighbors.down : index - 1 }), neighbors ? neighbors.down == null : index === 0),
     ]);
   }
 
@@ -211,8 +212,35 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
       list.replaceChildren(el('li', { class: 'empty-note', text: t('layers.empty') }));
       return;
     }
-    // Topmost first, like every design tool.
-    list.replaceChildren(...els.map((e, i) => layerRow(e, i, els.length)).reverse());
+    const indexOf = e => els.findIndex(item => item.id === e.id);
+    list.replaceChildren(...layerGroups(els).map(({ element: card, groups }) => {
+      const row = layerRow(card, indexOf(card), els.length);
+      if (!groups.length) return row;
+      return el('li', { class: 'layer-card', dataset: { cardId: card.id } }, [
+        el('ul', { class: 'layer-list' }, [row]),
+        el('ul', { class: 'layer-groups' }, groups.map(({ face, elements }) => {
+          const active = face !== null && card.card.activeFace === face;
+          const label = face === null ? t('card.base') : card.card.faces[face];
+          const heading = face === null
+            ? el('span', { class: 'layer-group-title', text: label })
+            : el('button', {
+              type: 'button', class: 'layer-group-title', text: label,
+              'aria-pressed': String(active),
+              onclick: () => {
+                if (!active) store.dispatch('cardFace', { id: card.id, face });
+                else store.select([card.id]);
+              },
+            });
+          return el('li', { class: `layer-group${active ? ' active-face' : ''}`, dataset: { face: face === null ? 'base' : face } }, [
+            el('div', { class: 'layer-group-heading' }, [heading, el('small', { text: String(elements.length) })]),
+            el('ul', { class: 'layer-list layer-children' }, elements.map((e, i) => layerRow(e, indexOf(e), els.length, {
+              up: i > 0 ? indexOf(elements[i - 1]) : null,
+              down: i + 1 < elements.length ? indexOf(elements[i + 1]) : null,
+            }))),
+          ]);
+        })),
+      ]);
+    }));
   }
 
   // -------------------------------------------------------------- themes --

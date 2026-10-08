@@ -307,6 +307,8 @@ pub enum ShapeKind {
         /// Corner radius, pixels.
         radius: f32,
     },
+    /// Independent radii: top-left, top-right, bottom-right, bottom-left.
+    Corners([f32; 4]),
     /// Ellipse inscribed in the box.
     Ellipse,
 }

@@ -309,6 +309,9 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
         checkField(t('player.hide'),c.hideWhenStopped,hideWhenStopped=>set({hideWhenStopped})),
         el('p',{class:'hint',text:t('player.help')}));
       for (const field of ['showCover','showProgress','showSource']) weatherAppearance.push(checkField(t(`player.${field}`),c[field],value=>set({[field]:value})));
+      if(c.showCover) weatherAppearance.push(
+        numberField(t('player.coverRadius'),c.coverRadius ?? 0,v=>set({coverRadius:Math.max(0,v)}),{min:0}),
+        numberField(t('player.coverGap'),c.coverGap ?? e.kind.style.size*.3,v=>set({coverGap:Math.max(0,v)}),{min:0}));
     }
     if (c.type === 'weather') {
       let query = c.city;
@@ -528,7 +531,10 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     const k = e.kind;
     return [
       segmented(t('inspector.shape'), k.shape, [['rect', t('shape.rect')], ['ellipse', t('shape.ellipse')]], (v) => update(e.id, { kind: { shape: v } })),
-      k.shape === 'rect' && numberField(t('inspector.radius'), k.radius ?? 0, (v) => update(e.id, { kind: { radius: Math.max(0, v) } }), { min: 0 }),
+      ...(k.shape === 'rect' ? [
+        checkField(t('inspector.individualCorners'),Boolean(k.corners),enabled=>update(e.id,{kind:{corners:enabled?Array(4).fill(k.radius ?? 0):null,radius:k.corners?.[0] ?? k.radius ?? 0}})),
+        ...(k.corners ? ['topLeft','topRight','bottomRight','bottomLeft'].map((name,i)=>numberField(t(`inspector.${name}`),k.corners[i],v=>update(e.id,{kind:{corners:k.corners.map((r,n)=>n===i?Math.max(0,v):r)}}),{min:0})) : [numberField(t('inspector.radius'),k.radius ?? 0,v=>update(e.id,{kind:{radius:Math.max(0,v)}}),{min:0})]),
+      ] : []),
       checkField(t('shape.videoWindow'), Boolean(k.videoWindow), (videoWindow) => update(e.id, { kind: { videoWindow } })),
       k.videoWindow ? el('div', {}, [el('p', { class: 'hint', text: t('shape.videoWindowHint') }), button(t('deviceVideo.choose'), () => video.openStorage())]) : colorField(t('inspector.fill'), typeof k.fill === 'string' ? k.fill : '#1e293bff', (v) => update(e.id, { kind: { fill: v } })),
       ...fadeFields(e),
@@ -596,6 +602,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       textField(t('trigger.app'),r.app,app=>{if(app.trim() || r.source==='mediaPlaying')change(i,{app:app.slice(0,160)});}),
       selectField(t('trigger.face'),String(r.face),c.faces.map((name,n)=>[String(n),name]),face=>change(i,{face:Number(face)})),
       numberField(t('trigger.priority'),r.priority ?? 0,priority=>change(i,{priority:Math.max(0,Math.min(100,Math.round(priority)))}),{min:0,max:100}),
+      selectField(t('trigger.returnFace'),r.returnFace==null?'previous':String(r.returnFace),[['previous',t('trigger.previous')],...c.faces.map((name,n)=>[String(n),name])],v=>change(i,{returnFace:v==='previous'?null:Number(v)})),
       numberField(t('trigger.return'),r.returnSeconds ?? 0,returnSeconds=>change(i,{returnSeconds:Math.max(0,Math.min(300,Math.round(returnSeconds)))}),{min:0,max:300}),
       button(t('trigger.remove'),()=>update(e.id,{card:{triggers:rules.filter((_,n)=>n!==i)}})),
     ])));

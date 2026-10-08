@@ -7,7 +7,7 @@ use tiny_skia::{Path, PathBuilder, Rect, Stroke};
 
 use crate::layer::Layer;
 use crate::paint::{paint_for, solid};
-use crate::path::rounded_rect;
+use crate::path::{rounded_corners, rounded_rect};
 
 /// Draws a shape filling `area`.
 pub(crate) fn draw(
@@ -43,6 +43,7 @@ pub(crate) fn outline_path(area: BoxF, shape: ShapeKind, inset: f32) -> Option<P
     let (w, h) = (area.width - 2.0 * inset, area.height - 2.0 * inset);
     match shape {
         ShapeKind::Rect { radius } => rounded_rect(x, y, w, h, radius - inset),
+        ShapeKind::Corners(r) => rounded_corners(x, y, w, h, r.map(|v| (v - inset).max(0.))),
         ShapeKind::Ellipse => Rect::from_xywh(x, y, w, h).and_then(PathBuilder::from_oval),
     }
 }

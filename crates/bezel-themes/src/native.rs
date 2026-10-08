@@ -1175,7 +1175,8 @@ mod tests {
             .iter_mut()
             .find(|e| e["kind"]["type"] == "shape")
             .unwrap();
-        shape["card"] = serde_json::json!({"faces":["Default","Music"],"activeFace":0,"triggers":[{"source":"mediaPlaying","app":"Spotify","face":1,"priority":4,"returnSeconds":3}]});
+        shape["card"] = serde_json::json!({"faces":["Default","Music"],"activeFace":0,"triggers":[{"source":"mediaPlaying","app":"Spotify","face":1,"priority":4,"returnSeconds":3,"returnFace":0}]});
+        shape["kind"]["corners"] = serde_json::json!([0, 12, 24, 36]);
         shape["kind"]["fade"] =
             serde_json::json!({"radial":[0.25,0.75,0.5],"angle":0,"start":1,"end":0});
         let image = elements
@@ -1188,7 +1189,7 @@ mod tests {
             .iter_mut()
             .find(|e| e["kind"]["type"] == "text")
             .unwrap();
-        text["kind"]["content"] = serde_json::json!({"type":"player","source":"Spotify","showCover":true,"showProgress":true,"emptyText":"No media"});
+        text["kind"]["content"] = serde_json::json!({"type":"player","source":"Spotify","showCover":true,"showProgress":true,"coverRadius":12,"coverGap":20,"emptyText":"No media"});
         let dto: ThemeDto = serde_json::from_value(json.clone()).unwrap();
         let theme = Theme::try_from(&dto).unwrap();
         assert_eq!(Theme::try_from(&ThemeDto::from(&theme)).unwrap(), theme);
@@ -1198,7 +1199,12 @@ mod tests {
                 .iter()
                 .any(|k| k.as_str() == "media.sessions")
         );
-        for (field, value) in [("face", 17), ("priority", 101), ("returnSeconds", 301)] {
+        for (field, value) in [
+            ("face", 17),
+            ("priority", 101),
+            ("returnSeconds", 301),
+            ("returnFace", 17),
+        ] {
             let mut bad = json.clone();
             let shape = bad["elements"]
                 .as_array_mut()

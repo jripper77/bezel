@@ -25,6 +25,11 @@ Checked items are implemented; unchecked items are design notes for future work.
 - [x] Show group containers and indented members in Layers; edit members individually.
 - [x] Select objects with a mouse rectangle and move objects outside the canvas.
 
+- [x] Restore canvas keyboard focus and support Ctrl+X/Ctrl+V with reversible cut/paste.
+- [x] Add accessible object context menus and drag objects across group/card containers.
+- [x] Distinguish foldable containers, indented faces, empty drop zones and root placement.
+- [x] Configure shared or independent shape corners and player cover radius/text spacing.
+
 ## Card widget with a base and multiple faces
 
 Face transitions, timed rotation and Windows application/media state rules are implemented. Cards move and resize their
@@ -60,7 +65,7 @@ settings and are not clipped to the card bounds. Entry/exit animations and senso
       needed and which fields are reliably available. Windows exposes sessions
       without OAuth; track fields/cover/timeline depend on the publishing app.
 - [x] Show a configured Music/player face while a matching media session plays;
-      after a configurable pause/stop delay, return to the previous card face.
+      after a configurable pause/stop delay, return to the previous or explicitly chosen card face.
       Spotify is supported when it publishes a Windows media session.
 - [ ] Resolve simultaneous triggers and manual tray overrides predictably.
 

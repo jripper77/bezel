@@ -39,3 +39,25 @@ export function layerDropIndex(elements, id, targetId, before) {
   // The list shows topmost first, opposite to the theme's paint order.
   return before ? Math.max(...indices) + 1 : Math.min(...indices);
 }
+
+/** Validate a layer reparent/reorder without changing geometry or IDs. */
+export function layerPlacement(theme,{ids,id,target,inside=false,face,root=false,before=true}) {
+  const roots=theme.elements.filter(e=>(ids ?? [id]).includes(e.id) && !withChildren(theme,(ids ?? [id]).filter(n=>n!==e.id)).includes(e.id));
+  if(!roots.length)return null;
+  const moved=new Set(withChildren(theme,roots.map(e=>e.id)));
+  const owner=theme.elements.find(e=>e.id===target);
+  if(!root && (!owner || moved.has(target)))return null;
+  let groupParent=null,cardMember=null;
+  if(!root) {
+    if(inside && owner.isGroup){groupParent=owner.id;cardMember=owner.cardMember ?? null;}
+    else if(inside && owner.card){if(face!==null && face!==undefined && (!Number.isInteger(face)||face<0||face>=owner.card.faces.length))return null;cardMember={parent:owner.id,face:face===undefined?owner.card.activeFace:face};}
+    else if(inside)return null;
+    else {groupParent=owner.groupParent ?? null;cardMember=owner.cardMember ?? null;}
+  }
+  const locked=e=>e?.locked || (e && (e.groupParent!=null || e.cardMember) && theme.elements.some(p=>(p.id===e.groupParent || p.id===e.cardMember?.parent)&&locked(p)));
+  const changed=roots.some(e=>(e.groupParent ?? null)!==groupParent || (e.cardMember?.parent ?? null)!==(cardMember?.parent ?? null) || (e.cardMember?.face ?? null)!==(cardMember?.face ?? null));
+  const container=theme.elements.find(e=>e.id===(groupParent ?? cardMember?.parent));
+  if(changed && (roots.some(locked) || locked(container)))return null;
+  if(cardMember && theme.elements.some(e=>moved.has(e.id)&&e.card))return null;
+  return {roots:roots.map(e=>e.id),moved,owner,groupParent,cardMember,inside,root,before,changed};
+}

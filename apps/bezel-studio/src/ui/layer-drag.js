@@ -1,26 +1,35 @@
 // Pointer events also work in Tauri, which intercepts native HTML file drops.
 import { el } from './dom.js';
-import { layerDropIndex } from '../editor/layers.js';
+import { layerPlacement } from '../editor/layers.js';
 
 export function wireLayerDrag(list, store) {
   let press = null, ghost = null, marker = null, frame = null, suppressClick = false;
   const scroller = list.closest('.library');
   const unmark = () => {
-    marker?.classList.remove('layer-drop-before', 'layer-drop-after');
+    marker?.classList.remove('layer-drop-before', 'layer-drop-after', 'layer-drop-inside');
     marker = null;
   };
   function refresh() {
     unmark();
     if (!press?.dragging) return;
-    const row = document.elementFromPoint(press.x, press.y)?.closest('.layer-row');
-    if (!row || !list.contains(row)) { press.drop = null; return; }
-    const target = Number(row.dataset.elementId), box = row.getBoundingClientRect();
-    const before = press.y < box.top + box.height / 2;
-    const index = layerDropIndex(store.getState().theme.elements, press.id, target, before);
-    press.drop = index === null ? null : { id: press.id, target, before };
-    if (press.drop) {
-      marker = row;
-      row.classList.add(before ? 'layer-drop-before' : 'layer-drop-after');
+    const hit=document.elementFromPoint(press.x,press.y);
+    const destination=hit?.closest('[data-drop-card], [data-root-drop]');
+    const row=hit?.closest('.layer-row');
+    let drop=null,node=null;
+    if(destination && list.contains(destination)) {
+      node=destination;
+      drop=destination.hasAttribute('data-root-drop')?{root:true}:{target:Number(destination.dataset.dropCard),inside:true,face:destination.dataset.dropFace==='base'?null:Number(destination.dataset.dropFace)};
+    } else if(row && list.contains(row)) {
+      const target=Number(row.dataset.elementId),box=row.getBoundingClientRect();
+      const owner=store.getState().theme.elements.find(e=>e.id===target);
+      const ratio=(press.y-box.top)/box.height;
+      const inside=Boolean(owner?.card || owner?.isGroup) && ratio>.25 && ratio<.75;
+      drop={target,inside,before:ratio<.5};node=row;
+    }
+    if(drop)drop={...drop,id:press.id,ids:press.ids};
+    press.drop=drop && layerPlacement(store.getState().theme,drop)?drop:null;
+    if(press.drop) {
+      marker=node;node.classList.add(drop.inside||drop.root?'layer-drop-inside':drop.before?'layer-drop-before':'layer-drop-after');
     }
   }
   function scrollFrame() {
@@ -50,7 +59,7 @@ export function wireLayerDrag(list, store) {
     const id = Number(row.dataset.elementId);
     const element = store.getState().theme.elements.find(e => e.id === id);
     if (!element) return;
-    press = { id, pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, x: evt.clientX, y: evt.clientY, dragging: false, label: element.name, drop: null };
+    press = { id, ids:store.getState().selection.includes(id)?[...store.getState().selection]:[id], pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, x: evt.clientX, y: evt.clientY, dragging: false, label: element.name, drop: null };
     // Capture only after a drag begins so ordinary name clicks still select.
   });
   list.addEventListener('pointermove', evt => {
@@ -81,7 +90,7 @@ export function wireLayerDrag(list, store) {
     suppressClick = true;
     setTimeout(() => { suppressClick = false; }, 0);
     evt.preventDefault();
-    if (drop) store.dispatch('reorderLayer', drop);
+    if (drop) store.dispatch('placeLayer', drop);
   });
   list.addEventListener('click', evt => {
     if (suppressClick) { evt.preventDefault(); evt.stopImmediatePropagation(); }

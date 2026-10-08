@@ -92,7 +92,10 @@ impl CardTimers {
                 if now >= until {
                     state.override_rule = None;
                     state.release = None;
-                    state.face = state.base;
+                    state.face = card.triggers[i]
+                        .return_face
+                        .filter(|f| *f < card.faces.len())
+                        .unwrap_or(state.base);
                     state.due = interval.map(|i| now + i);
                 }
             } else if state.due.is_some_and(|due| now >= due) {
@@ -172,6 +175,7 @@ mod tests {
                         face: 1,
                         priority: 1,
                         return_seconds: 3,
+                        return_face: None,
                     },
                     CardTrigger {
                         source: TriggerSource::Foreground,
@@ -179,6 +183,7 @@ mod tests {
                         face: 2,
                         priority: 2,
                         return_seconds: 0,
+                        return_face: None,
                     },
                 ],
             }),
@@ -227,6 +232,30 @@ mod tests {
         assert_eq!(t.elements[0].card.as_ref().unwrap().active_face, 0);
     }
     #[test]
+    fn explicit_return_face_applies_when_media_session_disappears() {
+        let mut t = theme();
+        let c = t.elements[0].card.as_mut().unwrap();
+        c.active_face = 1;
+        c.rotation_seconds = None;
+        c.triggers.truncate(1);
+        c.triggers[0].return_face = Some(0);
+        c.triggers[0].return_seconds = 0;
+        let mut timers = CardTimers::default();
+        let mut s = Snapshot::default();
+        s.media.push(MediaSession {
+            source: "Spotify".into(),
+            playing: true,
+            ..MediaSession::default()
+        });
+        timers.update(&t, &s, Duration::ZERO, true);
+        assert_eq!(face(&timers, &t), 1);
+        s.media.clear();
+        timers.update(&t, &s, Duration::from_secs(1), true);
+        assert_eq!(face(&timers, &t), 0);
+        assert_eq!(t.elements[0].card.as_ref().unwrap().active_face, 1);
+    }
+
+    #[test]
     fn closed_process_does_not_match_missing_measurements_and_rewind_resets() {
         let mut t = theme();
         let c = t.elements[0].card.as_mut().unwrap();
@@ -237,6 +266,7 @@ mod tests {
             face: 2,
             priority: 0,
             return_seconds: 0,
+            return_face: None,
         }];
         let mut timers = CardTimers::default();
         let mut s = Snapshot::default();

@@ -891,7 +891,14 @@ impl SkiaRenderer {
                     }
                     if let Some(m) = media {
                         if p.show_cover {
-                            let side = area.height.min(area.width * 0.4);
+                            let gap = p
+                                .cover_gap
+                                .unwrap_or(style.size * 0.3)
+                                .clamp(0., area.width.max(0.));
+                            let side = area
+                                .height
+                                .min(area.width * 0.4)
+                                .min((area.width - gap).max(0.));
                             if !m.cover.is_empty() {
                                 use std::hash::{Hash, Hasher};
                                 let mut hash = std::collections::hash_map::DefaultHasher::new();
@@ -908,8 +915,35 @@ impl SkiaRenderer {
                                     context,
                                 );
                             }
-                            area.x += side + style.size * 0.3;
-                            area.width = (area.width - side - style.size * 0.3).max(0.);
+                            if p.cover_radius > 0.
+                                && let Some(path) = crate::path::rounded_rect(
+                                    area.x,
+                                    area.y,
+                                    side,
+                                    side,
+                                    p.cover_radius,
+                                )
+                            {
+                                if let Some(mask) = layer.mask_of(&path) {
+                                    for (pixel, alpha) in layer
+                                        .pixmap
+                                        .data_mut()
+                                        .as_chunks_mut::<4>()
+                                        .0
+                                        .iter_mut()
+                                        .zip(mask.data())
+                                    {
+                                        for channel in pixel {
+                                            *channel = ((u16::from(*channel) * u16::from(*alpha)
+                                                + 127)
+                                                / 255)
+                                                as u8;
+                                        }
+                                    }
+                                }
+                            }
+                            area.x += side + gap;
+                            area.width = (area.width - side - gap).max(0.);
                         }
                         if p.show_progress && m.duration > 0. {
                             let bar = BoxF::new(area.x, area.y + area.height - 4., area.width, 4.);

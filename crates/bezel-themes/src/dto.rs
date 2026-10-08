@@ -304,6 +304,8 @@ pub struct CardTriggerDto {
     pub priority: u32,
     #[serde(default)]
     pub return_seconds: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_face: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -383,6 +385,10 @@ pub enum ContentDto {
         source: String,
         #[serde(default = "yes", rename = "showCover")]
         show_cover: bool,
+        #[serde(default, rename = "coverRadius")]
+        cover_radius: f32,
+        #[serde(default, rename = "coverGap", skip_serializing_if = "Option::is_none")]
+        cover_gap: Option<f32>,
         #[serde(default = "yes", rename = "showProgress")]
         show_progress: bool,
         #[serde(default, rename = "showSource")]
@@ -517,6 +523,8 @@ pub enum KindDto {
         fade: Option<FadeDto>,
         /// `rect` or `ellipse`.
         shape: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        corners: Option<[f32; 4]>,
         /// Corner radius for rects.
         #[serde(default)]
         radius: f32,
@@ -914,6 +922,8 @@ fn kind_dto(k: &ElementKind) -> KindDto {
                 TextContent::Player(p) => ContentDto::Player {
                     source: p.source.clone(),
                     show_cover: p.show_cover,
+                    cover_radius: p.cover_radius,
+                    cover_gap: p.cover_gap,
                     show_progress: p.show_progress,
                     show_source: p.show_source,
                     hide_when_stopped: p.hide_when_stopped,
@@ -990,9 +1000,10 @@ fn kind_dto(k: &ElementKind) -> KindDto {
             fill,
             stroke,
         } => {
-            let (name, radius) = match shape {
-                ShapeKind::Rect { radius } => ("rect", *radius),
-                ShapeKind::Ellipse => ("ellipse", 0.0),
+            let (name, radius, corners) = match shape {
+                ShapeKind::Rect { radius } => ("rect", *radius, None),
+                ShapeKind::Ellipse => ("ellipse", 0.0, None),
+                ShapeKind::Corners(r) => ("rect", 0., Some(*r)),
             };
             KindDto::Shape {
                 video_window: *video_window,
@@ -1002,6 +1013,7 @@ fn kind_dto(k: &ElementKind) -> KindDto {
                     start: f.start,
                     end: f.end,
                 }),
+                corners,
                 shape: name.to_string(),
                 radius,
                 fill: fill.as_ref().map(paint_dto),
@@ -1091,17 +1103,27 @@ fn kind(k: &KindDto) -> R<ElementKind> {
                 ContentDto::Player {
                     source,
                     show_cover,
+                    cover_radius,
+                    cover_gap,
                     show_progress,
                     show_source,
                     hide_when_stopped,
                     empty_text,
                 } => {
+                    if !cover_radius.is_finite()
+                        || *cover_radius < 0.
+                        || cover_gap.is_some_and(|v| !v.is_finite() || v < 0.)
+                    {
+                        return err("invalid cover geometry");
+                    }
                     if source.chars().count() > 160 || empty_text.chars().count() > 512 {
                         return err("player text is too long");
                     }
                     TextContent::Player(bezel_core::domain::playback::Player {
                         source: source.clone(),
                         show_cover: *show_cover,
+                        cover_radius: *cover_radius,
+                        cover_gap: *cover_gap,
                         show_progress: *show_progress,
                         show_source: *show_source,
                         hide_when_stopped: *hide_when_stopped,
@@ -1199,6 +1221,7 @@ fn kind(k: &KindDto) -> R<ElementKind> {
             video_window,
             fade,
             shape,
+            corners,
             radius,
             fill,
             stroke,
@@ -1207,7 +1230,16 @@ fn kind(k: &KindDto) -> R<ElementKind> {
             video_window: *video_window,
             fade: fade.as_ref().map(parse_fade).transpose()?,
             shape: match shape.as_str() {
-                "rect" => ShapeKind::Rect { radius: *radius },
+                "rect" => {
+                    if let Some(r) = corners {
+                        if r.iter().any(|v| !v.is_finite() || *v < 0.) {
+                            return err("invalid corner radius");
+                        }
+                        ShapeKind::Corners(*r)
+                    } else {
+                        ShapeKind::Rect { radius: *radius }
+                    }
+                }
                 "ellipse" => ShapeKind::Ellipse,
                 other => return err(format!("unknown shape {other:?}")),
             },
@@ -1357,6 +1389,7 @@ impl From<&Theme> for ThemeDto {
                                 face: r.face,
                                 priority: r.priority,
                                 return_seconds: r.return_seconds,
+                                return_face: r.return_face,
                             })
                             .collect(),
                         faces: c.faces.clone(),
@@ -1482,6 +1515,7 @@ impl TryFrom<&ThemeDto> for Theme {
                                         || r.face >= c.faces.len()
                                         || r.priority > 100
                                         || r.return_seconds > 300
+                                        || r.return_face.is_some_and(|f| f >= c.faces.len())
                                     {
                                         return err("invalid card trigger");
                                     }
@@ -1491,6 +1525,7 @@ impl TryFrom<&ThemeDto> for Theme {
                                         face: r.face,
                                         priority: r.priority,
                                         return_seconds: r.return_seconds,
+                                        return_face: r.return_face,
                                     })
                                 })
                                 .collect::<R<Vec<_>>>()?;

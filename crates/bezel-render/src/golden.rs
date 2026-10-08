@@ -1353,7 +1353,7 @@ fn player_cover_progress_and_stopped_state_use_measured_context() {
             duration: 60.,
             cover: png(20, 20, |_, _| RED),
         });
-    let t = theme(
+    let mut t = theme(
         200,
         90,
         Background::Color(BLACK),
@@ -1363,6 +1363,8 @@ fn player_cover_progress_and_stopped_state_use_measured_context() {
                 content: TextContent::Player(bezel_core::domain::playback::Player {
                     source: "Spotify".into(),
                     show_cover: true,
+                    cover_radius: 0.,
+                    cover_gap: None,
                     show_progress: true,
                     show_source: false,
                     hide_when_stopped: true,
@@ -1389,6 +1391,19 @@ fn player_cover_progress_and_stopped_state_use_measured_context() {
     assert_eq!(px(&frame, 20, 40), RED);
     assert!(px(&frame, 115, 87).r > 200);
     assert!(px(&frame, 190, 87).r < 100);
+    if let ElementKind::Text {
+        content: TextContent::Player(p),
+        ..
+    } = &mut t.elements[0].kind
+    {
+        p.cover_radius = 25.;
+        p.cover_gap = 20_f32.into();
+    }
+    let frame = render(&mut r, &t, &scene);
+    assert_eq!(px(&frame, 0, 0), BLACK);
+    assert_eq!(px(&frame, 40, 40), RED);
+    assert_eq!(px(&frame, 90, 87), BLACK);
+    assert!(px(&frame, 115, 87).r > 200);
     scene.snapshot.media[0].playing = false;
     let frame = render(&mut r, &t, &scene);
     assert_eq!(count(&frame, (0, 0, 200, 90), |p| p != BLACK), 0);
@@ -1437,4 +1452,29 @@ fn colored_weather_families_and_depth_have_distinct_vector_pixels() {
         let depth = shot(&mut r, &format!("weather_depth_{code}"), &make(w), &scene);
         assert_ne!(colored, depth);
     }
+}
+
+#[test]
+fn independent_shape_corners_clip_only_the_selected_corners() {
+    let t = theme(
+        80,
+        80,
+        Background::Color(BLACK),
+        vec![element(
+            BoxF::new(0., 0., 80., 80.),
+            ElementKind::Shape {
+                shape: ShapeKind::Corners([30., 0., 30., 0.]),
+                fill: Some(Paint::solid(RED)),
+                stroke: None,
+                fade: None,
+                video_window: false,
+            },
+        )],
+    );
+    let mut r = crate::testkit::renderer();
+    let frame = render(&mut r, &t, &Scene::empty());
+    assert_eq!(px(&frame, 0, 0), BLACK);
+    assert_eq!(px(&frame, 79, 0), RED);
+    assert_eq!(px(&frame, 79, 79), BLACK);
+    assert_eq!(px(&frame, 0, 79), RED);
 }

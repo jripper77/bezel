@@ -6,11 +6,18 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.16**. Object properties follow a consistent
+Current development release: **0.1.17**. Object properties follow a consistent
 order: name/type, position and size, content/data, appearance, membership,
 playback/animation and layer/object actions. Sections are separated by horizontal lines and can be collapsed; they retain
 their state while editing; irrelevant sections are omitted. Sensor bindings,
 clock/weather configuration and image assets are separate from visual styling.
+
+Right-click an object in the canvas or Layers for cut/copy/paste, grouping,
+ordering, visibility and locking actions. Arrow keys move the selection (Shift
+moves by 10 px). Layers accept drops into groups, card faces and the root level.
+Shapes support shared or individual corner radii; media covers have radius and
+text-gap controls. Each card trigger can return to an explicit face after its
+configured delay. Deselect the card and its objects to test automatic playback.
 
 In **Themes**, **Save as .bezeltheme...** opens a file dialog to save the current
 layout and its available assets wherever you choose (also Ctrl+Shift+S).

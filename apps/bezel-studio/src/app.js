@@ -17,6 +17,7 @@ import { createGifSearch } from './ui/gif-search.js';
 import { createCollectionPanel } from './ui/collection.js';
 import { createStandbyPanel } from './ui/standby.js';
 import { showAccessHelp } from './ui/udev.js';
+import { wireObjectMenu } from './ui/object-menu.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
 import { createPreviewAnimation } from './preview-animation.js';
@@ -93,8 +94,8 @@ function fail(e) {
 // ------------------------------------------------------------ store ----
 const session = await bridge.session().catch(() => null);
 const appVersion = session?.version ?? 'dev';
-$('app-version').textContent = `v${appVersion}`;
-document.title = `Bezel Evo ${appVersion}`;
+$('app-version').textContent = t('app.version',{version:appVersion});
+document.title = t('app.title',{version:appVersion});
 // Without a session: a blank theme for the 8.8", horizontal like the backend's
 // default for bar-shaped screens.
 // New elements and copies are named in the UI's language.
@@ -121,6 +122,8 @@ const canvasView = createCanvasView({
   describe: (name) => t('stage.selected', { name }),
   onFrameRequest: () => setFramingMode(true),
 });
+
+wireObjectMenu({store,canvasView,stage:$('stage-scroll'),layers:$('layer-list'),t});
 
 // The Media tab's Collection (D-2026-10-01-gif-sticker-search-5), and
 // "Search GIFs and stickers", opened from it (-4): what the search adds
@@ -426,7 +429,7 @@ function refreshChrome(reason) {
   void refreshAuto();
   inspector.render(state.assets);
   updateFramingReadout();
-  if (reason === 'select' && theme.elements.some(e => e.card?.rotationSeconds != null)) renderNow();
+  if (reason === 'select' && theme.elements.some(e => e.card?.rotationSeconds != null || e.card?.triggers?.length)) renderNow();
   if (reason !== 'select') {
     renderNow();
     pushLive();
@@ -1074,6 +1077,7 @@ document.addEventListener('keydown', (evt) => {
     case 'redo': store.redo(); break;
     case 'save': save(); break;
     case 'saveAs': save(true); break;
+    case 'cut': store.cutSelection(); break;
     case 'copy': store.copySelection(); break;
     case 'paste': store.paste(); break;
     case 'remove': if (ids.length) store.dispatch('remove', { ids }); break;

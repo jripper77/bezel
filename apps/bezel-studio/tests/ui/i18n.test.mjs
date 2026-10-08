@@ -202,6 +202,8 @@ const NOT_PROSE = new Set([
   // An Error's message for a malformed frame from the renderer: a detail for
   // the log, which the user reads inside the translated `error.unknown`.
   'bridge.js: frame too short',
+  // Default theme content, editable by the user rather than UI chrome.
+  'editor/widgets.js: No media session',
 ]);
 
 test('the prose scan finds sentences whatever function receives them', () => {
@@ -531,7 +533,7 @@ test('the messages a GIF or collection helper is given name only keys of both di
 test('index.html has no text of its own but the brand', () => {
   const html = readFileSync(new URL('index.html', src), 'utf8');
   const texts = [...html.matchAll(/>([^<>]+)</g)].map((m) => m[1].trim()).filter((text) => /\p{L}/u.test(text));
-  assert.deepEqual([...new Set(texts)], ['Bezel']);
+  assert.deepEqual([...new Set(texts)], ['Bezel Evo']);
   const attrs = [...html.matchAll(/\s(?:title|alt|placeholder|aria-label)="([^"]*)"/g)].map((m) => m[1]).filter((v) => /\p{L}/u.test(v));
   assert.deepEqual(attrs, []);
 });

@@ -26,6 +26,10 @@ pub struct Player {
     pub source: String,
     /// Display album artwork.
     pub show_cover: bool,
+    /// Cover corner radius in pixels.
+    pub cover_radius: f32,
+    /// Cover to text spacing; None preserves font-relative spacing.
+    pub cover_gap: Option<f32>,
     /// Display timeline and progress bar.
     pub show_progress: bool,
     /// Display the application identifier.
@@ -60,6 +64,8 @@ pub struct CardTrigger {
     pub priority: u32,
     /// Delay before restoring the previous face, 0 to 300.
     pub return_seconds: u32,
+    /// Explicit return face; None restores the face preceding the trigger.
+    pub return_face: Option<usize>,
 }
 /// Case-insensitive executable basename without its optional extension.
 pub fn app_name(value: &str) -> String {

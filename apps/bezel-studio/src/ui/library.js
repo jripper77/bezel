@@ -62,6 +62,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
   let catalog = [];
   let readings = {};
   let editing = null;
+  const collapsedLayers=new Set();
   // What each panel shows, to draw it again in another language.
   let themes = [];
   let media = [];
@@ -192,13 +193,15 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
       : el('button', {
         type: 'button', class: 'layer-name', 'aria-pressed': String(selected),
         onclick: (evt) => {
+          const previous=store.getState().selection;
           if (e.cardMember?.face != null) store.dispatch('cardFace', { id: e.cardMember.parent, face: e.cardMember.face });
-          store.select(evt.shiftKey ? [...new Set([...store.getState().selection, e.id])] : [e.id]);
+          store.select(evt.ctrlKey || evt.metaKey ? previous.includes(e.id)?previous.filter(id=>id!==e.id):[...previous,e.id] : evt.shiftKey ? [...new Set([...previous,e.id])] : [e.id]);
         },
         ondblclick: () => { editing = e.id; renderLayers(); document.querySelector('.layer-list input')?.focus(); },
       }, [e.name, el('small', { text: t(`widget.${widgetOf(e)}`) })]);
     const btn = (label, paths, onclick, disabled = false, pressed = null) => el('button', { type: 'button', class: 'icon-button', title: label, 'aria-label': label, disabled, 'aria-pressed': pressed === null ? null : String(pressed), onclick }, [icon(paths)]);
-    return el('li', { dataset: { elementId: e.id }, class: `layer-row${selected ? ' selected' : ''}${e.visible === false ? ' hidden-el' : ''}` }, [
+    return el('li', { dataset: { elementId: e.id }, class: `layer-row${e.card || e.isGroup ? ' layer-container' : ''}${selected ? ' selected' : ''}${e.visible === false ? ' hidden-el' : ''}` }, [
+      ...(e.card || e.isGroup ? [el('button',{type:'button',class:'icon-button layer-fold','aria-label':t(collapsedLayers.has(e.id)?'layers.expand':'layers.collapse'),'aria-expanded':String(!collapsedLayers.has(e.id)),onclick:()=>{if(collapsedLayers.has(e.id))collapsedLayers.delete(e.id);else collapsedLayers.add(e.id);renderLayers();}},[icon(collapsedLayers.has(e.id)?['M9 6l6 6-6 6']:['M6 9l6 6 6-6'],14)])] : []),
       name,
       btn(e.visible === false ? t('layers.show') : t('layers.hide'), e.visible === false ? ICONS.eyeOff : ICONS.eye, () => store.dispatch('update', { id: e.id, patch: { visible: e.visible === false } }), false, e.visible !== false),
       btn(e.locked ? t('layers.unlock') : t('layers.lock'), e.locked ? ICONS.lock : ICONS.unlock, () => store.dispatch('update', { id: e.id, patch: { locked: !e.locked } }), false, Boolean(e.locked)),
@@ -223,12 +226,12 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
       });
       if (card.isGroup) return el('li', { class: 'layer-card', dataset: { groupId: card.id } }, [
         el('ul', { class: 'layer-list' }, [row]),
-        el('ul', { class: 'layer-list layer-children' }, renderNodes(children)),
+        el('ul', { class: 'layer-list layer-children',hidden:collapsedLayers.has(card.id) }, renderNodes(children)),
       ]);
       if (!groups.length) return row;
       return el('li', { class: 'layer-card', dataset: { cardId: card.id } }, [
         el('ul', { class: 'layer-list' }, [row]),
-        el('ul', { class: 'layer-groups' }, groups.map(({ face, elements, nodes: members }) => {
+        el('ul', { class: 'layer-groups',hidden:collapsedLayers.has(card.id) }, groups.map(({ face, elements, nodes: members }) => {
           const active = face !== null && card.card.activeFace === face;
           const label = face === null ? t('card.base') : card.card.faces[face];
           const heading = face === null
@@ -242,13 +245,13 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
               },
             });
           return el('li', { class: `layer-group${active ? ' active-face' : ''}`, dataset: { face: face === null ? 'base' : face } }, [
-            el('div', { class: 'layer-group-heading' }, [heading, el('small', { text: String(elements.length) })]),
-            el('ul', { class: 'layer-list layer-children' }, renderNodes(members)),
+            el('div', { class: 'layer-group-heading',dataset:{dropCard:card.id,dropFace:face===null?'base':face} }, [icon(face===null?ICONS.shape:ICONS.card,14),heading, el('small', { text: String(elements.length) })]),
+            el('ul', { class: 'layer-list layer-children' }, members.length?renderNodes(members):[el('li',{class:'layer-empty',dataset:{dropCard:card.id,dropFace:face===null?'base':face},text:t('layers.dropHere')})]),
           ]);
         })),
       ]);
     });
-    list.replaceChildren(...renderNodes(layerGroups(els)));
+    list.replaceChildren(el('li',{class:'layer-root-drop',dataset:{rootDrop:'true'},text:t('layers.rootDrop')}),...renderNodes(layerGroups(els)));
     layerDrag.refresh();
   }
 

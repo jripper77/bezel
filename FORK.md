@@ -432,3 +432,39 @@ Eleven card/timer UI model tests and ten accessible browser checks passed in
 light Portuguese / dark English, including timer persistence and 1000x700 /
 1600x1000 layouts. No physical Spotify/media
 session or firmware shutdown countdown was exercised during this release.
+
+
+### Object editing and explicit trigger return (0.1.17)
+
+- Clicking the canvas now transfers focus from inspector fields/tabs so arrow
+  nudging and object clipboard shortcuts work. Ctrl+X cuts editable selection
+  roots with descendants; the first paste keeps their original position and
+  remaps ownership. Cut and paste each have their own Undo step.
+- Right-click the canvas or Layers (also Shift+F10) for cut/copy/paste,
+  duplicate, group/ungroup, create a card, front/back, detach from containers,
+  visibility, locking and deletion. The menu supports keyboard navigation.
+- Layer drops accept multiple selected roots into ordinary groups, specific card
+  faces/shared bases, siblings in another container or the root level. Geometry
+  stays fixed; group bounds follow membership. Cycles, nested cards and locked
+  reparenting are rejected. Simple reorder preserves the selection and permits
+  existing locked layers, whose geometry stays unchanged. Ctrl-click toggles
+  layer selection. Containers fold, faces carry counts and empty drop zones,
+  and hierarchy has indentation and guide lines.
+- Shapes/cards accept four independent corner radii in addition to the legacy
+  shared radius. Adjacent radii scale to fit. Cover radius and cover/text spacing
+  work in native preview, Live/Light and the browser demo. Existing themes retain
+  their former default geometry.
+- Each trigger adds `returnFace`: absent/null restores the preceding face;
+  an explicit index restores that face after `returnSeconds` when the winning
+  condition ends. Face reorder/removal remaps return targets. Deselecting a
+  trigger-only card requests playback immediately. Help explicitly explains
+  selected-card editing pause. The user confirmed Spotify activates its face
+  after deselection; this release tests session disappearance with an explicit
+  return target, without claiming physical Spotify close validation.
+
+Validation: 145 core, 42 renderer and 57 theme library tests passed (one existing
+renderer test ignored); card/animation runtime regressions and CLI/Studio Clippy
+passed. Targeted editor/translation models cover clipboard, ownership, locks,
+shortcuts and face remapping. Accessible browser tests exercise focus/nudge,
+cut/paste, grouping menus, cross-face drops, ordering/Undo, corner controls,
+player spacing and explicit return in Portuguese/light and English/dark.

@@ -2,9 +2,9 @@ import { test, expect, watchErrors, expectAccessible } from './helpers.mjs';
 
 async function dragRow(page, source, target, before = true, cancel = false, allowed = true) {
   const from = await source.boundingBox(), to = await target.boundingBox();
-  await page.mouse.move(from.x + 24, from.y + from.height / 2);
+  await page.mouse.move(from.x + 42, from.y + from.height / 2);
   await page.mouse.down();
-  await page.mouse.move(from.x + 32, from.y + from.height / 2, { steps: 3 });
+  await page.mouse.move(from.x + 50, from.y + from.height / 2, { steps: 3 });
   await expect(page.locator('.layer-drag-ghost')).toBeVisible();
   await expect(page.locator('.layer-drag-ghost')).toHaveText(await source.locator('.layer-name').evaluate(node => node.firstChild.textContent));
   await page.mouse.move(to.x + 24, before ? to.y + 4 : to.y + to.height - 4, { steps: 8 });
@@ -76,18 +76,20 @@ test('dragging card rows keeps member scopes, moves complete cards and preserves
   expect(await ids()).toEqual([...before].reverse());
   await expect(page.locator('#inspector').getByRole('combobox', { name: t('card.face'), exact: true })).toHaveValue('1');
   await page.locator('#undo').click(); expect(await ids()).toEqual(before);
-  await dragRow(page, rows.last(), card.locator('[data-face="1"] .layer-row').first(), true, false, false);
+  await dragRow(page, rows.last(), card.locator('[data-face="1"] .layer-row').first(), true, false, true);
+  await expect(card.locator('[data-face="1"] .layer-row')).toHaveCount(2);
+  await page.locator('#undo').click();
   expect(await ids()).toEqual(before);
   await expect(card.locator('[data-face="1"] .layer-row')).toHaveCount(1);
-  const originalRoots = await page.locator('#layer-list > li').evaluateAll(items => items.map(row => row.dataset.cardId ?? row.dataset.elementId));
+  const originalRoots = await page.locator('#layer-list > li:not(.layer-root-drop)').evaluateAll(items => items.map(row => row.dataset.cardId ?? row.dataset.elementId));
   await dragRow(page, cardRow, page.locator('#layer-list > .layer-row').last(), false);
-  const reorderedRoots = await page.locator('#layer-list > li').evaluateAll(items => items.map(row => row.dataset.cardId ?? row.dataset.elementId));
+  const reorderedRoots = await page.locator('#layer-list > li:not(.layer-root-drop)').evaluateAll(items => items.map(row => row.dataset.cardId ?? row.dataset.elementId));
   expect(reorderedRoots).toEqual([...originalRoots.slice(1), originalRoots[0]]);
   await expect(card.locator('.layer-row')).toHaveCount(4);
   await expect(card.locator('[data-face="0"] .layer-row')).toHaveCount(2);
   await expect(card.locator('[data-face="1"] .layer-row')).toHaveCount(1);
   await page.locator('#undo').click();
-  expect(await page.locator('#layer-list > li').evaluateAll(items => items.map(row => row.dataset.cardId ?? row.dataset.elementId))).toEqual(originalRoots);
+  expect(await page.locator('#layer-list > li:not(.layer-root-drop)').evaluateAll(items => items.map(row => row.dataset.cardId ?? row.dataset.elementId))).toEqual(originalRoots);
   await expectAccessible(page);
   expect(errors).toEqual([]);
 });

@@ -6,7 +6,7 @@
 import { ORIENTATIONS, isHorizontal, relayoutBox, roundBox, unionBox } from './geometry.js';
 import { createWidget, widgetOf } from './widgets.js';
 import { withChildren, transformCard, selectionRoots, owners, syncGroupBounds, canGroup } from './cards.js';
-import { layerDropIndex } from './layers.js';
+import { layerDropIndex, layerPlacement } from './layers.js';
 
 /** Most undo steps kept. */
 export const HISTORY_LIMIT = 200;
@@ -125,7 +125,7 @@ export const commands = {
     if (!parent?.card || parent.card.faces.length <= 1) return { theme };
     const face = parent.card.activeFace;
     const elements = theme.elements.filter(e => !(e.cardMember?.parent === id && e.cardMember.face === face)).map(e => {
-      if (e.id === id) return { ...e, card: { ...e.card, triggers:(e.card.triggers ?? []).filter(r=>r.face!==face).map(r=>({...r,face:r.face>face?r.face-1:r.face})), faces: e.card.faces.filter((_, i) => i !== face), activeFace: Math.min(face, e.card.faces.length - 2) } };
+      if (e.id === id) return { ...e, card: { ...e.card, triggers:(e.card.triggers ?? []).filter(r=>r.face!==face).map(r=>({...r,face:r.face>face?r.face-1:r.face,returnFace:r.returnFace==null?null:r.returnFace===face?null:r.returnFace>face?r.returnFace-1:r.returnFace})), faces: e.card.faces.filter((_, i) => i !== face), activeFace: Math.min(face, e.card.faces.length - 2) } };
       if (e.cardMember?.parent === id && e.cardMember.face !== null && e.cardMember.face > face) return { ...e, cardMember: { ...e.cardMember, face: e.cardMember.face - 1 } };
       return e;
     });
@@ -138,7 +138,7 @@ export const commands = {
     if (![-1, 1].includes(direction) || to < 0 || to >= parent.card.faces.length) return { theme };
     const swap = i => i === from ? to : i === to ? from : i;
     const elements = theme.elements.map(e => {
-      if (e.id === id) { const faces = [...e.card.faces]; [faces[from], faces[to]] = [faces[to], faces[from]]; return { ...e, card: { ...e.card, triggers:(e.card.triggers ?? []).map(r=>({...r,face:swap(r.face)})), faces, activeFace: to } }; }
+      if (e.id === id) { const faces = [...e.card.faces]; [faces[from], faces[to]] = [faces[to], faces[from]]; return { ...e, card: { ...e.card, triggers:(e.card.triggers ?? []).map(r=>({...r,face:swap(r.face),returnFace:r.returnFace==null?null:swap(r.returnFace)})), faces, activeFace: to } }; }
       if (e.cardMember?.parent === id && e.cardMember.face !== null) return { ...e, cardMember: { ...e.cardMember, face: swap(e.cardMember.face) } };
       return e;
     });
@@ -262,6 +262,31 @@ export const commands = {
     return result.theme.elements.every((e, i) => e.id === theme.elements[i].id) ? { theme } : result;
   },
 
+  placeLayer(theme,args) {
+    const place=layerPlacement(theme,args);if(!place)return {theme};
+    const {roots,moved,owner,groupParent,cardMember,inside,root,before,changed}=place;
+    const movingCards=new Set(theme.elements.filter(e=>moved.has(e.id)&&e.card).map(e=>e.id));
+    const block=theme.elements.filter(e=>moved.has(e.id)).map(e=>({...e,
+      ...(roots.includes(e.id)?{groupParent}:{}),
+      cardMember:movingCards.has(e.cardMember?.parent)?e.cardMember:cardMember,
+    }));
+    const elements=theme.elements.filter(e=>!moved.has(e.id));
+    const anchors=new Set(owner?withChildren({elements},[owner.id]):[]);
+    const indices=elements.flatMap((e,i)=>anchors.has(e.id)?[i]:[]);
+    const index=root?elements.length:inside?Math.max(...indices)+1:before?Math.max(...indices)+1:Math.min(...indices);
+    elements.splice(index,0,...block);
+    if(cardMember?.face!=null && roots.some(id=>{const e=theme.elements.find(e=>e.id===id);return e.cardMember?.parent!==cardMember.parent || e.cardMember?.face!==cardMember.face;})) {
+      const i=elements.findIndex(e=>e.id===cardMember.parent);if(i>=0)elements[i]={...elements[i],card:{...elements[i].card,activeFace:cardMember.face}};
+    }
+    if(elements.every((e,i)=>JSON.stringify(e)===JSON.stringify(theme.elements[i])))return {theme};
+    return {theme:{...theme,elements},...(changed?{selection:roots}:{})};
+  },
+  updateSelection(theme,{ids,patch}) { return {theme:mapElements(theme,ids,e=>merge(e,patch))}; },
+  orderSelection(theme,{ids,front}) {
+    let next=theme;
+    const roots=selectionRoots(theme,ids);for(const e of front?roots:[...roots].reverse())next=commands.reorder(next,{id:e.id,index:front?next.elements.length:0}).theme;
+    return {theme:next};
+  },
   /** Aligns boxes to the selection's bounds (or the canvas with one element). */
   align(theme, { ids, edge }) {
     const targets = selectionRoots(theme, ids).filter(e => !owners(theme, e).some(p => p.locked));
@@ -416,6 +441,13 @@ export function createStore(theme, { names = ENGLISH } = {}) {
       clipboard = clone(selected);
       pasteCount = 0;
       emit('copy');
+    },
+    cutSelection() {
+      const ids=selectionRoots(state.theme,state.selection).filter(e=>!owners(state.theme,e).some(p=>p.locked)).map(e=>e.id);
+      if (!ids.length) return state;
+      const included=new Set(withChildren(state.theme,ids));
+      clipboard=clone(state.theme.elements.filter(e=>included.has(e.id)));pasteCount=-1;
+      return this.dispatch('remove',{ids});
     },
     canPaste: () => clipboard.length > 0,
     paste() {

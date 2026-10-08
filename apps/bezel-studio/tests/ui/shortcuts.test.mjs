@@ -5,6 +5,7 @@ import { shortcutFor, usesArrows } from '../../src/shortcuts.js';
 const key = (k, mods = {}) => ({ key: k, ...mods });
 
 test('editing shortcuts', () => {
+  assert.deepEqual(shortcutFor(key('x', { ctrlKey: true }), null), { type: 'cut' });
   assert.deepEqual(shortcutFor(key('c', { ctrlKey: true }), null), { type: 'copy' });
   assert.deepEqual(shortcutFor(key('V', { metaKey: true }), null), { type: 'paste' });
   assert.deepEqual(shortcutFor(key('z', { ctrlKey: true }), null), { type: 'undo' });

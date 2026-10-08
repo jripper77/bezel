@@ -200,6 +200,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     if (evt.clientX >= viewport.left + scroll.clientWidth || evt.clientY >= viewport.top + scroll.clientHeight) return;
     if (framing && !containsClient(evt.clientX, evt.clientY)) return;
     evt.preventDefault();
+    if (!framing) { scroll.tabIndex = 0; scroll.focus({preventScroll:true}); }
     scroll.setPointerCapture?.(evt.pointerId);
     if (framing) {
       framePress(evt);

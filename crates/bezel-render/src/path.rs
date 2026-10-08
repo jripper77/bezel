@@ -43,6 +43,36 @@ pub(crate) fn rounded_rect(x: f32, y: f32, w: f32, h: f32, radius: f32) -> Optio
     pb.finish()
 }
 
+/// Independent corners normalized to avoid overlapping adjacent arcs.
+pub(crate) fn rounded_corners(x: f32, y: f32, w: f32, h: f32, radii: [f32; 4]) -> Option<Path> {
+    Rect::from_xywh(x, y, w, h)?;
+    let mut r = radii.map(|v| if v.is_finite() { v.max(0.) } else { 0. });
+    let scale = [
+        w / (r[0] + r[1]),
+        w / (r[2] + r[3]),
+        h / (r[0] + r[3]),
+        h / (r[1] + r[2]),
+    ]
+    .into_iter()
+    .fold(1_f32, f32::min);
+    r = r.map(|v| v * scale);
+    let [a, b, c, d] = r;
+    let [ak, bk, ck, dk] = r.map(|v| v * (1. - KAPPA));
+    let (rr, bb) = (x + w, y + h);
+    let mut p = PathBuilder::new();
+    p.move_to(x + a, y);
+    p.line_to(rr - b, y);
+    p.cubic_to(rr - bk, y, rr, y + bk, rr, y + b);
+    p.line_to(rr, bb - c);
+    p.cubic_to(rr, bb - ck, rr - ck, bb, rr - c, bb);
+    p.line_to(x + d, bb);
+    p.cubic_to(x + dk, bb, x, bb - dk, x, bb - d);
+    p.line_to(x, y + a);
+    p.cubic_to(x, y + ak, x + ak, y, x + a, y);
+    p.close();
+    p.finish()
+}
+
 /// The point at `angle` on the circle `(cx, cy, r)`.
 pub(crate) fn polar(cx: f32, cy: f32, r: f32, angle: f32) -> (f32, f32) {
     let a = angle.to_radians();

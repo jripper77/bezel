@@ -67,7 +67,7 @@ function drawText(ctx, e, t) {
   }
   if (k.content.type==='player') {
     ctx.textBaseline='top';
-    if(k.content.showCover){const side=Math.min(f.height,f.width*.4);ctx.fillStyle='#334155';ctx.fillRect(f.x,f.y,side,side);ctx.fillStyle=paint(s.paint);ctx.fillText('\u266b',f.x+side*.3,f.y+side*.3);f={...f,x:f.x+side+s.size*.3,width:f.width-side-s.size*.3};}
+    if(k.content.showCover){const gap=Math.min(f.width,k.content.coverGap ?? s.size*.3),side=Math.min(f.height,f.width*.4,Math.max(0,f.width-gap));ctx.save();ctx.beginPath();ctx.roundRect(f.x,f.y,side,side,k.content.coverRadius ?? 0);ctx.clip();ctx.fillStyle='#334155';ctx.fillRect(f.x,f.y,side,side);ctx.fillStyle=paint(s.paint);ctx.fillText('\u266b',f.x+side*.3,f.y+side*.3);ctx.restore();f={...f,x:f.x+side+gap,width:f.width-side-gap};}
     if(k.content.showProgress){ctx.fillStyle='#64748b';ctx.fillRect(f.x,f.y+f.height-4,f.width,4);ctx.fillStyle=paint(s.paint);ctx.fillRect(f.x,f.y+f.height-4,f.width*.4,4);}
   }
   ctx.fillStyle=paint(s.paint);
@@ -116,7 +116,7 @@ function drawElement(ctx, e, t) {
       ctx.fillStyle = k.videoWindow ? '#1f2330' : paint(k.fill);
       ctx.beginPath();
       if (k.shape === 'ellipse') ctx.ellipse(f.x + f.width / 2, f.y + f.height / 2, f.width / 2, f.height / 2, 0, 0, Math.PI * 2);
-      else ctx.roundRect(f.x, f.y, f.width, f.height, k.radius ?? 0);
+      else ctx.roundRect(f.x, f.y, f.width, f.height, k.corners ?? k.radius ?? 0);
       ctx.fill();
       if (k.stroke && k.strokeWidth > 0) { ctx.strokeStyle = color(k.stroke); ctx.lineWidth = k.strokeWidth; ctx.stroke(); }
       break;

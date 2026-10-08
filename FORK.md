@@ -218,3 +218,11 @@ Pixel comparisons against uncached rendering cover multiple Flip poses, both
 background variants, edits, readings, clock and revision invalidation, video-window
 masks and animated faces. Existing native transition/document and worker regressions
 remain applicable. Physical FPS improvement still requires a post-install capture.
+
+
+### Unassigned image placeholders (0.1.7)
+
+An Image object awaiting file selection can be saved and reopened. Asset
+collection excludes an empty reference while preserving the object in the
+manifest. Actual resource paths still pass the existing path-safety checks.
+Zip and folder round trips cover placeholder preservation alongside real assets.

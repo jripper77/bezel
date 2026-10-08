@@ -6,7 +6,7 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.6**. Native card transitions reuse transparent
+Current development release: **0.1.7**. Native card transitions reuse transparent
 face surfaces independently of the background, including device-video themes.
 The full-card Flip and serial protocol are preserved; real-device improvements
 are measured through Debug logs rather than assumed from panel specifications.

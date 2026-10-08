@@ -571,7 +571,8 @@ impl Theme {
         })
     }
 
-    /// Every asset the theme references (for packaging and loading).
+    /// Assigned assets the theme references (for packaging and loading).
+    /// Empty editor placeholders retain their objects but reference no file.
     pub fn assets(&self) -> Vec<AssetRef> {
         let mut out = Vec::new();
         match &self.background {
@@ -590,6 +591,7 @@ impl Theme {
                 _ => {}
             }
         }
+        out.retain(|asset| !asset.0.is_empty());
         out.sort();
         out.dedup();
         out

@@ -649,6 +649,24 @@ mod tests {
     }
 
     #[test]
+    fn an_unassigned_image_survives_zip_and_folder_loading() {
+        let (mut theme, assets) = every_kind();
+        theme.elements.push(el(99, ElementKind::Image {
+            asset: AssetRef(String::new()), fit: Fit::Contain,
+        }));
+        let root = scratch("unassigned-image");
+        for path in [root.join("folder"), root.join("placeholder.bezeltheme")] {
+            let location = ThemeLocation(path.to_string_lossy().into());
+            FsThemeStore.save(&location, &theme, &assets).unwrap();
+            let (loaded, bytes) = FsThemeStore.load(&location).unwrap();
+            assert_eq!(loaded, theme);
+            assert_eq!(bytes, assets);
+            assert!(!loaded.assets().iter().any(|asset| asset.0.is_empty()));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn unsafe_asset_paths_are_refused() {
         for bad in [
             "",

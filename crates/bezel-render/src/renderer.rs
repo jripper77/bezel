@@ -915,15 +915,20 @@ impl SkiaRenderer {
                                     context,
                                 );
                             }
-                            if p.cover_radius > 0.
-                                && let Some(path) = crate::path::rounded_rect(
+                            let cover_path = if let Some(r) = p.cover_corners {
+                                crate::path::rounded_corners(area.x, area.y, side, side, r)
+                            } else if p.cover_radius > 0. {
+                                crate::path::rounded_rect(
                                     area.x,
                                     area.y,
                                     side,
                                     side,
                                     p.cover_radius,
                                 )
-                            {
+                            } else {
+                                None
+                            };
+                            if let Some(path) = cover_path {
                                 if let Some(mask) = layer.mask_of(&path) {
                                     for (pixel, alpha) in layer
                                         .pixmap

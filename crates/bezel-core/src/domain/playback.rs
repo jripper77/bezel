@@ -28,6 +28,8 @@ pub struct Player {
     pub show_cover: bool,
     /// Cover corner radius in pixels.
     pub cover_radius: f32,
+    /// Independent cover radii: top-left, top-right, bottom-right, bottom-left.
+    pub cover_corners: Option<[f32; 4]>,
     /// Cover to text spacing; None preserves font-relative spacing.
     pub cover_gap: Option<f32>,
     /// Display timeline and progress bar.

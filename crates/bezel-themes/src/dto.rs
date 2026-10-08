@@ -387,6 +387,12 @@ pub enum ContentDto {
         show_cover: bool,
         #[serde(default, rename = "coverRadius")]
         cover_radius: f32,
+        #[serde(
+            default,
+            rename = "coverCorners",
+            skip_serializing_if = "Option::is_none"
+        )]
+        cover_corners: Option<[f32; 4]>,
         #[serde(default, rename = "coverGap", skip_serializing_if = "Option::is_none")]
         cover_gap: Option<f32>,
         #[serde(default = "yes", rename = "showProgress")]
@@ -923,6 +929,7 @@ fn kind_dto(k: &ElementKind) -> KindDto {
                     source: p.source.clone(),
                     show_cover: p.show_cover,
                     cover_radius: p.cover_radius,
+                    cover_corners: p.cover_corners,
                     cover_gap: p.cover_gap,
                     show_progress: p.show_progress,
                     show_source: p.show_source,
@@ -1104,13 +1111,15 @@ fn kind(k: &KindDto) -> R<ElementKind> {
                     source,
                     show_cover,
                     cover_radius,
+                    cover_corners,
                     cover_gap,
                     show_progress,
                     show_source,
                     hide_when_stopped,
                     empty_text,
                 } => {
-                    if !cover_radius.is_finite()
+                    if cover_corners.is_some_and(|r| r.iter().any(|v| !v.is_finite() || *v < 0.))
+                        || !cover_radius.is_finite()
                         || *cover_radius < 0.
                         || cover_gap.is_some_and(|v| !v.is_finite() || v < 0.)
                     {
@@ -1123,6 +1132,7 @@ fn kind(k: &KindDto) -> R<ElementKind> {
                         source: source.clone(),
                         show_cover: *show_cover,
                         cover_radius: *cover_radius,
+                        cover_corners: *cover_corners,
                         cover_gap: *cover_gap,
                         show_progress: *show_progress,
                         show_source: *show_source,

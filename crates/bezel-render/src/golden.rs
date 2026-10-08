@@ -1364,6 +1364,7 @@ fn player_cover_progress_and_stopped_state_use_measured_context() {
                     source: "Spotify".into(),
                     show_cover: true,
                     cover_radius: 0.,
+                    cover_corners: None,
                     cover_gap: None,
                     show_progress: true,
                     show_source: false,
@@ -1403,6 +1404,19 @@ fn player_cover_progress_and_stopped_state_use_measured_context() {
     assert_eq!(px(&frame, 0, 0), BLACK);
     assert_eq!(px(&frame, 40, 40), RED);
     assert_eq!(px(&frame, 90, 87), BLACK);
+    assert!(px(&frame, 115, 87).r > 200);
+    if let ElementKind::Text {
+        content: TextContent::Player(p),
+        ..
+    } = &mut t.elements[0].kind
+    {
+        p.cover_corners = Some([25., 0., 25., 0.]);
+    }
+    let frame = render(&mut r, &t, &scene);
+    assert_eq!(px(&frame, 0, 0), BLACK);
+    assert_eq!(px(&frame, 79, 0), RED);
+    assert_eq!(px(&frame, 79, 79), BLACK);
+    assert_eq!(px(&frame, 0, 79), RED);
     assert!(px(&frame, 115, 87).r > 200);
     scene.snapshot.media[0].playing = false;
     let frame = render(&mut r, &t, &scene);

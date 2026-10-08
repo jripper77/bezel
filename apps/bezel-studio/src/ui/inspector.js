@@ -310,7 +310,8 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
         el('p',{class:'hint',text:t('player.help')}));
       for (const field of ['showCover','showProgress','showSource']) weatherAppearance.push(checkField(t(`player.${field}`),c[field],value=>set({[field]:value})));
       if(c.showCover) weatherAppearance.push(
-        numberField(t('player.coverRadius'),c.coverRadius ?? 0,v=>set({coverRadius:Math.max(0,v)}),{min:0}),
+        checkField(t('inspector.individualCorners'),Boolean(c.coverCorners),enabled=>set({coverCorners:enabled?Array(4).fill(c.coverRadius ?? 0):null,coverRadius:c.coverCorners?.[0] ?? c.coverRadius ?? 0})),
+        ...(c.coverCorners ? ['topLeft','topRight','bottomRight','bottomLeft'].map((name,i)=>numberField(t(`inspector.${name}`),c.coverCorners[i],v=>set({coverCorners:c.coverCorners.map((r,n)=>n===i?Math.max(0,v):r)}),{min:0})) : [numberField(t('player.coverRadius'),c.coverRadius ?? 0,v=>set({coverRadius:Math.max(0,v)}),{min:0})]),
         numberField(t('player.coverGap'),c.coverGap ?? e.kind.style.size*.3,v=>set({coverGap:Math.max(0,v)}),{min:0}));
     }
     if (c.type === 'weather') {

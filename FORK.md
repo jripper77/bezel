@@ -468,3 +468,16 @@ passed. Targeted editor/translation models cover clipboard, ownership, locks,
 shortcuts and face remapping. Accessible browser tests exercise focus/nudge,
 cut/paste, grouping menus, cross-face drops, ordering/Undo, corner controls,
 player spacing and explicit return in Portuguese/light and English/dark.
+
+
+### Independent player cover corners (0.1.18)
+
+The media player's cover now has the same shared/individual radius switch as
+shapes. `coverCorners` optionally stores top-left, top-right, bottom-right and
+bottom-left radii; missing/null keeps the existing `coverRadius` behavior.
+Enabling independent corners copies the current shared radius; returning to
+shared mode uses the top-left radius. Cover spacing stays independent.
+Native Live/Light rendering and the demo both clip the cover with these radii.
+Checks: native asymmetric-cover pixels (including unaffected progress/text),
+theme round-trip, legacy compatibility and negative-radius rejection; accessible
+English/dark and Portuguese/light browser checks for switching, values and Undo.

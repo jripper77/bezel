@@ -1189,7 +1189,7 @@ mod tests {
             .iter_mut()
             .find(|e| e["kind"]["type"] == "text")
             .unwrap();
-        text["kind"]["content"] = serde_json::json!({"type":"player","source":"Spotify","showCover":true,"showProgress":true,"coverRadius":12,"coverGap":20,"emptyText":"No media"});
+        text["kind"]["content"] = serde_json::json!({"type":"player","source":"Spotify","showCover":true,"showProgress":true,"coverRadius":12,"coverCorners":[0,12,24,36],"coverGap":20,"emptyText":"No media"});
         let dto: ThemeDto = serde_json::from_value(json.clone()).unwrap();
         let theme = Theme::try_from(&dto).unwrap();
         assert_eq!(Theme::try_from(&ThemeDto::from(&theme)).unwrap(), theme);
@@ -1216,6 +1216,29 @@ mod tests {
             let dto: ThemeDto = serde_json::from_value(bad).unwrap();
             assert!(Theme::try_from(&dto).is_err());
         }
+        let mut legacy = json.clone();
+        let text = legacy["elements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|e| e["kind"]["type"] == "text")
+            .unwrap();
+        text["kind"]["content"]
+            .as_object_mut()
+            .unwrap()
+            .remove("coverCorners");
+        let dto: ThemeDto = serde_json::from_value(legacy).unwrap();
+        assert!(Theme::try_from(&dto).is_ok());
+        let mut invalid = json.clone();
+        let text = invalid["elements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|e| e["kind"]["type"] == "text")
+            .unwrap();
+        text["kind"]["content"]["coverCorners"] = serde_json::json!([-1, 0, 0, 0]);
+        let dto: ThemeDto = serde_json::from_value(invalid).unwrap();
+        assert!(Theme::try_from(&dto).is_err());
         let image = json["elements"]
             .as_array_mut()
             .unwrap()

@@ -5,6 +5,18 @@ The original project remains upstream. `main` follows the original; `windows-imp
 
 ## Implemented
 
+- **Windows distribution (0.1.22):** per-user NSIS Setup and an allowlisted
+  portable ZIP include Studio, Light, stock themes, rebuilt headless sensors and
+  license notices. Optional login and sensor setup use ownership checks; no
+  vendor tasks or external Libre instances are removed. Interactive setup offers
+  separate choices, silent setup leaves services alone, and uninstall retains
+  user data. Install/upgrade/uninstall and every payload hash passed a local
+  silent smoke test. Interactive UAC and a clean-PC hardware-driver setup still
+  need manual validation. The independent manual GitHub workflow builds the same
+  packages and source archive. Product/publisher metadata identify Bezel Evo;
+  Windows file version follows VERSION. The inherited internal data identifier
+  is retained for compatibility.
+
 - **Device picker (0.1.21):** recognized models retain their name and resolution;
   ambiguous models prefer a readable protocol family over USB driver names,
   with manufacturer/product names as a fallback for unknown families. This

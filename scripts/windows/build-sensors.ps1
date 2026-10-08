@@ -1,6 +1,7 @@
 param(
     [string]$LibreDirectory = 'F:\dev\tools\LibreHardwareMonitor-0.9.6',
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\target\release\sensors')
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\target\release\sensors'),
+    [switch]$ImportSensorNames
 )
 $ErrorActionPreference = 'Stop'
 $source = Join-Path $PSScriptRoot '..\..\apps\bezel-sensors-helper'
@@ -32,14 +33,16 @@ $licenseBase = 'https://raw.githubusercontent.com/LibreHardwareMonitor/LibreHard
 Invoke-WebRequest ($licenseBase + 'LICENSE') -UseBasicParsing -OutFile (Join-Path $OutputDirectory 'LICENSE-LibreHardwareMonitor.txt')
 Invoke-WebRequest ($licenseBase + 'THIRD-PARTY-NOTICES.txt') -UseBasicParsing -OutFile (Join-Path $OutputDirectory 'THIRD-PARTY-NOTICES.txt')
 # Preserve custom hardware/sensor labels; no GUI or control settings are imported.
-[xml]$configuration = Get-Content (Join-Path $LibreDirectory 'LibreHardwareMonitor.config') -Raw
 $names = New-Object Xml.XmlDocument
 $root = $names.CreateElement('appSettings')
 $names.AppendChild($root) | Out-Null
+if ($ImportSensorNames) {
+[xml]$configuration = Get-Content (Join-Path $LibreDirectory 'LibreHardwareMonitor.config') -Raw
 foreach ($item in $configuration.SelectNodes('//add')) {
     if ($item.key.StartsWith('/') -and $item.key.EndsWith('/name')) {
         $root.AppendChild($names.ImportNode($item, $true)) | Out-Null
     }
+}
 }
 $names.Save((Join-Path $OutputDirectory 'sensor-names.xml'))
 $seen | Set-Content (Join-Path $OutputDirectory 'bundled-dlls.txt')

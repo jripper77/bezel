@@ -6,7 +6,7 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.19**. Object properties follow a consistent
+Current development release: **0.1.22**. Object properties follow a consistent
 order: name/type, position and size, content/data, appearance, membership,
 playback/animation and layer/object actions. Sections are separated by horizontal lines and can be collapsed; they retain
 their state while editing; irrelevant sections are omitted. Sensor bindings,
@@ -28,6 +28,21 @@ it is not downloaded from the display when saving a theme.
 
 Development happens on [`windows-improvements`](https://github.com/jripper77/bezel/tree/windows-improvements).
 See [FORK.md](FORK.md) for implementation details, validation and limitations.
+
+## Windows downloads
+
+Windows x64 releases provide a **Setup executable**, a **portable ZIP**, checksums
+and the corresponding source archive on the [Releases page](https://github.com/jripper77/bezel/releases).
+The Setup installs Studio, Light, bundled themes and the headless sensor reader.
+It offers optional Light at sign-in and sensor setup; only configuring/removing
+an owned sensor task requests administrator approval. Existing tasks from other
+installations and external Libre are preserved.
+
+Save and exit Studio and quit Light before updating. Updates and uninstall retain
+personal themes, preferences and caches. Silent installation does not enable
+new optional services. These first packages are unsigned; video tools such as
+FFmpeg and hardware-access drivers are not installed automatically.
+See [Windows installation and build details](packaging/windows/README.md).
 
 ## What this fork adds
 

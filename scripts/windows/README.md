@@ -52,3 +52,26 @@ installed release number.
 Validation follows the change: compile and visually check small UI changes;
 run relevant integration tests for serial ownership, timing and sensors.
 The complete suite is reserved for broad changes or unresolved regressions.
+
+## Public Windows packages
+
+`package-evo.ps1` builds the VERSION release, rebuilds sensors from the pinned
+LibreHardwareMonitor 0.9.6 archive and creates Setup/portable/checksum files in
+`dist`. It does not package the local installation's logs or personal data.
+Use `-Version X.Y.Z` to retry a release, or `-SkipBuild` with matching binaries.
+Sensor aliases are excluded by default; the personal helper build supports the
+explicit `-ImportSensorNames` switch when needed.
+
+`installer-maintenance.ps1` manages only its own `BezelEvoLight` login entry and
+an owned `Bezel-Sensors` task. Its `Check` mode blocks running installations;
+it does not kill Studio or Light. Setup uses process-scoped execution-policy
+bypass for the bundled scripts and never changes the machine's policy.
+The old `configure-startup.ps1` migration remains a separate manual tool and is
+not included in the public package. See [the installer guide](../../packaging/windows/README.md).
+
+`test-installer.ps1` tests silent installation, replacement upgrade, payload
+hashes, preservation of user data and uninstall in `target/installer-smoke`.
+It refuses to run if the package's installation registry keys or shortcuts
+already exist. `.github/workflows/windows-evo-package.yml` is a manual build
+workflow that uploads these packages and the corresponding source as artifacts;
+it does not publish automatically.

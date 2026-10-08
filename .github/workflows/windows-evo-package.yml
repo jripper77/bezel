@@ -1,0 +1,42 @@
+name: Package Bezel Evo for Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Install pinned Rust toolchain
+        shell: powershell
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          cargo fetch --locked
+      - name: Build Windows packages
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          .\scripts\windows\package-evo.ps1 -Version $version
+      - name: Verify install, upgrade and uninstall
+        shell: powershell
+        run: .\scripts\windows\test-installer.ps1
+      - name: Archive corresponding source
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          git archive --format=zip --output="dist/Bezel-Evo-$version-source.zip" HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source archive failed.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bezel-evo-windows
+          path: dist/Bezel-Evo-*
+          if-no-files-found: error

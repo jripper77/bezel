@@ -11,8 +11,12 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Use a version such as 0.1.1.'
 [IO.File]::WriteAllText($versionFile, "$Version`n", [Text.UTF8Encoding]::new($false))
 Write-Output "Building Bezel Evo $Version"
 $previousStamp = $env:BEZEL_VERSION
+$previousTauriConfig = $env:TAURI_CONFIG
 try {
     $env:BEZEL_VERSION = $Version
+    $tauriOverlay = if ($previousTauriConfig) { $previousTauriConfig | ConvertFrom-Json } else { [pscustomobject]@{} }
+    $tauriOverlay | Add-Member -NotePropertyName version -NotePropertyValue $Version -Force
+    $env:TAURI_CONFIG = $tauriOverlay | ConvertTo-Json -Depth 12 -Compress
     Push-Location $repository
     try {
         # Windows PowerShell represents normal Cargo stderr progress as error
@@ -25,5 +29,5 @@ try {
         & (Join-Path $repository 'target\release\bezel.exe') --version
         if ($LASTEXITCODE -ne 0) { throw 'Could not verify CLI version.' }
     } finally { Pop-Location }
-} finally { $env:BEZEL_VERSION = $previousStamp }
+} finally { $env:BEZEL_VERSION = $previousStamp; $env:TAURI_CONFIG = $previousTauriConfig }
 Write-Output "Ready: target\release\bezel.exe and bezel-studio.exe ($Version)."

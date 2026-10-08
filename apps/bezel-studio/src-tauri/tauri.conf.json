@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Bezel",
+  "productName": "Bezel Evo",
   "mainBinaryName": "bezel-studio",
   "identifier": "io.github.slipalison.bezel",
   "build": {
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Bezel",
+        "title": "Bezel Evo",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -26,7 +26,7 @@
   },
   "bundle": {
     "active": true,
-    "publisher": "Alison Amorim",
+    "publisher": "jripper77",
     "category": "Utility",
     "shortDescription": "Design themes for and drive USB smart screens (Turing, TURZX and compatible)",
     "longDescription": "Bezel drives the USB system-monitor screens sold as Turing Smart Screen, TURZX, XuanFang, Kipye, WeAct and their rebrands, on Linux and Windows: live sensors, a drag-and-drop theme editor, images, video and the screen's SD card.",
@@ -60,6 +60,7 @@
     },
     "resources": {
       "../../../themes/": "themes/"
-    }
+    },
+    "homepage": "https://github.com/jripper77/bezel"
   }
 }

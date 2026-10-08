@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Media player — dati</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.sect{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8B939C;margin:0}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:0;background:transparent;color:#AEB5BD;cursor:pointer}
+.tabs{display:flex;gap:2px;padding:3px;border-radius:9px;background:#0F1214}
+.tabs button{flex:1;height:30px;border:0;border-radius:7px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.tabs button[aria-selected="true"]{background:#23282E;color:#E8EAED;font-weight:600}
+.pill{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:999px;border:1px solid #262B31;background:transparent;color:#AEB5BD;font:inherit;font-size:12.5px;cursor:pointer}
+.pill[aria-pressed="true"]{border-color:#4A3424;background:#1F1813;color:#FFB27A}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px">
+    <div style="width: 34px; height: 34px; border-radius: 8px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center"><svg class="ic" viewBox="0 0 24 24" style="width: 18px; height: 18px" aria-hidden="true"><path d="M9 18V6l10-2v12"></path><circle cx="6.5" cy="18" r="2.5"></circle><circle cx="16.5" cy="16" r="2.5"></circle></svg></div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25">
+      <strong style="font-size: 14px">Brano in riproduzione</strong>
+      <span style="font-size: 11.5px; color: #8B939C">Media player</span>
+    </div>
+    <button type="button" class="ib" aria-label="Altre azioni"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+  </div>
+
+  <div style="margin: 0 14px 12px; padding: 12px; border-radius: 12px; background: #0B0D0F; border: 1px solid #1D2227; display: flex; flex-direction: column; gap: 10px">
+    <span class="mono" style="font-size: 10.5px; color: #6B747C">ANTEPRIMA · DAL VIVO</span>
+    <div style="display: flex; align-items: center; gap: 12px">
+      <div style="width: 56px; height: 56px; border-radius: 8px; background: #2A1A2E; color: #F0ABFC; display: flex; align-items: center; justify-content: center; flex: none"><svg class="ic" viewBox="0 0 24 24" style="width: 22px; height: 22px; opacity: .6" aria-hidden="true"><path d="M9 18V6l10-2v12"></path><circle cx="6.5" cy="18" r="2.5"></circle><circle cx="16.5" cy="16" r="2.5"></circle></svg></div>
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+        <strong style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">[Titolo del brano]</strong>
+        <span style="font-size: 12px; color: #AEB5BD">[Artista]</span>
+        <span class="mono" style="font-size: 10.5px; color: #6B747C">Spotify</span>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <span class="mono" style="font-size: 10.5px; color: #8B939C">1:12</span>
+      <div style="flex: 1; height: 4px; border-radius: 2px; background: #23282E"><div style="width: 32%; height: 100%; border-radius: 2px; background: #F472B6"></div></div>
+      <span class="mono" style="font-size: 10.5px; color: #8B939C">3:45</span>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Sezioni" style="margin: 0 14px">
+    <button type="button" role="tab" aria-selected="true">Dati</button>
+    <button type="button" role="tab" aria-selected="false">Aspetto</button>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px">
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h3 class="sect">Da quale app</h3>
+      <div role="group" aria-label="App sorgente" style="display: flex; flex-wrap: wrap; gap: 6px">
+        <button type="button" class="pill" aria-pressed="false">Automatica</button>
+        <button type="button" class="pill" aria-pressed="true"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34D399"></span>Spotify</button>
+        <button type="button" class="pill" aria-pressed="false"><span style="width: 6px; height: 6px; border-radius: 50%; background: #4A525A"></span>Chrome</button>
+        <button type="button" class="pill" aria-pressed="false"><span style="width: 6px; height: 6px; border-radius: 50%; background: #4A525A"></span>VLC</button>
+        <button type="button" class="pill" aria-pressed="false" style="border-style: dashed">Altra…</button>
+      </div>
+      <span style="font-size: 11.5px; color: #7F8890; line-height: 1.45">Le app con il pallino verde stanno riproducendo ora. “Automatica” segue quella che Windows considera attiva.</span>
+    </section>
+
+    <section aria-labelledby="stopped-title" style="display: flex; flex-direction: column; gap: 8px">
+      <h3 id="stopped-title" class="sect">Quando non suona niente</h3>
+      <button type="button" aria-pressed="false" style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 10px; border: 1px solid #23282E; background: #15191C; color: #E8EAED; font: inherit; text-align: left; cursor: pointer">
+        <span style="width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #4A525A; box-sizing: border-box; flex: none"></span>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600">Nascondi il player</span><span style="font-size: 12px; color: #8B939C">Lo spazio resta vuoto</span></span>
+      </button>
+      <div style="display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 10px; border: 1px solid #FF9248; background: #1C1611">
+        <button type="button" aria-pressed="true" style="display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: transparent; color: #E8EAED; font: inherit; text-align: left; cursor: pointer">
+          <span style="width: 16px; height: 16px; border-radius: 50%; border: 5px solid #FF9248; background: #1A0E05; box-sizing: border-box; flex: none"></span>
+          <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600">Mostra un testo</span><span style="font-size: 12px; color: #8B939C">Al posto di titolo e artista</span></span>
+        </button>
+        <label style="display: flex; flex-direction: column; gap: 4px; padding-left: 28px">
+          <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Testo quando è fermo</span>
+          <input type="text" value="Niente in riproduzione" style="height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid #3A2E22; background: #0F1214; color: #E8EAED; font: inherit">
+        </label>
+      </div>
+    </section>
+
+    <div style="display: flex; gap: 10px; padding: 12px; border-radius: 10px; background: #101316; border: 1px dashed #2C3238; font-size: 12px; line-height: 1.45; color: #AEB5BD">
+      <svg class="ic" viewBox="0 0 24 24" style="color: #FFB27A; margin-top: 1px" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M11 12h1v4h1"></path></svg>
+      <span>Usa le sessioni multimediali di Windows: titolo e copertina dipendono da cosa pubblica l'app.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

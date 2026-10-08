@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Schermo — impostazioni</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.sect{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8B939C;margin:0}
+.seg{display:flex;padding:3px;border-radius:9px;background:#0F1214}
+.seg button{flex:1;height:30px;border:0;border-radius:7px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.seg button[aria-selected="true"]{background:#23282E;color:#E8EAED;font-weight:600}
+.tgl{position:relative;width:32px;height:18px;border-radius:999px;background:#2A3036;flex:none}
+.tgl.on{background:#FF9248}
+.tgl i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#E8EAED}
+.tgl.on i{left:16px;background:#1A0E05}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:34px;padding:0 12px;border-radius:8px;border:1px solid #2C3238;background:#15191C;color:#E8EAED;font:inherit;font-weight:600;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; padding: 16px; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <h2 style="margin: 0; font-size: 15px; font-weight: 600">Schermo</h2>
+  <div class="seg" role="tablist" aria-label="Sezioni schermo">
+    <button type="button" role="tab" aria-selected="true">Impostazioni</button>
+    <button type="button" role="tab" aria-selected="false">Archivio</button>
+  </div>
+
+  <div style="display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 12px; background: #15191C; border: 1px solid #23282E">
+    <div style="width: 22px; height: 54px; border-radius: 4px; border: 2px solid #E8EAED; display: flex; padding: 3px; box-sizing: border-box; flex: none"><div style="flex: 1; border-radius: 1px; background: #FF9248"></div></div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+      <strong style="font-size: 14px">Turing Smart Screen 8.8″</strong>
+      <span class="mono" style="font-size: 11px; color: #8B939C">COM5 · 480×1920 · protocollo C</span>
+      <span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6EE7B7"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34D399"></span>Attivo · in diretta</span>
+    </div>
+  </div>
+
+  <section style="display: flex; flex-direction: column; gap: 10px">
+    <div style="display: flex; justify-content: space-between; align-items: baseline"><h3 class="sect">Luminosità</h3><span class="mono" style="font-size: 13px; font-weight: 600">70%</span></div>
+    <div style="display: flex; align-items: center; gap: 10px; color: #8B939C">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 5v1M12 18v1M5 12h1M18 12h1"></path></svg>
+      <div style="flex: 1; position: relative; height: 18px; display: flex; align-items: center">
+        <div style="width: 100%; height: 4px; border-radius: 2px; background: #23282E"><div style="width: 70%; height: 100%; border-radius: 2px; background: #FF9248"></div></div>
+        <span style="position: absolute; left: calc(70% - 8px); width: 16px; height: 16px; border-radius: 50%; background: #E8EAED; border: 3px solid #FF9248; box-sizing: border-box"></span>
+      </div>
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+    </div>
+  </section>
+
+  <div style="display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid #1D2227; border-bottom: 1px solid #1D2227">
+    <span style="flex: 1; display: flex; flex-direction: column; gap: 3px">
+      <span style="font-weight: 500">Avvia con il computer</span>
+      <span style="font-size: 12px; color: #8B939C; line-height: 1.4">Nella tray, con l'ultimo tema già in diretta.</span>
+    </span>
+    <span class="tgl on" style="margin-top: 2px"><i></i></span>
+  </div>
+
+  <section role="radiogroup" aria-labelledby="shutdown-title" style="display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; justify-content: space-between; align-items: baseline">
+      <h3 id="shutdown-title" class="sect">Quando il computer si spegne</h3>
+      <button type="button" aria-label="Informazioni" style="width: 22px; height: 22px; border-radius: 50%; border: 1px solid #2C3238; background: transparent; color: #8B939C; font: inherit; font-size: 11px; cursor: pointer">?</button>
+    </div>
+    <sc-for list="{{choices}}" as="c" hint-placeholder-count="4">
+      <button type="button" role="radio" aria-checked="{{c.checked}}" style="{{c.style}}">
+        <span style="{{c.dot}}"></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left">
+          <span style="font-weight: 600">{{c.title}}</span>
+          <span style="font-size: 12px; color: #8B939C; line-height: 1.4">{{c.detail}}</span>
+        </span>
+      </button>
+    </sc-for>
+    <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: #0F1214">
+      <span style="font-size: 12px; color: #AEB5BD; flex: 1">Piano B, se Bezel non risponde</span>
+      <span class="mono" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #2C3238; display: flex; align-items: center; gap: 6px; font-size: 12px">5 min<svg class="ic" viewBox="0 0 24 24" style="width: 12px; height: 12px" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span>
+    </div>
+    <button type="button" style="height: 36px; border-radius: 8px; border: 0; background: #FF9248; color: #1A0E05; font: inherit; font-weight: 700; cursor: pointer">Scrivi sullo schermo</button>
+  </section>
+
+  <section style="margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid #1D2227">
+    <h3 class="sect">Avanzate</h3>
+    <button type="button" class="btn" style="justify-content: flex-start"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M21 14v7H3V3h7"></path></svg>Restituisci il controllo allo schermo</button>
+    <button type="button" class="btn" style="justify-content: flex-start; border-color: #4A2626; color: #FCA5A5; background: transparent"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0"></path></svg>Riavvia lo schermo…</button>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const list = [
+      { title: 'Lascia com’è', detail: 'Lo schermo continua a mostrare l’ultima immagine.' },
+      { title: 'Spegni lo schermo', detail: 'Bezel lo spegne alla chiusura del sistema.', on: true },
+      { title: 'Album foto dalla scheda', detail: '12 foto in sd/image, una ogni 3–5 s.' },
+      { title: 'Riproduci un video', detail: 'Nessun video sullo schermo. Caricane uno in Archivio.', off: true }
+    ];
+    return {
+      choices: list.map((c) => ({
+        ...c,
+        checked: c.on ? 'true' : 'false',
+        style: 'display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 10px; font: inherit; color: #E8EAED; cursor: pointer; ' +
+          (c.on ? 'border: 1px solid #FF9248; background: #1C1611' : 'border: 1px solid #23282E; background: #15191C') +
+          (c.off ? '; opacity: .5; cursor: not-allowed' : ''),
+        dot: 'margin-top: 2px; width: 16px; height: 16px; border-radius: 50%; box-sizing: border-box; flex: none; ' +
+          (c.on ? 'border: 5px solid #FF9248; background: #1A0E05' : 'border: 1.5px solid #4A525A')
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

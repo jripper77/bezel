@@ -1,0 +1,1 @@
+D-2026-10-09-studio-redesign-6 (2026-10-09): CSP inalterada (style-src/font-src 'self'): sem Google Fonts. IBM Plex Sans/Mono empacotadas localmente em woff2, só os pesos usados; licença OFL adicionada aos notices.

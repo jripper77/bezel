@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Grafico — aspetto</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.sect{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8B939C;margin:0}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:0;background:transparent;color:#AEB5BD;cursor:pointer}
+.tabs{display:flex;gap:2px;padding:3px;border-radius:9px;background:#0F1214}
+.tabs button{flex:1;height:30px;border:0;border-radius:7px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.tabs button[aria-selected="true"]{background:#23282E;color:#E8EAED;font-weight:600}
+.sw{width:28px;height:28px;border-radius:8px;border:2px solid transparent;cursor:pointer;padding:0}
+.sw[aria-pressed="true"]{border-color:#E8EAED;box-shadow:0 0 0 2px #121518 inset}
+.fld{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:8px;border:1px solid #262B31;background:#0F1214;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#E8EAED}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px">
+    <div style="width: 34px; height: 34px; border-radius: 8px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center"><svg class="ic" viewBox="0 0 24 24" style="width: 18px; height: 18px" aria-hidden="true"><path d="m3 17 5-6 4 3 4-7 5 5"></path></svg></div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25">
+      <strong style="font-size: 14px">Download</strong>
+      <span style="font-size: 11.5px; color: #8B939C">Grafico · gruppo Rete</span>
+    </div>
+    <button type="button" class="ib" aria-label="Altre azioni"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+  </div>
+
+  <div style="margin: 0 14px 12px; padding: 12px; border-radius: 12px; background: #0B0D0F; border: 1px solid #1D2227; display: flex; flex-direction: column; gap: 6px">
+    <div style="display: flex; justify-content: space-between; align-items: baseline">
+      <span class="mono" style="font-size: 10.5px; color: #6B747C">ANTEPRIMA · DAL VIVO</span>
+      <span class="mono" style="font-size: 14px; font-weight: 600">12,4 <span style="font-size: 11px; color: #8B939C; font-weight: 400">MB/s</span></span>
+    </div>
+    <svg viewBox="0 0 300 80" width="100%" height="80" aria-hidden="true">
+      <path d="M0 66 L20 60 L40 64 L60 46 L80 52 L100 34 L120 48 L140 40 L160 54 L180 22 L200 30 L220 18 L240 36 L260 28 L280 14 L300 24 V80 H0 Z" fill="#34D399" fill-opacity=".22"></path>
+      <path d="M0 66 L20 60 L40 64 L60 46 L80 52 L100 34 L120 48 L140 40 L160 54 L180 22 L200 30 L220 18 L240 36 L260 28 L280 14 L300 24" fill="none" stroke="#34D399" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
+    </svg>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Sezioni" style="margin: 0 14px">
+    <button type="button" role="tab" aria-selected="false">Dati</button>
+    <button type="button" role="tab" aria-selected="true">Aspetto</button>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px">
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h3 class="sect">Stile</h3>
+      <div role="radiogroup" aria-label="Stile del grafico" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+        <button type="button" role="radio" aria-checked="false" style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border-radius: 10px; border: 1px solid #262B31; background: #15191C; color: #AEB5BD; font: inherit; font-size: 12px; cursor: pointer">
+          <svg viewBox="0 0 60 32" width="60" height="32" aria-hidden="true"><path d="M2 26 L12 20 L22 23 L32 10 L42 15 L58 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path></svg>Linea
+        </button>
+        <button type="button" role="radio" aria-checked="true" style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border-radius: 10px; border: 1px solid #FF9248; background: #1C1611; color: #FFB27A; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">
+          <svg viewBox="0 0 60 32" width="60" height="32" aria-hidden="true"><path d="M2 26 L12 20 L22 23 L32 10 L42 15 L58 5 V32 H2 Z" fill="currentColor" fill-opacity=".3"></path><path d="M2 26 L12 20 L22 23 L32 10 L42 15 L58 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path></svg>Area
+        </button>
+        <button type="button" role="radio" aria-checked="false" style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border-radius: 10px; border: 1px solid #262B31; background: #15191C; color: #AEB5BD; font: inherit; font-size: 12px; cursor: pointer">
+          <svg viewBox="0 0 60 32" width="60" height="32" aria-hidden="true"><path d="M4 32V22h6v10M14 32V16h6v16M24 32V20h6v12M34 32V8h6v24M44 32V14h6v18" fill="currentColor"></path></svg>Barre
+        </button>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h3 class="sect">Colore</h3>
+      <div role="group" aria-label="Colore della linea" style="display: flex; align-items: center; gap: 8px">
+        <button type="button" class="sw" aria-label="Verde" aria-pressed="true" style="background: #34D399"></button>
+        <button type="button" class="sw" aria-label="Azzurro" aria-pressed="false" style="background: #38BDF8"></button>
+        <button type="button" class="sw" aria-label="Arancione" aria-pressed="false" style="background: #FB923C"></button>
+        <button type="button" class="sw" aria-label="Viola" aria-pressed="false" style="background: #A78BFA"></button>
+        <button type="button" class="sw" aria-label="Rosa" aria-pressed="false" style="background: #F472B6"></button>
+        <label class="fld" style="flex: 1; min-width: 0"><span style="width: 14px; height: 14px; border-radius: 4px; background: #34D399; flex: none"></span>#34D399</label>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline">
+        <h3 class="sect">Riempimento</h3>
+        <span style="font-size: 11px; color: #6B747C">solo stile Area</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <span style="font-size: 12.5px; color: #D5D9DE; flex: none">Stesso colore</span>
+        <div style="flex: 1; position: relative; height: 18px; display: flex; align-items: center">
+          <div style="width: 100%; height: 6px; border-radius: 3px; background: #23282E; overflow: hidden"><div style="width: 22%; height: 100%; background: #34D399; opacity: .7"></div></div>
+          <span style="position: absolute; left: calc(22% - 8px); width: 16px; height: 16px; border-radius: 50%; background: #E8EAED; border: 3px solid #FF9248; box-sizing: border-box"></span>
+        </div>
+        <span class="mono" style="font-size: 12px; width: 36px; text-align: right">22%</span>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline"><h3 class="sect">Spessore linea</h3><span class="mono" style="font-size: 12px">2,5 px</span></div>
+      <div role="radiogroup" aria-label="Spessore" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px">
+        <button type="button" role="radio" aria-checked="false" style="height: 34px; border-radius: 8px; border: 1px solid #262B31; background: #15191C; display: flex; align-items: center; justify-content: center; cursor: pointer"><span style="width: 28px; height: 1px; background: #AEB5BD"></span></button>
+        <button type="button" role="radio" aria-checked="false" style="height: 34px; border-radius: 8px; border: 1px solid #262B31; background: #15191C; display: flex; align-items: center; justify-content: center; cursor: pointer"><span style="width: 28px; height: 2px; background: #AEB5BD"></span></button>
+        <button type="button" role="radio" aria-checked="true" style="height: 34px; border-radius: 8px; border: 1px solid #FF9248; background: #1C1611; display: flex; align-items: center; justify-content: center; cursor: pointer"><span style="width: 28px; height: 3px; border-radius: 2px; background: #FFB27A"></span></button>
+        <button type="button" role="radio" aria-checked="false" style="height: 34px; border-radius: 8px; border: 1px solid #262B31; background: #15191C; display: flex; align-items: center; justify-content: center; cursor: pointer"><span style="width: 28px; height: 5px; border-radius: 3px; background: #AEB5BD"></span></button>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

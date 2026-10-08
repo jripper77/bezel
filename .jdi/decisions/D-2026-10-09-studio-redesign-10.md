@@ -1,0 +1,1 @@
+D-2026-10-09-studio-redesign-10 (2026-10-09): "Reiniciar sensores" reinicia hoje apenas o reader LibreHardwareMonitor (bridge.restartLibre). Não inventar reinícios de outras fontes no popover SensorStatus.

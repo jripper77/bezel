@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Card — movimento</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.sect{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8B939C;margin:0}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:0;background:transparent;color:#AEB5BD;cursor:pointer}
+.tabs{display:flex;gap:2px;padding:3px;border-radius:9px;background:#0F1214}
+.tabs button{flex:1;height:30px;border:0;border-radius:7px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.tabs button[aria-selected="true"]{background:#23282E;color:#E8EAED;font-weight:600}
+.chk{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;color:#D5D9DE}
+.tgl{position:relative;width:32px;height:18px;border-radius:999px;background:#2A3036;flex:none}
+.tgl.on{background:#FF9248}
+.tgl i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#E8EAED}
+.tgl.on i{left:16px;background:#1A0E05}
+.pill{height:28px;padding:0 10px;border-radius:999px;border:1px solid #262B31;background:transparent;color:#AEB5BD;font:inherit;font-size:12px;cursor:pointer}
+.pill[aria-pressed="true"]{border-color:#4A3424;background:#1F1813;color:#FFB27A}
+.dir{flex:1;height:32px;border-radius:7px;border:0;background:transparent;color:#8B939C;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.dir[aria-pressed="true"]{background:#23282E;color:#E8EAED}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px">
+    <div style="width: 34px; height: 34px; border-radius: 8px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center"><svg class="ic" viewBox="0 0 24 24" style="width: 18px; height: 18px" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"></rect><path d="M9 8h6M9 12h6"></path></svg></div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25">
+      <strong style="font-size: 14px">Metriche</strong>
+      <span style="font-size: 11.5px; color: #8B939C">Card · 3 facce · 9 oggetti</span>
+    </div>
+    <button type="button" class="ib" aria-label="Altre azioni"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Sezioni della card" style="margin: 0 14px">
+    <button type="button" role="tab" aria-selected="false">Facce</button>
+    <button type="button" role="tab" aria-selected="true">Movimento</button>
+    <button type="button" role="tab" aria-selected="false">Trigger</button>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px">
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <h3 class="sect">Rotazione automatica</h3>
+      <div class="chk">Cambia faccia da sola<span class="tgl on"><i></i></span></div>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <span style="flex: 1; font-size: 12.5px; color: #AEB5BD">Ogni</span>
+        <div style="display: flex; align-items: center; height: 34px; border-radius: 8px; border: 1px solid #262B31; background: #0F1214">
+          <button type="button" aria-label="Diminuisci" style="width: 32px; height: 32px; border: 0; background: transparent; color: #AEB5BD; cursor: pointer">−</button>
+          <span class="mono" style="min-width: 48px; text-align: center; font-size: 13px; font-weight: 600">12 s</span>
+          <button type="button" aria-label="Aumenta" style="width: 32px; height: 32px; border: 0; background: transparent; color: #AEB5BD; cursor: pointer">+</button>
+        </div>
+      </div>
+      <div role="group" aria-label="Durate rapide" style="display: flex; gap: 6px">
+        <button type="button" class="pill" aria-pressed="false">5 s</button>
+        <button type="button" class="pill" aria-pressed="false">10 s</button>
+        <button type="button" class="pill" aria-pressed="true">12 s</button>
+        <button type="button" class="pill" aria-pressed="false">30 s</button>
+        <button type="button" class="pill" aria-pressed="false">1 min</button>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; background: #0F1214; font-size: 11.5px; color: #8B939C">
+        <svg class="ic" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: #FFB27A" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>
+        In pausa mentre modifichi la card
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <h3 class="sect">Transizione tra facce</h3>
+      <div role="radiogroup" aria-label="Effetto" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px">
+        <sc-for list="{{effects}}" as="e" hint-placeholder-count="4">
+          <button type="button" role="radio" aria-checked="{{e.checked}}" style="{{e.style}}">
+            <svg viewBox="0 0 48 40" width="48" height="40" aria-hidden="true">
+              <rect x="{{e.ax}}" y="{{e.ay}}" width="22" height="32" rx="3" fill="#2C3238" opacity="{{e.ao}}"></rect>
+              <rect x="{{e.bx}}" y="4" width="{{e.bw}}" height="32" rx="3" fill="{{e.bc}}" opacity="{{e.bo}}"></rect>
+            </svg>
+            <span style="font-size: 11.5px">{{e.label}}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; justify-content: space-between; font-size: 12.5px; color: #D5D9DE"><span>Durata</span><span class="mono">450 ms</span></div>
+        <div style="position: relative; height: 18px; display: flex; align-items: center">
+          <div style="width: 100%; height: 4px; border-radius: 2px; background: #23282E"><div style="width: 30%; height: 100%; border-radius: 2px; background: #FF9248"></div></div>
+          <span style="position: absolute; left: calc(30% - 8px); width: 16px; height: 16px; border-radius: 50%; background: #E8EAED; border: 3px solid #FF9248; box-sizing: border-box"></span>
+        </div>
+        <div class="mono" style="display: flex; justify-content: space-between; font-size: 10.5px; color: #5F6870"><span>rapida</span><span>lenta</span></div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span style="font-size: 12.5px; color: #D5D9DE">Direzione</span>
+        <div role="group" aria-label="Direzione" style="display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: #0F1214">
+          <button type="button" class="dir" aria-pressed="false" aria-label="Sinistra"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></button>
+          <button type="button" class="dir" aria-pressed="false" aria-label="Destra"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+          <button type="button" class="dir" aria-pressed="true" aria-label="Su"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+          <button type="button" class="dir" aria-pressed="false" aria-label="Giù"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"></path></svg></button>
+        </div>
+      </div>
+
+      <div class="chk">Anima anche la base condivisa<span class="tgl"><i></i></span></div>
+
+      <button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; border-radius: 8px; border: 1px solid #2C3238; background: #15191C; color: #E8EAED; font: inherit; font-weight: 600; cursor: pointer">
+        <svg class="ic" viewBox="0 0 24 24" style="color: #FFB27A" aria-hidden="true"><path d="M7 5v14l11-7z"></path></svg>Prova sulla faccia successiva
+      </button>
+    </section>
+
+    <p style="margin: 0; font-size: 11.5px; line-height: 1.5; color: #7F8890">Le transizioni valgono anche in diretta. Se il sistema chiede movimento ridotto, le facce cambiano senza animazione.</p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const list = [
+      { label: 'Nessuna', ax: 13, ay: 4, ao: 0, bx: 13, bw: 22, bc: '#AEB5BD', bo: 1 },
+      { label: 'Dissolvi', ax: 9, ay: 4, ao: 1, bx: 17, bw: 22, bc: '#FF9248', bo: 0.55 },
+      { label: 'Scorri', ax: 13, ay: -8, ao: 1, bx: 13, bw: 22, bc: '#FF9248', bo: 1, on: true },
+      { label: 'Ribalta', ax: 13, ay: 4, ao: 0.4, bx: 19, bw: 10, bc: '#FF9248', bo: 1 }
+    ];
+    return {
+      effects: list.map((e) => ({
+        ...e,
+        checked: e.on ? 'true' : 'false',
+        style: 'display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px 6px; border-radius: 10px; font: inherit; cursor: pointer; ' +
+          (e.on ? 'border: 1px solid #FF9248; background: #1C1611; color: #FFB27A' : 'border: 1px solid #262B31; background: #15191C; color: #AEB5BD')
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

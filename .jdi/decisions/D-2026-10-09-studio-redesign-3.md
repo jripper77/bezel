@@ -1,0 +1,1 @@
+D-2026-10-09-studio-redesign-3 (2026-10-09): Execução por waves, uma área por vez, app funcionando e testado ao fim de cada wave: W1 tokens+fontes+shell; W2 painéis da biblioteca; W3 inspectors; W4 Connect+SensorStatus; W5 logo/ícones. Ordem refinável, mantendo shippability por wave.

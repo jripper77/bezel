@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Logo — alternative</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D0F}
+.mono{font-family:'IBM Plex Mono',monospace}
+.card{display:flex;flex-direction:column;gap:16px;padding:16px;border-radius:16px;background:#121518;border:1px solid #1D2227}
+.stage{height:232px;border-radius:12px;background:#0E1013;display:flex;align-items:center;justify-content:center}
+.sizes{display:flex;align-items:center;gap:14px;height:40px}
+.tray{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:6px;background:#202020;border:1px solid #333;font-size:11px;color:#CCC}
+.lock{display:flex;align-items:center;gap:10px;padding-top:14px;border-top:1px solid #1D2227}
+.num{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#FFB27A;letter-spacing:.06em}
+h3{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em}
+p{margin:0;font-size:12.5px;line-height:1.5;color:#AEB5BD}
+</style>
+</helmet>
+<div style="--accent: {{accent}}; width: 1760px; height: 720px; box-sizing: border-box; padding: 40px; display: flex; flex-direction: column; gap: 24px; background: #0B0D0F; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif">
+  <div style="display: flex; align-items: baseline; justify-content: space-between">
+    <h2 style="margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -.02em">Sei direzioni per il marchio</h2>
+    <span class="mono" style="font-size: 12px; color: #7F8890">ogni concept: icona · 32 px · 16 px nella tray · logo con nome</span>
+  </div>
+
+  <div style="flex: 1; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 20px">
+
+    <article class="card" style="border-color: #3A2A1E">
+      <div class="stage">
+        <svg viewBox="0 0 256 256" width="176" height="176" role="img" aria-label="Concept Archi"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><path d="M78 56 V200 M78 56 H122 A36 36 0 0 1 122 128 H78 M78 128 H138 A36 36 0 0 1 138 200 H78" fill="none" stroke="#F2EDE6" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"></path><path d="M78 128 H138 A36 36 0 0 1 138 200 H78" fill="none" stroke="{{accent}}" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="150 400"></path><circle cx="196" cy="62" r="11" fill="#34D399"></circle></svg>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 256 256" width="32" height="32" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><path d="M78 56 V200 M78 56 H122 A36 36 0 0 1 122 128 H78 M78 128 H138 A36 36 0 0 1 138 200 H78" fill="none" stroke="#F2EDE6" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"></path><path d="M78 128 H138 A36 36 0 0 1 138 200 H78" fill="none" stroke="{{accent}}" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="150 400"></path></svg>
+        <span class="tray"><svg viewBox="0 0 256 256" width="16" height="16" aria-hidden="true"><rect width="256" height="256" rx="52" fill="{{accent}}"></rect><path d="M78 56 V200 M78 56 H122 A36 36 0 0 1 122 128 H78 M78 128 H138 A36 36 0 0 1 138 200 H78" fill="none" stroke="#1A0E05" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"></path></svg>tray</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span class="num">00 · ATTUALE</span>
+        <h3>Archi</h3>
+        <p>Una B fatta da due archi a indicatore. Si legge come lettera e come gauge.</p>
+      </div>
+      <div class="lock" style="margin-top: auto">
+        <svg viewBox="0 0 256 256" width="26" height="26" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#22272C"></rect><path d="M78 56 V200 M78 56 H122 A36 36 0 0 1 122 128 H78 M78 128 H138 A36 36 0 0 1 138 200 H78" fill="none" stroke="#F2EDE6" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"></path><path d="M78 128 H138 A36 36 0 0 1 138 200 H78" fill="none" stroke="{{accent}}" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="150 400"></path></svg>
+        <strong style="font-size: 17px; letter-spacing: -.02em">Bezel</strong><span class="mono" style="font-size: 17px; color: var(--accent)">evo</span>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="stage">
+        <svg viewBox="0 0 256 256" width="176" height="176" role="img" aria-label="Concept Cornice"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><rect x="84" y="28" width="88" height="200" rx="20" fill="#F2EDE6"></rect><rect x="97" y="42" width="62" height="172" rx="9" fill="#0B0D0F"></rect><circle cx="128" cy="92" r="20" fill="none" stroke="#2C3238" stroke-width="8" stroke-linecap="round" stroke-dasharray="94 126" transform="rotate(135 128 92)"></circle><circle cx="128" cy="92" r="20" fill="none" stroke="{{accent}}" stroke-width="8" stroke-linecap="round" stroke-dasharray="60 126" transform="rotate(135 128 92)"></circle><rect x="108" y="134" width="40" height="7" rx="3.5" fill="#2C3238"></rect><rect x="108" y="134" width="28" height="7" rx="3.5" fill="#F2EDE6"></rect><rect x="108" y="152" width="40" height="7" rx="3.5" fill="#2C3238"></rect><rect x="108" y="152" width="18" height="7" rx="3.5" fill="#F2EDE6"></rect><rect x="108" y="178" width="40" height="20" rx="4" fill="#1D2227"></rect></svg>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 256 256" width="32" height="32" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><rect x="80" y="24" width="96" height="208" rx="22" fill="#F2EDE6"></rect><rect x="98" y="44" width="60" height="168" rx="10" fill="#0B0D0F"></rect><circle cx="128" cy="100" r="22" fill="none" stroke="{{accent}}" stroke-width="16" stroke-linecap="round" stroke-dasharray="70 138" transform="rotate(135 128 100)"></circle></svg>
+        <span class="tray"><svg viewBox="0 0 256 256" width="16" height="16" aria-hidden="true"><rect x="68" y="12" width="120" height="232" rx="28" fill="#F2EDE6"></rect><rect x="92" y="40" width="72" height="176" rx="10" fill="{{accent}}"></rect></svg>tray</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span class="num">01</span>
+        <h3>Cornice</h3>
+        <p>Lo smart screen stesso, con la sua cornice spessa e un piccolo tema acceso dentro. Il più letterale e riconoscibile.</p>
+      </div>
+      <div class="lock" style="margin-top: auto">
+        <svg viewBox="0 0 256 256" width="26" height="26" aria-hidden="true"><rect x="68" y="12" width="120" height="232" rx="28" fill="#F2EDE6"></rect><rect x="92" y="40" width="72" height="176" rx="10" fill="{{accent}}"></rect></svg>
+        <strong style="font-size: 17px; letter-spacing: -.02em">Bezel</strong><span style="font-size: 17px; font-weight: 400; color: #8B939C">Evo</span>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="stage">
+        <svg viewBox="0 0 256 256" width="176" height="176" role="img" aria-label="Concept Mirino"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><path d="M74 78V42h36M146 42h36v36M182 178v36h-36M110 214H74v-36" fill="none" stroke="#F2EDE6" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"></path><rect x="112" y="74" width="32" height="108" rx="10" fill="#2C3238"></rect><rect x="112" y="116" width="32" height="66" rx="10" fill="{{accent}}"></rect></svg>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 256 256" width="32" height="32" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><path d="M70 82V38h40M146 38h40v44M186 174v44h-40M110 218H70v-44" fill="none" stroke="#F2EDE6" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"></path><rect x="110" y="104" width="36" height="80" rx="10" fill="{{accent}}"></rect></svg>
+        <span class="tray"><svg viewBox="0 0 256 256" width="16" height="16" aria-hidden="true"><path d="M50 90V30h60M146 30h60v60M206 166v60h-60M110 226H50v-60" fill="none" stroke="#F2EDE6" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"></path><rect x="104" y="98" width="48" height="100" rx="10" fill="{{accent}}"></rect></svg>tray</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span class="num">02</span>
+        <h3>Mirino</h3>
+        <p>Quattro angoli che inquadrano uno schermo verticale e una barra di livello. Richiama la cornice e l'inquadratura dell'editor.</p>
+      </div>
+      <div class="lock" style="margin-top: auto">
+        <svg viewBox="0 0 256 256" width="26" height="26" aria-hidden="true"><path d="M50 90V30h60M146 30h60v60M206 166v60h-60M110 226H50v-60" fill="none" stroke="#F2EDE6" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"></path><rect x="104" y="98" width="48" height="100" rx="10" fill="{{accent}}"></rect></svg>
+        <strong style="font-size: 17px; letter-spacing: .08em; text-transform: uppercase">Bezel</strong>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="stage">
+        <svg viewBox="0 0 256 256" width="176" height="176" role="img" aria-label="Concept Quadrante"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><circle cx="134" cy="162" r="46" fill="none" stroke="#2C3238" stroke-width="24"></circle><circle cx="134" cy="162" r="46" fill="none" stroke="{{accent}}" stroke-width="24" stroke-linecap="round" stroke-dasharray="200 289" transform="rotate(180 134 162)"></circle><path d="M76 44V206" fill="none" stroke="#F2EDE6" stroke-width="24" stroke-linecap="round"></path></svg>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 256 256" width="32" height="32" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><circle cx="134" cy="162" r="46" fill="none" stroke="{{accent}}" stroke-width="30"></circle><path d="M76 40V208" fill="none" stroke="#F2EDE6" stroke-width="30" stroke-linecap="round"></path></svg>
+        <span class="tray"><svg viewBox="0 0 256 256" width="16" height="16" aria-hidden="true"><circle cx="140" cy="164" r="50" fill="none" stroke="{{accent}}" stroke-width="40"></circle><path d="M70 30V214" fill="none" stroke="#F2EDE6" stroke-width="40" stroke-linecap="round"></path></svg>tray</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span class="num">03</span>
+        <h3>Quadrante</h3>
+        <p>Una b minuscola: l'asta più un anello indicatore al 70%. Più morbida e leggibile anche a 16 px.</p>
+      </div>
+      <div class="lock" style="margin-top: auto">
+        <svg viewBox="0 0 256 256" width="26" height="26" aria-hidden="true"><circle cx="140" cy="164" r="50" fill="none" stroke="{{accent}}" stroke-width="36"></circle><path d="M70 30V214" fill="none" stroke="#F2EDE6" stroke-width="36" stroke-linecap="round"></path></svg>
+        <strong style="font-size: 17px; font-weight: 600; letter-spacing: -.02em; text-transform: lowercase">bezel</strong>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="stage">
+        <svg viewBox="0 0 256 256" width="176" height="176" role="img" aria-label="Concept Battito"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><rect x="82" y="36" width="92" height="184" rx="20" fill="none" stroke="#F2EDE6" stroke-width="16"></rect><path d="M30 140H88L106 100L128 178L148 118L160 140H226" fill="none" stroke="{{accent}}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 256 256" width="32" height="32" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><rect x="80" y="32" width="96" height="192" rx="22" fill="none" stroke="#F2EDE6" stroke-width="22"></rect><path d="M28 140H86L106 96L128 184L150 116L162 140H228" fill="none" stroke="{{accent}}" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <span class="tray"><svg viewBox="0 0 256 256" width="16" height="16" aria-hidden="true"><rect x="70" y="16" width="116" height="224" rx="26" fill="none" stroke="#F2EDE6" stroke-width="30"></rect><path d="M12 140H80L104 84L130 196L152 118L166 140H244" fill="none" stroke="{{accent}}" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"></path></svg>tray</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span class="num">04</span>
+        <h3>Battito</h3>
+        <p>Uno schermo attraversato da una traccia di sensore che esce dalla cornice. Racconta i dati del PC in tempo reale.</p>
+      </div>
+      <div class="lock" style="margin-top: auto">
+        <svg viewBox="0 0 256 256" width="26" height="26" aria-hidden="true"><rect x="70" y="16" width="116" height="224" rx="26" fill="none" stroke="#F2EDE6" stroke-width="26"></rect><path d="M12 140H80L104 84L130 196L152 118L166 140H244" fill="none" stroke="{{accent}}" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <strong style="font-size: 17px; letter-spacing: -.02em">Bezel</strong><span style="font-size: 17px; font-weight: 400; color: var(--accent)">Evo</span>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="stage">
+        <svg viewBox="0 0 256 256" width="176" height="176" role="img" aria-label="Concept Pixel"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><path d="{{pixDim}}" fill="#23282E"></path><path d="{{pixLit}}" fill="#F2EDE6"></path><path d="{{pixAcc}}" fill="{{accent}}"></path></svg>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 256 256" width="32" height="32" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><path d="{{pixLit}}" fill="#F2EDE6"></path><path d="{{pixAcc}}" fill="{{accent}}"></path></svg>
+        <span class="tray"><svg viewBox="0 0 256 256" width="16" height="16" aria-hidden="true"><path d="{{pixLit}}" fill="#F2EDE6" transform="translate(-36 -24) scale(1.28)"></path><path d="{{pixAcc}}" fill="{{accent}}" transform="translate(-36 -24) scale(1.28)"></path></svg>tray</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span class="num">05</span>
+        <h3>Pixel</h3>
+        <p>Una B disegnata su una matrice di punti, come un display LCD. La base si accende in arancione. Nitida a ogni dimensione.</p>
+      </div>
+      <div class="lock" style="margin-top: auto">
+        <svg viewBox="0 0 256 256" width="26" height="26" aria-hidden="true"><path d="{{pixLit}}" fill="#F2EDE6" transform="translate(-36 -24) scale(1.28)"></path><path d="{{pixAcc}}" fill="{{accent}}" transform="translate(-36 -24) scale(1.28)"></path></svg>
+        <strong class="mono" style="font-size: 16px; font-weight: 600; letter-spacing: .02em">BEZEL</strong><span class="mono" style="font-size: 16px; color: var(--accent)">EVO</span>
+      </div>
+    </article>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#FF9248","options":["#FF9248","#38BDF8","#A3E635","#F472B6"]},"$preview":{"width":1760,"height":720}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const B = ['11110', '10001', '10001', '11110', '10001', '10001', '11110'];
+    const ACC = ['00000', '00000', '00000', '00000', '00001', '00001', '11110'];
+    const cell = 22, gap = 4, x0 = 65, y0 = 39;
+    let lit = '', acc = '', dim = '';
+    B.forEach((row, r) => {
+      for (let c = 0; c < 5; c++) {
+        const x = x0 + c * (cell + gap), y = y0 + r * (cell + gap);
+        const d = 'M' + x + ' ' + y + 'h' + cell + 'v' + cell + 'h-' + cell + 'z';
+        if (ACC[r][c] === '1') acc += d;
+        else if (row[c] === '1') lit += d;
+        else dim += d;
+      }
+    });
+    return { accent: this.props.accent ?? '#FF9248', pixLit: lit, pixAcc: acc, pixDim: dim };
+  }
+}
+</script>
+</body>
+</html>

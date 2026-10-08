@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Schermo — archivio</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.sect{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8B939C;margin:0}
+.seg{display:flex;padding:3px;border-radius:9px;background:#0F1214}
+.seg button{flex:1;height:30px;border:0;border-radius:7px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.seg button[aria-selected="true"]{background:#23282E;color:#E8EAED;font-weight:600}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:34px;padding:0 12px;border-radius:8px;border:1px solid #2C3238;background:#15191C;color:#E8EAED;font:inherit;font-weight:600;cursor:pointer}
+.lg{display:flex;align-items:center;gap:5px;font-size:11px;color:#8B939C}
+.lg i{width:8px;height:8px;border-radius:2px}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; padding: 16px; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <h2 style="margin: 0; font-size: 15px; font-weight: 600">Schermo</h2>
+  <div class="seg" role="tablist" aria-label="Sezioni schermo">
+    <button type="button" role="tab" aria-selected="false">Impostazioni</button>
+    <button type="button" role="tab" aria-selected="true">Archivio</button>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+    <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: #15191C; border: 1px solid #23282E">
+      <span style="font-size: 12px; color: #AEB5BD">Memoria interna</span>
+      <span class="mono" style="font-size: 15px; font-weight: 600">1,2<span style="font-size: 11px; color: #7F8890; font-weight: 400"> / 3,6 GB</span></span>
+      <div style="display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #23282E"><span style="width: 24%; background: #38BDF8"></span><span style="width: 6%; background: #FB923C"></span><span style="width: 3%; background: #8B939C"></span></div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: #15191C; border: 1px solid #23282E">
+      <span style="font-size: 12px; color: #AEB5BD">Scheda SD</span>
+      <span class="mono" style="font-size: 15px; font-weight: 600">8,4<span style="font-size: 11px; color: #7F8890; font-weight: 400"> / 29,7 GB</span></span>
+      <div style="display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #23282E"><span style="width: 22%; background: #38BDF8"></span><span style="width: 4%; background: #FB923C"></span><span style="width: 2%; background: #8B939C"></span></div>
+    </div>
+  </div>
+  <div style="display: flex; gap: 14px; margin-top: -4px">
+    <span class="lg"><i style="background: #38BDF8"></i>Video</span>
+    <span class="lg"><i style="background: #FB923C"></i>Immagini</span>
+    <span class="lg"><i style="background: #8B939C"></i>Altro</span>
+  </div>
+
+  <section style="display: flex; flex-direction: column; gap: 8px">
+    <h3 class="sect">All'accensione</h3>
+    <div style="display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 12px; border: 1.5px dashed #3A4149; background: #101316">
+      <span style="width: 40px; height: 40px; border-radius: 8px; background: #16213A; color: #7DD3FC; display: flex; align-items: center; justify-content: center; flex: none"><svg class="ic" viewBox="0 0 24 24" style="width: 18px; height: 18px" aria-hidden="true"><path d="M3 6h13v12H3zM16 10l5-3v10l-5-3"></path></svg></span>
+      <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+        <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">nebulosa.mp4</span>
+        <span style="font-size: 11.5px; color: #8B939C">Si avvia da solo, anche senza Bezel</span>
+      </span>
+      <button type="button" aria-label="Torna all'orologio predefinito" style="width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: #8B939C; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+    </div>
+    <span style="font-size: 11.5px; color: #6B747C">Trascina qui un file dall'elenco per cambiarlo.</span>
+  </section>
+
+  <section style="flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; align-items: center; justify-content: space-between">
+      <h3 class="sect">File sullo schermo</h3>
+      <button type="button" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; border: 0; background: #FF9248; color: #1A0E05; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer"><svg class="ic" viewBox="0 0 24 24" style="width: 14px; height: 14px" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M5 21h14"></path></svg>Invia file</button>
+    </div>
+    <div role="group" aria-label="Filtra per posizione" style="display: flex; gap: 6px">
+      <button type="button" aria-pressed="true" style="height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid #4A3424; background: #1F1813; color: #FFB27A; font: inherit; font-size: 12px; cursor: pointer">Tutti · 6</button>
+      <button type="button" aria-pressed="false" style="height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid #262B31; background: transparent; color: #AEB5BD; font: inherit; font-size: 12px; cursor: pointer">Scheda SD</button>
+      <button type="button" aria-pressed="false" style="height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid #262B31; background: transparent; color: #AEB5BD; font: inherit; font-size: 12px; cursor: pointer">Interna</button>
+    </div>
+    <ul style="flex: 1; min-height: 0; overflow: auto; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">
+      <sc-for list="{{files}}" as="f" hint-placeholder-count="5">
+        <li style="list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px">
+          <span style="{{f.thumb}}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="{{f.icon}}"></path></svg></span>
+          <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+            <span style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{f.name}}</span>
+            <span style="display: flex; gap: 6px; align-items: center; font-size: 11px; color: #7F8890">
+              <span class="mono" style="padding: 0 5px; border-radius: 4px; background: #1D2227; color: #AEB5BD; font-size: 10px">{{f.place}}</span>
+              <span class="mono">{{f.size}}</span>
+              <sc-if value="{{f.warn}}" hint-placeholder-val="{{ false }}"><span style="color: #FFB27A">{{f.warn}}</span></sc-if>
+            </span>
+            <sc-if value="{{f.progress}}" hint-placeholder-val="{{ false }}">
+              <span style="height: 3px; border-radius: 2px; background: #23282E; margin-top: 3px"><span style="{{f.progress}}"></span></span>
+            </sc-if>
+          </span>
+          <button type="button" aria-label="Azioni sul file" style="width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: #8B939C; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+        </li>
+      </sc-for>
+    </ul>
+  </section>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-top: 12px; border-top: 1px solid #1D2227">
+    <button type="button" class="btn" style="font-size: 12px">Assistente pulizia</button>
+    <button type="button" class="btn" style="font-size: 12px">Copie locali · 1,4 GB</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const video = 'M3 6h13v12H3zM16 10l5-3v10l-5-3';
+    const image = 'M4 5h16v14H4zM20 16l-5-5-8 8';
+    const box = (bg, fg) => 'width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex: none; background: ' + bg + '; color: ' + fg;
+    return {
+      files: [
+        { name: 'aurora-loop.mp4', place: 'SD', size: '96 / 150 MB', icon: video, thumb: box('#16213A', '#7DD3FC'), progress: 'display: block; width: 64%; height: 100%; border-radius: 2px; background: #38BDF8', warn: '' },
+        { name: 'nebulosa.mp4', place: 'SD', size: '212 MB', icon: video, thumb: box('#16213A', '#7DD3FC'), warn: '' },
+        { name: 'gameplay-intro.mp4', place: 'SD', size: '1,8 GB', icon: video, thumb: box('#16213A', '#7DD3FC'), warn: 'nessuna copia locale' },
+        { name: 'foto-mare.png', place: 'SD', size: '2,1 MB', icon: image, thumb: box('#2B2114', '#FDE68A'), warn: '' },
+        { name: 'logo-avvio.png', place: 'INT', size: '180 KB', icon: image, thumb: box('#2B2114', '#FDE68A'), warn: '' },
+        { name: 'demo.mp4', place: 'INT', size: '840 MB', icon: video, thumb: box('#16213A', '#7DD3FC'), warn: '' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

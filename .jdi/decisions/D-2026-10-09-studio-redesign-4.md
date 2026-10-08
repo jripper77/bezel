@@ -1,0 +1,1 @@
+D-2026-10-09-studio-redesign-4 (2026-10-09): Design tokens como CSS custom properties em styles.css, com conjuntos dark e light (prefers-color-scheme). Nenhum hex fora dos blocos de token. Acento fixo #FF9248, token único.

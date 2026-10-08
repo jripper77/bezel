@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Pannello livelli</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.tb{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;border:0;background:transparent;color:#AEB5BD;cursor:pointer}
+.tb:hover{background:#262B31;color:#E8EAED}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <div style="display: flex; flex-direction: column; gap: 12px; padding: 16px 16px 10px">
+    <div style="display: flex; align-items: center; justify-content: space-between">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">Livelli</h2>
+      <div style="display: flex; gap: 2px">
+        <button type="button" class="tb" aria-label="Espandi tutto"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"></path></svg></button>
+        <button type="button" class="tb" aria-label="Comprimi tutto"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4 5 5 5-5M7 20l5-5 5 5"></path></svg></button>
+      </div>
+    </div>
+    <label style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid #262B31; background: #0F1214">
+      <svg class="ic" viewBox="0 0 24 24" style="color: #7F8890" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+      <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Filtra livelli</span>
+      <input type="search" placeholder="Filtra per nome o sensore" style="flex: 1; min-width: 0; border: 0; background: transparent; color: #E8EAED; font: inherit; outline: none">
+    </label>
+    <div class="mono" style="display: flex; justify-content: space-between; font-size: 11px; color: #6B747C"><span>IN PRIMO PIANO</span><span>14 oggetti</span></div>
+  </div>
+
+  <ul role="tree" aria-label="Livelli del tema" aria-multiselectable="true" style="flex: 1; min-height: 0; overflow: auto; list-style: none; margin: 0; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 1px">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="12">
+      <li role="treeitem" aria-selected="{{r.ariaSel}}" style="list-style: none; position: relative">
+        <sc-if value="{{r.dropBefore}}" hint-placeholder-val="{{ false }}">
+          <div aria-hidden="true" style="position: absolute; top: -2px; left: 40px; right: 6px; height: 2px; border-radius: 1px; background: #38BDF8"><span style="position: absolute; left: -6px; top: -3px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid #38BDF8; background: #121518; box-sizing: border-box"></span></div>
+        </sc-if>
+        <div style="{{r.rowStyle}}">
+          <span style="{{r.chevStyle}}"><svg class="ic" viewBox="0 0 24 24" style="width: 14px; height: 14px" aria-hidden="true"><path d="{{r.chev}}"></path></svg></span>
+          <span style="{{r.iconBox}}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="{{r.icon}}"></path></svg></span>
+          <span style="flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden">
+            <span style="{{r.nameStyle}}">{{r.name}}</span>
+            <span style="font-size: 11px; color: #6B747C; overflow: hidden; text-overflow: ellipsis">{{r.meta}}</span>
+          </span>
+          <sc-if value="{{r.badge}}" hint-placeholder-val="{{ false }}">
+            <span class="mono" style="padding: 1px 6px; border-radius: 4px; background: #10261C; color: #6EE7B7; font-size: 10px">{{r.badge}}</span>
+          </sc-if>
+          <sc-if value="{{r.tools}}" hint-placeholder-val="{{ false }}">
+            <span style="display: flex; gap: 0">
+              <button type="button" class="tb" aria-label="Nascondi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+              <button type="button" class="tb" aria-label="Blocca"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 7.5-2"></path></svg></button>
+            </span>
+          </sc-if>
+          <sc-if value="{{r.hidden}}" hint-placeholder-val="{{ false }}">
+            <button type="button" class="tb" aria-label="Mostra" style="color: #FFB27A"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.8M6.6 6.6C3.6 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"></path></svg></button>
+          </sc-if>
+          <sc-if value="{{r.locked}}" hint-placeholder-val="{{ false }}">
+            <button type="button" class="tb" aria-label="Sblocca" style="color: #FFB27A"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></button>
+          </sc-if>
+        </div>
+      </li>
+    </sc-for>
+  </ul>
+
+  <div style="display: flex; flex-direction: column; gap: 10px; margin: 0 12px 12px; padding: 12px; border-radius: 12px; background: #1A1E22; border: 1px solid #2C3238; box-shadow: 0 -8px 24px rgba(0,0,0,.35)">
+    <div style="display: flex; align-items: center; justify-content: space-between">
+      <strong>2 selezionati</strong>
+      <button type="button" style="height: 26px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: #AEB5BD; font: inherit; font-size: 12px; cursor: pointer">Deseleziona</button>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+      <button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 34px; border-radius: 8px; border: 1px solid #2C3238; background: #15191C; color: #E8EAED; font: inherit; font-weight: 600; cursor: pointer">Raggruppa<span class="mono" style="font-size: 10.5px; color: #7F8890">Ctrl G</span></button>
+      <button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 34px; border-radius: 8px; border: 1px solid #2C3238; background: #15191C; color: #E8EAED; font: inherit; font-weight: 600; cursor: pointer">Crea card</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const I = {
+      text: 'M5 6V4h14v2M12 4v16M9 20h6',
+      clock: 'M12 4a8 8 0 1 1 0 16a8 8 0 1 1 0-16M12 8v4l3 2',
+      ring: 'M12 4a8 8 0 1 0 8 8',
+      bar: 'M6 9h12a3 3 0 0 1 0 6H6a3 3 0 0 1 0-6zM6 12h7',
+      shape: 'M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z',
+      card: 'M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM9 8h6M9 12h6',
+      face: 'M4 6h16M4 6v12h16V6M8 10h8',
+      base: 'm12 4 8 4-8 4-8-4 8-4zM4 12l8 4 8-4',
+      graph: 'm3 17 5-6 4 3 4-7 5 5',
+      value: 'M4 18V6M8 18V10M12 18V4M16 18v-6M20 18V8',
+      group: 'M3 3h8v8H3zM13 13h8v8h-8zM11 7h4v6',
+      player: 'M9 18V6l10-2v12M9 18a2.5 2.5 0 1 1-5 0a2.5 2.5 0 1 1 5 0',
+      image: 'M4 5h16v14H4zM20 16l-5-5-8 8'
+    };
+    const open = 'm6 9 6 6 6-6', closed = 'm9 6 6 6-6 6';
+    const raw = [
+      { d: 0, t: 'clock', name: 'Ora', meta: 'Orologio' },
+      { d: 0, t: 'card', name: 'Metriche', meta: 'Card · 3 facce', open: true },
+      { d: 1, t: 'base', name: 'Base condivisa', meta: 'sempre visibile', open: true, sub: true },
+      { d: 2, t: 'shape', name: 'Sfondo card', meta: 'Forma' },
+      { d: 1, t: 'face', name: 'METRICHE', meta: 'faccia 1', open: true, sub: true, badge: 'in vista' },
+      { d: 2, t: 'ring', name: 'CPU', meta: 'cpu.usage', sel: true, tools: true },
+      { d: 2, t: 'bar', name: 'GPU', meta: 'gpu.temperature' },
+      { d: 2, t: 'bar', name: 'RAM', meta: 'memory.percent', sel: true },
+      { d: 1, t: 'face', name: 'DETTAGLI', meta: 'faccia 2 · 3 oggetti', closedNode: true, sub: true },
+      { d: 0, t: 'group', name: 'Rete', meta: 'Gruppo', open: true, drop: true },
+      { d: 1, t: 'graph', name: 'Download', meta: 'net.down' },
+      { d: 1, t: 'value', name: 'Upload', meta: 'net.up', hidden: true },
+      { d: 0, t: 'player', name: 'Brano in riproduzione', meta: 'Media player' },
+      { d: 0, t: 'image', name: 'Sfondo', meta: 'Immagine', locked: true }
+    ];
+    const rows = raw.map((r) => {
+      const container = r.open || r.closedNode;
+      return {
+        name: r.name, meta: r.meta, badge: r.badge || '', tools: !!r.tools, hidden: !!r.hidden, locked: !!r.locked,
+        dropBefore: !!r.drop, ariaSel: r.sel ? 'true' : 'false',
+        icon: I[r.t], chev: r.open ? open : closed,
+        chevStyle: 'width: 16px; display: flex; color: #6B747C; visibility: ' + (container ? 'visible' : 'hidden'),
+        iconBox: 'display: flex; color: ' + (r.sel ? '#FFB27A' : r.sub ? '#6B747C' : '#AEB5BD'),
+        nameStyle: r.sub
+          ? 'font-family: IBM Plex Mono, monospace; font-size: 11px; letter-spacing: .06em; color: #AEB5BD; font-weight: 600'
+          : 'font-weight: ' + (r.sel ? '600' : '500') + '; overflow: hidden; text-overflow: ellipsis',
+        rowStyle: 'display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 4px 0 ' + (6 + r.d * 18) + 'px; border-radius: 8px; cursor: default; ' +
+          (r.sel ? 'background: #1F1813; box-shadow: inset 0 0 0 1px #4A3424; ' : '') +
+          (r.hidden ? 'opacity: .5; ' : '')
+      };
+    });
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

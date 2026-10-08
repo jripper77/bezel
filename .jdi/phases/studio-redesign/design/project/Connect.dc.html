@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Bezel Evo — collega uno schermo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D0F}
+a{color:#FFB27A}a:hover{color:#FFD2B0}
+.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+</style>
+</helmet>
+<div style="--accent: {{accent}}; width: 100%; min-height: 900px; display: flex; flex-direction: column; background: #0B0D0F; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px">
+
+  <header style="height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 12px 0 10px; border-bottom: 1px solid #1D2227; background: #101316">
+    <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#22272C"></rect><path d="M6 2h3v3H6zM10 2h3v3h-3zM14 2h3v3h-3zM18 2h3v3h-3zM6 6h3v3H6zM22 6h3v3h-3zM6 10h3v3H6zM22 10h3v3h-3zM6 14h3v3H6zM10 14h3v3h-3zM14 14h3v3h-3zM18 14h3v3h-3zM6 18h3v3H6zM6 22h3v3H6z" fill="#F2EDE6"></path><path d="M22 18h3v3h-3zM22 22h3v3h-3zM6 26h3v3H6zM10 26h3v3h-3zM14 26h3v3h-3zM18 26h3v3h-3z" fill="{{accent}}"></path><path d="M22 2h3v3h-3z" fill="#4A525A"></path></svg>
+    <strong style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; letter-spacing: .04em">BEZEL <span style="font-weight: 400; color: var(--accent)">EVO</span></strong>
+    <div style="flex: 1"></div>
+    <span style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px dashed #2C3238; color: #8B939C">
+      <span style="width: 8px; height: 8px; border-radius: 50%; background: #4A525A"></span>Nessuno schermo
+    </span>
+    <div style="flex: 1"></div>
+    <button type="button" aria-label="Preferenze" style="width: 36px; height: 36px; border-radius: 8px; border: 0; background: transparent; color: #AEB5BD; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M15 4v4M4 12h3M11 12h9M9 10v4M4 18h11M19 18h1M17 16v4"></path></svg></button>
+  </header>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; gap: 32px; justify-content: center; align-items: flex-start; padding: 64px 24px; background-image: radial-gradient(#1A1E22 1px, transparent 1px); background-size: 20px 20px">
+
+    <section aria-labelledby="connect-title" style="flex: 1 1 560px; max-width: 640px; display: flex; flex-direction: column; gap: 28px">
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <span class="mono" style="font-size: 11.5px; color: #FFB27A; letter-spacing: .08em">PASSO 1 DI 2</span>
+        <h1 id="connect-title" style="margin: 0; font-size: 36px; line-height: 1.12; font-weight: 700; letter-spacing: -.02em">Collega il tuo smart screen</h1>
+        <p style="margin: 0; font-size: 15px; line-height: 1.55; color: #AEB5BD; max-width: 52ch">Usa un cavo USB dati. Bezel riconosce Turing, TURZX, XuanFang, Kipye, WeAct e i cloni più diffusi, e sceglie da solo il protocollo giusto.</p>
+      </div>
+
+      <div style="display: flex; flex-direction: column; border-radius: 14px; border: 1px solid #23282E; background: #121518; overflow: hidden">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #1D2227">
+          <svg class="ic" viewBox="0 0 24 24" style="color: #38BDF8" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><path d="M20 4v5h-5"></path></svg>
+          <strong style="flex: 1">Ricerca dispositivi in corso…</strong>
+          <span class="mono" style="font-size: 11.5px; color: #7F8890">USB · seriale · HID</span>
+        </div>
+
+        <button type="button" style="display: flex; align-items: center; gap: 14px; padding: 16px; border: 0; border-bottom: 1px solid #1D2227; background: #17130F; color: #E8EAED; font: inherit; text-align: left; cursor: pointer">
+          <div style="width: 22px; height: 52px; border-radius: 4px; border: 2px solid #E8EAED; display: flex; padding: 3px; box-sizing: border-box"><div style="flex: 1; border-radius: 1px; background: var(--accent)"></div></div>
+          <span style="flex: 1; display: flex; flex-direction: column; gap: 3px">
+            <span style="font-size: 15px; font-weight: 600">Turing Smart Screen 8.8″</span>
+            <span class="mono" style="font-size: 11.5px; color: #8B939C">480×1920 · COM5 · protocollo C</span>
+          </span>
+          <span style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 8px; background: var(--accent); color: #1A0E05; font-weight: 700">Usa questo schermo<svg class="ic" viewBox="0 0 24 24" style="width: 16px; height: 16px" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span>
+        </button>
+
+        <div style="display: flex; align-items: center; gap: 14px; padding: 16px">
+          <div style="width: 52px; height: 22px; border-radius: 4px; border: 2px solid #4A525A; box-sizing: border-box"></div>
+          <span style="flex: 1; display: flex; flex-direction: column; gap: 3px">
+            <span style="font-size: 15px; font-weight: 600; color: #AEB5BD">Schermo 5″ (0x1CBE)</span>
+            <span style="font-size: 12.5px; color: #FFB27A">Trovato, ma Windows non ha il driver WinUSB.</span>
+          </span>
+          <button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #2C3238; background: #15191C; color: #E8EAED; font: inherit; font-weight: 600; cursor: pointer">Come risolvere</button>
+        </div>
+      </div>
+
+      <ol style="margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 12px; background: #121518; border: 1px solid #1D2227">
+          <span class="mono" style="width: 24px; height: 24px; border-radius: 6px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">1</span>
+          <strong style="font-size: 13px">Cavo dati</strong>
+          <span style="font-size: 12px; line-height: 1.45; color: #8B939C">Alcuni cavi caricano soltanto: se lo schermo non compare, prova un altro cavo.</span>
+        </li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 12px; background: #121518; border: 1px solid #1D2227">
+          <span class="mono" style="width: 24px; height: 24px; border-radius: 6px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">2</span>
+          <strong style="font-size: 13px">Chiudi TURZX</strong>
+          <span style="font-size: 12px; line-height: 1.45; color: #8B939C">Un solo programma alla volta può usare la porta dello schermo.</span>
+        </li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 12px; background: #121518; border: 1px solid #1D2227">
+          <span class="mono" style="width: 24px; height: 24px; border-radius: 6px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">3</span>
+          <strong style="font-size: 13px">Permessi</strong>
+          <span style="font-size: 12px; line-height: 1.45; color: #8B939C">Su Linux installa la regola udev con un clic da Preferenze.</span>
+        </li>
+      </ol>
+
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+        <button type="button" style="height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid #2C3238; background: #15191C; color: #E8EAED; font: inherit; font-weight: 600; cursor: pointer">Prova senza schermo</button>
+        <span style="font-size: 12.5px; color: #7F8890">Puoi progettare un tema ora e inviarlo dopo.</span>
+      </div>
+    </section>
+
+    <aside aria-labelledby="recent-title" style="flex: 0 1 320px; display: flex; flex-direction: column; gap: 12px">
+      <h2 id="recent-title" style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8B939C">Temi recenti</h2>
+      <a href="Main.dc.html" style="display: flex; gap: 12px; align-items: center; padding: 10px; border-radius: 12px; border: 1px solid #23282E; background: #121518; color: #E8EAED; text-decoration: none">
+        <div style="width: 30px; height: 96px; border-radius: 4px; background: #050607; border: 1px solid #2A3036; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 8px; box-sizing: border-box">
+          <div style="width: 16px; height: 3px; background: #E8EAED; border-radius: 1px"></div>
+          <div style="width: 16px; height: 16px; border-radius: 50%; border: 2px solid #38BDF8; box-sizing: border-box"></div>
+          <div style="width: 18px; height: 2px; background: #FB923C"></div>
+          <div style="width: 18px; height: 2px; background: #A78BFA"></div>
+        </div>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 3px">
+          <strong>Monitor di sistema</strong>
+          <span class="mono" style="font-size: 11px; color: #7F8890">480×1920 · modificato oggi</span>
+        </span>
+      </a>
+      <a href="Main.dc.html" style="display: flex; gap: 12px; align-items: center; padding: 10px; border-radius: 12px; border: 1px solid #23282E; background: #121518; color: #E8EAED; text-decoration: none">
+        <div style="width: 30px; height: 96px; border-radius: 4px; background: #1A1430; border: 1px solid #2A3036; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; padding-bottom: 8px; box-sizing: border-box">
+          <div style="width: 18px; height: 18px; border-radius: 3px; background: #F472B6"></div>
+          <div style="width: 16px; height: 2px; background: #E8EAED"></div>
+        </div>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 3px">
+          <strong>Now playing</strong>
+          <span class="mono" style="font-size: 11px; color: #7F8890">480×1920 · 3 giorni fa</span>
+        </span>
+      </a>
+      <button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 44px; border-radius: 12px; border: 1px dashed #2C3238; background: transparent; color: #AEB5BD; font: inherit; font-weight: 500; cursor: pointer">
+        <svg class="ic" viewBox="0 0 24 24" style="width: 16px; height: 16px" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Importa .turtheme
+      </button>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#FF9248","options":["#FF9248","#38BDF8","#A3E635","#F472B6"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#FF9248' };
+  }
+}
+</script>
+</body>
+</html>

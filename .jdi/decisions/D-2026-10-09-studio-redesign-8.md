@@ -1,0 +1,1 @@
+D-2026-10-09-studio-redesign-8 (2026-10-09): Ícones continuam SVG inline; controles continuam elementos nativos (button, input, select). A11y: focus ring visível, aria em tabs/toggles/segmented, sem regressão em shortcuts.js, contraste AA (reforçado pelo axe).

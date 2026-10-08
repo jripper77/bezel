@@ -1,0 +1,32 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-09T10:00:00Z"},
+  "title": "Bezel Studio Redesign",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "Editor — anello selezionato", "expand": "fill"},
+    "Connect.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "Primo avvio — nessuno schermo", "expand": "fill"},
+    "Sensors.dc.html": {"x": 0, "y": 1020, "w": 360, "h": 900, "title": "Pannello sensori"},
+    "Themes.dc.html": {"x": 440, "y": 1020, "w": 1040, "h": 720, "title": "Galleria temi"},
+    "Layers.dc.html": {"x": 1560, "y": 1020, "w": 360, "h": 900, "title": "Pannello livelli"},
+    "Media.dc.html": {"x": 2000, "y": 1020, "w": 360, "h": 900, "title": "Pannello media"},
+    "Screen.dc.html": {"x": 2440, "y": 1020, "w": 360, "h": 900, "title": "Schermo — impostazioni"},
+    "Storage.dc.html": {"x": 2880, "y": 1020, "w": 360, "h": 900, "title": "Schermo — archivio"},
+    "Logo.dc.html": {"x": 0, "y": 2040, "w": 1280, "h": 720, "title": "Logo e icona app"},
+    "LogoAlternatives.dc.html": {"x": 1360, "y": 2040, "w": 1760, "h": 720, "title": "Logo — alternative"},
+    "CardFaces.dc.html": {"x": 0, "y": 2880, "w": 360, "h": 900, "title": "Card — facce"},
+    "CardMotion.dc.html": {"x": 440, "y": 2880, "w": 360, "h": 900, "title": "Card — movimento"},
+    "CardTriggers.dc.html": {"x": 880, "y": 2880, "w": 360, "h": 900, "title": "Card — trigger"},
+    "GraphData.dc.html": {"x": 1320, "y": 2880, "w": 360, "h": 900, "title": "Grafico — dati"},
+    "GraphLook.dc.html": {"x": 1760, "y": 2880, "w": 360, "h": 900, "title": "Grafico — aspetto"},
+    "PlayerData.dc.html": {"x": 2200, "y": 2880, "w": 360, "h": 900, "title": "Media player — dati"},
+    "PlayerLook.dc.html": {"x": 2640, "y": 2880, "w": 360, "h": 900, "title": "Media player — aspetto"},
+    "SensorStatus.dc.html": {"x": 3080, "y": 2880, "w": 960, "h": 600, "title": "Stato sensori — pallino e riavvio"}
+  },
+  "order": ["Main.dc.html", "Connect.dc.html", "Sensors.dc.html", "Themes.dc.html", "Layers.dc.html", "Media.dc.html", "Screen.dc.html", "Storage.dc.html", "Logo.dc.html", "LogoAlternatives.dc.html", "CardFaces.dc.html", "CardMotion.dc.html", "CardTriggers.dc.html", "GraphData.dc.html", "GraphLook.dc.html", "PlayerData.dc.html", "PlayerLook.dc.html", "SensorStatus.dc.html"],
+  "notes": {
+    "title": {"x": 0, "y": -300, "text": "Bezel Evo — proposta UI/UX", "kind": "title1", "maxW": 2960}
+  },
+  "designSystems": []
+}

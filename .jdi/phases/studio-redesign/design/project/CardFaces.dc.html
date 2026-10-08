@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Card — facce</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.sect{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8B939C;margin:0}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:0;background:transparent;color:#AEB5BD;cursor:pointer}
+.ib:hover{background:#1D2227;color:#E8EAED}
+.tabs{display:flex;gap:2px;padding:3px;border-radius:9px;background:#0F1214}
+.tabs button{flex:1;height:30px;border:0;border-radius:7px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.tabs button[aria-selected="true"]{background:#23282E;color:#E8EAED;font-weight:600}
+.btn{display:flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border-radius:8px;border:1px solid #2C3238;background:#15191C;color:#E8EAED;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px">
+    <div style="width: 34px; height: 34px; border-radius: 8px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center"><svg class="ic" viewBox="0 0 24 24" style="width: 18px; height: 18px" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"></rect><path d="M9 8h6M9 12h6"></path></svg></div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25">
+      <strong style="font-size: 14px">Metriche</strong>
+      <span style="font-size: 11.5px; color: #8B939C">Card · 3 facce · 9 oggetti</span>
+    </div>
+    <button type="button" class="ib" aria-label="Nascondi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+    <button type="button" class="ib" aria-label="Altre azioni"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Sezioni della card" style="margin: 0 14px">
+    <button type="button" role="tab" aria-selected="true">Facce</button>
+    <button type="button" role="tab" aria-selected="false">Movimento</button>
+    <button type="button" role="tab" aria-selected="false">Trigger</button>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 20px; padding: 18px 14px">
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline">
+        <h3 class="sect">Facce</h3>
+        <span style="font-size: 11.5px; color: #7F8890">clic per mostrarla</span>
+      </div>
+      <div role="listbox" aria-label="Facce della card" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px">
+        <button type="button" role="option" aria-selected="false" style="flex: none; width: 64px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px; border-radius: 10px; border: 1px dashed #3A4149; background: transparent; color: #AEB5BD; font: inherit; cursor: pointer">
+          <span style="width: 36px; height: 72px; border-radius: 4px; background: #0B0D0F; border: 1px solid #2A3036; display: flex; align-items: flex-end; padding: 4px; box-sizing: border-box"><span style="flex: 1; height: 100%; border-radius: 2px; background: #1D2227"></span></span>
+          <span style="font-size: 10.5px; line-height: 1.2; text-align: center">Base</span>
+        </button>
+        <sc-for list="{{faces}}" as="f" hint-placeholder-count="3">
+          <button type="button" role="option" aria-selected="{{f.selected}}" style="{{f.style}}">
+            <span style="width: 36px; height: 72px; border-radius: 4px; background: #0B0D0F; border: 1px solid #2A3036; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 8px; box-sizing: border-box">
+              <span style="{{f.mark}}"></span>
+              <span style="width: 22px; height: 2px; background: #FB923C"></span>
+              <span style="width: 22px; height: 2px; background: #A78BFA"></span>
+            </span>
+            <span class="mono" style="font-size: 9.5px; letter-spacing: .04em; max-width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{f.name}}</span>
+            <sc-if value="{{f.live}}" hint-placeholder-val="{{ false }}">
+              <span style="position: absolute; top: -6px; right: -4px; padding: 0 5px; border-radius: 4px; background: #10261C; color: #6EE7B7; font-size: 9.5px; line-height: 16px; font-family: 'IBM Plex Mono', monospace">in vista</span>
+            </sc-if>
+          </button>
+        </sc-for>
+        <button type="button" aria-label="Aggiungi faccia" style="flex: none; width: 52px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #262B31; background: #15191C; color: #FFB27A; cursor: pointer"><svg class="ic" viewBox="0 0 24 24" style="width: 18px; height: 18px" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 12px; background: #15191C; border: 1px solid #23282E">
+      <label style="display: flex; flex-direction: column; gap: 6px">
+        <span style="font-size: 12px; color: #AEB5BD">Nome della faccia</span>
+        <input type="text" value="DETTAGLI" style="height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid #2C3238; background: #0F1214; color: #E8EAED; font-family: 'IBM Plex Mono', monospace; font-size: 13px">
+      </label>
+      <div style="display: flex; gap: 6px">
+        <button type="button" class="btn" aria-label="Sposta prima" style="width: 32px; padding: 0"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+        <button type="button" class="btn" aria-label="Sposta dopo" style="width: 32px; padding: 0"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
+        <button type="button" class="btn" style="flex: 1"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V4H4v12h4"></path></svg>Duplica</button>
+        <button type="button" class="btn" aria-label="Elimina faccia e i suoi oggetti" style="width: 32px; padding: 0; border-color: #4A2626; color: #FCA5A5; background: transparent"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline">
+        <h3 class="sect">Oggetti in DETTAGLI</h3>
+        <span class="mono" style="font-size: 11px; color: #6B747C">3</span>
+      </div>
+      <sc-for list="{{objects}}" as="o" hint-placeholder-count="3">
+        <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 6px 0 10px; border-radius: 8px; background: #15191C">
+          <svg class="ic" viewBox="0 0 24 24" style="color: #AEB5BD" aria-hidden="true"><path d="{{o.icon}}"></path></svg>
+          <span style="flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px"><span style="font-weight: 500">{{o.name}}</span><span class="mono" style="font-size: 10.5px; color: #6B747C">{{o.key}}</span></span>
+          <button type="button" style="display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 6px; border: 0; background: transparent; color: #8B939C; font: inherit; font-size: 11.5px; cursor: pointer">Sposta<svg class="ic" viewBox="0 0 24 24" style="width: 12px; height: 12px" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+        </div>
+      </sc-for>
+      <span style="font-size: 11.5px; color: #7F8890; line-height: 1.45; padding: 4px 2px 0">“Sposta” manda un oggetto in un'altra faccia o nella base, visibile sotto ogni faccia.</span>
+    </section>
+
+    <div style="display: flex; gap: 10px; padding: 12px; border-radius: 10px; background: #101316; border: 1px dashed #2C3238; font-size: 12px; line-height: 1.45; color: #AEB5BD">
+      <svg class="ic" viewBox="0 0 24 24" style="color: #FFB27A; margin-top: 1px" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M11 12h1v4h1"></path></svg>
+      <span>I widget che trascini mentre la card è selezionata entrano nella faccia in vista.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const list = [
+      { name: 'METRICHE', ring: '#38BDF8', live: true },
+      { name: 'DETTAGLI', ring: '#FB923C', sel: true },
+      { name: 'NOW PLAYING', ring: '#F472B6' }
+    ];
+    return {
+      faces: list.map((f) => ({
+        name: f.name, live: !!f.live, selected: f.sel ? 'true' : 'false',
+        mark: 'width: 16px; height: 16px; border-radius: 50%; box-sizing: border-box; border: 3px solid ' + f.ring + '; border-bottom-color: transparent',
+        style: 'position: relative; flex: none; width: 70px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px; border-radius: 10px; font: inherit; color: #E8EAED; cursor: pointer; ' +
+          (f.sel ? 'border: 1px solid #FF9248; background: #1C1611; box-shadow: 0 0 0 3px rgba(255,146,72,.15)' : 'border: 1px solid #262B31; background: #15191C')
+      })),
+      objects: [
+        { name: 'Temperatura GPU', key: 'gpu.temperature', icon: 'M4 17a8 8 0 0 1 16 0M12 17l4-5' },
+        { name: 'Ventole', key: 'fan.rpm', icon: 'M4 18V6M8 18V10M12 18V4M16 18v-6M20 18V8' },
+        { name: 'Dischi', key: 'disk.read', icon: 'm3 17 5-6 4 3 4-7 5 5' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

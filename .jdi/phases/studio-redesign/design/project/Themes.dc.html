@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Galleria temi</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D0F}
+.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.seg{display:flex;padding:2px;border-radius:8px;background:#0F1214;border:1px solid #1D2227}
+.seg button{height:30px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.seg button[aria-pressed="true"]{background:#262B31;color:#E8EAED}
+.card{display:flex;flex-direction:column;gap:10px;padding:10px;border-radius:12px;border:1px solid #23282E;background:#15191C;color:#E8EAED;font:inherit;text-align:left;cursor:pointer}
+.card:hover{border-color:#3A4149}
+</style>
+</helmet>
+<div style="width: 1040px; height: 720px; box-sizing: border-box; display: flex; flex-direction: column; border-radius: 16px; border: 1px solid #262B31; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <header style="display: flex; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid #1D2227">
+    <h2 style="margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.01em">Temi</h2>
+    <span class="mono" style="font-size: 12px; color: #7F8890">7 temi · 4 per questo schermo</span>
+    <div style="flex: 1"></div>
+    <button type="button" style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #2C3238; background: #15191C; color: #E8EAED; font: inherit; font-weight: 600; cursor: pointer"><svg class="ic" viewBox="0 0 24 24" style="width: 16px; height: 16px" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M5 21h14"></path></svg>Importa .turtheme</button>
+    <button type="button" aria-label="Chiudi" style="width: 36px; height: 36px; border-radius: 8px; border: 0; background: transparent; color: #AEB5BD; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 20px">
+    <label style="flex: 1 1 260px; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid #262B31; background: #0F1214">
+      <svg class="ic" viewBox="0 0 24 24" style="width: 16px; height: 16px; color: #7F8890" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+      <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Cerca temi</span>
+      <input type="search" placeholder="Cerca temi" style="flex: 1; min-width: 0; border: 0; background: transparent; color: #E8EAED; font: inherit; outline: none">
+    </label>
+    <div class="seg" role="group" aria-label="Compatibilità">
+      <button type="button" aria-pressed="true">Per questo schermo</button>
+      <button type="button" aria-pressed="false">Tutti</button>
+    </div>
+    <div class="seg" role="group" aria-label="Orientamento">
+      <button type="button" aria-pressed="true">Entrambi</button>
+      <button type="button" aria-pressed="false">Verticali</button>
+      <button type="button" aria-pressed="false">Orizzontali</button>
+    </div>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 20px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; align-content: start">
+    <button type="button" class="card" style="border-style: dashed; background: transparent; align-items: center; justify-content: center; gap: 12px; min-height: 290px; color: #AEB5BD">
+      <span style="width: 44px; height: 44px; border-radius: 12px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center"><svg class="ic" viewBox="0 0 24 24" style="width: 22px; height: 22px" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span>
+      <strong style="color: #E8EAED">Nuovo tema</strong>
+      <span style="font-size: 12px; text-align: center; line-height: 1.4">Vuoto, 480×1920<br>verticale</span>
+    </button>
+    <sc-for list="{{themes}}" as="t" hint-placeholder-count="6">
+      <button type="button" class="card" style="{{t.cardStyle}}">
+        <div style="height: 210px; border-radius: 8px; background: #0B0D0F; display: flex; align-items: center; justify-content: center">
+          <div style="{{t.thumbStyle}}">
+            <div style="width: 60%; height: 6px; border-radius: 2px; background: #E8EAED; opacity: .9"></div>
+            <div style="{{t.ringStyle}}"></div>
+            <div style="width: 70%; height: 3px; border-radius: 2px; background: {{t.c2}}"></div>
+            <div style="width: 70%; height: 3px; border-radius: 2px; background: {{t.c3}}"></div>
+            <div style="width: 70%; height: 22px; border-radius: 3px; background: rgba(255,255,255,.06)"></div>
+          </div>
+        </div>
+        <span style="display: flex; flex-direction: column; gap: 3px">
+          <strong style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{t.name}}</strong>
+          <span class="mono" style="font-size: 11px; color: #7F8890">{{t.meta}}</span>
+        </span>
+        <sc-if value="{{t.tag}}" hint-placeholder-val="{{ true }}">
+          <span class="mono" style="align-self: flex-start; padding: 2px 6px; border-radius: 4px; background: #1A2430; color: #7DD3FC; font-size: 10.5px">{{t.tag}}</span>
+        </sc-if>
+      </button>
+    </sc-for>
+  </div>
+
+  <footer style="display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-top: 1px solid #1D2227; background: #101316">
+    <span style="flex: 1; color: #AEB5BD">Selezionato: <strong style="color: #E8EAED">Monitor di sistema</strong></span>
+    <button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #2C3238; background: transparent; color: #E8EAED; font: inherit; font-weight: 600; cursor: pointer">Duplica</button>
+    <button type="button" style="height: 36px; padding: 0 16px; border-radius: 8px; border: 0; background: #FF9248; color: #1A0E05; font: inherit; font-weight: 700; cursor: pointer">Apri nell'editor</button>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1040,"height":720}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const list = [
+      { name: 'Monitor di sistema', meta: '480×1920 · oggi', bg: '#050607', c1: '#38BDF8', c2: '#FB923C', c3: '#A78BFA', tag: '', sel: true },
+      { name: 'Now playing', meta: '480×1920 · 3 g fa', bg: '#1A1430', c1: '#F472B6', c2: '#F472B6', c3: '#E8EAED', tag: '' },
+      { name: 'Gaming HUD', meta: '480×1920 · 1 sett.', bg: '#0C1A12', c1: '#A3E635', c2: '#A3E635', c3: '#34D399', tag: 'TURZX' },
+      { name: 'Meteo e orologio', meta: '480×1920 · 2 sett.', bg: '#0E1A2B', c1: '#7DD3FC', c2: '#FDE68A', c3: '#7DD3FC', tag: '' },
+      { name: 'Minimal chiaro', meta: '480×1920 · 1 mese', bg: '#E9E6DF', c1: '#141413', c2: '#141413', c3: '#8B939C', tag: 'TURZX' }
+    ];
+    return {
+      themes: list.map((t) => ({
+        ...t,
+        cardStyle: t.sel ? 'border-color: #FF9248; box-shadow: 0 0 0 3px rgba(255,146,72,.18)' : '',
+        thumbStyle: 'width: 52px; height: 190px; border-radius: 4px; border: 1px solid #2A3036; display: flex; flex-direction: column; align-items: center; gap: 9px; padding-top: 14px; box-sizing: border-box; background: ' + t.bg,
+        ringStyle: 'width: 32px; height: 32px; border-radius: 50%; box-sizing: border-box; border: 4px solid ' + t.c1 + '; border-bottom-color: transparent'
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Pannello media</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.sect{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8B939C;margin:0}
+.seg{display:flex;padding:3px;border-radius:9px;background:#0F1214}
+.seg button{flex:1;height:30px;border:0;border-radius:7px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.seg button[aria-selected="true"]{background:#23282E;color:#E8EAED;font-weight:600}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:34px;padding:0 12px;border-radius:8px;border:1px solid #2C3238;background:#15191C;color:#E8EAED;font:inherit;font-weight:600;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; padding: 16px; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <h2 style="margin: 0; font-size: 15px; font-weight: 600">Media</h2>
+  <div class="seg" role="tablist" aria-label="Origine dei media">
+    <button type="button" role="tab" aria-selected="true">Questo tema</button>
+    <button type="button" role="tab" aria-selected="false">Collezione</button>
+    <button type="button" role="tab" aria-selected="false">Icone</button>
+  </div>
+
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 14px; border-radius: 12px; border: 1.5px dashed #3A4149; background: #101316; text-align: center">
+    <span style="width: 40px; height: 40px; border-radius: 10px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center"><svg class="ic" viewBox="0 0 24 24" style="width: 20px; height: 20px" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M5 21h14"></path></svg></span>
+    <strong style="font-size: 13.5px">Trascina qui immagini, GIF o video</strong>
+    <span style="font-size: 12px; color: #8B939C; line-height: 1.45">Sull'area di lavoro diventano lo sfondo.<br><span class="mono" style="font-size: 10.5px">PNG · JPEG · GIF · MP4 · MOV · MKV · WebM</span></span>
+    <div style="display: flex; gap: 8px; margin-top: 4px">
+      <button type="button" class="btn">Immagine…</button>
+      <button type="button" class="btn">Video…</button>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 10px; background: #15191C; border: 1px solid #23282E">
+    <span style="width: 36px; height: 36px; border-radius: 6px; background: #1A2430; color: #7DD3FC; display: flex; align-items: center; justify-content: center; flex: none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"></rect><path d="m16 10 5-3v10l-5-3"></path></svg></span>
+    <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+      <span style="display: flex; justify-content: space-between; font-size: 12.5px"><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">aurora-loop.mp4</span><span class="mono" style="color: #8B939C; font-size: 11px">64%</span></span>
+      <span style="height: 4px; border-radius: 2px; background: #23282E"><span style="display: block; width: 64%; height: 100%; border-radius: 2px; background: #38BDF8"></span></span>
+      <span style="font-size: 11px; color: #7F8890">Preparo la copertina…</span>
+    </span>
+    <button type="button" aria-label="Annulla" style="width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: #8B939C; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+  </div>
+
+  <div style="display: flex; align-items: baseline; justify-content: space-between">
+    <h3 class="sect">Nel tema</h3>
+    <span class="mono" style="font-size: 11px; color: #6B747C">4 file · 18,2 MB</span>
+  </div>
+  <ul style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+    <sc-for list="{{items}}" as="m" hint-placeholder-count="4">
+      <li style="list-style: none">
+        <button type="button" style="{{m.cardStyle}}">
+          <span style="{{m.thumb}}">
+            <svg class="ic" viewBox="0 0 24 24" style="width: 22px; height: 22px; opacity: .55" aria-hidden="true"><path d="{{m.icon}}"></path></svg>
+            <span class="mono" style="position: absolute; left: 6px; top: 6px; padding: 1px 5px; border-radius: 4px; background: rgba(0,0,0,.6); color: #E8EAED; font-size: 10px">{{m.kind}}</span>
+            <sc-if value="{{m.bg}}" hint-placeholder-val="{{ false }}">
+              <span class="mono" style="position: absolute; right: 6px; top: 6px; padding: 1px 5px; border-radius: 4px; background: #FF9248; color: #1A0E05; font-size: 10px; font-weight: 600">SFONDO</span>
+            </sc-if>
+          </span>
+          <span style="display: flex; flex-direction: column; gap: 1px; padding: 0 2px; text-align: left">
+            <span style="font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{m.name}}</span>
+            <span class="mono" style="font-size: 10.5px; color: #6B747C">{{m.meta}}</span>
+          </span>
+        </button>
+      </li>
+    </sc-for>
+  </ul>
+
+  <div style="margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid #1D2227">
+    <button type="button" class="btn" style="justify-content: flex-start"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>Cerca GIF e sticker<span class="mono" style="margin-left: auto; font-size: 10.5px; color: #6B747C">KLIPY</span></button>
+    <span style="font-size: 11.5px; color: #7F8890; line-height: 1.45">Clic per selezionare, doppio clic per aggiungere al centro dello schermo.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const video = 'M3 6h13v12H3zM16 10l5-3v10l-5-3';
+    const image = 'M4 5h16v14H4zM20 16l-5-5-8 8';
+    const list = [
+      { name: 'Sfondo nebulosa', meta: '0:24 · 12,8 MB', kind: 'VIDEO', icon: video, tint: '#16213A', fg: '#7DD3FC', bg: true },
+      { name: 'Copertina album', meta: '480×480 · 340 KB', kind: 'PNG', icon: image, tint: '#2A1A2E', fg: '#F0ABFC', sel: true },
+      { name: 'Gatto che balla', meta: '2,1 s · 4,6 MB', kind: 'GIF', icon: image, tint: '#1F2A16', fg: '#BEF264' },
+      { name: 'Logo squadra', meta: '256×256 · 48 KB', kind: 'PNG', icon: image, tint: '#2B2114', fg: '#FDE68A' }
+    ];
+    return {
+      items: list.map((m) => ({
+        ...m,
+        cardStyle: 'width: 100%; display: flex; flex-direction: column; gap: 8px; padding: 6px; border-radius: 10px; font: inherit; color: #E8EAED; cursor: grab; ' +
+          (m.sel ? 'border: 1px solid #FF9248; background: #1C1611; box-shadow: 0 0 0 3px rgba(255,146,72,.15)' : 'border: 1px solid #23282E; background: #15191C'),
+        thumb: 'position: relative; height: 104px; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: ' + m.tint + '; color: ' + m.fg
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

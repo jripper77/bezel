@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Media player — aspetto</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#121518}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:'IBM Plex Mono',monospace}
+.sect{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8B939C;margin:0}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:0;background:transparent;color:#AEB5BD;cursor:pointer}
+.tabs{display:flex;gap:2px;padding:3px;border-radius:9px;background:#0F1214}
+.tabs button{flex:1;height:30px;border:0;border-radius:7px;background:transparent;color:#8B939C;font:inherit;font-weight:500;cursor:pointer}
+.tabs button[aria-selected="true"]{background:#23282E;color:#E8EAED;font-weight:600}
+.opt{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px 8px;border-radius:10px;font:inherit;font-size:11.5px;cursor:pointer}
+.opt[aria-pressed="true"]{border:1px solid #FF9248;background:#1C1611;color:#FFB27A}
+.opt[aria-pressed="false"]{border:1px solid #262B31;background:#15191C;color:#8B939C}
+.cn{width:52px;height:28px;border-radius:6px;border:1px solid #262B31;background:#0F1214;color:#E8EAED;font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;align-items:center;justify-content:center}
+.fld{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:8px;border:1px solid #262B31;background:#0F1214;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#E8EAED}
+.fld span{color:#7F8890;font-size:11px}
+</style>
+</helmet>
+<div style="width: 360px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #121518; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px">
+    <div style="width: 34px; height: 34px; border-radius: 8px; background: #1F1813; color: #FFB27A; display: flex; align-items: center; justify-content: center"><svg class="ic" viewBox="0 0 24 24" style="width: 18px; height: 18px" aria-hidden="true"><path d="M9 18V6l10-2v12"></path><circle cx="6.5" cy="18" r="2.5"></circle><circle cx="16.5" cy="16" r="2.5"></circle></svg></div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25">
+      <strong style="font-size: 14px">Brano in riproduzione</strong>
+      <span style="font-size: 11.5px; color: #8B939C">Media player</span>
+    </div>
+    <button type="button" class="ib" aria-label="Altre azioni"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+  </div>
+
+  <div style="margin: 0 14px 12px; padding: 12px; border-radius: 12px; background: #0B0D0F; border: 1px solid #1D2227; display: flex; flex-direction: column; gap: 10px">
+    <span class="mono" style="font-size: 10.5px; color: #6B747C">ANTEPRIMA · DAL VIVO</span>
+    <div style="display: flex; align-items: center; gap: 14px">
+      <div style="width: 56px; height: 56px; border-radius: 16px 4px 16px 4px; background: #2A1A2E; color: #F0ABFC; display: flex; align-items: center; justify-content: center; flex: none; outline: 1px dashed #FF9248; outline-offset: 3px"><svg class="ic" viewBox="0 0 24 24" style="width: 22px; height: 22px; opacity: .6" aria-hidden="true"><path d="M9 18V6l10-2v12"></path><circle cx="6.5" cy="18" r="2.5"></circle><circle cx="16.5" cy="16" r="2.5"></circle></svg></div>
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+        <strong style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">[Titolo del brano]</strong>
+        <span style="font-size: 12px; color: #AEB5BD">[Artista]</span>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <span class="mono" style="font-size: 10.5px; color: #8B939C">1:12</span>
+      <div style="flex: 1; height: 4px; border-radius: 2px; background: #23282E"><div style="width: 32%; height: 100%; border-radius: 2px; background: #F472B6"></div></div>
+      <span class="mono" style="font-size: 10.5px; color: #8B939C">3:45</span>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Sezioni" style="margin: 0 14px">
+    <button type="button" role="tab" aria-selected="false">Dati</button>
+    <button type="button" role="tab" aria-selected="true">Aspetto</button>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px">
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h3 class="sect">Cosa mostrare</h3>
+      <div role="group" aria-label="Elementi del player" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+        <button type="button" class="opt" aria-pressed="true">
+          <svg viewBox="0 0 40 28" width="40" height="28" aria-hidden="true"><rect x="2" y="2" width="24" height="24" rx="4" fill="currentColor"></rect><path d="M30 8h8M30 14h6" stroke="#4A525A" stroke-width="2.5" stroke-linecap="round"></path></svg>Copertina
+        </button>
+        <button type="button" class="opt" aria-pressed="true">
+          <svg viewBox="0 0 40 28" width="40" height="28" aria-hidden="true"><path d="M4 14h32" stroke="#4A525A" stroke-width="3" stroke-linecap="round"></path><path d="M4 14h14" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><path d="M4 22h6M30 22h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>Avanzamento
+        </button>
+        <button type="button" class="opt" aria-pressed="false">
+          <svg viewBox="0 0 40 28" width="40" height="28" aria-hidden="true"><rect x="4" y="9" width="32" height="10" rx="3" fill="none" stroke="currentColor" stroke-width="2"></rect><path d="M9 14h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>Nome app
+        </button>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; justify-content: space-between; align-items: center">
+        <h3 class="sect">Angoli della copertina</h3>
+        <div role="group" aria-label="Modalità angoli" style="display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: #0F1214">
+          <button type="button" aria-pressed="false" style="height: 24px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: #8B939C; font: inherit; font-size: 11.5px; cursor: pointer">Uguali</button>
+          <button type="button" aria-pressed="true" style="height: 24px; padding: 0 8px; border: 0; border-radius: 5px; background: #23282E; color: #E8EAED; font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer">Singoli</button>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: 52px 1fr 52px; grid-template-rows: 28px 1fr 28px; gap: 8px; align-items: center; justify-items: center; padding: 4px 18px">
+        <input type="text" inputmode="numeric" class="cn" style="text-align: center" aria-label="Alto sinistra" value="16">
+        <span></span>
+        <input type="text" inputmode="numeric" class="cn" style="text-align: center" aria-label="Alto destra" value="4">
+        <span></span>
+        <div style="width: 96px; height: 96px; border-radius: 22px 6px 22px 6px; border: 2px solid #FF9248; background: #1C1611"></div>
+        <span></span>
+        <input type="text" inputmode="numeric" class="cn" style="text-align: center" aria-label="Basso sinistra" value="4">
+        <span></span>
+        <input type="text" inputmode="numeric" class="cn" style="text-align: center" aria-label="Basso destra" value="16">
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h3 class="sect">Spazi e testo</h3>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+        <label class="fld"><span>distanza</span>14 px</label>
+        <label class="fld"><span>testo</span>28 px</label>
+      </div>
+      <span style="font-size: 11.5px; color: #7F8890">“Distanza” è lo spazio tra copertina e testo.</span>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

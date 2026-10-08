@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Logo Bezel Evo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D0F}
+.mono{font-family:'IBM Plex Mono',monospace}
+.lbl{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#7F8890;letter-spacing:.04em}
+</style>
+</helmet>
+<div style="--accent: {{accent}}; width: 1280px; height: 720px; box-sizing: border-box; display: grid; grid-template-columns: 560px minmax(0, 1fr); background: #0B0D0F; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif">
+
+  <section style="display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 36px; padding: 48px; border-right: 1px solid #1D2227; background-image: radial-gradient(#1A1E22 1px, transparent 1px); background-size: 20px 20px">
+    <svg viewBox="0 0 256 256" width="280" height="280" role="img" aria-label="Logo Bezel Evo">
+      <rect width="256" height="256" rx="60" fill="#181B1F"></rect>
+      <rect x="1.5" y="1.5" width="253" height="253" rx="58.5" fill="none" stroke="#2C3238" stroke-width="3"></rect>
+      <path d="{{big.dim}}" fill="#22272C"></path>
+      <path d="{{big.lit}}" fill="#F2EDE6"></path>
+      <path d="{{big.acc}}" fill="{{accent}}"></path>
+      <path d="{{big.live}}" fill="#34D399"></path>
+    </svg>
+    <div style="display: flex; align-items: center; gap: 14px">
+      <svg viewBox="0 0 32 32" width="44" height="44" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#181B1F"></rect><path d="{{s32.lit}}" fill="#F2EDE6"></path><path d="{{s32.acc}}" fill="{{accent}}"></path><path d="{{s32.live}}" fill="#34D399"></path></svg>
+      <span class="mono" style="font-size: 32px; font-weight: 600; letter-spacing: .04em">BEZEL</span>
+      <span class="mono" style="font-size: 32px; font-weight: 400; letter-spacing: .04em; color: var(--accent)">EVO</span>
+    </div>
+    <p style="margin: 0; max-width: 42ch; text-align: center; font-size: 13.5px; line-height: 1.55; color: #AEB5BD">Una B su una matrice di punti 5×7, come un display LCD. La base si accende in arancione come un livello e il pixel in alto a destra, verde, segnala lo stato in diretta.</p>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 32px; padding: 48px">
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <h2 class="lbl" style="margin: 0">ICONA APP · DIMENSIONI</h2>
+      <div style="display: flex; align-items: flex-end; gap: 28px">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+          <svg viewBox="0 0 256 256" width="128" height="128" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><path d="{{big.dim}}" fill="#22272C"></path><path d="{{big.lit}}" fill="#F2EDE6"></path><path d="{{big.acc}}" fill="{{accent}}"></path><path d="{{big.live}}" fill="#34D399"></path></svg>
+          <span class="lbl">128</span>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+          <svg viewBox="0 0 256 256" width="64" height="64" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#181B1F"></rect><path d="{{big.lit}}" fill="#F2EDE6"></path><path d="{{big.acc}}" fill="{{accent}}"></path><path d="{{big.live}}" fill="#34D399"></path></svg>
+          <span class="lbl">64</span>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+          <svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true" shape-rendering="crispEdges"><rect width="32" height="32" rx="7" fill="#181B1F"></rect><path d="{{s32.lit}}" fill="#F2EDE6"></path><path d="{{s32.acc}}" fill="{{accent}}"></path><path d="{{s32.live}}" fill="#34D399"></path></svg>
+          <span class="lbl">32 · griglia 3+1 px</span>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" shape-rendering="crispEdges"><path d="{{s16.lit}}" fill="#F2EDE6"></path><path d="{{s16.acc}}" fill="{{accent}}"></path><path d="{{s16.live}}" fill="#34D399"></path></svg>
+          <span class="lbl">16 · tray</span>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+          <svg viewBox="0 0 16 16" width="64" height="64" aria-hidden="true" shape-rendering="crispEdges" style="background: #202020; border-radius: 4px"><path d="{{s16.lit}}" fill="#F2EDE6"></path><path d="{{s16.acc}}" fill="{{accent}}"></path><path d="{{s16.live}}" fill="#34D399"></path></svg>
+          <span class="lbl">16 ingrandita ×4</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <h2 class="lbl" style="margin: 0">VARIANTI</h2>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px; border-radius: 14px; background: #F4F1EB">
+          <svg viewBox="0 0 256 256" width="88" height="88" aria-hidden="true"><rect width="256" height="256" rx="60" fill="#FFFFFF"></rect><rect x="1.5" y="1.5" width="253" height="253" rx="58.5" fill="none" stroke="#DDD7CC" stroke-width="3"></rect><path d="{{big.dim}}" fill="#EEE9E0"></path><path d="{{big.lit}}" fill="#141618"></path><path d="{{big.acc}}" fill="#E8701F"></path><path d="{{big.live}}" fill="#059669"></path></svg>
+          <span class="mono" style="font-size: 11px; color: #5A5148">tema chiaro</span>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px; border-radius: 14px; background: #15191C; border: 1px solid #23282E">
+          <svg viewBox="0 0 256 256" width="88" height="88" aria-hidden="true"><path d="{{big.all}}" fill="#E8EAED"></path></svg>
+          <span class="lbl">monocromo</span>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px; border-radius: 14px; background: var(--accent)">
+          <svg viewBox="0 0 256 256" width="88" height="88" aria-hidden="true"><path d="{{big.dim}}" fill="#1A0E05" fill-opacity=".12"></path><path d="{{big.all}}" fill="#1A0E05"></path></svg>
+          <span class="mono" style="font-size: 11px; color: #1A0E05">su accento</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <h2 class="lbl" style="margin: 0">IN CONTESTO</h2>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+        <div style="display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px 0 12px; border-radius: 10px; background: #101316; border: 1px solid #1D2227">
+          <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#22272C"></rect><path d="{{s32.lit}}" fill="#F2EDE6"></path><path d="{{s32.acc}}" fill="{{accent}}"></path><path d="{{s32.live}}" fill="#34D399"></path></svg>
+          <span style="display: flex; flex-direction: column; line-height: 1.15"><strong class="mono" style="font-size: 13px; letter-spacing: .04em">BEZEL <span style="font-weight: 400; color: var(--accent)">EVO</span></strong><span class="mono" style="font-size: 10.5px; color: #7F8890">0.1.21</span></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-radius: 8px; background: #202020; border: 1px solid #333">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" shape-rendering="crispEdges"><path d="{{s16.lit}}" fill="#F2EDE6"></path><path d="{{s16.acc}}" fill="{{accent}}"></path><path d="{{s16.live}}" fill="#34D399"></path></svg>
+          <span style="font-size: 12px; color: #CCC">Bezel Evo · in diretta su Turing 8.8″</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#FF9248","options":["#FF9248","#38BDF8","#A3E635","#F472B6"]},"$preview":{"width":1280,"height":720}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const B   = ['11110', '10001', '10001', '11110', '10001', '10001', '11110'];
+    const ACC = ['00000', '00000', '00000', '00000', '00001', '00001', '11110'];
+    const rect = (x, y, c, r) => r
+      ? 'M' + (x + r) + ' ' + y + 'h' + (c - 2 * r) + 'a' + r + ' ' + r + ' 0 0 1 ' + r + ' ' + r + 'v' + (c - 2 * r) + 'a' + r + ' ' + r + ' 0 0 1 -' + r + ' ' + r + 'h-' + (c - 2 * r) + 'a' + r + ' ' + r + ' 0 0 1 -' + r + ' -' + r + 'v-' + (c - 2 * r) + 'a' + r + ' ' + r + ' 0 0 1 ' + r + ' -' + r + 'z'
+      : 'M' + x + ' ' + y + 'h' + c + 'v' + c + 'h-' + c + 'z';
+    const grid = (cell, gap, x0, y0, r) => {
+      const out = { lit: '', acc: '', dim: '', live: '', all: '' };
+      B.forEach((row, ri) => {
+        for (let ci = 0; ci < 5; ci++) {
+          const d = rect(x0 + ci * (cell + gap), y0 + ri * (cell + gap), cell, r);
+          if (ri === 0 && ci === 4) out.live += d;
+          else if (ACC[ri][ci] === '1') { out.acc += d; out.all += d; }
+          else if (row[ci] === '1') { out.lit += d; out.all += d; }
+          else out.dim += d;
+        }
+      });
+      return out;
+    };
+    return {
+      accent: this.props.accent ?? '#FF9248',
+      big: grid(24, 4, 60, 32, 5),
+      s32: grid(3, 1, 6, 2, 0),
+      s16: grid(2, 0, 3, 1, 0)
+    };
+  }
+}
+</script>
+</body>
+</html>

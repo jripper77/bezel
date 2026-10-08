@@ -1,0 +1,1 @@
+D-2026-10-09-studio-redesign-1 (2026-10-09): O canvas em design/project é spec visual estática, não código: reescrever com os padrões de apps/bezel-studio/src (ES modules vanilla, styles.css, ui/*.js). Nomes, valores e arquivos do mockup são falsos; usar dados reais do bridge.

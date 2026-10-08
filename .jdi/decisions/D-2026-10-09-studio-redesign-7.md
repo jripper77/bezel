@@ -1,0 +1,1 @@
+D-2026-10-09-studio-redesign-7 (2026-10-09): i18n: nenhuma string fixa. Adicionar i18n/it.js NESTA phase, com paridade de chaves en/pt-BR/it. O texto italiano do mockup vira chaves; "Card" permanece "Card" (não "Carta").

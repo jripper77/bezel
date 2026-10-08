@@ -1,3 +1,4 @@
+import { isShown, withChildren } from '../editor/cards.js';
 // The canvas: shows the rendered frame at a zoom level and handles direct
 // manipulation on a DOM overlay (selection, eight resize handles, snapping
 // guides, marquee). Everything is in canvas pixels until drawn. In framing
@@ -127,9 +128,9 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     const t = theme();
     const sel = new Set(selection());
     const nodes = [];
-    const hovered = t.elements.find((e) => e.id === hoverId && !sel.has(e.id) && e.visible !== false);
+    const hovered = t.elements.find((e) => e.id === hoverId && !sel.has(e.id) && isShown(t, e));
     if (hovered) nodes.push(el('div', { class: 'hover-box', style: boxStyle(hovered.frame) }));
-    const chosen = t.elements.filter((e) => sel.has(e.id));
+    const chosen = t.elements.filter((e) => sel.has(e.id) && (!e.cardMember || isShown(t, e)));
     for (const e of chosen) {
       nodes.push(el('div', { class: `sel-box${e.locked ? ' locked' : ''}`, style: boxStyle(e.frame), role: 'img', 'aria-label': describe(e.name) }));
     }
@@ -149,8 +150,8 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   // ------------------------------------------------------ interactions ----
 
   function othersThan(ids) {
-    const set = new Set(ids);
-    return theme().elements.filter((e) => !set.has(e.id) && e.visible !== false).map((e) => e.frame);
+    const set = new Set(withChildren(theme(), ids));
+    return theme().elements.filter((e) => !set.has(e.id) && isShown(theme(), e)).map((e) => e.frame);
   }
 
   /** A press in framing mode: the drag that follows pans the video. */
@@ -185,7 +186,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
       press = { mode: 'resize', id: e.id, handle, frame: { ...e.frame }, start, client: [evt.clientX, evt.clientY], started: false };
       return;
     }
-    const id = hitTest(state.theme.elements, start.x, start.y);
+    const id = hitTest(state.theme.elements.filter(e => isShown(state.theme, e)), start.x, start.y);
     if (id === null) {
       if (!evt.shiftKey && !evt.ctrlKey && !evt.metaKey) store.select([]);
       press = { mode: 'marquee', start, base: evt.shiftKey ? [...state.selection] : [], client: [evt.clientX, evt.clientY], started: false };
@@ -199,7 +200,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
       sel = [id];
       store.select(sel);
     }
-    const movable = state.theme.elements.filter((e) => sel.includes(e.id) && !e.locked);
+    const movable = state.theme.elements.filter((e) => sel.includes(e.id) && !e.locked && (!e.cardMember || isShown(state.theme, e)));
     press = { mode: 'move', ids: movable.map((e) => e.id), frames: movable.map((e) => ({ ...e.frame })), start, applied: { x: 0, y: 0 }, client: [evt.clientX, evt.clientY], started: false };
   }
 
@@ -261,7 +262,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   function onPointerMove(evt) {
     const p = point(evt.clientX, evt.clientY);
     if (!press) {
-      const id = framing ? null : hitTest(theme().elements, p.x, p.y);
+      const id = framing ? null : hitTest(theme().elements.filter(e => isShown(theme(), e)), p.x, p.y);
       if (id !== hoverId) {
         hoverId = id;
         drawOverlay();
@@ -274,7 +275,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     else if (press.mode === 'resize') onResize(evt, p);
     else {
       marquee = boxFromPoints(press.start.x, press.start.y, p.x, p.y);
-      const hits = marqueeSelect(theme().elements, marquee);
+      const hits = marqueeSelect(theme().elements.filter(e => isShown(theme(), e)), marquee);
       store.select([...new Set([...press.base, ...hits])]);
     }
     drawOverlay();
@@ -318,7 +319,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   function onDoubleClick(evt) {
     if (framing || theme().background.type !== 'video') return;
     const p = point(evt.clientX, evt.clientY);
-    if (hitTest(theme().elements, p.x, p.y) === null) onFrameRequest();
+    if (hitTest(theme().elements.filter(e => isShown(theme(), e)), p.x, p.y) === null) onFrameRequest();
   }
 
   /**

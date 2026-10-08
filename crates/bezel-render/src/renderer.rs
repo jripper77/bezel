@@ -46,6 +46,13 @@ pub struct SkiaRenderer {
     /// z-index and id (ids may repeat in imported themes).
     layers: HashMap<LayerKey, CachedLayer>,
     used_layers: HashSet<LayerKey>,
+    cards: crate::cards::Cards,
+    card_buffers: Vec<Pixmap>,
+    face_cache: HashMap<FaceKey, CachedFace>,
+    content_revision: u64,
+    render_stats: bezel_core::ports::RenderStats,
+    card_scene: u64,
+    card_scenes: HashMap<u64, crate::cards::Cards>,
 }
 
 /// Where an element sits in its theme: z-index and id.
@@ -58,6 +65,22 @@ struct CachedLayer {
     pixels: Vec<u8>,
     opaque: bool,
 }
+
+type FaceKey = (u64, ElementId, usize, bool, bool);
+
+/// Face surfaces never contain the background; video cutouts have their own mask.
+struct CachedFace {
+    revision: u64,
+    elements: Vec<(usize, Element)>,
+    time: bezel_core::domain::clock::LocalTime,
+    language: bezel_core::domain::clock::Language,
+    snapshot: bezel_core::domain::sensor::Snapshot,
+    histories: bezel_core::domain::history::Histories,
+    quantities: bezel_core::domain::sensor::Quantities,
+    pixels: Pixmap,
+    window: Option<Pixmap>,
+}
+const FACE_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
 /// Elements whose pixels depend on nothing but themselves (no sensor, no
 /// clock, no asset), so their layer can be kept between frames.
@@ -103,6 +126,13 @@ impl SkiaRenderer {
             canvas: None,
             layers: HashMap::new(),
             used_layers: HashSet::new(),
+            cards: crate::cards::Cards::new(),
+            card_buffers: Vec::new(),
+            face_cache: HashMap::new(),
+            content_revision: 0,
+            render_stats: bezel_core::ports::RenderStats::default(),
+            card_scene: 0,
+            card_scenes: HashMap::new(),
         }
     }
 }
@@ -132,12 +162,37 @@ impl FrameRenderer for SkiaRenderer {
         self.images.timeline(asset, assets, &mut self.diagnostics)
     }
 
+    fn set_scene(&mut self, scene: u64) {
+        if scene != self.card_scene {
+            let next = match self.card_scenes.remove(&scene) {
+                Some(cards) => cards,
+                None => crate::cards::Cards::new(), // New scenes enable motion by default.
+            };
+            let previous = std::mem::replace(&mut self.cards, next);
+            self.card_scenes.insert(self.card_scene, previous);
+            self.card_scene = scene;
+        }
+    }
+    fn set_content_revision(&mut self, revision: u64) {
+        self.content_revision = revision;
+    }
+    fn render_stats(&self) -> bezel_core::ports::RenderStats {
+        self.render_stats
+    }
+    fn next_change(&self) -> Option<std::time::Duration> {
+        self.cards.next
+    }
+    fn set_motion(&mut self, allowed: bool) {
+        self.cards.motion = allowed;
+    }
+
     fn render(
         &mut self,
         theme: &Theme,
         assets: &BTreeMap<AssetRef, Vec<u8>>,
         context: RenderContext<'_>,
     ) -> Result<Frame> {
+        self.render_stats = bezel_core::ports::RenderStats::default();
         let size = theme.canvas;
         if size.area() == 0 {
             return Ok(Frame::filled(size, Rgba::default()));
@@ -147,10 +202,30 @@ impl FrameRenderer for SkiaRenderer {
             _ => new_canvas(size)?,
         };
         self.draw_background(&mut canvas, theme, assets, &context);
+        let transitions = self.cards.update(theme, context.animation);
         for (index, element) in theme.elements.iter().enumerate() {
-            if element.visible {
+            if let Some(transition) = transitions.get(&element.id) {
+                self.draw_card(&mut canvas, theme, element, *transition, assets, &context)?;
+                continue;
+            }
+            if element
+                .card_member
+                .as_ref()
+                .is_some_and(|m| transitions.contains_key(&m.parent))
+            {
+                continue;
+            }
+            if theme.is_visible(element) {
                 let key = (index, element.id);
-                self.draw_element(&mut canvas, key, element, assets, &context);
+                if let Some(member) = &element.card_member
+                    && let Some(parent) = theme.element(member.parent)
+                {
+                    let mut shown = element.clone();
+                    shown.opacity *= parent.opacity;
+                    self.draw_element(&mut canvas, key, &shown, assets, &context);
+                } else {
+                    self.draw_element(&mut canvas, key, element, assets, &context);
+                }
             }
         }
         self.images.sweep();
@@ -308,7 +383,7 @@ impl SkiaRenderer {
         let (asset, fit) = match (&theme.background, context.backdrop) {
             (Background::DeviceVideo { color, .. }, backdrop) => {
                 let windows = theme.elements.iter().any(|e| {
-                    e.visible
+                    theme.is_visible(e)
                         && opacity_of(e.opacity) > 0
                         && matches!(
                             e.kind,
@@ -383,6 +458,247 @@ impl SkiaRenderer {
             opaque: false,
         };
         composite::blend(&mut target, &sprite, 255);
+    }
+
+    fn draw_card(
+        &mut self,
+        canvas: &mut Pixmap,
+        theme: &Theme,
+        parent: &Element,
+        transition: crate::cards::Transition,
+        assets: &BTreeMap<AssetRef, Vec<u8>>,
+        context: &RenderContext<'_>,
+    ) -> Result<()> {
+        use bezel_core::domain::theme::CardEffect;
+        let started = std::time::Instant::now();
+        let draw_before = self.render_stats.face_draw_ms;
+        let include = transition.settings.include_base;
+        let mut buffers = std::mem::take(&mut self.card_buffers);
+        let mut acquire = || -> Result<Pixmap> {
+            let mut pixmap = match buffers
+                .pop()
+                .filter(|p| p.width() == theme.canvas.width && p.height() == theme.canvas.height)
+            {
+                Some(p) => p,
+                None => new_canvas(theme.canvas)?,
+            };
+            pixmap.fill(Color::TRANSPARENT);
+            Ok(pixmap)
+        };
+        let mut group = acquire()?;
+        let mut combined = acquire()?;
+        let has_windows = matches!(context.backdrop, Backdrop::OnDevice)
+            && theme.elements.iter().any(|e| {
+                (e.id == parent.id
+                    || e.card_member
+                        .as_ref()
+                        .is_some_and(|m| m.parent == parent.id))
+                    && matches!(
+                        e.kind,
+                        ElementKind::Shape {
+                            video_window: true,
+                            ..
+                        }
+                    )
+            });
+        let mut window_group = has_windows.then(&mut acquire).transpose()?;
+        let mut window_combined = has_windows.then(&mut acquire).transpose()?;
+        if !include {
+            for (index, e) in theme.elements.iter().enumerate().filter(|(_, e)| {
+                e.id == parent.id
+                    || e.card_member
+                        .as_ref()
+                        .is_some_and(|m| m.parent == parent.id && m.face.is_none())
+            }) {
+                if e.visible {
+                    let mut shown = e.clone();
+                    if e.id != parent.id {
+                        shown.opacity *= parent.opacity;
+                    }
+                    self.draw_element(canvas, (index, e.id), &shown, assets, context);
+                }
+            }
+        }
+        for pose in transition.poses(parent.frame) {
+            group.fill(Color::TRANSPARENT);
+            if let Some(window) = &mut window_group {
+                window.fill(Color::TRANSPARENT);
+            }
+            let selected: Vec<_> = theme
+                .elements
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| {
+                    e.visible
+                        && (e.card_member.as_ref().is_some_and(|m| {
+                            m.parent == parent.id
+                                && (m.face == Some(pose.face) || include && m.face.is_none())
+                        }) || include && e.id == parent.id)
+                })
+                .map(|(index, e)| {
+                    let mut shown = e.clone();
+                    if e.id != parent.id {
+                        shown.opacity *= parent.opacity;
+                    }
+                    (index, shown)
+                })
+                .collect();
+            // Animated image faces take the original drawing path. Static icons
+            // and all sensor/text widgets may reuse surfaces until inputs change.
+            let animated = selected.iter().any(|(_, e)| match &e.kind {
+                ElementKind::Image { asset, .. } => self
+                    .images
+                    .timeline(asset, assets, &mut self.diagnostics)
+                    .is_some(),
+                _ => false,
+            });
+            let key = (self.card_scene, parent.id, pose.face, include, has_windows);
+            let cached = self.face_cache.get(&key).filter(|face| {
+                self.content_revision != 0
+                    && !animated
+                    && face.revision == self.content_revision
+                    && face.pixels.width() == theme.canvas.width
+                    && face.pixels.height() == theme.canvas.height
+                    && face.elements == selected
+                    && face.time == context.time
+                    && face.language == context.language
+                    && face.snapshot == *context.snapshot
+                    && face.histories == *context.histories
+                    && face.quantities == *context.quantities
+            });
+            if let Some(face) = cached {
+                group.data_mut().copy_from_slice(face.pixels.data());
+                if let (Some(window), Some(kept)) = (&mut window_group, &face.window) {
+                    window.data_mut().copy_from_slice(kept.data());
+                }
+                self.render_stats.face_hits += 1;
+            } else {
+                self.render_stats.face_misses += 1;
+                let drawing = std::time::Instant::now();
+                for (index, shown) in &selected {
+                    self.draw_element(&mut group, (*index, shown.id), shown, assets, context);
+                    if let Some(window) = &mut window_group
+                        && let ElementKind::Shape {
+                            video_window: true,
+                            shape,
+                            fade,
+                            ..
+                        } = shown.kind
+                    {
+                        let mut mask = shown.clone();
+                        mask.kind = ElementKind::Shape {
+                            video_window: false,
+                            shape,
+                            fade,
+                            fill: Some(bezel_core::domain::theme::Paint::solid(Rgba::WHITE)),
+                            stroke: None,
+                        };
+                        self.draw_element(window, (*index, shown.id), &mask, assets, context);
+                    }
+                }
+                self.render_stats.face_draw_ms += drawing.elapsed().as_secs_f64() * 1000.0;
+                let bytes = group.data().len() * if has_windows { 2 } else { 1 };
+                if self.content_revision != 0 && !animated && bytes <= FACE_CACHE_BYTES {
+                    self.face_cache.remove(&key);
+                    let used: usize = self
+                        .face_cache
+                        .values()
+                        .map(|f| {
+                            f.pixels.data().len() + f.window.as_ref().map_or(0, |w| w.data().len())
+                        })
+                        .sum();
+                    if used + bytes > FACE_CACHE_BYTES {
+                        self.face_cache.clear();
+                    }
+                    self.face_cache.insert(
+                        key,
+                        CachedFace {
+                            revision: self.content_revision,
+                            elements: selected,
+                            time: context.time,
+                            language: context.language,
+                            snapshot: context.snapshot.clone(),
+                            histories: context.histories.clone(),
+                            quantities: context.quantities.clone(),
+                            pixels: group.clone(),
+                            window: window_group.clone(),
+                        },
+                    );
+                }
+            }
+            if let Some(projection) = pose.projection {
+                projection.draw(&group, &mut combined, pose.shade, pose.alpha);
+                if let (Some(window), Some(combined)) = (&window_group, &mut window_combined) {
+                    projection.draw(window, combined, 1.0, pose.alpha);
+                }
+                continue;
+            }
+            if pose.shade < 1.0 {
+                // Premultiplied RGB shading preserves transparency.
+                for pixel in group.data_mut().as_chunks_mut::<4>().0 {
+                    for channel in &mut pixel[..3] {
+                        *channel = (f32::from(*channel) * pose.shade).round() as u8;
+                    }
+                }
+            }
+            let paint = tiny_skia::PixmapPaint {
+                opacity: pose.alpha,
+                blend_mode: if transition.settings.effect == CardEffect::Fade {
+                    tiny_skia::BlendMode::Plus
+                } else {
+                    tiny_skia::BlendMode::SourceOver
+                },
+                quality: tiny_skia::FilterQuality::Bilinear,
+            };
+            combined.draw_pixmap(0, 0, group.as_ref(), &paint, pose.transform, None);
+            if let (Some(window), Some(combined)) = (&window_group, &mut window_combined) {
+                combined.draw_pixmap(0, 0, window.as_ref(), &paint, pose.transform, None);
+            }
+        }
+        let mask = if transition.settings.effect == CardEffect::Slide {
+            let b = parent.frame;
+            let mut mask = tiny_skia::Mask::new(canvas.width(), canvas.height());
+            if let (Some(mask), Some(rect)) =
+                (&mut mask, Rect::from_xywh(b.x, b.y, b.width, b.height))
+            {
+                mask.fill_path(
+                    &tiny_skia::PathBuilder::from_rect(rect),
+                    tiny_skia::FillRule::Winding,
+                    true,
+                    Transform::identity(),
+                );
+            }
+            mask
+        } else {
+            None
+        };
+        if let Some(window) = &window_combined {
+            canvas.draw_pixmap(
+                0,
+                0,
+                window.as_ref(),
+                &tiny_skia::PixmapPaint {
+                    blend_mode: tiny_skia::BlendMode::DestinationOut,
+                    ..tiny_skia::PixmapPaint::default()
+                },
+                Transform::identity(),
+                mask.as_ref(),
+            );
+        }
+        canvas.draw_pixmap(
+            0,
+            0,
+            combined.as_ref(),
+            &tiny_skia::PixmapPaint::default(),
+            Transform::identity(),
+            mask.as_ref(),
+        );
+        self.card_buffers = vec![group, combined];
+        self.card_buffers.extend(window_group);
+        self.card_buffers.extend(window_combined);
+        self.render_stats.face_compose_ms += started.elapsed().as_secs_f64() * 1000.0
+            - (self.render_stats.face_draw_ms - draw_before);
+        Ok(())
     }
 
     /// Draws one element into a scratch layer the size of its bounds (or
@@ -828,5 +1144,360 @@ mod tests {
     fn oversized_canvases_are_refused() {
         assert!(new_canvas(Size::new(MAX_CANVAS_SIDE + 1, 1)).is_err());
         assert!(new_canvas(Size::new(4, 4)).is_ok());
+    }
+    #[test]
+    fn card_faces_render_shared_base_and_inherit_parent_opacity() {
+        use bezel_core::domain::theme::{Card, CardMember};
+        let black = Rgba::opaque(0, 0, 0);
+        let red = Rgba::opaque(255, 0, 0);
+        let green = Rgba::opaque(0, 255, 0);
+        let mut parent = rect(BoxF::new(0.0, 0.0, 32.0, 16.0), black, 1.0);
+        parent.card = Some(Card {
+            faces: vec!["A".into(), "B".into()],
+            active_face: 0,
+            transition: None,
+        });
+        let mut base = rect(BoxF::new(0.0, 0.0, 8.0, 8.0), Rgba::WHITE, 1.0);
+        base.id = ElementId(2);
+        base.card_member = Some(CardMember {
+            parent: parent.id,
+            face: None,
+        });
+        let mut a = rect(BoxF::new(10.0, 0.0, 8.0, 8.0), red, 1.0);
+        a.id = ElementId(3);
+        a.card_member = Some(CardMember {
+            parent: parent.id,
+            face: Some(0),
+        });
+        let mut b = a.clone();
+        b.id = ElementId(4);
+        b.kind = rect(b.frame, green, 1.0).kind;
+        b.card_member.as_mut().unwrap().face = Some(1);
+        let mut theme = testkit::theme(32, 16, Background::Color(black), vec![parent, base, a, b]);
+        let mut r = testkit::renderer();
+        let scene = Scene::empty();
+        let frame = render_over(&mut r, &theme, &scene, Backdrop::Poster);
+        assert_eq!(px(&frame, 4, 4), Rgba::WHITE);
+        assert_eq!(px(&frame, 14, 4), red);
+        theme.elements[0].card.as_mut().unwrap().active_face = 1;
+        let frame = render_over(&mut r, &theme, &scene, Backdrop::Poster);
+        assert_eq!(px(&frame, 14, 4), green);
+        theme.elements[0].opacity = 0.5;
+        let frame = render_over(&mut r, &theme, &scene, Backdrop::Poster);
+        assert!((126..=129).contains(&px(&frame, 14, 4).g));
+        theme.elements[0].visible = false;
+        let frame = render_over(&mut r, &theme, &scene, Backdrop::Poster);
+        assert_eq!(px(&frame, 4, 4), black);
+        assert_eq!(px(&frame, 14, 4), black);
+    }
+    #[test]
+    fn card_transitions_schedule_intermediate_frames_and_finish_exactly() {
+        use bezel_core::app::ThemeRuntime;
+        use bezel_core::domain::clock::Language;
+        use bezel_core::domain::theme::{
+            Card, CardDirection, CardEffect, CardMember, CardTransition,
+        };
+        use std::time::Duration;
+        let black = Rgba::opaque(0, 0, 0);
+        let red = Rgba::opaque(255, 0, 0);
+        let green = Rgba::opaque(0, 255, 0);
+        for effect in [CardEffect::Fade, CardEffect::Slide, CardEffect::Flip] {
+            let mut parent = rect(BoxF::new(0.0, 0.0, 32.0, 16.0), black, 1.0);
+            parent.card = Some(Card {
+                faces: vec!["A".into(), "B".into()],
+                active_face: 0,
+                transition: Some(CardTransition {
+                    effect,
+                    direction: CardDirection::Left,
+                    duration_ms: 600,
+                    include_base: false,
+                }),
+            });
+            let mut a = rect(BoxF::new(10.0, 0.0, 8.0, 8.0), red, 1.0);
+            a.id = ElementId(2);
+            a.card_member = Some(CardMember {
+                parent: parent.id,
+                face: Some(0),
+            });
+            let mut b = a.clone();
+            b.id = ElementId(3);
+            b.kind = rect(b.frame, green, 1.0).kind;
+            b.card_member.as_mut().unwrap().face = Some(1);
+            let mut theme = testkit::theme(32, 16, Background::Color(black), vec![parent, a, b]);
+            let mut runtime = ThemeRuntime::new(theme.clone(), BTreeMap::new(), Language::English);
+            let mut renderer = testkit::renderer();
+            assert!(
+                runtime
+                    .preview(&mut renderer, testkit::TIME, Duration::ZERO)
+                    .unwrap()
+                    .1
+                    .is_none()
+            );
+            theme.elements[0].card.as_mut().unwrap().active_face = 1;
+            runtime.replace_theme(theme.clone());
+            let (first, due) = runtime
+                .preview(&mut renderer, testkit::TIME, Duration::from_millis(100))
+                .unwrap();
+            assert_eq!(px(&first, 14, 4), red);
+            assert_eq!(due, Some(Duration::from_millis(133)));
+            let (middle, due) = runtime
+                .preview(&mut renderer, testkit::TIME, Duration::from_millis(400))
+                .unwrap();
+            assert!(due.is_some());
+            if effect == CardEffect::Fade {
+                let p = px(&middle, 14, 4);
+                assert!((126..=129).contains(&p.r) && (126..=129).contains(&p.g));
+            } else {
+                assert_eq!(px(&middle, 14, 4), black);
+            }
+            let (last, due) = runtime
+                .preview(&mut renderer, testkit::TIME, Duration::from_millis(700))
+                .unwrap();
+            assert_eq!(px(&last, 14, 4), green);
+            assert_eq!(due, None);
+            renderer.set_motion(false);
+            theme.elements[0].card.as_mut().unwrap().active_face = 0;
+            runtime.replace_theme(theme);
+            let (still, due) = runtime
+                .preview(&mut renderer, testkit::TIME, Duration::from_millis(800))
+                .unwrap();
+            assert_eq!(px(&still, 14, 4), red);
+            assert_eq!(due, None);
+            if effect == CardEffect::Flip {
+                let mut window_theme = runtime.theme().clone();
+                if let ElementKind::Shape { video_window, .. } = &mut window_theme.elements[0].kind
+                {
+                    *video_window = true;
+                }
+                window_theme.elements[0]
+                    .card
+                    .as_mut()
+                    .unwrap()
+                    .transition
+                    .as_mut()
+                    .unwrap()
+                    .include_base = true;
+                renderer.set_motion(true);
+                let mut scene = Scene::empty();
+                scene.animation = Duration::from_millis(900);
+                let first = render_over(&mut renderer, &window_theme, &scene, Backdrop::OnDevice);
+                assert_eq!(px(&first, 16, 12).a, 0);
+                window_theme.elements[0].card.as_mut().unwrap().active_face = 1;
+                scene.animation = Duration::from_millis(1000);
+                let first = render_over(&mut renderer, &window_theme, &scene, Backdrop::OnDevice);
+                assert_eq!(
+                    px(&first, 16, 12).a,
+                    0,
+                    "device video remains visible when motion starts"
+                );
+                scene.animation = Duration::from_millis(1150);
+                let middle = render_over(&mut renderer, &window_theme, &scene, Backdrop::OnDevice);
+                assert_eq!(
+                    px(&middle, 16, 12).a,
+                    0,
+                    "transformed video window remains a cutout"
+                );
+            }
+        }
+    }
+    #[test]
+    fn cached_card_faces_match_fresh_pixels_and_invalidate_inputs() {
+        use bezel_core::domain::theme::{
+            Card, CardDirection, CardEffect, CardMember, CardTransition,
+        };
+        use std::time::Duration;
+        let mut parent = rect(BoxF::new(0., 0., 32., 16.), Rgba::opaque(20, 30, 40), 1.);
+        parent.card = Some(Card {
+            faces: vec!["A".into(), "B".into()],
+            active_face: 0,
+            transition: Some(CardTransition {
+                effect: CardEffect::Flip,
+                direction: CardDirection::Left,
+                duration_ms: 750,
+                include_base: true,
+            }),
+        });
+        let mut member = rect(BoxF::new(4., 4., 12., 8.), Rgba::WHITE, 0.8);
+        member.id = ElementId(2);
+        member.card_member = Some(CardMember {
+            parent: parent.id,
+            face: Some(0),
+        });
+        let mut theme = testkit::theme(
+            32,
+            16,
+            Background::DeviceVideo {
+                path: bezel_core::domain::storage::RemotePath::parse("internal/video/a.mp4")
+                    .unwrap(),
+                repeat: bezel_core::domain::storage::Repeat::Loop,
+                color: Rgba::BLACK,
+            },
+            vec![parent, member],
+        );
+        let mut scene = Scene::empty();
+        let mut cached = testkit::renderer();
+        let mut fresh = testkit::renderer();
+        cached.set_content_revision(1);
+        for r in [&mut cached, &mut fresh] {
+            render_over(r, &theme, &scene, Backdrop::Poster);
+        }
+        theme.elements[0].card.as_mut().unwrap().active_face = 1;
+        for ms in [100, 150, 200, 250, 500, 550, 600] {
+            scene.animation = Duration::from_millis(ms);
+            let a = render_over(&mut cached, &theme, &scene, Backdrop::Poster);
+            let b = render_over(&mut fresh, &theme, &scene, Backdrop::Poster);
+            assert_eq!(a, b, "cached pose {ms}");
+            if ms == 150 {
+                assert_eq!(cached.render_stats().face_hits, 1);
+            }
+            let a = render_over(&mut cached, &theme, &scene, Backdrop::OnDevice);
+            let b = render_over(&mut fresh, &theme, &scene, Backdrop::OnDevice);
+            assert_eq!(a, b, "overlay pose {ms}");
+            assert_eq!(
+                cached.render_stats().face_hits,
+                1,
+                "same face across backgrounds"
+            );
+        }
+        for change in 0..4 {
+            match change {
+                0 => {
+                    scene.snapshot.insert(
+                        testkit::key("cpu.usage"),
+                        bezel_core::domain::sensor::Reading::Value(20.),
+                    );
+                }
+                1 => {
+                    theme.elements[0].opacity = 0.3;
+                }
+                2 => {
+                    scene.time.second += 1;
+                }
+                _ => cached.set_content_revision(2),
+            }
+            let a = render_over(&mut cached, &theme, &scene, Backdrop::OnDevice);
+            let b = render_over(&mut fresh, &theme, &scene, Backdrop::OnDevice);
+            assert_eq!(a, b);
+            assert_eq!(
+                cached.render_stats().face_misses,
+                1,
+                "invalidation {change}"
+            );
+        }
+        // Window masks are reused only with their matching backdrop variant.
+        if let ElementKind::Shape { video_window, .. } = &mut theme.elements[0].kind {
+            *video_window = true;
+        }
+        for backdrop in [
+            Backdrop::Poster,
+            Backdrop::OnDevice,
+            Backdrop::Poster,
+            Backdrop::OnDevice,
+        ] {
+            let a = render_over(&mut cached, &theme, &scene, backdrop);
+            let b = render_over(&mut fresh, &theme, &scene, backdrop);
+            assert_eq!(a, b, "cached window mask");
+        }
+        // A GIF never reuses a face across animation times.
+        theme.elements[1].card_member.as_mut().unwrap().face = Some(1);
+        theme.elements[1].kind = ElementKind::Image {
+            asset: AssetRef("a.gif".into()),
+            fit: Fit::Fill,
+        };
+        scene.assets.insert(
+            AssetRef("a.gif".into()),
+            testkit::gif(2, 2, &[(Rgba::WHITE, 100), (Rgba::BLACK, 100)]),
+        );
+        cached.set_content_revision(3);
+        for ms in [610, 630] {
+            scene.animation = Duration::from_millis(ms);
+            let a = render_over(&mut cached, &theme, &scene, Backdrop::OnDevice);
+            let b = render_over(&mut fresh, &theme, &scene, Backdrop::OnDevice);
+            assert_eq!(a, b, "animated face");
+            assert_eq!(cached.render_stats().face_hits, 0);
+        }
+        assert!(
+            cached
+                .face_cache
+                .values()
+                .map(|f| f.pixels.data().len() + f.window.as_ref().map_or(0, |w| w.data().len()))
+                .sum::<usize>()
+                <= FACE_CACHE_BYTES
+        );
+    }
+
+    /// Run explicitly in release mode; records CPU render cost, excluding serial/IPC.
+    #[test]
+    #[ignore]
+    fn profile_card_flip_480x1920() {
+        use bezel_core::domain::theme::{
+            Card, CardDirection, CardEffect, CardMember, CardTransition,
+        };
+        use std::time::{Duration, Instant};
+        let mut parent = rect(
+            BoxF::new(36.0, 650.0, 408.0, 408.0),
+            Rgba::opaque(30, 41, 59),
+            1.0,
+        );
+        parent.card = Some(Card {
+            faces: vec!["A".into(), "B".into()],
+            active_face: 0,
+            transition: Some(CardTransition {
+                effect: CardEffect::Flip,
+                direction: CardDirection::Left,
+                duration_ms: 1000,
+                include_base: true,
+            }),
+        });
+        let mut members = vec![parent];
+        for face in 0..2 {
+            for i in 0..8 {
+                let mut e = rect(
+                    BoxF::new(65.0, 690.0 + i as f32 * 38.0, 330.0, 20.0),
+                    if face == 0 {
+                        Rgba::opaque(34, 211, 238)
+                    } else {
+                        Rgba::opaque(192, 132, 252)
+                    },
+                    1.0,
+                );
+                e.id = ElementId(2 + face as u32 * 8 + i as u32);
+                e.card_member = Some(CardMember {
+                    parent: ElementId(1),
+                    face: Some(face),
+                });
+                members.push(e);
+            }
+        }
+        let mut theme = testkit::theme(480, 1920, Background::Color(Rgba::BLACK), members);
+        let mut renderer = testkit::renderer();
+        let mut scene = Scene::empty();
+        render_over(&mut renderer, &theme, &scene, Backdrop::Poster);
+        renderer.set_content_revision(1);
+        theme.elements[0].card.as_mut().unwrap().active_face = 1;
+        let mut costs = Vec::new();
+        let mut film = RgbaImage::new(480 * 5, 600);
+        for i in 0..60 {
+            scene.animation = Duration::from_millis(i * 16);
+            let started = Instant::now();
+            let frame = render_over(&mut renderer, &theme, &scene, Backdrop::Poster);
+            costs.push(started.elapsed().as_secs_f64() * 1000.0);
+            if [0, 15, 30, 45, 59].contains(&i) {
+                let image = RgbaImage::from_raw(480, 1920, frame.as_rgba().to_vec()).unwrap();
+                let crop = image::imageops::crop_imm(&image, 0, 560, 480, 600).to_image();
+                image::imageops::replace(
+                    &mut film,
+                    &crop,
+                    ([0, 15, 30, 45, 59].iter().position(|v| *v == i).unwrap() * 480) as i64,
+                    0,
+                );
+            }
+        }
+        costs.sort_by(f64::total_cmp);
+        eprintln!(
+            "480x1920 Flip CPU: median {:.2} ms, p95 {:.2} ms, max {:.2} ms",
+            costs[30], costs[57], costs[59]
+        );
+        film.save("../../target/card-flip-perspective.png").unwrap();
     }
 }

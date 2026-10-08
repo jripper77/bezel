@@ -1,12 +1,9 @@
-// The preview's own frames for animated GIFs (T-7.11). The backend says,
-// with each preview frame, how long until its GIFs change (the core's
-// "next frame due"); one more render is asked for then, at most
-// `perSecond` a second (15: the screen gets up to 30), and never sooner
-// than the last render took after it ended, so the backend and the IPC
-// stay mostly idle even for a large GIF. A hidden page or reduced motion
-// gets no extra frames: the refresh still redraws the preview.
+// The backend reports when the next animated preview frame is due. Timing
+// starts before rendering/IPC: wait only for the remainder of that interval,
+// rather than adding another render-duration pause. The render scheduler
+// keeps one request in flight; hidden pages and reduced motion stop timers.
 
-/** Most preview frames a second drawn for animated GIFs. */
+/** Default preview rate; the app supplies 30 for card transitions. */
 export const PREVIEW_FPS = 15;
 
 /**
@@ -22,7 +19,7 @@ export function nextAnimationDelay({ nextMs, elapsed, perSecond = PREVIEW_FPS })
   if (nextMs === null || nextMs === undefined) return null;
   const left = nextMs - elapsed;
   const fastest = 1000 / perSecond - elapsed;
-  return Math.max(0, left, fastest, elapsed);
+  return Math.max(0, left, fastest);
 }
 
 /**

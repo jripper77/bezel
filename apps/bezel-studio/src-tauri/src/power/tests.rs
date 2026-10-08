@@ -549,7 +549,7 @@ fn a_session_end_applies_the_choice_and_a_quit_does_not() {
         Some(DISPLAY),
         "live mode stays"
     );
-    backend.tick(TIME, Instant::now() + Duration::from_secs(60));
+    backend.tick_and_wait(TIME, Instant::now() + Duration::from_secs(60));
     assert!(backend.set_live(true, Some(DISPLAY), TIME).is_err());
     assert_eq!(heard.since(live.len()), ["turn_off_now"]);
     assert_eq!(
@@ -666,7 +666,7 @@ fn the_final_state_lets_nothing_reach_a_screen() {
     );
     backend.set_live(true, Some(DISPLAY), TIME).unwrap();
     let later = Instant::now() + Duration::from_secs(60);
-    backend.tick(TIME, later);
+    backend.tick_and_wait(TIME, later);
     assert!(
         backend.studio().reconnecting().is_some(),
         "{:?}",
@@ -677,7 +677,7 @@ fn the_final_state_lets_nothing_reach_a_screen() {
     let before = heard.all();
     let long_due = later + Duration::from_secs(60);
     for _ in 0..3 {
-        backend.tick(TIME, long_due);
+        backend.tick_and_wait(TIME, long_due);
     }
     assert!(backend.studio().reconnect_due(long_due).is_none());
     assert!(backend.studio().tick(TIME, long_due).unwrap().is_none());
@@ -703,7 +703,7 @@ fn the_final_state_lets_nothing_reach_a_screen() {
     );
 
     backend.leave_final_state();
-    backend.tick(TIME, long_due);
+    backend.tick_and_wait(TIME, long_due);
     assert_eq!(heard.since(before.len()).first(), Some(&"connect"));
     assert!(backend.storage.claim().is_ok());
 }

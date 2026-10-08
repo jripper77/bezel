@@ -62,6 +62,8 @@ fn theme() -> (Theme, BTreeMap<AssetRef, Vec<u8>>) {
     let mut theme = Theme::blank("gif", Size::new(480, 1920), Orientation::Landscape);
     let asset = AssetRef("assets/spin.gif".into());
     theme.elements.push(Element {
+        card: None,
+        card_member: None,
         id: ElementId(1),
         name: "spin".into(),
         frame: BoxF::new(100.0, 100.0, 64.0, 64.0),

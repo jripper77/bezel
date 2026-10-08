@@ -73,6 +73,38 @@ export function createPreferences({ t, bridge, onLanguage, notify }) {
     ]);
   }
 
+  function debugSection() {
+    const input = el('input', { id: 'prefs-debug', type: 'checkbox', role: 'switch', checked: prefs.debug });
+    const overlay = el('input', { id: 'prefs-debug-overlay', type: 'checkbox', checked: prefs.debugShowReadings, disabled: !prefs.debug });
+    const corner = el('select', { id: 'prefs-debug-corner', disabled: !prefs.debug || !prefs.debugShowReadings });
+    for (const value of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
+      corner.append(el('option', { value, text: t(`prefs.debugCorner.${value}`), selected: value === (prefs.debugCorner ?? 'bottom-left') }));
+    }
+    corner.addEventListener('change', save);
+    async function save() {
+      input.disabled = true; overlay.disabled = true; corner.disabled = true;
+      try {
+        await bridge.setDebug(input.checked, overlay.checked, corner.value);
+        prefs.debug = input.checked; prefs.debugShowReadings = overlay.checked; prefs.debugCorner = corner.value;
+      } catch (e) {
+        input.checked = prefs.debug; overlay.checked = prefs.debugShowReadings; corner.value = prefs.debugCorner ?? "bottom-left";
+        notify(errorText(t, e));
+      } finally { input.disabled = false; overlay.disabled = !prefs.debug; corner.disabled = !prefs.debug || !prefs.debugShowReadings; }
+    }
+    input.addEventListener('change', save); overlay.addEventListener('change', save);
+    return el('section', { class: 'prefs-section', 'aria-labelledby': 'prefs-debug-title' }, [
+      el('h3', { id: 'prefs-debug-title', text: t('prefs.debugTitle') }),
+      el('label', { class: 'check', for: 'prefs-debug' }, [input, el('span', { text: t('prefs.debugEnable') })]),
+      el('div', { style: { marginLeft: '24px' } }, [
+        el('label', { class: 'check', for: 'prefs-debug-overlay' }, [overlay, el('span', { text: t('prefs.debugOverlay') })]),
+        el('label', { class: 'field', for: 'prefs-debug-corner' }, [el('span', { text: t('prefs.debugCorner') }), corner]),
+        el('p', { class: 'hint', text: t('prefs.debugOverlayHint') }),
+      ]),
+      el('p', { class: 'hint', text: t('prefs.debugHint') }),
+      el('p', { class: 'hint', style: { overflowWrap: 'anywhere' }, text: prefs.debugLogPath }),
+    ]);
+  }
+
   function pingField() {
     const input = el('input', {
       id: 'prefs-ping-host', type: 'text', value: typedHost ?? prefs.pingHost, spellcheck: false, autocomplete: 'off',
@@ -159,7 +191,7 @@ export function createPreferences({ t, bridge, onLanguage, notify }) {
     const close = el('button', { type: 'button', class: 'icon-button dialog-close', title: t('dialog.close'), 'aria-label': t('dialog.close'), onclick: () => dialog.close() }, [icon(ICONS.close, 16)]);
     dialog.replaceChildren(
       el('div', { class: 'dialog-head' }, [el('h2', { id: 'prefs-title', text: t('prefs.title') }), close]),
-      el('div', { class: 'dialog-body' }, [languageField(), runtimeSection(), sensorsSection()]),
+      el('div', { class: 'dialog-body' }, [languageField(), runtimeSection(), debugSection(), sensorsSection()]),
       el('div', { class: 'dialog-actions' }, [el('button', { type: 'button', class: 'primary-button', text: t('prefs.done'), onclick: () => dialog.close() })]),
     );
     if (focused) (dialog.querySelector(`#${focused}`) ?? dialog.querySelector('#prefs-mangohud-choose'))?.focus();

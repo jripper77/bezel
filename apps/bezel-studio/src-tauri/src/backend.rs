@@ -3,6 +3,7 @@
 //! tests. Errors reach the UI as codes with arguments ([`UiError`]).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -86,8 +87,11 @@ pub struct Backend {
 /// screen's link came back from showing a frame: the screen's I/O happens
 /// outside the lock, so previews render while the screen works.
 pub struct Session {
-    studio: Mutex<Studio>,
-    link_back: Condvar,
+    studio: Arc<Mutex<Studio>>,
+    link_back: Arc<Condvar>,
+    delivery_epoch: Arc<AtomicU64>,
+    completed: crate::deliveries::Completion,
+    workers: Mutex<crate::deliveries::Workers>,
 }
 
 /// Longest wait for the live link to come back from showing a frame; after
@@ -97,9 +101,33 @@ const LINK_BACK_WAIT: Duration = Duration::from_secs(10);
 impl Session {
     /// The session of `studio`.
     pub fn new(studio: Studio) -> Self {
+        let studio = Arc::new(Mutex::new(studio));
+        let link_back = Arc::new(Condvar::new());
+        let delivery_epoch = Arc::new(AtomicU64::new(0));
+        let completed: crate::deliveries::Completion = {
+            let studio = Arc::clone(&studio);
+            let link_back = Arc::clone(&link_back);
+            let epoch = Arc::clone(&delivery_epoch);
+            Arc::new(move |delivery, outcome| {
+                let unwanted = studio
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .presented(delivery, outcome, Instant::now());
+                drop(unwanted);
+                // Pair notification with the waiter's lock: no lost wake-up
+                // between its predicate and the condvar wait.
+                let signal = studio.lock().unwrap_or_else(PoisonError::into_inner);
+                epoch.fetch_add(1, Ordering::Release);
+                link_back.notify_all();
+                drop(signal);
+            })
+        };
         Self {
-            studio: Mutex::new(studio),
-            link_back: Condvar::new(),
+            studio,
+            link_back,
+            delivery_epoch,
+            workers: Mutex::new(crate::deliveries::Workers::new(Arc::clone(&completed))),
+            completed,
         }
     }
 
@@ -266,10 +294,55 @@ impl Backend {
             return Ok(());
         };
         let outcome = delivery.present();
-        let unwanted = self.studio().presented(delivery, &outcome, Instant::now());
-        self.studio.link_back.notify_all();
-        drop(unwanted);
+        (self.studio.completed)(delivery, &outcome);
         outcome
+    }
+
+    fn dispatch(&self, delivered: bezel_core::Result<Option<Delivery>>) {
+        match delivered {
+            Ok(Some(delivery)) => {
+                let submitted = self
+                    .studio
+                    .workers
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .submit(delivery);
+                if let Err((delivery, error)) = submitted {
+                    (self.studio.completed)(*delivery, &Err(error));
+                    diag::report(DiagCode::LiveFrameFailed);
+                }
+            }
+            Ok(None) => {}
+            Err(_) => diag::report(DiagCode::LiveFrameFailed),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tick_and_wait(&self, time: LocalTime, now: Instant) -> Instant {
+        self.tick(time, now);
+        let studio = self.idle_studio();
+        assert!(
+            !studio.presenting(),
+            "delivery worker did not return its link"
+        );
+        studio.next_due_all()
+    }
+
+    /// Capture before ticking, so a completion during rendering is not missed.
+    pub(crate) fn delivery_epoch(&self) -> u64 {
+        self.studio.delivery_epoch.load(Ordering::Acquire)
+    }
+
+    /// Wait until rendering is due or any display has completed its frame.
+    pub(crate) fn wait_refresh(&self, due: Instant, epoch: u64) {
+        let timeout = sleep_until(due, Instant::now());
+        let waited = self
+            .studio
+            .link_back
+            .wait_timeout_while(self.studio.lock(), timeout, |_| {
+                self.delivery_epoch() == epoch
+            });
+        drop(waited.unwrap_or_else(PoisonError::into_inner));
     }
 
     /// Shows the edited theme on the live screen now (its video probed
@@ -337,9 +410,48 @@ impl Backend {
     }
 
     /// What the preferences show.
+    pub fn set_debug(
+        &self,
+        on: bool,
+        show_readings: bool,
+        corner: crate::performance::Corner,
+    ) -> std::io::Result<()> {
+        crate::debug::configure(
+            &self.settings.path().with_file_name("debug.log"),
+            on,
+            show_readings,
+            corner,
+        )?;
+        self.settings.update(|s| {
+            s.debug = on;
+            s.debug_show_readings = show_readings;
+            s.debug_corner = corner;
+        });
+        Ok(())
+    }
+
+    pub fn restore_debug(&self) {
+        let settings = self.settings.load();
+        let _ = crate::debug::configure(
+            &self.settings.path().with_file_name("debug.log"),
+            settings.debug,
+            settings.debug_show_readings,
+            settings.debug_corner,
+        );
+    }
+
     pub fn preferences(&self) -> PreferencesDto {
         let settings = self.settings.load();
         PreferencesDto {
+            debug: settings.debug,
+            debug_show_readings: settings.debug_show_readings,
+            debug_corner: settings.debug_corner,
+            debug_log_path: self
+                .settings
+                .path()
+                .with_file_name("debug.log")
+                .display()
+                .to_string(),
             light_on_close: settings.light_on_close.unwrap_or(true),
             light_runtime: cfg!(windows),
             theme_filter: ThemeFilterDto {
@@ -484,7 +596,9 @@ impl Backend {
             if studio.shutting_down() {
                 return Err(UiError::new(ErrorCode::Busy));
             }
-            studio.stop_live()
+            let previous = studio.stop_live();
+            let alias = screen.and_then(|key| studio.stop_live_screen(key));
+            (previous, alias)
         };
         drop(previous);
         if !on {
@@ -509,11 +623,13 @@ impl Backend {
             if !studio.go_live_on(key.clone(), found, link) {
                 return Err(UiError::new(ErrorCode::Busy));
             }
+            studio.canonicalize_selected_screen(&key);
             (key, studio.theme().orientation)
         };
         self.show_now(time)?;
         self.settings.update(|s| {
             s.live_screen = Some(key.clone());
+            s.selected_screen = Some(key.clone());
             if !s.live_screens.contains(&key) {
                 s.live_screens.push(key.clone());
             }
@@ -632,6 +748,7 @@ impl Backend {
     pub fn session(&self) -> SessionDto {
         let studio = self.studio();
         SessionDto {
+            version: crate::EVO_VERSION.into(),
             screen: studio.selected_screen().map(str::to_owned),
             theme: ThemeDto::from(studio.theme()),
             location: studio.location().map(|l| l.0.clone()),
@@ -691,8 +808,11 @@ impl Backend {
         now: Instant,
         motion: Motion,
     ) -> UiResult<Vec<u8>> {
+        let started = Instant::now();
         let theme = theme_of(theme)?;
+        let waiting = Instant::now();
         let mut studio = self.studio();
+        let lock_ms = waiting.elapsed().as_secs_f64() * 1000.0;
         studio.set_theme(theme);
         if let Some(probe) = studio.video_to_probe() {
             drop(studio);
@@ -701,7 +821,17 @@ impl Backend {
             studio = self.studio();
         }
         let (frame, change) = studio.preview(time, now, motion)?;
-        Ok(frame_bytes(&frame, change))
+        let reused = studio.render_reused();
+        drop(studio);
+        let bytes = frame_bytes(&frame, change);
+        if crate::debug::enabled() {
+            crate::performance::preview_render(
+                started.elapsed().as_secs_f64() * 1000.0,
+                lock_ms,
+                reused,
+            );
+        }
+        Ok(bytes)
     }
 
     /// Takes the UI's theme and says what Auto turns its video background
@@ -1093,7 +1223,12 @@ impl Backend {
             }
         }
         if let Some(selected) = settings.selected_screen {
-            let _ = self.select_screen(&selected);
+            let canonical = self
+                .find_screen(&selected)
+                .ok()
+                .and_then(|screen| screen.address().map(|address| address.0.clone()))
+                .unwrap_or(selected);
+            let _ = self.select_screen(&canonical);
         }
     }
 
@@ -1104,18 +1239,34 @@ impl Backend {
     /// probe outside the session's lock). Returns when the next refresh is
     /// due.
     pub fn tick(&self, time: LocalTime, now: Instant) -> Instant {
+        let started = Instant::now();
         self.reconnect(now);
         let probes = self.studio().live_videos_to_probe();
         for probe in probes {
             self.learn_video(Some(probe), Wait::No);
         }
-        let deliveries = self.studio().tick_all(time, now);
+        let waiting = Instant::now();
+        let mut studio = self.studio();
+        let lock_ms = waiting.elapsed().as_secs_f64() * 1000.0;
+        let deliveries = studio.tick_all(time, now);
+        drop(studio);
+        let frames = deliveries
+            .iter()
+            .filter(|r| matches!(r, Ok(Some(_))))
+            .count();
         for delivered in deliveries {
-            if self.deliver(delivered).is_err() {
-                diag::report(DiagCode::LiveFrameFailed);
-            }
+            self.dispatch(delivered);
         }
-        self.studio().next_due_all()
+        let due = self.studio().next_due_all();
+        if crate::debug::enabled() && (frames > 0 || started.elapsed().as_millis() > 50) {
+            crate::performance::refresh_tick(
+                started.elapsed().as_secs_f64() * 1000.0,
+                lock_ms,
+                Instant::now().saturating_duration_since(now).as_secs_f64() * 1000.0,
+                frames,
+            );
+        }
+        due
     }
 
     /// Connects a live screen whose link failed again, when an attempt is
@@ -1615,7 +1766,7 @@ mod tests {
         let theme = f.backend.session().theme;
         f.backend.push(&theme, TIME).unwrap();
         let now = Instant::now();
-        let due = f.backend.tick(TIME, now);
+        let due = f.backend.tick_and_wait(TIME, now);
         assert!(due >= now + Duration::from_secs_f32(MIN_REFRESH_SECONDS));
         assert_eq!(f.connector.log().frames.len(), 3);
         f.backend.set_brightness(KEY, 40).unwrap();
@@ -1768,7 +1919,7 @@ mod tests {
         f.connector = connector;
         f.backend.set_live(true, Some(KEY), TIME).unwrap();
         let later = |ms| Instant::now() + Duration::from_millis(ms);
-        f.backend.tick(TIME, later(1_000));
+        f.backend.tick_and_wait(TIME, later(1_000));
         let sample = f.backend.sample();
         assert_eq!(sample.live.as_deref(), Some(KEY), "still live");
         assert_eq!(sample.live_error, None);
@@ -1783,9 +1934,9 @@ mod tests {
             "{busy}"
         );
 
-        f.backend.tick(TIME, later(500));
+        f.backend.tick_and_wait(TIME, later(500));
         assert_eq!(f.connector.log().connects, 1, "not before 2 s");
-        f.backend.tick(TIME, later(3_000));
+        f.backend.tick_and_wait(TIME, later(3_000));
         let sample = f.backend.sample();
         assert_eq!(sample.reconnecting, None);
         assert_eq!(sample.live.as_deref(), Some(KEY));
@@ -1807,13 +1958,13 @@ mod tests {
         f.backend.set_live(true, Some(KEY), TIME).unwrap();
         let later = |ms| Instant::now() + Duration::from_millis(ms);
         f.backend.bus = Arc::new(FakeBus::new(Vec::new()));
-        f.backend.tick(TIME, later(0));
+        f.backend.tick_and_wait(TIME, later(0));
         for (wait, attempt) in [(3_000, 2), (6_000, 3)] {
-            f.backend.tick(TIME, later(wait));
+            f.backend.tick_and_wait(TIME, later(wait));
             let sample = f.backend.sample();
             assert_eq!(sample.reconnecting.map(|r| r.attempt), Some(attempt));
         }
-        f.backend.tick(TIME, later(11_000));
+        f.backend.tick_and_wait(TIME, later(11_000));
         let sample = f.backend.sample();
         assert_eq!((sample.live, sample.reconnecting), (None, None));
         assert_eq!(sample.live_error.unwrap().code(), "hung");
@@ -1823,10 +1974,10 @@ mod tests {
         let connector = FakeConnector::default().breaking_after(1, hung());
         f.backend.connector = Arc::new(connector.clone());
         f.backend.set_live(true, Some(KEY), TIME).unwrap();
-        f.backend.tick(TIME, later(0));
+        f.backend.tick_and_wait(TIME, later(0));
         assert!(f.backend.sample().reconnecting.is_some());
         f.backend.set_live(false, None, TIME).unwrap();
-        f.backend.tick(TIME, later(3_000));
+        f.backend.tick_and_wait(TIME, later(3_000));
         let sample = f.backend.sample();
         assert_eq!((sample.live, sample.reconnecting), (None, None));
         assert_eq!(sample.live_error, None);
@@ -1853,7 +2004,7 @@ mod tests {
         }
         fn present(&mut self, frame: &bezel_core::domain::frame::Frame) -> bezel_core::Result<()> {
             self.arrived.send(()).unwrap();
-            self.through.recv().unwrap();
+            self.through.recv_timeout(Duration::from_secs(5)).unwrap();
             self.inner.present(frame)
         }
         fn screen_off(&mut self) -> bezel_core::Result<()> {
@@ -1862,6 +2013,156 @@ mod tests {
         fn release(&mut self) -> bezel_core::Result<()> {
             self.inner.release()
         }
+    }
+
+    #[test]
+    fn a_slow_display_does_not_block_fast_deliveries_or_queue_stale_frames() {
+        let f = fixture("independent-deliveries");
+        let blank = f.backend.studio().theme().clone();
+        let (slow_arrived, slow_frames) = mpsc::channel();
+        let (slow_release, slow_through) = mpsc::channel();
+        let (fast_arrived, fast_frames) = mpsc::channel();
+        let (fast_release, fast_through) = mpsc::channel();
+        let slow = Held {
+            inner: f.backend.connect(KEY).unwrap(),
+            arrived: slow_arrived,
+            through: slow_through,
+        };
+        let fast = Held {
+            inner: f.backend.connect(KEY).unwrap(),
+            arrived: fast_arrived,
+            through: fast_through,
+        };
+        {
+            let mut s = f.backend.studio();
+            s.select_screen("slow", blank.clone());
+            s.go_live("slow".into(), Box::new(slow));
+            s.select_screen("fast", blank.clone());
+            s.go_live("fast".into(), Box::new(fast));
+        }
+        let now = Instant::now();
+        let epoch = f.backend.delivery_epoch();
+        f.backend.tick(TIME, now);
+        slow_frames.recv_timeout(Duration::from_secs(2)).unwrap();
+        fast_frames.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Both sends started, and tick returned while both links were held.
+        assert_eq!(f.backend.delivery_epoch(), epoch);
+        fast_release.send(()).unwrap();
+        f.backend.wait_refresh(now + Duration::from_secs(1), epoch);
+        assert!(
+            f.backend.delivery_epoch() > epoch,
+            "completion wakes rendering"
+        );
+
+        let mut blue = blank.clone();
+        blue.background = Background::Color(Rgba::opaque(0, 0, 255));
+        f.backend.studio().set_theme(blue);
+        f.backend.tick(TIME, now + Duration::from_secs(2));
+        fast_frames.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Fast's worker was reused while slow is still on its first frame.
+        assert!(slow_frames.try_recv().is_err());
+        let mut red = blank;
+        red.background = Background::Color(Rgba::opaque(255, 0, 0));
+        f.backend.studio().set_theme(red);
+        for seconds in 3..10 {
+            f.backend.tick(TIME, now + Duration::from_secs(seconds));
+        }
+        assert!(
+            fast_frames.try_recv().is_err(),
+            "one outstanding frame, no backlog"
+        );
+        assert_eq!(f.connector.log().frames.len(), 1);
+
+        let epoch = f.backend.delivery_epoch();
+        fast_release.send(()).unwrap();
+        f.backend
+            .wait_refresh(Instant::now() + Duration::from_secs(1), epoch);
+        f.backend.tick(TIME, now + Duration::from_secs(11));
+        fast_frames.recv_timeout(Duration::from_secs(2)).unwrap();
+        slow_release.send(()).unwrap();
+        fast_release.send(()).unwrap();
+        assert!(!f.backend.idle_studio().presenting());
+        let frames = f.connector.log().frames;
+        assert_eq!(frames.len(), 4, "three fast frames and one slow frame");
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|frame| frame.pixel(0, 0) == Some(Rgba::opaque(255, 0, 0)))
+                .count(),
+            1,
+            "latest edit replaces skipped frames"
+        );
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|frame| frame.pixel(0, 0) == Some(Rgba::opaque(0, 0, 255)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_delivery_completed_before_waiting_does_not_lose_its_wakeup() {
+        let f = fixture("delivery-wakeup");
+        f.backend
+            .studio()
+            .go_live(KEY.into(), f.backend.connect(KEY).unwrap());
+        let epoch = f.backend.delivery_epoch();
+        f.backend.tick_and_wait(TIME, Instant::now());
+        assert!(f.backend.delivery_epoch() > epoch);
+        let start = Instant::now();
+        f.backend
+            .wait_refresh(start + Duration::from_secs(1), epoch);
+        assert!(
+            start.elapsed() < Duration::from_millis(100),
+            "do not wait the 250 ms polling interval after completion"
+        );
+    }
+
+    #[test]
+    fn four_display_workers_start_independently_and_one_failure_is_isolated() {
+        let f = fixture("four-deliveries");
+        let blank = f.backend.studio().theme().clone();
+        let mut gates = Vec::new();
+        for index in 0..4 {
+            let (arrived, frames) = mpsc::channel();
+            let (release, through) = mpsc::channel();
+            let inner = if index == 0 {
+                let failing = FakeConnector::default()
+                    .breaking_after(0, bezel_core::BezelError::Hung("test stall".into()));
+                connect_screen(f.backend.bus.as_ref(), &failing, Some(KEY))
+                    .unwrap()
+                    .1
+            } else {
+                f.backend.connect(KEY).unwrap()
+            };
+            let key = format!("display-{index}");
+            let mut s = f.backend.studio();
+            s.select_screen(&key, blank.clone());
+            s.go_live(
+                key,
+                Box::new(Held {
+                    inner,
+                    arrived,
+                    through,
+                }),
+            );
+            gates.push((frames, release));
+        }
+        f.backend.tick(TIME, Instant::now());
+        for (frames, _) in &gates {
+            frames.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        assert!(f.backend.studio().presenting());
+        for (_, release) in &gates {
+            release.send(()).unwrap();
+        }
+        assert!(!f.backend.idle_studio().presenting());
+        assert_eq!(f.connector.log().frames.len(), 3);
+        assert!(f.backend.studio().any_live(), "other displays stay live");
+        f.backend.studio().select_screen("display-0", blank);
+        assert!(f.backend.studio().live_error().is_some());
+        assert_eq!(f.backend.studio().live_key(), None);
     }
 
     #[test]
@@ -1880,7 +2181,7 @@ mod tests {
         let backend = &f.backend;
         std::thread::scope(|scope| {
             let started = Instant::now();
-            let ticking = scope.spawn(|| backend.tick(TIME, Instant::now()));
+            let ticking = scope.spawn(|| backend.tick_and_wait(TIME, Instant::now()));
             frame_arrived.recv().unwrap();
             // The screen is busy with a frame: the session is not.
             assert!(
@@ -1957,7 +2258,7 @@ mod tests {
         let frames = || f.connector.log().frames.len();
         let before = frames();
         f.backend
-            .tick(TIME, Instant::now() + Duration::from_millis(ms));
+            .tick_and_wait(TIME, Instant::now() + Duration::from_millis(ms));
         assert_eq!(frames(), before + 1, "the refresh drew a frame");
         f.backend.push(theme, TIME).unwrap();
         assert_eq!(frames(), before + 2, "a push shows one at once");
@@ -1995,7 +2296,7 @@ mod tests {
         let size = auto.size.map(|s| (s.width, s.height));
         assert_eq!((auto.rotation, size), (270, Some((480, 1920))));
         f.backend
-            .tick(TIME, Instant::now() + Duration::from_secs(120));
+            .tick_and_wait(TIME, Instant::now() + Duration::from_secs(120));
         let video = f.backend.sample().video.unwrap();
         assert_eq!(
             (video.state, video.path.as_deref()),
@@ -2011,7 +2312,7 @@ mod tests {
         let (f, mut theme) = dragon_live("posters", media);
         // The refresh probes the video for the live screen.
         f.backend
-            .tick(TIME, Instant::now() + Duration::from_secs(60));
+            .tick_and_wait(TIME, Instant::now() + Duration::from_secs(60));
         assert_eq!(f.backend.sample().video.unwrap().state, "missing");
         let poster = AssetRef(DRAGON_POSTER.into());
         let before = f.backend.studio().assets()[&poster].clone();
@@ -2251,11 +2552,53 @@ mod tests {
     }
 
     #[test]
+    fn restoring_live_does_not_reselect_the_stale_wake_alias_document() {
+        let f = fixture("restore-selected-alias");
+        f.backend.settings.update(|s| {
+            s.selected_screen = Some(MCU.into());
+            s.live_screens = vec![KEY.into()];
+        });
+        f.backend.restore_live(TIME);
+        assert_eq!(f.backend.session().screen.as_deref(), Some(KEY));
+        assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
+        assert_eq!(f.connector.log().connects, 1);
+    }
+
+    #[test]
+    fn live_from_wake_document_releases_existing_display_document_before_reopening() {
+        let mut f = fixture("live-alias-document");
+        let tracked = Tracked {
+            inner: f.connector.clone(),
+            ..Tracked::default()
+        };
+        f.backend.connector = Arc::new(tracked.clone());
+        f.backend.set_live(true, Some(KEY), TIME).unwrap();
+        f.backend.select_screen(MCU).unwrap();
+        // The user edited this document; enabling Live must retain those edits.
+        let mut edited = f.backend.studio().theme().clone();
+        edited.name = "Unsaved card edit".into();
+        f.backend.studio().set_theme(edited);
+        f.backend.set_live(true, Some(MCU), TIME).unwrap();
+        assert_eq!(f.backend.session().theme.name, "Unsaved card edit");
+        assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
+        assert_eq!(f.connector.log().connects, 2);
+        assert_eq!(*tracked.seen.lock().unwrap(), ["open", "close", "open"]);
+        assert_eq!(f.backend.session().screen.as_deref(), Some(KEY));
+        assert_eq!(
+            f.backend.settings.load().selected_screen.as_deref(),
+            Some(KEY)
+        );
+        f.backend.select_screen(MCU).unwrap();
+        f.backend.select_screen(KEY).unwrap();
+        assert_eq!(f.backend.session().theme.name, "Unsaved card edit");
+    }
+
+    #[test]
     fn sensors_reach_the_ui() {
         let f = fixture("sensors");
         let catalog = f.backend.catalog().unwrap();
         assert!(catalog.iter().any(|s| s.key == "cpu.usage"));
-        f.backend.tick(TIME, Instant::now());
+        f.backend.tick_and_wait(TIME, Instant::now());
         let sample = f.backend.sample();
         assert!(sample.readings.contains_key("cpu.usage"));
         assert_eq!(sample.live_error, None);

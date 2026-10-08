@@ -1,3 +1,5 @@
+import { createCardMotion } from './editor/card-motion.js';
+import { isShown } from './editor/cards.js';
 // An in-memory backend for demo mode: a simulated screen, sensors that move,
 // themes, media and an approximate renderer. Nothing here reaches hardware.
 import { DEMO_BACK_FROM_DESKTOP, DEMO_LIBRARY, DEMO_LOCAL_FILES, DEMO_ORIGINALS, DEMO_ORIGINALS_FOLDER, DEMO_PANELS, DEMO_PICKED, DEMO_PICKED_VIDEO, DEMO_POSTER_URL, DEMO_STORAGE, DEMO_THEME_VIDEOS, DEMO_UDEV_COMMAND, SCENARIOS } from './demo-data.js';
@@ -112,7 +114,7 @@ export function demoHung() {
  * shows none), like the backend's preview: every visible `*.gif` image.
  */
 export function demoNextChange(theme, ms) {
-  const gif = (theme?.elements ?? []).some((e) => e.visible !== false && e.kind?.type === 'image' && String(e.kind.asset).toLowerCase().endsWith('.gif'));
+  const gif = (theme?.elements ?? []).some((e) => isShown(theme, e) && e.kind?.type === 'image' && String(e.kind.asset).toLowerCase().endsWith('.gif'));
   return gif ? DEMO_GIF_FRAME_MS - (Math.floor(ms) % DEMO_GIF_FRAME_MS) : null;
 }
 
@@ -153,7 +155,7 @@ function thumbnailPart(e) {
 export function demoThumbnail(theme) {
   const { width, height } = theme.canvas;
   const background = theme.background?.type === 'color' ? svgColor(theme.background.color, '#0c0e16') : '#10111a';
-  const parts = (theme.elements ?? []).filter((e) => e.visible !== false && e.frame).map(thumbnailPart).join('');
+  const parts = (theme.elements ?? []).filter((e) => isShown(theme, e) && e.frame).map(thumbnailPart).join('');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${background}"/>${parts}</svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
 }
@@ -1063,6 +1065,7 @@ function createDemoStorage(chosen, { delay, now, live, isLive, theme, themes, sc
  *   `letGo` (tests)
  */
 export function createDemoBackend(scenario, clock = {}, hooks = {}) {
+  const cards = createCardMotion();
   let libreFailed = hooks.libre === 'partial' || hooks.libre === 'error';
   let libreOffline = hooks.libre === 'error';
   const libreSensors = hooks.libre ? [
@@ -1256,6 +1259,9 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
   let windowState = 'open';
   // The language the user chose (`null`: the system's, from the browser).
   let language = null;
+  let debug = false;
+  let debugShowReadings = false;
+  let debugCorner = "bottom-left";
   let lightOnClose = true;
   const systemLanguage = pickLocale(hooks.languages ?? []);
   const sensorOptions = { pingHost: null, mangohudDir: null };
@@ -1317,7 +1323,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       }
       return Promise.resolve({ sampleMillis: 3, readings, live: live || null, liveError, video: videoOfTheme(), reconnecting });
     },
-    session: () => Promise.resolve({ screen: selectedScreen, theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location, minRefreshSeconds: DEMO_MIN_REFRESH }),
+    session: () => Promise.resolve({ version: 'demo', screen: selectedScreen, theme: structuredClone(theme), location: chosen.theme ? null : saved[0].location, minRefreshSeconds: DEMO_MIN_REFRESH }),
     selectScreen: async (key) => {
       if (selectedScreen !== key) {
         if (selectedScreen) screenDocuments.set(selectedScreen, { theme, live });
@@ -1333,8 +1339,9 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       const started = performance.now();
       const t = now();
       const video = videoPicture(next, motion, t * 1000);
-      const frame = renderApprox(next, t, video);
-      const due = [demoNextChange(next, t * 1000), video?.nextMs ?? null].filter((ms) => ms !== null);
+      const transitions = cards.update(next, t * 1000, motion);
+      const frame = renderApprox(next, t, video, transitions);
+      const due = [demoNextChange(next, t * 1000), video?.nextMs ?? null, transitions.size ? 33 : null].filter((ms) => ms !== null);
       return Promise.resolve({ ...frame, millis: performance.now() - started, nextMs: due.length ? Math.min(...due) : null });
     },
     /** What Auto is for the theme's video background, like `video_auto`. */
@@ -1477,8 +1484,10 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       for (const cb of quitListeners) cb();
     },
     windowState: () => windowState,
+    setDebug: (on, show, corner) => { debug = on; debugShowReadings = show; debugCorner = corner ?? "bottom-left"; return Promise.resolve(); },
     setLightOnClose: (on) => { lightOnClose = on; return Promise.resolve(); },
     preferences: () => Promise.resolve({
+      debug, debugShowReadings, debugCorner, debugLogPath: "Demo: no file logging",
       lightOnClose,
       lightRuntime: true,
       language,

@@ -169,11 +169,14 @@ fn multi_screens(
     };
     let shared = bezel_sensors::SharedSensors::new(sensor_source(cli.fake, Some(settings)));
     let mut commands = Vec::new();
+    let screens = if cli.fake {
+        bezel_core::app::discover_screens(&fake_bus())
+    } else {
+        bezel_core::app::discover_screens(&SystemBus)
+    }
+    .unwrap_or_default();
     let mut seen = std::collections::BTreeSet::new();
     for key in keys.iter().filter_map(|k| k.as_str()) {
-        if !seen.insert(key.to_string()) {
-            continue;
-        }
         let theme = saved["screenThemes"][key].as_str().or_else(|| {
             (saved["liveScreen"].as_str() == Some(key))
                 .then(|| saved["lastTheme"].as_str())
@@ -185,6 +188,10 @@ fn multi_screens(
         };
         if !Path::new(theme).exists() {
             eprintln!("bezel light: saved theme for {key} is missing; skipped");
+            continue;
+        }
+        if !seen.insert(bezel_cli::light_recovery::physical_key(key, &screens)) {
+            eprintln!("bezel light: {key} is another endpoint of an active screen; skipped");
             continue;
         }
         commands.push(Cli {

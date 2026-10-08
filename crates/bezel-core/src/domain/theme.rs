@@ -416,6 +416,10 @@ pub enum ElementKind {
 /// One thing drawn on the canvas.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Element {
+    /// Optional multi-face container configuration.
+    pub card: Option<Card>,
+    /// Container and face owning this object; none means an independent object.
+    pub card_member: Option<CardMember>,
     /// Stable id.
     pub id: ElementId,
     /// Name shown in the layer list.
@@ -430,6 +434,63 @@ pub struct Element {
     pub locked: bool,
     /// What it is.
     pub kind: ElementKind,
+}
+
+/// A card base is drawn as a normal shape; face objects keep stable theme IDs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Card {
+    /// Face names, in presentation order.
+    pub faces: Vec<String>,
+    /// Face shown by the renderer.
+    pub active_face: usize,
+    /// Optional face transition; absent means an immediate switch.
+    pub transition: Option<CardTransition>,
+}
+
+/// Face transition style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardEffect {
+    /// Immediate switch.
+    None,
+    /// Crossfade.
+    Fade,
+    /// Sliding faces.
+    Slide,
+    /// Turn around the center axis.
+    Flip,
+}
+/// Direction of a slide or flip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardDirection {
+    /// Left.
+    Left,
+    /// Right.
+    Right,
+    /// Up.
+    Up,
+    /// Down.
+    Down,
+}
+/// Saved card animation settings (animation progress is never saved).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CardTransition {
+    /// Effect.
+    pub effect: CardEffect,
+    /// Movement direction.
+    pub direction: CardDirection,
+    /// Duration in milliseconds, 150 to 3000.
+    pub duration_ms: u32,
+    /// Move the common base with the face.
+    pub include_base: bool,
+}
+
+/// Membership in a card shared base or one face.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CardMember {
+    /// Card element ID.
+    pub parent: ElementId,
+    /// None belongs to the shared base, otherwise a face index.
+    pub face: Option<usize>,
 }
 
 /// A complete theme.
@@ -493,6 +554,23 @@ impl Theme {
         self.elements.iter().find(|e| e.id == id)
     }
 
+    /// Visibility includes the owning card and its active face.
+    pub fn is_visible(&self, element: &Element) -> bool {
+        if !element.visible {
+            return false;
+        }
+        let Some(member) = &element.card_member else {
+            return true;
+        };
+        self.element(member.parent).is_some_and(|parent| {
+            parent.visible
+                && parent
+                    .card
+                    .as_ref()
+                    .is_some_and(|card| member.face.is_none_or(|face| face == card.active_face))
+        })
+    }
+
     /// Every asset the theme references (for packaging and loading).
     pub fn assets(&self) -> Vec<AssetRef> {
         let mut out = Vec::new();
@@ -517,13 +595,27 @@ impl Theme {
         out
     }
 
+    fn is_sampled(&self, element: &Element) -> bool {
+        self.is_visible(element)
+            || (element.visible
+                && element.card_member.as_ref().is_some_and(|m| {
+                    self.element(m.parent).is_some_and(|parent| {
+                        parent.visible
+                            && parent.card.as_ref().is_some_and(|card| {
+                                card.transition
+                                    .is_some_and(|t| t.effect != CardEffect::None)
+                            })
+                    })
+                }))
+    }
+
     /// The sensors the visible elements show: what running this theme
     /// wants measured (hidden elements are not drawn).
     pub fn sensor_keys(&self) -> BTreeSet<SensorKey> {
         let mut keys: BTreeSet<SensorKey> = self
             .elements
             .iter()
-            .filter(|e| e.visible)
+            .filter(|e| self.is_sampled(e))
             .filter_map(|e| match &e.kind {
                 ElementKind::Text {
                     content: TextContent::Sensor { key, .. },
@@ -536,7 +628,7 @@ impl Theme {
                 _ => None,
             })
             .collect();
-        for e in self.elements.iter().filter(|e| e.visible) {
+        for e in self.elements.iter().filter(|e| self.is_sampled(e)) {
             if let ElementKind::Text {
                 content: TextContent::Weather(weather),
                 ..
@@ -565,7 +657,7 @@ impl Theme {
                 && b.y < height
                 && b.x + b.width > 0.0
                 && b.y + b.height > 0.0;
-            (e.visible && e.opacity > 0.0 && on_canvas).then_some(asset)
+            (self.is_visible(e) && e.opacity > 0.0 && on_canvas).then_some(asset)
         })
     }
 
@@ -594,6 +686,8 @@ mod tests {
 
     fn element(id: u32, kind: ElementKind) -> Element {
         Element {
+            card: None,
+            card_member: None,
             id: ElementId(id),
             name: format!("e{id}"),
             frame: BoxF::new(0.0, 0.0, 100.0, 40.0),

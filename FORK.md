@@ -74,3 +74,147 @@ Bezel remains GPL-3.0-or-later. Tabler SVGs retain their MIT notice; see `apps/b
 Weather data: [Open-Meteo](https://open-meteo.com/) under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); geocoding data: [GeoNames](https://www.geonames.org/). Current conditions are model-based. See [the API usage terms](https://open-meteo.com/en/terms) for public/commercial use.
 
 The bundled MDI hardware subset is Apache 2.0; see `apps/bezel-studio/src/assets/mdi/LICENSE` and `NOTICE`. Brand/logo icons are excluded. The Tabler catalog keeps its MIT license.
+
+## Card widget (first version)
+
+Add **Card** from Widgets, or select several objects and choose **Create card
+from selection** in the inspector. The card has an editable shape base and one
+initial face. Use **Displayed face** to switch, and add, rename, duplicate,
+reorder or delete faces. Deleting a face also deletes its objects; Undo restores
+both. At least one face remains.
+
+New widgets added while a card or one of its objects is selected join that
+face. Each object's **Card membership** controls its container and face; choose
+**Shared base (always visible)** for common objects, or **No card** to detach.
+Select the card through Layers to manage faces. Selecting a face object through
+Layers displays its face. Move, resize, align, duplicate or copy the card to act
+on all its objects, including inactive faces. Locked children move with their
+container; a locked card cannot be dragged. The base stays below its objects.
+
+Themes save face selection and ownership in optional `card` and `cardMember`
+metadata. Old themes remain unchanged when saved. Studio, thumbnails and Light
+render the selected face and the shared base, with inherited card visibility
+and opacity. A card's objects keep their existing font and stroke settings;
+resizing scales their frames, and objects are not clipped to the card bounds.
+Nested cards are not supported. Timed switches, entry/exit animations and software triggers are tracked in
+TODO.md and are not implemented yet.
+
+Validation: native theme round-trip and invalid ownership rejection, renderer
+pixel checks for base/face visibility and inherited opacity, editor ownership,
+clipboard/Undo and group transformations, plus accessible browser checks in
+both UI languages and light/dark modes. Windows binaries are built together so
+Studio and Light use the same theme model.
+
+## Card face transitions
+
+A card's **Face animation** section offers None, Fade, Slide and Flip,
+150-1500 ms in the editor (themes accept up to 3000 ms), direction and a shared
+base toggle. **Animate next face** selects the next face with that transition;
+the selected face remains an ordinary theme edit and can be undone. Create
+a card and add faces using the normal editor controls.
+
+The native renderer transforms the entire face bitmap, including text, icons
+and indicators. Flip uses perspective projection with bilinear sampling and restrained shading, and keeps text
+unmirrored. Slide is clipped to the card rectangle during the transition.
+Fade adds weighted premultiplied layers to avoid a dark dip between faces.
+Progress lives only in the renderer, not the theme or clipboard. Changes
+interrupt the previous transition instead of building a queue. First loading a
+saved card shows its saved face immediately. Preview motion respects reduced
+motion; animations request at most 30 frames/s and skip late frames. Hardware
+transfer speed still determines the frame rate of a real display. Transition
+buffers are reused. Studio forwards transition deadlines through its shared
+renderer; each screen document has separate transition state, so rendering a
+second screen does not reset the first card. Sensor sampling retains the
+theme refresh interval. The preview subtracts rendering/IPC time from the next
+frame interval instead of adding an extra pause.
+
+Studio Live uses the native transition renderer and existing serial protocol.
+Light retains the settings and shows the saved face; autonomous/timed switching
+remains planned. The browser demo matches the effect poses for UI testing.
+Animated cards keep face sensors sampled at the theme's normal refresh rate,
+including inactive faces, so outgoing values remain available during a change.
+Tests cover pose geometry, interrupted/reduced motion, theme round-trip and
+validation, native mid-transition pixels and scheduling, and changing browser
+frames for every effect in both languages and light/dark modes. Actual display
+smoothness is still to be judged on hardware.
+
+
+Studio also releases a live connection parked in another document when the
+same Rev C screen is selected through its wake port. The edited document
+adopts the display port after connecting, preserving unsaved edits and any
+parked alias document. Startup resolves a saved wake-port selection to the
+listed display key. Renderer transition state follows each document when
+switching screens.
+
+
+Rev C serial status reads now wait for 10 ms of silence after a recognized
+`needReSend` / `renderCnt` reply, rather than 30 ms. Other replies and incomplete
+status fields keep the original 30 ms interval; no-response deadlines, packet
+formats, QUERY_STATUS frequency, write/drain checks and resend handling are
+unchanged. This removes 20 ms of host waiting from a normal partial frame,
+but USB transfer size and device rendering still limit physical frame rate.
+Set `BEZEL_REV_C_FAST_STATUS=0` when launching for the original receive timing.
+The animation demo button has been removed from Widgets; animation checks use
+cards constructed with ordinary editor controls.
+
+
+### Independent Studio frame deliveries (0.1.4)
+
+The refresh loop submits serial I/O to an idle-expiring worker per display rather
+than waiting for all displays in sequence. The existing borrowed-link state allows
+one outstanding frame per display; it skips intermediate updates instead of
+building a backlog. Completion notifications wake the refresh loop through a
+condition variable and an epoch counter, including completions that occur before
+it starts waiting. Rendering and sensor/session state remain shared. Initial Live
+activation and explicit UI pushes still report their synchronous send outcome.
+Link completions carry the live generation, preventing an old connection from
+replacing a newer one. Shutdown and storage continue to wait for the borrowed link.
+The packet protocol, framing and serial pacing are unchanged.
+
+Validation: a held slow display permits repeated frames and the latest edit on a
+fast display; four held displays start independently and one failure is isolated;
+completion before waiting is not lost; stale generations are rejected. Existing
+backend, storage and Windows shutdown regressions also pass. Physical animation
+FPS and USB-controller contention still need measurement after installation.
+
+
+### Recent Studio frame reuse (0.1.5)
+
+Studio preview and Live can reuse one unpainted frame per document for less than
+one animation interval (33.33 ms), ending earlier at the next GIF/transition
+boundary. Reuse never extends that interval or moves the original drawing clock.
+Theme/asset edits, sensor samples, catalog changes and motion-policy changes
+invalidate it. Video backgrounds keep separate rendering because device playback,
+posters and host-decoded pictures differ. The feature is opt-in at ThemeRuntime;
+CLI/Light retain their existing rendering behavior. Serial framing is unchanged.
+
+Debug logs include `render_reused` on deliveries and preview records, preview
+elapsed time and initial editor-lock wait, plus refresh-loop duration, frame
+preparation lock wait and age of the requested update. These measurements separate
+editor contention from serial completion; no panel Hz assumption is needed.
+
+Validation covers reuse in both directions, expiry, backward clocks, wall-clock
+changes, edit/asset/sample/catalog/motion invalidation, GIF boundaries and live
+cadence. Studio document isolation, native card transitions, independent workers
+and source logging restrictions remain covered by their existing regressions.
+The real-device FPS improvement must be measured after installation.
+
+
+### Card face surfaces (0.1.6)
+
+Native card transitions cache unprojected transparent face surfaces, separately
+from the background. Preview and Live share these surfaces when video cutouts do
+not change their pixels; device-video windows retain separate surfaces and masks.
+The cache is bounded to 32 MiB of pixel storage across renderer scenes. Content
+revisions invalidate asset/theme/sample/catalog changes; canvas, face members,
+wall clock, language and readings/history/units are also checked. GIF faces use
+the original drawing path, preserving their animation. The full card projection,
+shading, transition timing, background composition and serial protocol are retained.
+CLI/Light and Studio supply content revisions; renderer clients without revision
+tracking use the original path. Debug deliveries expose face cache hits/misses,
+fresh face drawing time and other card work (copy/projection/composition).
+
+Pixel comparisons against uncached rendering cover multiple Flip poses, both
+background variants, edits, readings, clock and revision invalidation, video-window
+masks and animated faces. Existing native transition/document and worker regressions
+remain applicable. Physical FPS improvement still requires a post-install capture.

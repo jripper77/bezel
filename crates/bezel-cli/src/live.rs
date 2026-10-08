@@ -876,6 +876,8 @@ mod tests {
         let location = ThemeLocation(path.display().to_string());
         let (mut theme, assets) = FsThemeStore.load(&location).unwrap();
         theme.elements.push(Element {
+            card: None,
+            card_member: None,
             id: ElementId(1),
             name: "ping".into(),
             frame: BoxF::new(0.0, 0.0, 200.0, 40.0),
@@ -1454,6 +1456,8 @@ mod tests {
         let gif = AssetRef("assets/spin.gif".into());
         assets.insert(gif.clone(), spinning_gif());
         theme.elements.push(Element {
+            card: None,
+            card_member: None,
             id: ElementId(1),
             name: "spin".into(),
             frame: BoxF::new(100.0, 100.0, 64.0, 64.0),

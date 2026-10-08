@@ -14,4 +14,41 @@ To roll back, restore the original Run value from `startup-backup/bezel-run.txt`
 
 ## Embedded sensors
 
+Light checks for a gap of at least ten seconds in its tray event loop. After
+such a gap (including sleep), it stops the old render workers, restarts the
+configured sensor task on a background thread and reopens the saved screens.
+This is a pause watchdog, not a native suspend notification; shorter pauses
+continue through the existing serial reconnect path. Recovery also waits while
+Studio owns the display. The display endpoint and wake MCU of a Rev C screen
+count as one physical screen when starting multiple workers.
+
 Implemented in `apps/bezel-sensors-helper/Program.cs`. The payload includes only the LHM library and its runtime dependencies, with licenses and source metadata; the CLI and editor read its bounded, fresh local snapshot. See `sensors/README.md` in the installation for details and rollback.
+
+Sensor recovery after standby now waits for a new embedded snapshot, with a
+60-second health deadline and bounded retries for tasks that exit immediately.
+Studio and Light serialize recovery through a per-user mutex. The helper uses
+mutex ownership instead of mutex-name existence and can acquire an abandoned
+instance lock after task termination. A sensor-worker watchdog also recovers a
+missing/stalled embedded reader in Studio and CLI without blocking the UI.
+Startup grace/cooldown is 90 seconds; a snapshot must be at least 60 seconds old
+before that watchdog restarts it. Accepted readings still expire after six
+seconds. The task remains the existing elevated Bezel-Sensors task.
+
+
+## Bezel Evo release versions
+
+`VERSION` is the local product release number, shown in Studio's header and
+window title and by `bezel --version`. It is independent of theme schema and
+inherited crate/package versions. Every delivered update must change it.
+
+From a shell with Cargo available, run `scripts/windows/build-evo.ps1` to
+increment the patch number and build Studio and Light together. Use
+`-Version 0.2.0` for an explicitly chosen release, or the same version to retry
+a failed build. The script builds into the existing `target/release` directory;
+copy verified executables into the existing `dist/bezel` after Studio closes.
+Development builds may use Cargo directly; do not deliver them under the last
+installed release number.
+
+Validation follows the change: compile and visually check small UI changes;
+run relevant integration tests for serial ownership, timing and sensors.
+The complete suite is reserved for broad changes or unresolved regressions.

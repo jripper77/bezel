@@ -1,3 +1,4 @@
+import { isShown } from '../editor/cards.js';
 import { CLOCK_PATTERNS, formatClock } from '../clock-format.js';
 // The right inspector: the theme when nothing is selected, one element's
 // properties, or align/distribute tools for several. Every edit is one
@@ -238,7 +239,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
   function backgroundFields(bg, assets) {
     if (bg.type === 'deviceVideo') {
       const context = video.context();
-      const windows = store.getState().theme.elements.some((e) => e.visible !== false && e.kind.type === 'shape' && e.kind.videoWindow);
+      const windows = store.getState().theme.elements.some((e) => isShown(store.getState().theme, e) && e.kind.type === 'shape' && e.kind.videoWindow);
       const status = context.live ? context.liveVideo?.state : null;
       return [
         el('strong', { text: fileNameOf(bg.path) }),
@@ -508,6 +509,51 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     });
   }
 
+  function cardForm(e) {
+    const c = e.card;
+    const action = (key, command, disabled = false, args = {}) => el('button', { type: 'button', class: 'text-button', text: t(key), disabled, onclick: () => store.dispatch(command, { id: e.id, ...args }) });
+    return [
+      el('h3', { text: t('card.faces') }),
+      selectField(t('card.activeFace'), String(c.activeFace), c.faces.map((name, i) => [String(i), name]), value => store.dispatch('cardFace', { id: e.id, face: Number(value) })),
+      textField(t('card.faceTitle'), c.faces[c.activeFace], name => {
+        if (!name.trim()) return;
+        const faces = [...c.faces]; faces[c.activeFace] = name.trim().slice(0, 32);
+        update(e.id, { card: { faces } });
+      }),
+      el('div', { class: 'actions' }, [
+        action('card.addFace', 'addCardFace', c.faces.length >= 16, { name: t('card.faceName', { number: c.faces.length + 1 }) }),
+        action('card.duplicateFace', 'duplicateCardFace', c.faces.length >= 16),
+        action('card.removeFace', 'removeCardFace', c.faces.length <= 1),
+        action('card.previous', 'reorderCardFace', c.activeFace === 0, { direction: -1 }),
+        action('card.next', 'reorderCardFace', c.activeFace === c.faces.length - 1, { direction: 1 }),
+      ]),
+      el('h3', { text: t('card.animation') }),
+      selectField(t('card.effect'), c.transition?.effect ?? 'none', ['none', 'fade', 'slide', 'flip'].map(value => [value, t(`card.effect.${value}`)]), effect => update(e.id, { card: { transition: { effect, direction: c.transition?.direction ?? 'left', durationMs: c.transition?.durationMs ?? 650, includeBase: c.transition?.includeBase ?? true } } })),
+      ...(c.transition && c.transition.effect !== 'none' ? [
+        rangeField(t('card.duration'), c.transition.durationMs, durationMs => update(e.id, { card: { transition: { durationMs } } }), { min: 150, max: 1500, step: 50, format: value => `${value} ms` }),
+        selectField(t('card.direction'), c.transition.direction, ['left', 'right', 'up', 'down'].map(value => [value, t(`card.direction.${value}`)]), direction => update(e.id, { card: { transition: { direction } } })),
+        checkField(t('card.includeBase'), c.transition.includeBase, includeBase => update(e.id, { card: { transition: { includeBase } } })),
+      ] : []),
+      action('card.animateNext', 'cardFace', c.faces.length < 2, { face: (c.activeFace + 1) % c.faces.length }),
+      el('p', { class: 'hint', text: t('card.animationHelp') }),
+      el('p', { class: 'hint', text: t('card.help') }),
+    ];
+  }
+  function membershipForm(e, theme) {
+    if (e.card) return [];
+    const cards = theme.elements.filter(p => p.card);
+    if (!cards.length) return [];
+    const parent = cards.find(p => p.id === e.cardMember?.parent);
+    return [
+      el('h3', { text: t('card.membership') }),
+      selectField(t('card.container'), parent ? String(parent.id) : '', [['', t('card.none')], ...cards.map(p => [String(p.id), p.name])], value => {
+        const target = cards.find(p => String(p.id) === value);
+        store.dispatch('attachCard', { ids: [e.id], parent: target?.id, face: target?.card.activeFace ?? null });
+      }),
+      parent && selectField(t('card.face'), e.cardMember.face === null ? '' : String(e.cardMember.face), [['', t('card.base')], ...parent.card.faces.map((name, i) => [String(i), name])], value => store.dispatch('attachCard', { ids: [e.id], parent: parent.id, face: value === '' ? null : Number(value) })),
+    ].filter(Boolean);
+  }
+
   // ------------------------------------------------------------ element --
   function elementForm(e, theme, assets) {
     const f = e.frame;
@@ -518,6 +564,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       el('h2', { text: t(`widget.${widgetOf(e)}`) }),
       textField(t('inspector.name'), e.name, (v) => v.trim() && update(e.id, { name: v.trim() })),
       showAs(e, theme),
+      ...(e.card ? cardForm(e) : membershipForm(e, theme)),
       el('h3', { text: t('inspector.position') }),
       el('div', { class: 'field-row' }, [
         numberField(t('inspector.x'), f.x, (v) => setFrame({ x: v })),
@@ -545,6 +592,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     const tool = (edge, paths) => el('button', { type: 'button', class: 'icon-button', title: t(`align.${edge}`), 'aria-label': t(`align.${edge}`), onclick: () => store.dispatch('align', { ids, edge }) }, [icon(paths)]);
     return [
       el('h2', { text: t('inspector.multi', { count: ids.length }) }),
+      el('button', { type: 'button', class: 'text-button', text: t('card.group'), onclick: () => store.dispatch('cardFromSelection', { ids }) }),
       el('h3', { text: t('inspector.alignTools') }),
       el('div', { class: 'button-row' }, [
         tool('left', ICONS.alignLeft), tool('centerX', ICONS.alignCenterX), tool('right', ICONS.alignRight),

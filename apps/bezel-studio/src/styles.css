@@ -63,6 +63,8 @@ select option, select optgroup { background-color: var(--surface-2); color: var(
 .topbar > * { flex: none; }
 .topbar > .spacer { flex: 1 1 0; }
 .brand { display: flex; align-items: center; gap: 8px; }
+.brand-label { display: grid; line-height: 1.2; }
+.brand-version { font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .brand-name { font-weight: 700; font-size: 1.05rem; }
 .topbar > .screen-chip { display: flex; flex: 0 1 auto; min-width: 0; align-items: center; gap: 6px; padding: 2px 4px 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }
 .screen-chip select { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; padding: 4px; max-width: 300px; text-overflow: ellipsis; }

@@ -21,9 +21,9 @@ test('at most 15 preview frames a second, whatever the GIF', () => {
   assert.equal(nextAnimationDelay({ nextMs: 0, elapsed: 0, perSecond: 10 }), 100);
 });
 
-test('a slow render leaves the backend idle at least as long', () => {
+test('a slow render does not add another full render duration of waiting', () => {
   // A full-screen GIF that takes 150 ms to render and send over the IPC.
-  assert.equal(nextAnimationDelay({ nextMs: 100, elapsed: 150 }), 150);
+  assert.equal(nextAnimationDelay({ nextMs: 100, elapsed: 150 }), 0);
 });
 
 /** An animation over a fake timer list. */
@@ -74,4 +74,9 @@ test('a hidden page or reduced motion gets no animation frame', () => {
   h.enabled = true;
   h.animation.shown({ nextMs: 50, elapsed: 0 });
   assert.equal(h.timers.length, 1);
+});
+
+test('30 fps waits only for the remainder of the interval', () => {
+  assert.equal(nextAnimationDelay({ nextMs: 33, elapsed: 25, perSecond: 30 }), 1000 / 30 - 25);
+  assert.equal(nextAnimationDelay({ nextMs: 33, elapsed: 40, perSecond: 30 }), 0);
 });

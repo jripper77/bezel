@@ -14,9 +14,8 @@ members = [
 ]
 
 [workspace.package]
-# 0.0.0 on purpose: CI stamps the version it computes from the commits into
-# the release build and the packages (same scheme as ddc-control). A local
-# `--version` says 0.0.0 unless scripts/install-local.sh stamps it.
+# Inherited crate/package version; upstream CI may stamp release packages.
+# Local product builds show the Bezel Evo release from VERSION instead.
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.98"

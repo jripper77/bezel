@@ -46,7 +46,7 @@ use bezel_core::domain::standby::PlanB;
 use bezel_core::domain::storage::{
     Confirmed, FileName, Medium, RemotePath, Repeat, StartMode, StorageInfo, StorageLocation,
 };
-use bezel_core::ports::{ScreenLink, ScreenStorage};
+use bezel_core::ports::{ScreenLink, ScreenStorage, TransferStats};
 use bezel_core::{BezelError, Result};
 
 use crate::driver::{
@@ -198,6 +198,7 @@ pub struct TuringRevC<W: Wire, P: Pause, C: Monotonic = SteadyClock> {
     /// The OPTIONS fields to send: the last brightness this link sent, and
     /// the start mode, flip and sleep delay of its last OPTIONS.
     options: Options,
+    transfer: TransferStats,
 }
 
 impl<W: Wire, P: Pause + Clone> TuringRevC<W, P> {
@@ -237,6 +238,7 @@ impl<W: Wire, P: Pause + Clone, C: Monotonic> TuringRevC<W, P, C> {
             last: None,
             seq: 0,
             streaming: false,
+            transfer: TransferStats::default(),
             options: Options {
                 brightness: DEFAULT_STORED_BRIGHTNESS,
                 start_mode: proto::StartMode::Default,
@@ -257,7 +259,11 @@ impl<W: Wire, P: Pause, C: Monotonic> TuringRevC<W, P, C> {
     }
 
     fn send(&mut self, bytes: &[u8]) -> Result<()> {
-        self.wire.send(bytes).map_err(io_err)?;
+        let started = Instant::now();
+        let result = self.wire.send(bytes).map_err(io_err);
+        self.transfer.write_ms += started.elapsed().as_secs_f64() * 1000.0;
+        result?;
+        self.transfer.bytes += bytes.len() as u64;
         self.sent_at = self.clock.now();
         Ok(())
     }
@@ -313,6 +319,7 @@ impl<W: Wire, P: Pause, C: Monotonic> TuringRevC<W, P, C> {
     }
 
     fn full_frame(&mut self, bgra: Vec<u8>) -> Result<()> {
+        self.transfer.kind = "full";
         if !self.streaming {
             self.enter_streaming()?;
         }
@@ -321,10 +328,13 @@ impl<W: Wire, P: Pause, C: Monotonic> TuringRevC<W, P, C> {
         self.send(&proto::blocks(&bgra))?;
         // The device may say something after a frame; drain it so it does not
         // pollute the next reply.
+        let reply_started = Instant::now();
         let after = self
             .wire
             .receive(REPLY_MAX, FRAME_REPLY_WAIT)
-            .map_err(io_err)?;
+            .map_err(io_err);
+        self.transfer.reply_ms += reply_started.elapsed().as_secs_f64() * 1000.0;
+        let after = after?;
         tracing::debug!(bytes = bgra.len(), reply = %printable(&after), "full frame");
         self.last = Some(bgra);
         self.seq = 0;
@@ -334,6 +344,7 @@ impl<W: Wire, P: Pause, C: Monotonic> TuringRevC<W, P, C> {
     /// A partial update carrying `list`, then QUERY_STATUS: a full frame
     /// next when the device asks for one.
     fn partial(&mut self, mut list: Vec<u8>, bgra: Vec<u8>) -> Result<()> {
+        self.transfer.kind = "partial";
         list.extend_from_slice(&proto::MAGIC);
         self.send(&proto::partial_header(list.len() as u32, self.seq))?;
         self.send(&proto::blocks(&list))?;
@@ -362,10 +373,13 @@ impl<W: Wire, P: Pause, C: Monotonic> TuringRevC<W, P, C> {
     /// QUERY_STATUS round-trip; `true` when the device asks for a full frame.
     fn needs_full_frame(&mut self) -> Result<bool> {
         self.send(&proto::simple(op::QUERY_STATUS))?;
+        let reply_started = Instant::now();
         let answer = self
             .wire
-            .receive(REPLY_MAX, REPLY_TIMEOUT)
-            .map_err(io_err)?;
+            .receive_status(REPLY_MAX, REPLY_TIMEOUT)
+            .map_err(io_err);
+        self.transfer.reply_ms += reply_started.elapsed().as_secs_f64() * 1000.0;
+        let answer = answer?;
         let status = Status::parse(&answer);
         tracing::debug!(reply = %printable(&answer), seq = self.seq, "QUERY_STATUS");
         Ok(status.is_some_and(|s| s.need_resend))
@@ -503,15 +517,28 @@ impl<W: Wire, P: Pause, C: Monotonic> ScreenLink for TuringRevC<W, P, C> {
     /// Frames keep their alpha per pixel in both pixel formats: over a video
     /// the screen plays, A = 0 shows the video (spec § 13.5).
     fn present(&mut self, frame: &Frame) -> Result<()> {
+        self.transfer = TransferStats {
+            kind: "unchanged",
+            ..TransferStats::default()
+        };
+        let started = Instant::now();
         let bgra = self.native(frame)?;
+        self.transfer.conversion_ms = started.elapsed().as_secs_f64() * 1000.0;
         let Some(last) = self.last.as_ref() else {
             return self.full_frame(bgra);
         };
-        match proto::diff_runs(last, &bgra, self.format) {
+        let started = Instant::now();
+        let diff = proto::diff_runs(last, &bgra, self.format);
+        self.transfer.diff_ms = started.elapsed().as_secs_f64() * 1000.0;
+        match diff {
             None => self.full_frame(bgra),
             Some(list) if list.is_empty() => self.keep_awake(bgra),
             Some(list) => self.partial(list, bgra),
         }
+    }
+
+    fn last_transfer(&self) -> Option<TransferStats> {
+        Some(self.transfer)
     }
 
     fn screen_off(&mut self) -> Result<()> {
@@ -887,6 +914,12 @@ mod tests {
         );
         let data = &sent[n - 1];
         assert_eq!(data.len(), 3_701_250);
+        let stats = s.last_transfer().unwrap();
+        assert_eq!(stats.kind, "full");
+        assert_eq!(
+            stats.bytes,
+            sent[n - 3..].iter().map(|b| b.len() as u64).sum::<u64>()
+        );
         // Portrait on a reverse-portrait panel: rotated 180°, so the red
         // top-left pixel is the last native pixel (BGRA 00 00 FF FF).
         let bgra = s.last.as_ref().unwrap();
@@ -902,6 +935,8 @@ mod tests {
         // Unchanged frame: nothing is sent.
         s.present(&base).unwrap();
         assert_eq!(s.wire().sent.len(), before);
+        assert_eq!(s.last_transfer().unwrap().bytes, 0);
+        assert_eq!(s.last_transfer().unwrap().kind, "unchanged");
 
         let mut next = base.clone();
         next.fill_rect(Rect::new(10, 10, 3, 1), Rgba::WHITE);
@@ -915,6 +950,12 @@ mod tests {
         assert_eq!(list_len, 5 + 3 * 4 + 2, "one run of 3 BGRA pixels + EF 69");
         assert_eq!(&sent[1][list_len - 2..list_len], &[0xEF, 0x69]);
         assert_eq!(s.seq, 1);
+        let stats = s.last_transfer().unwrap();
+        assert_eq!(stats.kind, "partial");
+        assert_eq!(
+            stats.bytes,
+            sent.iter().map(|b| b.len() as u64).sum::<u64>()
+        );
     }
 
     #[test]

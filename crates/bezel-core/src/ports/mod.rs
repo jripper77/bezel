@@ -76,10 +76,31 @@ pub trait ScreenConnector {
     }
 }
 
+/// Host-side measurements of the most recent frame transfer.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TransferStats {
+    /// Bytes accepted by the serial wire, including framing and status query.
+    pub bytes: u64,
+    /// Rotation and RGBA to BGRA conversion time.
+    pub conversion_ms: f64,
+    /// Pixel difference encoding time.
+    pub diff_ms: f64,
+    /// Serial writes including drain time.
+    pub write_ms: f64,
+    /// Waiting for frame/status replies.
+    pub reply_ms: f64,
+    /// Full, partial or unchanged/keepalive frame.
+    pub kind: &'static str,
+}
+
 /// Driven port: one connected screen. Frames go in the orientation the user
 /// looks at; the adapter rotates and encodes them for the panel and decides
 /// between a full frame and a partial update.
 pub trait ScreenLink: Send {
+    /// Measurements when the adapter supports them; unavailable otherwise.
+    fn last_transfer(&self) -> Option<TransferStats> {
+        None
+    }
     /// Who answered the handshake.
     fn identity(&self) -> &ScreenIdentity;
     /// Backlight level.
@@ -414,6 +435,19 @@ pub struct RenderContext<'a> {
     pub backdrop: Backdrop<'a>,
 }
 
+/// Native card drawing costs, separate from serial delivery.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RenderStats {
+    /// Face surfaces reused in the last render.
+    pub face_hits: u32,
+    /// Face surfaces freshly drawn in the last render.
+    pub face_misses: u32,
+    /// Time drawing fresh face contents, milliseconds.
+    pub face_draw_ms: f64,
+    /// Other card work: buffers, caching, projection and composition, milliseconds.
+    pub face_compose_ms: f64,
+}
+
 /// Driven port: draws a theme into a frame of its canvas size.
 pub trait FrameRenderer: Send {
     /// Renders `theme` with `assets` in `context`.
@@ -423,6 +457,26 @@ pub trait FrameRenderer: Send {
         assets: &BTreeMap<AssetRef, Vec<u8>>,
         context: RenderContext<'_>,
     ) -> Result<Frame>;
+
+    /// Select transient state for a document when a renderer is shared.
+    /// Font/image caches may be shared, but transition clocks must be isolated.
+    fn set_scene(&mut self, _scene: u64) {}
+
+    /// An opaque content revision, changed when assets/readings/theme change.
+    /// Zero means no revision tracking: adapters must not reuse asset-dependent faces.
+    fn set_content_revision(&mut self, _revision: u64) {}
+
+    /// Drawing costs of the last frame, when available.
+    fn render_stats(&self) -> RenderStats {
+        RenderStats::default()
+    }
+
+    /// Next transition frame on the RenderContext animation clock.
+    fn next_change(&self) -> Option<Duration> {
+        None
+    }
+    /// Disable transient card motion for reduced-motion previews.
+    fn set_motion(&mut self, _allowed: bool) {}
 
     /// The frame times of the image `asset` when it is an animation (an
     /// animated GIF): what [`RenderContext::animation`] picks its frame

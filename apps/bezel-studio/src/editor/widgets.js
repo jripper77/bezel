@@ -30,7 +30,7 @@ export function defaultRange(quantity) {
 }
 
 /** Widget ids in palette order. */
-export const WIDGETS = Object.freeze(['text', 'value', 'clock', 'weather', 'image', 'shape', 'bar', 'ring', 'needle', 'graph']);
+export const WIDGETS = Object.freeze(['text', 'value', 'clock', 'weather', 'image', 'shape', 'card', 'bar', 'ring', 'needle', 'graph']);
 
 /**
  * The kind object and default size of a new widget.
@@ -46,6 +46,8 @@ export function createWidget(widget, canvas, sensor = {}) {
   const binding = { key, ...range };
   const fontSize = Math.max(10, Math.round(short / 12));
   switch (widget) {
+    case 'card':
+      return { kind: { type: 'shape', shape: 'rect', radius: 12, fill: '#1e293bff', stroke: null, strokeWidth: 0 }, card: { faces: ['Face 1'], activeFace: 0 }, width: short * 0.8, height: short * 0.6 };
     case 'text':
       return { kind: { type: 'text', content: { type: 'static', text: 'Text' }, style: textStyle(fontSize) }, width: short * 0.6, height: fontSize * 1.5 };
     case 'value':
@@ -101,6 +103,7 @@ export function boundKey(element) {
 
 /** Which widget an element was made from (for icons and names). */
 export function widgetOf(element) {
+  if (element.card) return 'card';
   const k = element.kind;
   if (k.type === 'text') {
     if (k.content.type === 'sensor') return 'value';

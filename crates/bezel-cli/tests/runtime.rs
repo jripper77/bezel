@@ -84,6 +84,8 @@ impl SensorSource for NoCatalog {
 fn graphing(name: &str, history: u16) -> Theme {
     let mut theme = Theme::blank(name, Size::new(480, 1920), Orientation::Portrait);
     theme.elements.push(Element {
+        card: None,
+        card_member: None,
         id: ElementId(1),
         name: "cpu graph".into(),
         frame: BoxF::new(0.0, 0.0, 480.0, 200.0),

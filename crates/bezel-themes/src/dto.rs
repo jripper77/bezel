@@ -245,6 +245,12 @@ pub struct FadeDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ElementDto {
+    /// Optional card container, absent in existing themes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card: Option<CardDto>,
+    /// Optional membership of a shared base or face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_member: Option<CardMemberDto>,
     /// Id.
     pub id: u32,
     /// Name.
@@ -262,6 +268,33 @@ pub struct ElementDto {
     pub locked: bool,
     /// Kind.
     pub kind: KindDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardDto {
+    pub faces: Vec<String>,
+    #[serde(default)]
+    pub active_face: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<CardTransitionDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardTransitionDto {
+    pub effect: String,
+    pub direction: String,
+    pub duration_ms: u32,
+    #[serde(default)]
+    pub include_base: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardMemberDto {
+    pub parent: u32,
+    pub face: Option<usize>,
 }
 
 /// A box.
@@ -1235,6 +1268,20 @@ impl From<&Theme> for ThemeDto {
                 .elements
                 .iter()
                 .map(|e| ElementDto {
+                    card: e.card.as_ref().map(|c| CardDto {
+                        faces: c.faces.clone(),
+                        active_face: c.active_face,
+                        transition: c.transition.map(|t| CardTransitionDto {
+                            effect: format!("{:?}", t.effect).to_lowercase(),
+                            direction: format!("{:?}", t.direction).to_lowercase(),
+                            duration_ms: t.duration_ms,
+                            include_base: t.include_base,
+                        }),
+                    }),
+                    card_member: e.card_member.as_ref().map(|m| CardMemberDto {
+                        parent: m.parent.0,
+                        face: m.face,
+                    }),
                     id: e.id.0,
                     name: e.name.clone(),
                     frame: BoxDto {
@@ -1307,6 +1354,57 @@ impl TryFrom<&ThemeDto> for Theme {
             .iter()
             .map(|e| {
                 Ok(Element {
+                    card: e
+                        .card
+                        .as_ref()
+                        .map(|c| -> R<bezel_core::domain::theme::Card> {
+                            use bezel_core::domain::theme::{
+                                CardDirection, CardEffect, CardTransition,
+                            };
+                            let transition = c
+                                .transition
+                                .as_ref()
+                                .map(|t| -> R<CardTransition> {
+                                    let effect = match t.effect.as_str() {
+                                        "none" => CardEffect::None,
+                                        "fade" => CardEffect::Fade,
+                                        "slide" => CardEffect::Slide,
+                                        "flip" => CardEffect::Flip,
+                                        _ => return err("unknown card transition effect"),
+                                    };
+                                    let direction = match t.direction.as_str() {
+                                        "left" => CardDirection::Left,
+                                        "right" => CardDirection::Right,
+                                        "up" => CardDirection::Up,
+                                        "down" => CardDirection::Down,
+                                        _ => return err("unknown card transition direction"),
+                                    };
+                                    if !(150..=3000).contains(&t.duration_ms) {
+                                        return err(
+                                            "card transition duration must be 150 to 3000 ms",
+                                        );
+                                    }
+                                    Ok(CardTransition {
+                                        effect,
+                                        direction,
+                                        duration_ms: t.duration_ms,
+                                        include_base: t.include_base,
+                                    })
+                                })
+                                .transpose()?;
+                            Ok(bezel_core::domain::theme::Card {
+                                faces: c.faces.clone(),
+                                active_face: c.active_face,
+                                transition,
+                            })
+                        })
+                        .transpose()?,
+                    card_member: e.card_member.as_ref().map(|m| {
+                        bezel_core::domain::theme::CardMember {
+                            parent: ElementId(m.parent),
+                            face: m.face,
+                        }
+                    }),
                     id: ElementId(e.id),
                     name: e.name.clone(),
                     frame: BoxF::new(e.frame.x, e.frame.y, e.frame.width, e.frame.height),
@@ -1318,6 +1416,41 @@ impl TryFrom<&ThemeDto> for Theme {
                 })
             })
             .collect::<R<Vec<_>>>()?;
+        if elements
+            .iter()
+            .any(|e| e.card.is_some() || e.card_member.is_some())
+        {
+            let ids: std::collections::BTreeSet<_> = elements.iter().map(|e| e.id.0).collect();
+            if ids.len() != elements.len() {
+                return err("duplicate element IDs in card theme");
+            }
+        }
+        for e in &elements {
+            if let Some(card) = &e.card
+                && (card.faces.is_empty()
+                    || card.faces.len() > 16
+                    || card.active_face >= card.faces.len()
+                    || card
+                        .faces
+                        .iter()
+                        .any(|name| name.trim().is_empty() || name.len() > 128)
+                    || e.card_member.is_some()
+                    || !matches!(e.kind, ElementKind::Shape { .. }))
+            {
+                return err("invalid card configuration");
+            }
+            if let Some(member) = &e.card_member {
+                let parent = elements
+                    .iter()
+                    .find(|parent| parent.id == member.parent && parent.id != e.id);
+                if !parent
+                    .and_then(|p| p.card.as_ref())
+                    .is_some_and(|c| member.face.is_none_or(|f| f < c.faces.len()))
+                {
+                    return err("invalid card membership");
+                }
+            }
+        }
         Ok(Theme {
             name: d.name.clone(),
             canvas: Size::new(d.canvas.width, d.canvas.height),

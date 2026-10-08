@@ -127,6 +127,8 @@ pub(super) fn run(arguments: Vec<OsString>) -> anyhow::Result<String> {
     let mut reload_saved = false;
     let studio_exe = directory.join("bezel-studio.exe");
     let mut fatal = None;
+    let mut pause_watch = bezel_cli::light_recovery::PauseWatch::new(std::time::SystemTime::now());
+    let mut sensor_recovery: Option<std::thread::JoinHandle<std::io::Result<()>>> = None;
     event_loop.run_return(|event, _, flow| {
         // Tao delivers LoopDestroyed synchronously inside WM_ENDSESSION,
         // then exits the process. Finish BEFORE returning from this callback.
@@ -152,6 +154,28 @@ pub(super) fn run(arguments: Vec<OsString>) -> anyhow::Result<String> {
             return;
         }
         *flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100));
+        if pause_watch.poll(std::time::SystemTime::now()) && !simulate && !finite
+            && !quit_requested.load(Ordering::SeqCst)
+        {
+            eprintln!("bezel light: long pause detected; reopening screens and hardware sensors");
+            stop.store(true, Ordering::SeqCst);
+            reload_saved = true;
+            if sensor_recovery.is_none() && directory.join("sensors/bezel-sensors-helper.exe").is_file() {
+                match std::thread::Builder::new().name("bezel-resume-sensors".into())
+                    .spawn(bezel_sensors::restart_libre_reader) {
+                    Ok(thread) => sensor_recovery = Some(thread),
+                    Err(error) => eprintln!("bezel light: sensor recovery could not start: {error}"),
+                }
+            }
+        }
+        if sensor_recovery.as_ref().is_some_and(|thread| thread.is_finished())
+            && let Some(thread) = sensor_recovery.take() {
+                match thread.join() {
+                    Ok(Ok(())) => eprintln!("bezel light: sensor reader recovered after pause; fresh snapshot verified"),
+                    Ok(Err(error)) => eprintln!("bezel light: sensor recovery failed: {error}"),
+                    Err(_) => eprintln!("bezel light: sensor recovery thread panicked"),
+                }
+        }
         let wants_open = match event {
             Event::UserEvent(Action::Menu(ref event)) if event.id == *quit.id() => {
                 quit_requested.store(true, Ordering::SeqCst);
@@ -232,6 +256,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> anyhow::Result<String> {
             && !pending_open
             && opening.is_none()
             && worker.is_none()
+            && sensor_recovery.is_none()
             && Instant::now() >= retry_at
         {
             let mut cli = match Cli::try_parse_from(&arguments) {

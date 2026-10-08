@@ -92,10 +92,13 @@ function fail(e) {
 
 // ------------------------------------------------------------ store ----
 const session = await bridge.session().catch(() => null);
+const appVersion = session?.version ?? 'dev';
+$('app-version').textContent = `v${appVersion}`;
+document.title = `Bezel Evo ${appVersion}`;
 // Without a session: a blank theme for the 8.8", horizontal like the backend's
 // default for bar-shaped screens.
 // New elements and copies are named in the UI's language.
-const names = { widget: (widget) => t(`widget.${widget}`), copy: (name) => t('layers.copyOf', { name }) };
+const names = { face: (number) => t('card.faceName', { number }), widget: (widget) => t(`widget.${widget}`), copy: (name) => t('layers.copyOf', { name }) };
 const store = createStore(session?.theme ?? { schema: 1, name: t('themes.untitled'), canvas: { width: 1920, height: 480 }, orientation: 'landscape', refreshSeconds: 1, background: { type: 'color', color: '#0c0e16ff' }, elements: [] }, { names });
 state.location = session?.location ?? null;
 state.screen = session?.screen ?? null;
@@ -333,6 +336,7 @@ async function refreshAuto() {
 // pace (T-7.11, D-2026-10-01-video-background-framing-5), at most 15 frames
 // a second; not while the window is hidden or motion is reduced.
 const animation = createPreviewAnimation({
+  perSecond: 30,
   request: () => renderNow(),
   enabled: motionAllowed,
 });

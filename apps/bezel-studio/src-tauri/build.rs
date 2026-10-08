@@ -51,6 +51,7 @@ const COMMANDS: &[&str] = &[
     "preferences",
     "set_language",
     "set_light_on_close",
+    "set_debug",
     "set_sensor_options",
     "pick_folder",
     "show_sensors",

@@ -1018,7 +1018,7 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
                 .backend
                 .render(&theme, TIME, Instant::now(), Motion::Allowed);
             assert!(previewed.is_ok());
-            f.backend.tick(TIME, Instant::now());
+            f.backend.tick_and_wait(TIME, Instant::now());
             assert_eq!(f.connector.log().frames.len(), 2);
             // The screen's port has one owner meanwhile.
             assert!(
@@ -1046,7 +1046,7 @@ fn on_a_live_screen_a_job_borrows_the_link_and_frames_pause() {
     assert_eq!(f.backend.sample().live.as_deref(), Some(KEY));
     // The next refresh (a second later).
     f.backend
-        .tick(TIME, Instant::now() + Duration::from_secs(2));
+        .tick_and_wait(TIME, Instant::now() + Duration::from_secs(2));
     assert_eq!(frames(), 4, "frames resumed");
 
     // The theme would hide what the screen plays: no play or stop while live.

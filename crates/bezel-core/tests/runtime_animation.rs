@@ -76,6 +76,8 @@ impl FrameRenderer for Clockwork {
 
 fn image(id: u32, asset: &str) -> Element {
     Element {
+        card: None,
+        card_member: None,
         id: ElementId(id),
         name: asset.into(),
         frame: BoxF::new(100.0, 100.0, 64.0, 64.0),
@@ -262,4 +264,25 @@ fn the_refresh_stays_within_the_callers_limit() {
     assert!(rt.sample_on_time(&mut sensors, ms(9_000)).expect("late"));
     assert_eq!(rt.next_sample(), ms(11_000));
     assert_eq!(sensors.samples_taken(), 2);
+}
+
+#[test]
+fn sharing_preview_keeps_the_animation_boundary_and_live_cadence() {
+    let theme = theme(vec![image(1, "a.gif")]);
+    let mut runtime = ThemeRuntime::new(theme, BTreeMap::new(), Language::English);
+    runtime.reuse_recent_frames(true);
+    let mut renderer = Clockwork::new(ms(40));
+    runtime
+        .sample_on_time(&mut FakeSensors::demo(), Duration::ZERO)
+        .unwrap();
+    runtime.preview(&mut renderer, TIME, ms(25)).unwrap();
+    runtime
+        .render_at(&mut renderer, TIME, ms(30), Duration::ZERO)
+        .unwrap();
+    assert!(runtime.render_reused());
+    // Reuse keeps the original drawing clock; it doesn't defer the next live frame.
+    assert_eq!(runtime.next_due(), ms(25) + MIN_FRAME_STEP);
+    runtime.preview(&mut renderer, TIME, ms(40)).unwrap();
+    assert!(!runtime.render_reused());
+    assert_eq!(renderer.drawn, vec![ms(25), ms(40)]);
 }

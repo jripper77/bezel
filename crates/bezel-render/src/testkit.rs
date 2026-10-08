@@ -52,6 +52,8 @@ pub(crate) fn key(k: &str) -> SensorKey {
 /// A visible, opaque element.
 pub(crate) fn element(frame: BoxF, kind: ElementKind) -> Element {
     Element {
+        card: None,
+        card_member: None,
         id: ElementId(1),
         name: "e".into(),
         frame,

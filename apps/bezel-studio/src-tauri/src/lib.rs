@@ -13,6 +13,8 @@
 pub mod backend;
 pub mod clock;
 pub mod commands;
+pub mod debug;
+mod deliveries;
 pub mod diag;
 pub mod dto;
 pub mod gifs;
@@ -20,6 +22,7 @@ pub mod library;
 pub mod manager;
 pub mod media;
 pub mod messages;
+mod performance;
 pub mod power;
 pub mod settings;
 pub mod standby;
@@ -53,9 +56,7 @@ use bezel_sensors::{FakeSensors, SystemSensors};
 use bezel_themes::FsThemeStore;
 use tauri::{App, AppHandle, Emitter as _, Manager, RunEvent, Runtime, WindowEvent};
 
-use crate::backend::{
-    Backend, DEFAULT_MODEL, SensorFactory, Session, default_orientation, sleep_until,
-};
+use crate::backend::{Backend, DEFAULT_MODEL, SensorFactory, Session, default_orientation};
 use crate::commands::{Shared, Unsaved};
 use crate::diag::DiagCode;
 use crate::gifs::{
@@ -363,6 +364,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::close_window,
             commands::preferences,
             commands::set_light_on_close,
+            commands::set_debug,
             commands::set_language,
             commands::set_sensor_options,
             commands::pick_folder,
@@ -510,6 +512,7 @@ fn setup<R: Runtime>(app: &App<R>, start: Start<R>) -> Result<(), Box<dyn std::e
     let backend: Shared = Arc::new(compose(&folders, start.adapters, start.simulate));
     // Before the window asks for it: the last theme, or a blank one for the
     // connected screen.
+    backend.restore_debug();
     backend.restore_theme();
     // Restore every screen before exposing the session to the webview:
     // selecting a background document must not race the first preview.
@@ -540,9 +543,16 @@ fn add_tray(app: &AppHandle, live: bool, text: &Texts) -> tauri::Result<LiveSync
     Ok(Box::new(move |live| item.sync(live)))
 }
 
+/// Shared release number shown by the native UI and the local CLI.
+pub const EVO_VERSION: &str = match option_env!("BEZEL_VERSION") {
+    Some(version) => version,
+    None => include_str!("../../../../VERSION").trim_ascii(),
+};
+
 /// Shows, restores and focuses the main window.
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        let _ = window.set_title(&format!("Bezel Evo {EVO_VERSION}"));
         // Best effort for each step: the window manager may refuse focus or
         // unminimizing, and there is nothing better to do than try the rest.
         let _ = window.show();
@@ -799,12 +809,13 @@ fn start_refresh_loop(backend: Shared, live_item: LiveSync) {
                 diag::report(DiagCode::SensorCatalogNotRead);
             }
             loop {
+                let epoch = backend.delivery_epoch();
                 let due = backend.tick(clock::now(), Instant::now());
                 // Not under the session's lock: the menu waits for the main
                 // thread.
                 let live = backend.studio().any_live();
                 live_item(live);
-                std::thread::sleep(sleep_until(due, Instant::now()));
+                backend.wait_refresh(due, epoch);
             }
         });
     if let Err(error) = spawned {
@@ -2577,7 +2588,11 @@ mod tests {
                      reads one"
                 ));
             }
-            if LOG_INSTALLERS.contains(&name) {
+            if LOG_INSTALLERS.contains(&name)
+                && !(self.file == "debug.rs"
+                    && self.outer() == Some("install")
+                    && name == "set_global_default")
+            {
                 self.refuse(format_args!(
                     "`{name}` installs a logger or a tracing subscriber: the studio installs none"
                 ));
@@ -2749,7 +2764,15 @@ mod tests {
             }
             let logs = segments.len() > 1 && LOGGERS.contains(&segments[0].as_str());
             let prints = called && (PRINT_MACROS.contains(&last) || LOG_MACROS.contains(&last));
-            if self.silent() && (logs || prints) {
+            let debug_trace = segments.first().is_some_and(|s| s == "tracing")
+                && (self.file == "debug.rs"
+                    || (self.file == "performance.rs"
+                        && matches!(
+                            self.outer(),
+                            Some("completed" | "refresh_tick" | "preview_render")
+                        )
+                        && last == "debug"));
+            if self.silent() && (logs || prints) && !debug_trace {
                 self.refuse(format_args!(
                     "`{}` prints or logs outside `{DIAG_MODULE}`",
                     segments.join("::")
@@ -3135,7 +3158,11 @@ mod tests {
             let logs = use_roots(&item.tree)
                 .iter()
                 .any(|root| LOGGERS.iter().any(|logger| *root == logger));
-            if self.silent() && logs {
+            if self.silent()
+                && logs
+                && !(self.file == "debug.rs"
+                    && use_roots(&item.tree).iter().all(|root| root == "tracing"))
+            {
                 self.refuse(format_args!("a logger imported outside `{DIAG_MODULE}`"));
             }
             for (path, renamed) in use_leaves(&item.tree, &[]) {
@@ -3706,7 +3733,7 @@ mod tests {
     ///   attribute of the key file JSON's `key`, which is a `KlipyKey`;
     /// - a function that reads the key's text (those three) calls no macro
     ///   at all;
-    /// - nothing prints or logs but `diag.rs`
+    /// - dynamic diagnostics are allowed only in opt-in `debug.rs` and the fixed performance event; other output stays in `diag.rs`
     ///   (D-2026-10-01-gif-sticker-search-12): elsewhere, production code
     ///   calls no print macro (`PRINT_MACROS`) nor a logger's macro by its
     ///   bare name, uses no logger's path, imports no logger, names no
@@ -3726,7 +3753,7 @@ mod tests {
     ///   `Box::new`): it says only what it is given;
     /// - nothing installs a logger or a tracing subscriber, nor changes the
     ///   panic hook (D-2026-10-01-gif-sticker-search-14): production code,
-    ///   `diag.rs` included, names none of `LOG_INSTALLERS`
+    ///   except `debug::install`, names none of `LOG_INSTALLERS`
     ///   (`set_global_default`, `set_logger`, ...), no path or import starts
     ///   with a logger installer's crate (`LOGGER_CRATES`), `set_hook` is
     ///   named once, in `diag::hook_panics`, which `main` calls first, and

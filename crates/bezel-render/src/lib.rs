@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod cards;
 mod composite;
 mod diagnostics;
 mod fonts;

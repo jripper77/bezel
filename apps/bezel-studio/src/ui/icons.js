@@ -7,6 +7,7 @@ export const ICONS = Object.freeze({
   clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
   image: ['M4 5h16v14H4z', 'M4 16l5-5 4 4 3-3 4 4', 'M15 9h.01'],
   shape: ['M5 5h14v14H5z'],
+  card: ['M3 5h18v14H3z', 'M7 9h10', 'M7 13h6'],
   bar: ['M4 10h16v4H4z', 'M4 10h9v4H4z'],
   ring: ['M12 3a9 9 0 1 1-9 9', 'M12 3a9 9 0 0 1 9 9'],
   needle: ['M4 17a8 8 0 0 1 16 0', 'M12 17l4-6'],

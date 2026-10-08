@@ -69,7 +69,7 @@ test('every palette widget creates a valid kind sized to the canvas', () => {
     const made = createWidget(w, canvas, { key: 'gpu.temperature', quantity: 'celsius' });
     assert.ok(made.width > 0 && made.height > 0, w);
     assert.ok(made.kind.type, w);
-    const el = { kind: made.kind };
+    const el = { kind: made.kind, card: made.card };
     assert.equal(widgetOf(el), w, w);
     if (['value', 'bar', 'ring', 'needle', 'graph'].includes(w)) assert.equal(boundKey(el), 'gpu.temperature', w);
   }

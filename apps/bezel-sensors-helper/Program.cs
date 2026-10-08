@@ -36,10 +36,9 @@ internal static class Program
         WindowsIdentity identity = WindowsIdentity.GetCurrent();
         bool elevated = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
         if (!elevated) { Log("Administrator rights required for hardware sensors"); return 3; }
-        bool created;
-        using (Mutex mutex = new Mutex(true, "Local\\BezelSensors-" + identity.User.Value, out created))
+        using (Mutex mutex = new Mutex(false, "Local\\BezelSensors-" + identity.User.Value))
         {
-            if (!created) { Log("Another sensor helper instance is already running; exiting"); return 0; }
+            if (!TryAcquire(mutex)) { Log("Another sensor helper instance owns the reader; exiting"); return 0; }
             Computer computer = null;
             try
             {
@@ -95,6 +94,14 @@ internal static class Program
                 mutex.ReleaseMutex();
             }
         }
+    }
+
+    // A named mutex can survive its owner (other handles and task teardown).
+    // Existence is not ownership. An abandoned mutex is acquired by WaitOne.
+    private static bool TryAcquire(Mutex mutex)
+    {
+        try { return mutex.WaitOne(0); }
+        catch (AbandonedMutexException) { Log("Acquired abandoned reader mutex"); return true; }
     }
 
     // A heartbeat from a previous session must not cancel the startup grace period.
@@ -187,6 +194,26 @@ internal static class Program
 
     private static int SelfTest()
     {
+        string testMutexName = "Local\\BezelSensorsTest-" + Guid.NewGuid().ToString("N");
+        using (Mutex observer = new Mutex(false, testMutexName))
+        {
+            Thread owner = new Thread(delegate() {
+                using (Mutex held = new Mutex(false, testMutexName)) { held.WaitOne(); }
+                // Exit without releasing ownership, retaining observer's handle.
+            });
+            owner.Start(); owner.Join();
+            if (!TryAcquire(observer)) return 1;
+            bool rejected = false;
+            Thread contender = new Thread(delegate() {
+                using (Mutex held = new Mutex(false, testMutexName)) {
+                    rejected = !TryAcquire(held);
+                    if (!rejected) held.ReleaseMutex();
+                }
+            });
+            contender.Start(); contender.Join();
+            observer.ReleaseMutex();
+            if (!rejected) return 1;
+        }
         DateTime started = new DateTime(2026, 10, 6, 20, 0, 0, DateTimeKind.Utc);
         if (ShouldStop(started, started.AddDays(-1), started.AddSeconds(1))) return 1;
         if (ShouldStop(started, started, started.AddSeconds(30))) return 1;

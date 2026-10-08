@@ -73,6 +73,8 @@ impl FrameRenderer for Recorder {
 fn graphing(name: &str, history: u16) -> Theme {
     let mut theme = Theme::blank(name, Size::new(480, 1920), Orientation::Portrait);
     theme.elements.push(Element {
+        card: None,
+        card_member: None,
         id: ElementId(1),
         name: "usage".into(),
         frame: BoxF {
@@ -192,4 +194,82 @@ fn a_catalog_read_again_gives_the_units() {
     assert_eq!(r.seen[0].unit, Some(Quantity::Celsius));
     rt.use_catalog(&[]);
     assert!(rt.quantities().is_empty(), "the sensor is gone");
+}
+
+#[test]
+fn recent_frames_are_shared_without_extending_their_lifetime() {
+    use std::time::Duration;
+    let mut runtime = ThemeRuntime::new(graphing("reuse", 8), BTreeMap::new(), Language::English);
+    runtime.reuse_recent_frames(true);
+    let mut renderer = Recorder::default();
+    runtime
+        .preview(&mut renderer, TIME, Duration::ZERO)
+        .unwrap();
+    runtime
+        .render_at(
+            &mut renderer,
+            TIME,
+            Duration::from_millis(10),
+            Duration::ZERO,
+        )
+        .unwrap();
+    assert!(runtime.render_reused());
+    assert_eq!(renderer.seen.len(), 1);
+    runtime
+        .preview(&mut renderer, TIME, Duration::from_millis(30))
+        .unwrap();
+    assert!(runtime.render_reused());
+    runtime
+        .preview(&mut renderer, TIME, Duration::from_millis(34))
+        .unwrap();
+    assert!(!runtime.render_reused());
+    assert_eq!(renderer.seen.len(), 2);
+    // Backward clocks and different wall-clock seconds also force fresh output.
+    runtime
+        .preview(&mut renderer, TIME, Duration::from_millis(33))
+        .unwrap();
+    assert!(!runtime.render_reused());
+    let mut later = TIME;
+    later.second += 1;
+    runtime
+        .preview(&mut renderer, later, Duration::from_millis(34))
+        .unwrap();
+    assert!(!runtime.render_reused());
+}
+
+#[test]
+fn edits_assets_samples_units_and_motion_invalidate_recent_frames() {
+    use std::time::Duration;
+    let mut runtime = ThemeRuntime::new(graphing("reuse", 8), BTreeMap::new(), Language::English);
+    runtime.reuse_recent_frames(true);
+    let mut renderer = Recorder::default();
+    let mut sensors = usage(&[10., 20.]);
+    for change in 0..5 {
+        runtime
+            .preview(&mut renderer, TIME, Duration::ZERO)
+            .unwrap();
+        match change {
+            0 => runtime.replace_theme(graphing("edited", 8)),
+            1 => runtime.add_asset(AssetRef("icon.png".into()), vec![1]),
+            2 => runtime.sample(&mut sensors).unwrap(),
+            3 => runtime.use_catalog(&[info("cpu.usage", Quantity::Percent)]),
+            _ => {
+                runtime.reuse_recent_frames(false);
+                runtime.reuse_recent_frames(true);
+            }
+        }
+        runtime
+            .preview(&mut renderer, TIME, Duration::from_millis(1))
+            .unwrap();
+        assert!(!runtime.render_reused(), "change {change}");
+    }
+    let seen = renderer.seen.len();
+    runtime.reuse_recent_frames(false);
+    runtime
+        .preview(&mut renderer, TIME, Duration::from_millis(2))
+        .unwrap();
+    runtime
+        .preview(&mut renderer, TIME, Duration::from_millis(3))
+        .unwrap();
+    assert_eq!(renderer.seen.len(), seen + 2);
 }

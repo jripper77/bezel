@@ -379,6 +379,8 @@ pub fn theme() -> Option<Theme> {
         .flatten()
         .enumerate()
         .map(|(i, (frame, kind))| Element {
+            card: None,
+            card_member: None,
             id: ElementId(i as u32 + 1),
             name: format!("element {}", i + 1),
             frame,

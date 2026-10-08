@@ -31,3 +31,14 @@ that the PSU resumed reading.
 The helper accepts `--once`, `--output PATH`, and `--names PATH`. `--self-test` checks invariant number serialization and rejects restoring control modes. The production executable requires elevation through its manifest; the build can be checked with an unelevated console compilation of the same source before configuring the privileged task.
 
 For rollback, stop/disable `Bezel-Sensors` and restore/enable `Bezel-LibreHardwareMonitor` from `startup-backup/Bezel-LibreHardwareMonitor.xml`. Its original executable and configuration are left installed. Bezel will fall back to the original Libre interface once the last embedded snapshot expires.
+
+After standby, Bezel's recovery waits for a newly published snapshot rather
+than just a Task Scheduler acknowledgement. Early exits are retried, and
+Studio/Light serialize concurrent recovery requests. The helper acquires its
+single-instance mutex even when an earlier owner abandoned it; an existing
+mutex name alone does not indicate a running reader. Studio and CLI also check
+for a missing or stalled embedded snapshot in their polling worker: allow
+startup/recovery 90 seconds, tolerate samples up to 60 seconds old before
+requesting recovery, and keep at most one restart worker per sensor reader.
+These recovery thresholds are separate from the six-second freshness limit
+used to accept readings. Missing data remains unavailable during recovery.

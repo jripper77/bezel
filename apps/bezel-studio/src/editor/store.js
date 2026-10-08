@@ -5,6 +5,7 @@
 
 import { ORIENTATIONS, isHorizontal, relayoutBox, roundBox, unionBox } from './geometry.js';
 import { createWidget, widgetOf } from './widgets.js';
+import { withChildren, transformCard } from './cards.js';
 
 /** Most undo steps kept. */
 export const HISTORY_LIMIT = 200;
@@ -41,29 +42,47 @@ export function merge(target, patch) {
 
 /** Pure theme commands. Each returns `{theme, selection?}`. */
 export const commands = {
-  add(theme, { widget, x, y, sensor, name, names = ENGLISH }) {
+  add(theme, { widget, x, y, sensor, name, cardMember, names = ENGLISH }) {
     const made = createWidget(widget, theme.canvas, sensor);
     const id = nextId(theme);
     const frame = roundBox({ x: x - made.width / 2, y: y - made.height / 2, width: made.width, height: made.height });
-    const element = { id, name: uniqueName(theme, name ?? sensor?.label ?? names.widget(widget)), frame, opacity: 1, visible: true, locked: false, kind: made.kind };
+    if (made.card) made.card.faces = [names.face?.(1) ?? 'Face 1'];
+    const element = { ...(cardMember && !made.card ? { cardMember } : {}), id, name: uniqueName(theme, name ?? sensor?.label ?? names.widget(widget)), frame, opacity: 1, visible: true, locked: false, kind: made.kind, ...(made.card ? { card: made.card } : {}) };
     return { theme: { ...theme, elements: [...theme.elements, element] }, selection: [id] };
   },
 
+  cardDemo(theme, { x, y, title = 'METRICS', alternate = 'DETAILS', names = ENGLISH }) {
+    const id = nextId(theme), size = Math.min(theme.canvas.width, theme.canvas.height);
+    const width = Math.round(size * 0.85), height = Math.round(size * 0.85);
+    const frame = { x: Math.round(x - width / 2), y: Math.round(y - height / 2), width, height };
+    const shape = createWidget('card', theme.canvas);
+    const parent = { id, name: uniqueName(theme, names.widget('card')), frame, visible: true, locked: false, opacity: 1, kind: { ...shape.kind, radius: 18 }, card: { faces: [title, alternate], activeFace: 0, transition: { effect: 'flip', direction: 'left', durationMs: 650, includeBase: true } } };
+    const objects = [parent];
+    for (let face = 0; face < 2; face++) {
+      const heading = createWidget('text', theme.canvas), ring = createWidget('ring', theme.canvas);
+      objects.push({ id: id + objects.length, name: face ? alternate : title, frame: { x: frame.x + width * 0.08, y: frame.y + height * 0.08, width: width * 0.84, height: height * 0.16 }, opacity: 1, visible: true, locked: false, cardMember: { parent: id, face }, kind: { ...heading.kind, content: { type: 'static', text: face ? alternate : title }, style: { ...heading.kind.style, size: Math.round(size * 0.05), align: 'center', color: face ? '#c4b5fdff' : '#67e8f9ff' } } });
+      objects.push({ id: id + objects.length, name: `${face ? 'RAM' : 'CPU'} Ring`, frame: { x: frame.x + width * 0.25, y: frame.y + height * 0.3, width: width * 0.5, height: width * 0.5 }, opacity: 1, visible: true, locked: false, cardMember: { parent: id, face }, kind: { ...ring.kind, binding: { ...ring.kind.binding, key: face ? 'memory.usage' : 'cpu.usage' }, fill: face ? '#a78bfaff' : '#22d3eeff', testFull: true, thickness: Math.round(size * 0.035) } });
+    }
+    return { theme: { ...theme, elements: [...theme.elements, ...objects] }, selection: [id] };
+  },
+
   remove(theme, { ids }) {
-    const set = new Set(ids);
+    const set = new Set(withChildren(theme, ids));
     return { theme: { ...theme, elements: theme.elements.filter((e) => !set.has(e.id)) }, selection: [] };
   },
 
   duplicate(theme, { ids, offset = 16, names = ENGLISH }) {
-    return commands.paste(theme, { elements: theme.elements.filter((e) => ids.includes(e.id)), offset, names });
+    return commands.paste(theme, { elements: theme.elements.filter((e) => withChildren(theme, ids).includes(e.id)), offset, names });
   },
 
   paste(theme, { elements, offset = 16, names = ENGLISH }) {
     let next = theme;
     const created = [];
+    const mapping = new Map(elements.map((e, index) => [e.id, nextId(theme) + index]));
     for (const e of elements) {
       const id = nextId(next);
       const copy = { ...clone(e), id, name: uniqueName(next, names.copy(e.name)), locked: false, frame: { ...e.frame, x: e.frame.x + offset, y: e.frame.y + offset } };
+      if (copy.cardMember) copy.cardMember = mapping.has(copy.cardMember.parent) ? { ...copy.cardMember, parent: mapping.get(copy.cardMember.parent) } : null;
       next = { ...next, elements: [...next.elements, copy] };
       created.push(id);
     }
@@ -71,13 +90,81 @@ export const commands = {
   },
 
   move(theme, { ids, dx, dy }) {
+    const parents = new Set(ids.filter(id => !theme.elements.find(e => e.id === id)?.locked));
+    ids = withChildren(theme, [...parents]);
     return {
-      theme: mapElements(theme, ids, (e) => (e.locked ? e : { ...e, frame: { ...e.frame, x: Math.round(e.frame.x + dx), y: Math.round(e.frame.y + dy) } })),
+      theme: mapElements(theme, ids, (e) => (e.locked && !parents.has(e.cardMember?.parent) ? e : { ...e, frame: { ...e.frame, x: Math.round(e.frame.x + dx), y: Math.round(e.frame.y + dy) } })),
     };
   },
 
   setFrame(theme, { id, frame }) {
-    return { theme: mapElements(theme, [id], (e) => (e.locked ? e : { ...e, frame: roundBox(frame) })) };
+    const e = theme.elements.find(e => e.id === id);
+    return { theme: e && !e.locked ? transformCard(theme, id, roundBox(frame)) : theme };
+  },
+
+  cardFace(theme, { id, face }) {
+    return { theme: mapElements(theme, [id], e => e.card && Number.isInteger(face) && face >= 0 && face < e.card.faces.length ? { ...e, card: { ...e.card, activeFace: face } } : e), selection: [id] };
+  },
+  addCardFace(theme, { id, name }) {
+    return { theme: mapElements(theme, [id], e => e.card && typeof name === 'string' && name.trim() && e.card.faces.length < 16 ? { ...e, card: { ...e.card, faces: [...e.card.faces, Array.from(name.trim()).slice(0, 32).join('')], activeFace: e.card.faces.length } } : e), selection: [id] };
+  },
+  duplicateCardFace(theme, { id, names = ENGLISH }) {
+    const parent = theme.elements.find(e => e.id === id);
+    if (!parent?.card || parent.card.faces.length >= 16) return { theme };
+    const face = parent.card.activeFace, nextFace = parent.card.faces.length;
+    const copies = theme.elements.filter(e => e.cardMember?.parent === id && e.cardMember.face === face);
+    const result = commands.paste(theme, { elements: copies, offset: 0, names });
+    const copied = new Set(result.selection);
+    const next = mapElements(result.theme, [...copied], e => ({ ...e, cardMember: { parent: id, face: nextFace } }));
+    return { theme: mapElements(next, [id], e => ({ ...e, card: { ...e.card, faces: [...e.card.faces, Array.from(names.copy(e.card.faces[face])).slice(0, 32).join('')], activeFace: nextFace } })), selection: [id] };
+  },
+  removeCardFace(theme, { id }) {
+    const parent = theme.elements.find(e => e.id === id);
+    if (!parent?.card || parent.card.faces.length <= 1) return { theme };
+    const face = parent.card.activeFace;
+    const elements = theme.elements.filter(e => !(e.cardMember?.parent === id && e.cardMember.face === face)).map(e => {
+      if (e.id === id) return { ...e, card: { ...e.card, faces: e.card.faces.filter((_, i) => i !== face), activeFace: Math.min(face, e.card.faces.length - 2) } };
+      if (e.cardMember?.parent === id && e.cardMember.face !== null && e.cardMember.face > face) return { ...e, cardMember: { ...e.cardMember, face: e.cardMember.face - 1 } };
+      return e;
+    });
+    return { theme: { ...theme, elements }, selection: [id] };
+  },
+  reorderCardFace(theme, { id, direction }) {
+    const parent = theme.elements.find(e => e.id === id);
+    if (!parent?.card) return { theme };
+    const from = parent.card.activeFace, to = from + direction;
+    if (![-1, 1].includes(direction) || to < 0 || to >= parent.card.faces.length) return { theme };
+    const swap = i => i === from ? to : i === to ? from : i;
+    const elements = theme.elements.map(e => {
+      if (e.id === id) { const faces = [...e.card.faces]; [faces[from], faces[to]] = [faces[to], faces[from]]; return { ...e, card: { ...e.card, faces, activeFace: to } }; }
+      if (e.cardMember?.parent === id && e.cardMember.face !== null) return { ...e, cardMember: { ...e.cardMember, face: swap(e.cardMember.face) } };
+      return e;
+    });
+    return { theme: { ...theme, elements }, selection: [id] };
+  },
+  attachCard(theme, { ids, parent, face = null }) {
+    const card = theme.elements.find(e => e.id === parent && e.card);
+    if (card && face !== null && (!Number.isInteger(face) || face < 0 || face >= card.card.faces.length)) return { theme };
+    const next = mapElements(theme, ids, e => e.card || e.id === parent ? e : { ...e, cardMember: card ? { parent, face } : null });
+    if (!card) return { theme: next };
+    // A card's base is below its objects, including objects added earlier.
+    const members = next.elements.filter(e => e.cardMember?.parent === parent);
+    const elements = next.elements.filter(e => e.cardMember?.parent !== parent);
+    elements.splice(elements.findIndex(e => e.id === parent) + 1, 0, ...members);
+    return { theme: { ...next, elements } };
+  },
+  cardFromSelection(theme, { ids, names = ENGLISH }) {
+    const members = theme.elements.filter(e => ids.includes(e.id) && !e.card && !e.locked);
+    if (!members.length) return { theme };
+    const bounds = unionBox(members.map(e => e.frame));
+    const made = createWidget('card', theme.canvas);
+    made.card.faces = [names.face?.(1) ?? 'Face 1'];
+    const id = nextId(theme);
+    const card = { id, name: uniqueName(theme, names.widget('card')), frame: { x: bounds.x - 12, y: bounds.y - 12, width: bounds.width + 24, height: bounds.height + 24 }, opacity: 1, visible: true, locked: false, kind: made.kind, card: made.card };
+    const elements = [...theme.elements];
+    elements.splice(elements.findIndex(e => e.id === members[0].id), 0, card);
+    const attached = commands.attachCard({ ...theme, elements }, { ids: members.map(e => e.id), parent: id, face: 0 });
+    return { ...attached, selection: [id] };
   },
 
   update(theme, { id, patch }) {
@@ -106,23 +193,27 @@ export const commands = {
     if (!ORIENTATIONS.includes(orientation) || orientation === theme.orientation) return { theme };
     if (isHorizontal(orientation) === isHorizontal(theme.orientation)) return { theme: { ...theme, orientation } };
     const canvas = { width: theme.canvas.height, height: theme.canvas.width };
-    const elements = theme.elements.map((e) => ({ ...e, frame: relayoutBox(e.frame, theme.canvas, canvas) }));
-    return { theme: { ...theme, orientation, canvas, elements } };
+    let next = { ...theme, orientation, canvas };
+    for (const e of theme.elements.filter(e => !e.cardMember)) next = transformCard(next, e.id, relayoutBox(e.frame, theme.canvas, canvas));
+    return { theme: next };
   },
 
   /** Moves one element to `index` in the z-order (0 = bottom). */
   reorder(theme, { id, index }) {
     const from = theme.elements.findIndex((e) => e.id === id);
     if (from < 0) return { theme };
-    const elements = [...theme.elements];
-    const [e] = elements.splice(from, 1);
-    elements.splice(Math.max(0, Math.min(index, elements.length)), 0, e);
+    const target = theme.elements[from];
+    const moved = new Set(target.card ? withChildren(theme, [id]) : [id]);
+    const block = theme.elements.filter(e => moved.has(e.id));
+    const elements = theme.elements.filter(e => !moved.has(e.id));
+    const floor = target.cardMember ? elements.findIndex(e => e.id === target.cardMember.parent) + 1 : 0;
+    elements.splice(Math.max(floor, Math.min(index, elements.length)), 0, ...block);
     return { theme: { ...theme, elements } };
   },
 
   /** Aligns boxes to the selection's bounds (or the canvas with one element). */
   align(theme, { ids, edge }) {
-    const targets = theme.elements.filter((e) => ids.includes(e.id) && !e.locked);
+    const targets = theme.elements.filter((e) => ids.includes(e.id) && !e.locked && !ids.includes(e.cardMember?.parent));
     const bounds = targets.length > 1 ? unionBox(targets.map((e) => e.frame)) : { x: 0, y: 0, ...theme.canvas };
     if (!bounds) return { theme };
     const place = (f) => {
@@ -136,14 +227,16 @@ export const commands = {
         default: return f;
       }
     };
-    return { theme: mapElements(theme, targets.map((e) => e.id), (e) => ({ ...e, frame: place(e.frame) })) };
+    let next = theme;
+    for (const e of targets) next = transformCard(next, e.id, place(e.frame));
+    return { theme: next };
   },
 
   /** Spreads three or more boxes evenly between the outermost two. */
   distribute(theme, { ids, axis }) {
     const pos = axis === 'x' ? 'x' : 'y';
     const len = axis === 'x' ? 'width' : 'height';
-    const targets = theme.elements.filter((e) => ids.includes(e.id) && !e.locked).sort((a, b) => a.frame[pos] - b.frame[pos]);
+    const targets = theme.elements.filter((e) => ids.includes(e.id) && !e.locked && !ids.includes(e.cardMember?.parent)).sort((a, b) => a.frame[pos] - b.frame[pos]);
     if (targets.length < 3) return { theme };
     const first = targets[0].frame;
     const last = targets[targets.length - 1].frame;
@@ -155,7 +248,9 @@ export const commands = {
       placed.set(e.id, Math.round(cursor));
       cursor += e.frame[len] + gap;
     }
-    return { theme: mapElements(theme, [...placed.keys()], (e) => ({ ...e, frame: { ...e.frame, [pos]: placed.get(e.id) } })) };
+    let next = theme;
+    for (const e of targets) next = transformCard(next, e.id, { ...e.frame, [pos]: placed.get(e.id) });
+    return { theme: next };
   },
 };
 
@@ -221,7 +316,12 @@ export function createStore(theme, { names = ENGLISH } = {}) {
       const command = commands[name];
       if (!command) throw new Error(`unknown command ${name}`);
       const before = state.theme;
-      const result = command(state.theme, { names, ...args });
+      let cardMember;
+      if (name === 'add' && args.widget !== 'card' && state.selection.length === 1) {
+        const selected = state.theme.elements.find(e => e.id === state.selection[0]);
+        cardMember = selected?.card ? { parent: selected.id, face: selected.card.activeFace } : selected?.cardMember;
+      }
+      const result = command(state.theme, { names, cardMember, ...args });
       if (result.theme === before && result.selection === undefined) return state;
       if (gesture) {
         if (!gesture.recorded) {
@@ -258,7 +358,7 @@ export function createStore(theme, { names = ENGLISH } = {}) {
     },
 
     copySelection() {
-      const selected = selectedElements(state);
+      const selected = state.theme.elements.filter(e => withChildren(state.theme, state.selection).includes(e.id));
       if (!selected.length) return;
       clipboard = clone(selected);
       pasteCount = 0;

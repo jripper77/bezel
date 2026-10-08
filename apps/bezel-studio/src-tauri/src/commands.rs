@@ -492,6 +492,19 @@ pub fn set_light_on_close(state: State<'_, Shared>, on: bool) {
         .update(|settings| settings.light_on_close = Some(on));
 }
 
+/// Enables bounded diagnostic logs and the optional physical-screen overlay.
+#[tauri::command]
+pub fn set_debug(
+    state: State<'_, Shared>,
+    on: bool,
+    show_readings: bool,
+    corner: Option<crate::performance::Corner>,
+) -> UiResult<()> {
+    state
+        .set_debug(on, show_readings, corner.unwrap_or_default())
+        .map_err(|e| UiError::from(bezel_core::BezelError::Transport(e.to_string())))
+}
+
 /// The language chosen in the settings and the system's.
 #[tauri::command]
 pub fn preferences(state: State<'_, Shared>) -> PreferencesDto {

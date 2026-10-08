@@ -403,6 +403,8 @@ mod tests {
         let mut theme = Theme::blank("t", Size::new(480, 1920), Orientation::Portrait);
         for (id, key) in (1..).zip(shown) {
             theme.elements.push(Element {
+                card: None,
+                card_member: None,
                 id: ElementId(id),
                 name: (*key).to_string(),
                 frame: BoxF::new(0.0, 0.0, 100.0, 40.0),

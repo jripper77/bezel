@@ -18,6 +18,9 @@ use crate::texts::parse_language;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    pub debug: bool,
+    pub debug_show_readings: bool,
+    pub debug_corner: crate::performance::Corner,
     /// Location of the last theme opened or saved.
     pub last_theme: Option<String>,
     /// Use the light Windows runtime after closing the editor; absent means enabled.

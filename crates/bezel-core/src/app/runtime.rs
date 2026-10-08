@@ -160,12 +160,18 @@ impl fmt::Debug for HostVideo<'_> {
 
 /// What a frame is drawn from: the theme with its assets and the readings.
 struct Scene {
+    revision: u64,
     theme: Theme,
     assets: BTreeMap<AssetRef, Vec<u8>>,
     histories: Histories,
     quantities: Quantities,
     snapshot: Snapshot,
     language: Language,
+}
+
+fn content_revision() -> u64 {
+    static REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl Scene {
@@ -187,6 +193,7 @@ impl Scene {
             language: self.language,
             backdrop,
         };
+        renderer.set_content_revision(self.revision);
         renderer.render(&self.theme, &self.assets, context)
     }
 }
@@ -204,6 +211,14 @@ struct Cadence {
     drawn: Option<Duration>,
 }
 
+/// One unpainted frame shared by preview and live within a frame interval.
+struct RecentFrame {
+    frame: Frame,
+    time: LocalTime,
+    at: Duration,
+    until: Duration,
+}
+
 /// A theme being shown.
 pub struct ThemeRuntime {
     scene: Scene,
@@ -213,6 +228,10 @@ pub struct ThemeRuntime {
     /// The caller's clock at the last frame drawn: animated images show
     /// their frame of it.
     clock: Duration,
+    renderer_change: Option<Duration>,
+    reuse_frames: bool,
+    recent_frame: Option<RecentFrame>,
+    render_reused: bool,
     cadence: Cadence,
     /// Slowest refresh the caller allows, seconds.
     slowest: f32,
@@ -368,6 +387,7 @@ impl ThemeRuntime {
             also: Wanted::nothing(),
             wanted,
             scene: Scene {
+                revision: content_revision(),
                 theme,
                 assets,
                 histories,
@@ -382,9 +402,67 @@ impl ThemeRuntime {
             playing: None,
             timelines: BTreeMap::new(),
             clock: Duration::ZERO,
+            renderer_change: None,
+            reuse_frames: false,
+            recent_frame: None,
+            render_reused: false,
             cadence: Cadence::default(),
             slowest: DEFAULT_SLOWEST_REFRESH,
         }
+    }
+
+    /// Opt in to sharing recent frames between preview and live. The caller
+    /// must use the same renderer and invalidate reuse when motion policy changes.
+    /// Video backgrounds are excluded because their preview and live differ.
+    pub fn reuse_recent_frames(&mut self, enabled: bool) {
+        if self.reuse_frames != enabled {
+            self.recent_frame = None;
+        }
+        self.reuse_frames = enabled;
+    }
+
+    /// Whether the last render reused a recent frame instead of drawing again.
+    pub fn render_reused(&self) -> bool {
+        self.render_reused
+    }
+
+    fn draw_frame(
+        &mut self,
+        renderer: &mut dyn FrameRenderer,
+        time: LocalTime,
+        now: Duration,
+        backdrop: Backdrop<'_>,
+    ) -> Result<Frame> {
+        self.render_reused = false;
+        let eligible = self.reuse_frames
+            && matches!(self.video, VideoState::NoVideo)
+            && matches!(backdrop, Backdrop::Poster);
+        if eligible
+            && let Some(recent) = &self.recent_frame
+            && recent.time == time
+            && now >= recent.at
+            && now < recent.until
+        {
+            self.render_reused = true;
+            return Ok(recent.frame.clone());
+        }
+        self.recent_frame = None;
+        let frame = self.scene.draw(renderer, time, now, backdrop)?;
+        self.renderer_change = renderer.next_change();
+        if eligible {
+            // Never cross an image/transition boundary or hold a frame longer
+            // than one animation interval. Reuse does not extend its lifetime.
+            let until = self
+                .next_animation_change(now)
+                .map_or(now + MIN_FRAME_STEP, |due| due.min(now + MIN_FRAME_STEP));
+            self.recent_frame = Some(RecentFrame {
+                frame: frame.clone(),
+                time,
+                at: now,
+                until,
+            });
+        }
+        Ok(frame)
     }
 
     /// The theme being shown.
@@ -401,6 +479,8 @@ impl ThemeRuntime {
     /// them); the other assets stay. New bytes for the theme's video drop
     /// what [`Self::set_video_info`] said of it.
     pub fn add_asset(&mut self, asset: AssetRef, bytes: Vec<u8>) {
+        self.scene.revision = content_revision();
+        self.recent_frame = None;
         self.timelines.remove(&asset);
         if self.is_video(&asset) && self.scene.assets.get(&asset) != Some(&bytes) {
             self.set_video_info(None);
@@ -451,6 +531,8 @@ impl ThemeRuntime {
     /// Takes what each sensor measures from `catalog`, read again when
     /// sensors come and go.
     pub fn use_catalog(&mut self, catalog: &[SensorInfo]) {
+        self.scene.revision = content_revision();
+        self.recent_frame = None;
         self.scene.quantities = Quantities::from_catalog(catalog);
     }
 
@@ -460,6 +542,8 @@ impl ThemeRuntime {
     /// again with [`Self::start_video`]. New bytes for the video drop what
     /// [`Self::set_video_info`] said of it.
     pub fn replace(&mut self, theme: Theme, assets: BTreeMap<AssetRef, Vec<u8>>) {
+        self.scene.revision = content_revision();
+        self.recent_frame = None;
         let before = self.device_video();
         if video_bytes(&theme, &assets) != video_bytes(&self.scene.theme, &self.scene.assets) {
             self.info = None;
@@ -486,6 +570,8 @@ impl ThemeRuntime {
     /// Puts `theme` in place, keeping the history of sensors still graphed;
     /// another video goes back to [`VideoState::NotStarted`].
     fn swap_theme(&mut self, theme: Theme) {
+        self.scene.revision = content_revision();
+        self.recent_frame = None;
         let mut histories = Histories::new(&theme.history_lengths());
         histories.adopt(&self.scene.histories);
         if video_of(&theme) != video_of(&self.scene.theme)
@@ -723,6 +809,8 @@ impl ThemeRuntime {
     /// Tells the sensors what is shown ([`Self::wanted`]), samples them and
     /// records the graph histories (once per `refresh_seconds`).
     pub fn sample(&mut self, sensors: &mut dyn SensorSource) -> Result<()> {
+        self.scene.revision = content_revision();
+        self.recent_frame = None;
         sensors.want(&self.wanted);
         if self.scene.quantities.is_empty() {
             // Units of sensor text; a catalog failure only costs the units.
@@ -758,6 +846,11 @@ impl ThemeRuntime {
         video: Duration,
     ) -> Result<Frame> {
         self.learn_animations(renderer);
+        if matches!(self.video, VideoState::NoVideo) {
+            return self.draw_frame(renderer, time, self.clock, Backdrop::Poster);
+        }
+        self.recent_frame = None;
+        self.render_reused = false;
         let framing = self.video_framing().unwrap_or(ResolvedFraming::plain(0));
         let canvas = self.scene.theme.canvas;
         let picture = match (&self.video, self.host.as_mut()) {
@@ -771,7 +864,9 @@ impl ThemeRuntime {
             (_, Some(picture)) => Backdrop::Frame(picture),
             _ => Backdrop::Poster,
         };
-        self.scene.draw(renderer, time, self.clock, backdrop)
+        let frame = self.scene.draw(renderer, time, self.clock, backdrop)?;
+        self.renderer_change = renderer.next_change();
+        Ok(frame)
     }
 
     /// Renders one frame from the last sample over `backdrop`, whatever the
@@ -845,8 +940,13 @@ impl ThemeRuntime {
         video: Duration,
     ) -> Result<Frame> {
         self.clock = now;
-        self.cadence.drawn = Some(now);
-        self.render(renderer, time, video)
+        let frame = self.render(renderer, time, video)?;
+        self.cadence.drawn = Some(if self.render_reused {
+            self.recent_frame.as_ref().map_or(now, |recent| recent.at)
+        } else {
+            now
+        });
+        Ok(frame)
     }
 
     /// One frame of a live loop at `now`: a sample when one is due
@@ -889,6 +989,7 @@ impl ThemeRuntime {
             .shown_images()
             .filter_map(|asset| self.timelines.get(asset)?.as_ref())
             .map(|timeline| timeline.next_change(at))
+            .chain(self.renderer_change)
             .min()
     }
 
@@ -930,7 +1031,7 @@ impl ThemeRuntime {
     ) -> Result<(Frame, Option<Duration>)> {
         self.learn_animations(renderer);
         self.clock = now;
-        let frame = self.scene.draw(renderer, time, now, backdrop)?;
+        let frame = self.draw_frame(renderer, time, now, backdrop)?;
         Ok((frame, self.next_animation_change(now)))
     }
 

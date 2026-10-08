@@ -17,6 +17,11 @@ pub trait Wire: Send {
     /// and the line stayed quiet briefly, once `max` bytes arrived, or empty
     /// on timeout.
     fn receive(&mut self, max: usize, timeout: Duration) -> io::Result<Vec<u8>>;
+    /// Rev C status replies may finish after a shorter quiet interval.
+    /// Other transports retain their existing receive behavior.
+    fn receive_status(&mut self, max: usize, timeout: Duration) -> io::Result<Vec<u8>> {
+        self.receive(max, timeout)
+    }
     /// Drops unread input.
     fn discard_input(&mut self) -> io::Result<()>;
 }
@@ -294,26 +299,12 @@ impl Wire for SerialWire {
     }
 
     fn receive(&mut self, max: usize, timeout: Duration) -> io::Result<Vec<u8>> {
-        let deadline = Instant::now() + timeout;
-        let mut out = Vec::new();
-        let mut last_byte = Instant::now();
-        let mut buf = [0u8; 1024];
-        while out.len() < max {
-            let now = Instant::now();
-            if now >= deadline || (!out.is_empty() && now.duration_since(last_byte) >= QUIET) {
-                break;
-            }
-            match self.port.read(&mut buf[..(max - out.len()).min(1024)]) {
-                Ok(0) => {}
-                Ok(n) => {
-                    out.extend_from_slice(&buf[..n]);
-                    last_byte = Instant::now();
-                }
-                Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(out)
+        receive_reply(max, timeout, false, Instant::now, |buf| self.port.read(buf))
+    }
+
+    fn receive_status(&mut self, max: usize, timeout: Duration) -> io::Result<Vec<u8>> {
+        let fast = !matches!(std::env::var("BEZEL_REV_C_FAST_STATUS").as_deref(), Ok("0"));
+        receive_reply(max, timeout, fast, Instant::now, |buf| self.port.read(buf))
     }
 
     fn discard_input(&mut self) -> io::Result<()> {
@@ -321,6 +312,54 @@ impl Wire for SerialWire {
             .clear(serialport::ClearBuffer::Input)
             .map_err(io::Error::other)
     }
+}
+
+/// Shorten only recognized status replies. No generic serial framing changes:
+/// incomplete/unrecognized replies retain the original 30 ms quiet interval.
+fn status_quiet(bytes: &[u8], fast: bool) -> Duration {
+    if fast {
+        let mut fields = bytes.split(|b| *b == b'|');
+        let valid_flag = matches!(fields.next(), Some(b"needReSend:0" | b"needReSend:1"));
+        let valid_count = fields
+            .next()
+            .and_then(|field| field.strip_prefix(b"renderCnt:"))
+            .is_some_and(|count| !count.is_empty() && count.iter().all(u8::is_ascii_digit));
+        if valid_flag && valid_count {
+            return Duration::from_millis(10);
+        }
+    }
+    QUIET
+}
+
+fn receive_reply(
+    max: usize,
+    timeout: Duration,
+    status: bool,
+    mut clock: impl FnMut() -> Instant,
+    mut read: impl FnMut(&mut [u8]) -> io::Result<usize>,
+) -> io::Result<Vec<u8>> {
+    let deadline = clock() + timeout;
+    let mut out = Vec::new();
+    let mut last_byte = clock();
+    let mut buf = [0u8; 1024];
+    while out.len() < max {
+        let now = clock();
+        if now >= deadline
+            || (!out.is_empty() && now.duration_since(last_byte) >= status_quiet(&out, status))
+        {
+            break;
+        }
+        match read(&mut buf[..(max - out.len()).min(1024)]) {
+            Ok(0) => {}
+            Ok(n) => {
+                out.extend_from_slice(&buf[..n]);
+                last_byte = clock();
+            }
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(out)
 }
 
 /// A fake wire that records what is sent and answers from a script.
@@ -390,6 +429,83 @@ mod tests {
         w.discard_input().unwrap();
         assert_eq!(w.discards, 1);
         assert_eq!(w.sent_with_opcode(3).len(), 1);
+    }
+
+    #[test]
+    fn status_reads_save_twenty_ms_without_changing_other_replies() {
+        use std::cell::Cell;
+        let origin = Instant::now();
+        for (fast, reply, expected) in [
+            (true, b"needReSend:0|renderCnt:123".as_slice(), 10),
+            (true, b"needReSend:1|renderCnt:0|theme:video".as_slice(), 10),
+            (false, b"needReSend:0|renderCnt:123".as_slice(), 30),
+            (true, b"needReSend:1|renderCnt:".as_slice(), 30),
+            (true, b"chs_88inch.dev1_rom1.90".as_slice(), 30),
+        ] {
+            let now = Cell::new(origin);
+            let mut sent = false;
+            let result = receive_reply(
+                1024,
+                Duration::from_secs(1),
+                fast,
+                || now.get(),
+                |buf| {
+                    if !sent {
+                        sent = true;
+                        buf[..reply.len()].copy_from_slice(reply);
+                        Ok(reply.len())
+                    } else {
+                        now.set(now.get() + Duration::from_millis(5));
+                        Err(io::ErrorKind::TimedOut.into())
+                    }
+                },
+            )
+            .unwrap();
+            assert_eq!(result, reply);
+            assert_eq!(now.get() - origin, Duration::from_millis(expected));
+        }
+    }
+    #[test]
+    fn status_reads_keep_fragments_and_original_no_reply_deadline() {
+        use std::cell::Cell;
+        let origin = Instant::now();
+        let now = Cell::new(origin);
+        let mut fragments = VecDeque::from([
+            b"needReSend:".as_slice(),
+            b"1|renderCnt:".as_slice(),
+            b"42".as_slice(),
+        ]);
+        let result = receive_reply(
+            1024,
+            Duration::from_secs(1),
+            true,
+            || now.get(),
+            |buf| {
+                now.set(now.get() + Duration::from_millis(5));
+                if let Some(chunk) = fragments.pop_front() {
+                    buf[..chunk.len()].copy_from_slice(chunk);
+                    Ok(chunk.len())
+                } else {
+                    Err(io::ErrorKind::TimedOut.into())
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(result, b"needReSend:1|renderCnt:42");
+        assert_eq!(now.get() - origin, Duration::from_millis(25));
+        let result = receive_reply(
+            1024,
+            Duration::from_millis(100),
+            true,
+            || now.get(),
+            |_| {
+                now.set(now.get() + Duration::from_millis(5));
+                Err(io::ErrorKind::TimedOut.into())
+            },
+        )
+        .unwrap();
+        assert!(result.is_empty());
+        assert_eq!(now.get() - origin, Duration::from_millis(125));
     }
 
     #[test]

@@ -6,6 +6,11 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
+Current development release: **0.1.6**. Native card transitions reuse transparent
+face surfaces independently of the background, including device-video themes.
+The full-card Flip and serial protocol are preserved; real-device improvements
+are measured through Debug logs rather than assumed from panel specifications.
+
 Development happens on [`windows-improvements`](https://github.com/jripper77/bezel/tree/windows-improvements).
 See [FORK.md](FORK.md) for implementation details, validation and limitations.
 
@@ -15,7 +20,10 @@ See [FORK.md](FORK.md) for implementation details, validation and limitations.
   the editor's WebView open. Open Studio from the tray; closing Studio returns
   control to Light. Unsaved changes are handled before closing.
 - **Multiple screens:** separate themes, orientations and live selections;
-  Light drives the saved active screens together and shares sensor sampling.
+  Light drives the saved active screens together and shares sensor sampling. Studio delivers frames on an independent
+  worker per display, with one outstanding frame per connection and completion
+  notifications to keep slow screens from pausing faster ones. Rendering and
+  sensor state remain shared.
 - **Integrated Windows sensors:** a headless LibreHardwareMonitorLib 0.9.6
   helper reads CPU temperature, fans, power and other available sensors. Only
   the configured helper requires administrator rights. Studio provides reader
@@ -29,6 +37,10 @@ See [FORK.md](FORK.md) for implementation details, validation and limitations.
   casing per object, including Italian dates and day names.
 - **Object copy and paste:** duplicate single objects or selections while
   preserving properties, with independent IDs and Undo support.
+- **Card widgets:** shared base and named faces, manual face selection, face
+  duplication and ordering, grouping existing objects, movement, resizing and
+  clipboard support. Face changes support fade, slide and flip transitions,
+  configurable duration/direction and optional base movement. Automatic face changes are planned in [TODO.md](TODO.md).
 - **Weather widgets:** city search, units, language, icon style, size and spacing.
 - **Ring gradients:** start/end colors and an adjustable transition along the
   full arc, plus a checkbox to preview the ring at 100%.
@@ -39,6 +51,38 @@ See [FORK.md](FORK.md) for implementation details, validation and limitations.
   original-file association when missing. Previewing does not alter the theme.
 - **Login and shutdown integration:** launch Light and the helper at login and
   apply saved shutdown actions through the active screen connection.
+- **Recovery after long pauses:** Light detects a tray-loop pause of at least
+  ten seconds, stops the old render workers, restarts the configured sensor
+  helper off the UI thread, verifies a fresh sensor snapshot and reopens the
+  saved displays. Studio and Light also retry a missing or stalled bundled
+  reader from their sensor worker. The wake MCU and
+  display port of one screen no longer create duplicate workers.
+
+## Measuring Live animation performance
+
+In Studio Preferences, enable **Debug** to write app, sensor and device diagnostics
+into `debug.log` beside `settings.json` (the full path appears in Preferences).
+**Show readings on screen**, nested under Debug, adds a temporary overlay to the
+physical Live display. Choose any of the four corners with **Screen corner**. Turning Debug off stops file logging and hides the overlay;
+the theme file is unchanged. Logs keep one previous 5 MiB segment and exclude
+network-client targets.
+
+Preview and Live reuse recent identical scene frames within one animation interval
+(excluding video backgrounds). Debug logs record reuse, preview/editor-lock times
+and refresh-loop preparation times to help distinguish rendering from transfer costs.
+
+`SEND FPS` measures successful host transfer completion during animation bursts,
+not the panel's internal scanout. `GAP` is the interval between completions;
+`RENDER` measures theme rendering and `PRESENT` the complete driver operation.
+`handoff_ms` in the logs measures the delay from a prepared frame to its driver
+starting; stopped/replaced connections reject completions from older generations.
+For Rev C, `C` is rotation/BGRA conversion, `D` difference encoding, `W` serial
+write/drain, `A` reply wait, and `KB` the framed bytes sent. `S` shows sensor
+sampling time / configured sampling interval in milliseconds. Other drivers show
+unavailable transfer phases as `N/A`. FPS requires at least two transfers and
+resets after a pause over 300 ms. The overlay uses the previous measurements and
+updates at most four times per second; `animating` in the logs identifies active card transitions; it adds some changed pixels, so compare
+with logging enabled and the overlay disabled for the final timing capture.
 
 ## Build and setup on Windows
 
@@ -111,3 +155,13 @@ retain their original authorship and copyright notices.
 
 Protocol knowledge also draws on turing-smart-screen-python and the inherited
 research in [docs/reverse-engineering](docs/reverse-engineering/).
+
+
+## Next development work
+
+The [roadmap](TODO.md) tracks face containers in Layers, timed/software/media card
+triggers and player widgets, linear/radial image transparency, radial shape
+transparency, per-screen sleep timing (default five minutes), additional colored
+and 3D-style weather icons, editor/property organization, calculated variables and
+PC-idle screensavers. These items are planned; availability and licensing of
+external event sources and icon collections still need evaluation.

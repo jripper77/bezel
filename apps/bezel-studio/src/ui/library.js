@@ -90,7 +90,11 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
   });
 
   const center = () => {
-    const c = store.getState().theme.canvas;
+    const { theme, selection } = store.getState();
+    const chosen = selection.length === 1 && theme.elements.find(e => e.id === selection[0]);
+    const card = chosen?.card ? chosen : theme.elements.find(e => e.id === chosen?.cardMember?.parent);
+    if (card) return { x: card.frame.x + card.frame.width / 2, y: card.frame.y + card.frame.height / 2 };
+    const c = theme.canvas;
     return { x: c.width / 2, y: c.height / 2 };
   };
 
@@ -184,7 +188,10 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
       })
       : el('button', {
         type: 'button', class: 'layer-name', 'aria-pressed': String(selected),
-        onclick: (evt) => store.select(evt.shiftKey ? [...new Set([...store.getState().selection, e.id])] : [e.id]),
+        onclick: (evt) => {
+          if (e.cardMember?.face != null) store.dispatch('cardFace', { id: e.cardMember.parent, face: e.cardMember.face });
+          store.select(evt.shiftKey ? [...new Set([...store.getState().selection, e.id])] : [e.id]);
+        },
         ondblclick: () => { editing = e.id; renderLayers(); document.querySelector('.layer-list input')?.focus(); },
       }, [e.name, el('small', { text: t(`widget.${widgetOf(e)}`) })]);
     const btn = (label, paths, onclick, disabled = false, pressed = null) => el('button', { type: 'button', class: 'icon-button', title: label, 'aria-label': label, disabled, 'aria-pressed': pressed === null ? null : String(pressed), onclick }, [icon(paths)]);

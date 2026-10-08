@@ -333,6 +333,8 @@ impl SampleDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionDto {
+    /// Installed product version, independent of the theme schema.
+    pub version: String,
     pub screen: Option<String>,
     /// The theme.
     pub theme: ThemeDto,
@@ -438,6 +440,10 @@ pub struct SavedDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreferencesDto {
+    pub debug: bool,
+    pub debug_show_readings: bool,
+    pub debug_corner: crate::performance::Corner,
+    pub debug_log_path: String,
     pub light_on_close: bool,
     pub light_runtime: bool,
     /// The language the user chose (`pt-BR` or `en`); `None` follows the

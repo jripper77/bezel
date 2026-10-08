@@ -251,6 +251,8 @@ impl Builder {
     pub fn push(&mut self, name: impl Into<String>, frame: BoxF, visible: bool, kind: ElementKind) {
         let id = ElementId(u32::try_from(self.elements.len()).unwrap_or(u32::MAX - 1) + 1);
         self.elements.push(Element {
+            card: None,
+            card_member: None,
             id,
             name: name.into(),
             frame,

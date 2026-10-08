@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::lhm::Row;
 
@@ -12,13 +13,20 @@ const STALE: Duration = Duration::from_secs(6);
 
 pub(super) struct Reader {
     directory: Option<PathBuf>,
+    recovery: Mutex<(
+        Instant,
+        Option<std::thread::JoinHandle<std::io::Result<()>>>,
+    )>,
 }
 
 impl Reader {
     pub(super) fn new() -> Self {
         let directory = std::env::var_os("LOCALAPPDATA")
             .map(|base| PathBuf::from(base).join("io.github.slipalison.bezel/sensors"));
-        let reader = Self { directory };
+        let reader = Self {
+            directory,
+            recovery: Mutex::new((Instant::now(), None)),
+        };
         reader.request();
         if reader.query().is_err() {
             use std::os::windows::process::CommandExt;
@@ -50,14 +58,71 @@ impl Reader {
         }
     }
 
+    fn recover_if_stalled(&self, snapshot_age: Option<Duration>) {
+        // Recover in Studio as well as Light, but allow slow hardware samples
+        // and startup to finish. Never launch an unconfigured external reader.
+        let bundled = std::env::current_exe()
+            .ok()
+            .and_then(|p| {
+                p.parent()
+                    .map(|p| p.join("sensors/bezel-sensors-helper.exe"))
+            })
+            .is_some_and(|p| p.is_file());
+        if !bundled {
+            return;
+        }
+        let Ok(mut recovery) = self.recovery.lock() else {
+            return;
+        };
+        if recovery
+            .1
+            .as_ref()
+            .is_some_and(|thread| thread.is_finished())
+            && let Some(thread) = recovery.1.take()
+        {
+            let _ = thread.join();
+        }
+        if !should_recover(snapshot_age, recovery.0.elapsed(), recovery.1.is_some()) {
+            return;
+        }
+        recovery.0 = Instant::now();
+        crate::sensor_log::log(
+            "reader.recovery",
+            "Bundled reader snapshot stalled; requesting verified restart",
+        );
+        match std::thread::Builder::new()
+            .name("bezel-reader-recovery".into())
+            .spawn(crate::restart_libre_reader)
+        {
+            Ok(thread) => recovery.1 = Some(thread),
+            Err(error) => crate::sensor_log::log("reader.recovery.failed", &error.to_string()),
+        }
+    }
+
     pub(super) fn query(&self) -> Result<(Vec<Row>, HashMap<String, String>), String> {
         self.request();
         let directory = self
             .directory
             .as_ref()
             .ok_or("sensor helper data folder unavailable")?;
-        read_snapshot(&directory.join("hardware.json"), SystemTime::now())
+        let path = directory.join("hardware.json");
+        let now = SystemTime::now();
+        let answer = read_snapshot(&path, now);
+        if answer.is_err() {
+            let age = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok());
+            self.recover_if_stalled(age);
+        }
+        answer
     }
+}
+
+fn should_recover(snapshot_age: Option<Duration>, since_attempt: Duration, running: bool) -> bool {
+    !running
+        && since_attempt >= Duration::from_secs(90)
+        && snapshot_age.is_none_or(|age| age >= Duration::from_secs(60))
 }
 
 fn read_snapshot(
@@ -87,6 +152,16 @@ fn read_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stalled_reader_recovery_allows_startup_and_serializes_attempts() {
+        let long = Duration::from_secs(100);
+        assert!(!should_recover(Some(Duration::from_secs(6)), long, false));
+        assert!(!should_recover(Some(long), Duration::from_secs(30), false));
+        assert!(!should_recover(Some(long), long, true));
+        assert!(should_recover(Some(long), long, false));
+        assert!(should_recover(None, long, false));
+    }
 
     #[test]
     fn embedded_snapshot_preserves_identifiers_and_missing_values_and_expires() {

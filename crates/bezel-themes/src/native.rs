@@ -241,6 +241,8 @@ mod tests {
 
     fn el(id: u32, kind: ElementKind) -> Element {
         Element {
+            card: None,
+            card_member: None,
             id: ElementId(id),
             name: format!("element {id}"),
             frame: BoxF::new(10.0 * id as f32, 20.0, 120.0, 40.5),
@@ -987,6 +989,97 @@ mod tests {
                 }
                 other => panic!("{bad}: {other:?}"),
             }
+        }
+    }
+    #[test]
+    fn cards_round_trip_and_validate_ownership() {
+        use bezel_core::domain::theme::{
+            Card, CardDirection, CardEffect, CardMember, CardTransition,
+        };
+        let (mut theme, _) = every_kind();
+        let parent = theme
+            .elements
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Shape { .. }))
+            .unwrap()
+            .id;
+        theme
+            .elements
+            .iter_mut()
+            .find(|e| e.id == parent)
+            .unwrap()
+            .card = Some(Card {
+            faces: vec!["Metrics".into(), "Music".into()],
+            active_face: 1,
+            transition: None,
+        });
+        let child = theme.elements.iter_mut().find(|e| e.id != parent).unwrap();
+        let child_id = child.id;
+        child.card_member = Some(CardMember {
+            parent,
+            face: Some(0),
+        });
+        theme
+            .elements
+            .iter_mut()
+            .find(|e| e.id == parent)
+            .unwrap()
+            .card
+            .as_mut()
+            .unwrap()
+            .transition = Some(CardTransition {
+            effect: CardEffect::Flip,
+            direction: CardDirection::Down,
+            duration_ms: 650,
+            include_base: true,
+        });
+        let bytes = manifest(&theme).unwrap();
+        assert_eq!(parse_manifest(&bytes).unwrap(), theme);
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        for membership in [
+            serde_json::json!({"parent": 999999, "face": 0}),
+            serde_json::json!({"parent": parent.0, "face": 2}),
+            serde_json::json!({"parent": child_id.0, "face": 0}),
+        ] {
+            let mut bad = json.clone();
+            let child = bad["elements"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|e| e["id"] == child_id.0)
+                .unwrap();
+            child["cardMember"] = membership;
+            assert!(parse_manifest(&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
+        for transition in [
+            serde_json::json!({"effect":"unknown","direction":"left","durationMs":650}),
+            serde_json::json!({"effect":"flip","direction":"unknown","durationMs":650}),
+            serde_json::json!({"effect":"fade","direction":"left","durationMs":1}),
+        ] {
+            let mut bad = json.clone();
+            let parent = bad["elements"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|e| e["id"] == parent.0)
+                .unwrap();
+            parent["card"]["transition"] = transition;
+            assert!(parse_manifest(&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
+        for card in [
+            serde_json::json!({"faces": [], "activeFace": 0}),
+            serde_json::json!({"faces": ["A"], "activeFace": 1}),
+            serde_json::json!({"faces": [" "], "activeFace": 0}),
+        ] {
+            let mut bad = json.clone();
+            let parent = bad["elements"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|e| e["id"] == parent.0)
+                .unwrap();
+            parent["card"] = card;
+            assert!(parse_manifest(&serde_json::to_vec(&bad).unwrap()).is_err());
         }
     }
 }

@@ -479,6 +479,14 @@ impl Live {
 /// A frame on its way to the live screen with the screen's link, out of the
 /// session so the screen's I/O does not hold it.
 pub struct Delivery {
+    generation: u64,
+    render_ms: f64,
+    render_reused: bool,
+    render_stats: bezel_core::ports::RenderStats,
+    present_ms: f64,
+    handoff_ms: f64,
+    prepared_at: Instant,
+    animating: bool,
     key: String,
     link: Box<dyn ScreenLink>,
     frame: Frame,
@@ -487,12 +495,19 @@ pub struct Delivery {
 }
 
 impl Delivery {
+    pub(crate) fn key(&self) -> &str {
+        &self.key
+    }
     /// Shows the frame on the screen.
     pub fn present(&mut self) -> Result<()> {
+        self.handoff_ms = self.prepared_at.elapsed().as_secs_f64() * 1000.0;
         if let Some(orientation) = self.turn {
             self.link.set_orientation(orientation)?;
         }
-        self.link.present(&self.frame)
+        let started = Instant::now();
+        let result = self.link.present(&self.frame);
+        self.present_ms = started.elapsed().as_secs_f64() * 1000.0;
+        result
     }
 }
 
@@ -546,6 +561,7 @@ pub enum Resume {
 
 /// One editing session.
 pub struct Studio {
+    performance: crate::performance::Performance,
     shared_sensors: bezel_sensors::SharedSensors,
     shared_renderer: SharedRenderer,
     serial_counter: Arc<std::sync::atomic::AtomicU64>,
@@ -585,7 +601,25 @@ pub struct Studio {
 }
 
 #[derive(Clone)]
-struct SharedRenderer(Arc<Mutex<Box<dyn FrameRenderer>>>);
+struct SharedRenderer {
+    inner: Arc<Mutex<Box<dyn FrameRenderer>>>,
+    scene: u64,
+    next: Option<Duration>,
+    stats: bezel_core::ports::RenderStats,
+    revision: u64,
+}
+impl SharedRenderer {
+    fn document(inner: Arc<Mutex<Box<dyn FrameRenderer>>>) -> Self {
+        static SCENE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self {
+            inner,
+            scene: SCENE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            next: None,
+            stats: bezel_core::ports::RenderStats::default(),
+            revision: 0,
+        }
+    }
+}
 impl FrameRenderer for SharedRenderer {
     fn render(
         &mut self,
@@ -593,17 +627,34 @@ impl FrameRenderer for SharedRenderer {
         assets: &BTreeMap<AssetRef, Vec<u8>>,
         context: bezel_core::ports::RenderContext<'_>,
     ) -> Result<Frame> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .render(theme, assets, context)
+        let mut renderer = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        renderer.set_scene(self.scene);
+        renderer.set_content_revision(self.revision);
+        let frame = renderer.render(theme, assets, context)?;
+        self.next = renderer.next_change();
+        self.stats = renderer.render_stats();
+        Ok(frame)
+    }
+    fn set_content_revision(&mut self, revision: u64) {
+        self.revision = revision;
+    }
+    fn render_stats(&self) -> bezel_core::ports::RenderStats {
+        self.stats
+    }
+    fn next_change(&self) -> Option<Duration> {
+        self.next
+    }
+    fn set_motion(&mut self, allowed: bool) {
+        let mut renderer = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        renderer.set_scene(self.scene);
+        renderer.set_motion(allowed);
     }
     fn animation(
         &mut self,
         asset: &AssetRef,
         assets: &BTreeMap<AssetRef, Vec<u8>>,
     ) -> Option<bezel_core::domain::animation::Timeline> {
-        self.0
+        self.inner
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .animation(asset, assets)
@@ -653,6 +704,8 @@ impl Studio {
         });
         std::mem::swap(&mut self.sensors, &mut next.sensors);
         std::mem::swap(&mut self.runtime, &mut next.runtime);
+        std::mem::swap(&mut self.renderer, &mut next.renderer);
+        std::mem::swap(&mut self.performance, &mut next.performance);
         std::mem::swap(&mut self.listed, &mut next.listed);
         std::mem::swap(&mut self.sample_millis, &mut next.sample_millis);
         std::mem::swap(&mut self.location, &mut next.location);
@@ -677,6 +730,22 @@ impl Studio {
         }
         self.selected_screen = Some(key.into());
         !existed
+    }
+
+    /// Keep the active edited document while adopting the connected display key.
+    /// Preserve a parked alias document rather than dropping its unsaved state.
+    pub fn canonicalize_selected_screen(&mut self, key: &str) {
+        if let Some(previous) = self
+            .selected_screen
+            .as_ref()
+            .filter(|old| old.as_str() != key)
+            .cloned()
+        {
+            if let Some(parked) = self.documents.remove(key) {
+                self.documents.insert(previous, parked);
+            }
+        }
+        self.selected_screen = Some(key.into());
     }
 
     pub fn selected_screen(&self) -> Option<&str> {
@@ -744,7 +813,7 @@ impl Studio {
         theme: Theme,
     ) -> Self {
         let shared_sensors = bezel_sensors::SharedSensors::new(sensors);
-        let shared_renderer = SharedRenderer(Arc::new(Mutex::new(renderer)));
+        let shared_renderer = SharedRenderer::document(Arc::new(Mutex::new(renderer)));
         Self::from_shared(shared_sensors, shared_renderer, language, theme)
     }
 
@@ -754,10 +823,13 @@ impl Studio {
         language: Language,
         theme: Theme,
     ) -> Self {
+        let shared_renderer = SharedRenderer::document(shared_renderer.inner);
         let posters = posters_of(&theme);
         let mut runtime = ThemeRuntime::new(theme, BTreeMap::new(), language);
         runtime.limit_refresh(MAX_REFRESH);
+        runtime.reuse_recent_frames(true);
         let mut studio = Self {
+            performance: crate::performance::Performance::default(),
             sensors: Box::new(shared_sensors.clone()),
             renderer: Box::new(shared_renderer.clone()),
             shared_sensors,
@@ -815,6 +887,7 @@ impl Studio {
         let info = self.runtime.video_info().cloned();
         // The old runtime, and a video it decodes here, stop first.
         self.runtime = ThemeRuntime::new(theme, assets, language);
+        self.runtime.reuse_recent_frames(true);
         self.runtime.limit_refresh(MAX_REFRESH);
         self.runtime.use_catalog(&self.catalog);
         self.runtime.want_also(self.listed.clone());
@@ -1265,6 +1338,9 @@ impl Studio {
         now: Instant,
         motion: Motion,
     ) -> Result<(Frame, Option<Duration>)> {
+        self.runtime
+            .reuse_recent_frames(matches!(motion, Motion::Allowed));
+        self.renderer.set_motion(matches!(motion, Motion::Allowed));
         let mut playing = match motion {
             Motion::Allowed if !self.video_known() => Playing::Busy,
             Motion::Allowed => self.start_preview(now),
@@ -1292,6 +1368,11 @@ impl Studio {
             Playing::Video | Playing::Poster => None,
         };
         Ok((frame, sooner(gifs, again)))
+    }
+
+    /// Whether the last preview/live frame avoided another native render.
+    pub fn render_reused(&self) -> bool {
+        self.runtime.render_reused()
     }
 
     /// Starts the preview's decoder of the theme's video when none runs:
@@ -1633,6 +1714,18 @@ impl Studio {
         true
     }
 
+    /// Close the owner of this physical screen, even in a background document
+    /// reached by the other port of the same Rev C device.
+    pub fn stop_live_screen(&mut self, key: &str) -> Option<Box<dyn ScreenLink>> {
+        if self.live.as_ref().is_some_and(|live| live.answers_to(key)) {
+            return self.stop_live();
+        }
+        self.documents
+            .values_mut()
+            .find(|document| document.is_live(key))
+            .and_then(|document| document.stop_live_screen(key))
+    }
+
     /// Stops showing the theme and hands back the screen's link (`None`
     /// while it is out: whoever has it closes it). A screen being connected
     /// again stops there. In the final state of a shutdown live mode stays
@@ -1731,13 +1824,18 @@ impl Studio {
             .map_or(Duration::ZERO, |h| now.saturating_duration_since(h.started));
         live.drawn = Some(now);
         let renderer = self.renderer.as_mut();
-        let frame = match self.runtime.render_at(renderer, time, clock, video) {
+        let render_started = Instant::now();
+        let mut frame = match self.runtime.render_at(renderer, time, clock, video) {
             Ok(frame) => frame,
             Err(e) => {
                 self.stop_with(UiError::from(e.clone()));
                 return Err(e);
             }
         };
+        let render_ms = render_started.elapsed().as_secs_f64() * 1000.0;
+        if crate::debug::overlay() {
+            self.performance.paint(&mut frame, crate::debug::corner());
+        }
         if let Some(misfit) = misfit(self.runtime.theme(), panel) {
             let error = BezelError::InvalidInput(misfit.to_string());
             self.stop_with(misfit);
@@ -1750,6 +1848,18 @@ impl Studio {
             return Ok(None);
         };
         Ok(Some(Delivery {
+            generation: self.generation,
+            render_ms,
+            render_reused: self.runtime.render_reused(),
+            render_stats: if self.runtime.render_reused() {
+                bezel_core::ports::RenderStats::default()
+            } else {
+                self.renderer.render_stats()
+            },
+            present_ms: 0.0,
+            handoff_ms: 0.0,
+            prepared_at: Instant::now(),
+            animating: self.renderer.next_change().is_some(),
             key: live.key.clone(),
             link,
             frame,
@@ -1781,6 +1891,27 @@ impl Studio {
             {
                 return studio.presented(delivery, outcome, now);
             }
+        }
+        if !self.is_live(&delivery.key) || self.generation != delivery.generation {
+            return Some(delivery.link);
+        }
+        if crate::debug::enabled() {
+            self.performance.completed(
+                crate::performance::Timings {
+                    animating: delivery.animating,
+                    render_ms: delivery.render_ms,
+                    render_reused: delivery.render_reused,
+                    render_stats: delivery.render_stats,
+                    present_ms: delivery.present_ms,
+                    handoff_ms: delivery.handoff_ms,
+                    sensors_ms: self.sample_millis,
+                    refresh_ms: f64::from(self.runtime.theme().refresh_seconds) * 1000.0,
+                },
+                delivery.link.last_transfer(),
+                &delivery.key,
+                outcome.is_ok(),
+                now,
+            );
         }
         let Delivery {
             key, link, turn, ..
@@ -2188,6 +2319,157 @@ mod tests {
         )
     }
 
+    fn card_animation_studio() -> Studio {
+        use bezel_core::domain::theme::{
+            Card, CardDirection, CardEffect, CardTransition, Paint, ShapeKind,
+        };
+        let mut theme = theme_88();
+        theme.refresh_seconds = 1.0;
+        theme.elements.push(Element {
+            id: ElementId(1),
+            name: "Card".into(),
+            frame: BoxF::new(20.0, 20.0, 100.0, 100.0),
+            opacity: 1.0,
+            visible: true,
+            locked: false,
+            card_member: None,
+            card: Some(Card {
+                faces: vec!["A".into(), "B".into()],
+                active_face: 0,
+                transition: Some(CardTransition {
+                    effect: CardEffect::Flip,
+                    direction: CardDirection::Left,
+                    duration_ms: 650,
+                    include_base: true,
+                }),
+            }),
+            kind: ElementKind::Shape {
+                video_window: false,
+                fade: None,
+                shape: ShapeKind::Rect { radius: 0.0 },
+                fill: Some(Paint::solid(Rgba::WHITE)),
+                stroke: None,
+            },
+        });
+        Studio::new(
+            Box::new(FakeSensors::demo()),
+            Box::new(SkiaRenderer::with_fonts(Vec::new(), SystemFonts::Skip)),
+            Language::English,
+            theme,
+        )
+    }
+    #[test]
+    fn native_card_preview_schedules_frames_through_shared_renderer() {
+        let mut s = card_animation_studio();
+        assert!(
+            s.preview(TIME, at(&s, 0), Motion::Allowed)
+                .unwrap()
+                .1
+                .is_none()
+        );
+        let mut theme = s.theme().clone();
+        theme.elements[0].card.as_mut().unwrap().active_face = 1;
+        s.set_theme(theme);
+        assert_eq!(
+            s.preview(TIME, at(&s, 10), Motion::Allowed).unwrap().1,
+            Some(Duration::from_millis(33))
+        );
+        // A second screen with unrelated elements must not wipe this card's clock.
+        let mut other = Studio::from_shared(
+            s.shared_sensors.clone(),
+            s.shared_renderer.clone(),
+            Language::English,
+            theme_88(),
+        );
+        other
+            .preview(TIME, at(&other, 50), Motion::Allowed)
+            .unwrap();
+        assert_eq!(
+            s.preview(TIME, at(&s, 200), Motion::Allowed).unwrap().1,
+            Some(Duration::from_millis(33))
+        );
+        assert!(
+            s.preview(TIME, at(&s, 660), Motion::Allowed)
+                .unwrap()
+                .1
+                .is_none()
+        );
+        let mut theme = s.theme().clone();
+        theme.elements[0].card.as_mut().unwrap().active_face = 0;
+        s.set_theme(theme);
+        assert!(
+            s.preview(TIME, at(&s, 700), Motion::Reduced)
+                .unwrap()
+                .1
+                .is_none()
+        );
+    }
+    #[test]
+    fn native_card_transition_follows_its_document_when_switching_screens() {
+        let mut s = card_animation_studio();
+        s.select_screen("one", theme_88());
+        s.preview(TIME, at(&s, 0), Motion::Allowed).unwrap();
+        let mut theme = s.theme().clone();
+        theme.elements[0].card.as_mut().unwrap().active_face = 1;
+        s.set_theme(theme);
+        assert!(
+            s.preview(TIME, at(&s, 10), Motion::Allowed)
+                .unwrap()
+                .1
+                .is_some()
+        );
+        s.select_screen("two", theme_88());
+        assert!(
+            s.preview(TIME, at(&s, 0), Motion::Allowed)
+                .unwrap()
+                .1
+                .is_none()
+        );
+        s.select_screen("one", theme_88());
+        assert_eq!(
+            s.preview(TIME, at(&s, 200), Motion::Allowed).unwrap().1,
+            Some(Duration::from_millis(33))
+        );
+    }
+
+    #[test]
+    fn native_card_live_frames_run_between_one_second_sensor_samples() {
+        let mut s = card_animation_studio();
+        let connector = FakeConnector::default();
+        go_live(
+            &mut s,
+            open_screen(&FakeBus::turing_88(), &connector, None).unwrap(),
+        )
+        .unwrap();
+        let mut theme = s.theme().clone();
+        theme.elements[0].card.as_mut().unwrap().active_face = 1;
+        s.set_theme(theme);
+        tick(&mut s, 1000).unwrap();
+        assert!(s.next_due() < at(&s, 1040));
+        tick(&mut s, 1034).unwrap();
+        assert_eq!(
+            connector.log().frames.len(),
+            3,
+            "intermediate frame before the next sensor sample"
+        );
+        let mut other = Studio::from_shared(
+            s.shared_sensors.clone(),
+            s.shared_renderer.clone(),
+            Language::English,
+            theme_88(),
+        );
+        other
+            .preview(TIME, at(&other, 20), Motion::Allowed)
+            .unwrap();
+        tick(&mut s, 1068).unwrap();
+        assert!(s.next_due() < at(&s, 1110));
+        tick(&mut s, 1650).unwrap();
+        assert_eq!(
+            s.next_due(),
+            at(&s, 2000),
+            "after motion, return to sensor cadence"
+        );
+    }
     #[test]
     fn two_screen_documents_keep_their_theme_and_live_frames() {
         let first = FakeConnector::default();
@@ -2475,6 +2757,8 @@ mod tests {
     /// `theme` graphing `cpu.usage` over 8 samples.
     fn graphing(mut theme: Theme) -> Theme {
         theme.elements.push(Element {
+            card: None,
+            card_member: None,
             id: ElementId(7),
             name: "usage".into(),
             frame: BoxF {
@@ -2548,6 +2832,38 @@ mod tests {
             FakeSensors::demo().catalog().unwrap().len()
         );
         assert_eq!(s.period(), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn preview_reuses_the_live_frame_but_motion_and_edits_invalidate_it() {
+        let link = open_screen(&FakeBus::turing_88(), &FakeConnector::default(), None).unwrap();
+        let probe = Probe::default();
+        let mut s = Studio::new(
+            Box::new(FakeSensors::demo()),
+            Box::new(probe.clone()),
+            Language::English,
+            theme_88(),
+        );
+        go_live(&mut s, link).unwrap();
+        let now = s.origin + Duration::from_secs(1);
+        let _ = s.frame_for_screen(TIME, now).unwrap();
+        let seen = probe.0.lock().unwrap().len();
+        s.preview(TIME, now + Duration::from_millis(5), Motion::Allowed)
+            .unwrap();
+        assert!(s.render_reused());
+        assert_eq!(probe.0.lock().unwrap().len(), seen);
+        s.preview(TIME, now + Duration::from_millis(6), Motion::Reduced)
+            .unwrap();
+        assert!(!s.render_reused());
+        s.preview(TIME, now + Duration::from_millis(7), Motion::Allowed)
+            .unwrap();
+        assert!(!s.render_reused());
+        let mut edited = s.theme().clone();
+        edited.name = "edited".into();
+        s.set_theme(edited);
+        s.preview(TIME, now + Duration::from_millis(8), Motion::Allowed)
+            .unwrap();
+        assert!(!s.render_reused());
     }
 
     /// The fake WeAct 0.96": no storage, no playback of stored videos.
@@ -2688,6 +3004,8 @@ mod tests {
         // The preview shows a theme that prints the ping.
         let mut theme = s.theme().clone();
         theme.elements.push(Element {
+            card: None,
+            card_member: None,
             id: ElementId(1),
             name: "ping".into(),
             frame: BoxF::new(0.0, 0.0, 100.0, 40.0),
@@ -2803,6 +3121,31 @@ mod tests {
         assert!(s.stop_live().is_none());
         assert!(s.presented(delivery, &Ok(()), now).is_some());
         assert_eq!(s.live_key(), None);
+    }
+
+    #[test]
+    fn a_late_delivery_cannot_replace_a_new_live_generation() {
+        let connector = FakeConnector::default();
+        let mut s = studio();
+        s.go_live(
+            "k".into(),
+            open_screen(&FakeBus::turing_88(), &connector, None).unwrap(),
+        );
+        let now = at(&s, 0);
+        let old = s.frame_for_screen(TIME, now).unwrap().unwrap();
+        s.stop_live();
+        s.go_live(
+            "k".into(),
+            open_screen(&FakeBus::turing_88(), &connector, None).unwrap(),
+        );
+        let new = s.frame_for_screen(TIME, now).unwrap().unwrap();
+        assert!(
+            s.presented(old, &Ok(()), now).is_some(),
+            "close the old link"
+        );
+        assert!(s.presenting(), "new generation still owns its delivery");
+        assert!(s.presented(new, &Ok(()), now).is_none());
+        assert!(!s.presenting());
     }
 
     #[test]

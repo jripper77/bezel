@@ -6,6 +6,7 @@
 
 pub mod clock;
 mod devices;
+pub mod light_recovery;
 pub mod live;
 mod messages;
 mod screen;
@@ -36,10 +37,10 @@ pub use sensors::{WatchStyle, run as run_sensors};
 pub use standby::{StandbyArgs, StandbyKit, run as run_standby_command};
 pub use storage::{ProgressStyle, StorageArgs, StorageKit, run as run_storage_command};
 
-/// Product version: the one CI or `scripts/install-local.sh` stamped, else the crate's.
+/// Product version: an explicit release stamp, else the fork's VERSION file.
 pub const VERSION: &str = match option_env!("BEZEL_VERSION") {
     Some(v) => v,
-    None => env!("CARGO_PKG_VERSION"),
+    None => include_str!("../../../VERSION").trim_ascii(),
 };
 
 /// Control USB smart screens (Turing, TURZX and compatible) from the terminal.

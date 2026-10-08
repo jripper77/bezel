@@ -88,6 +88,10 @@ The existing themes remain usable without cards, states or automatic triggers.
 
 ## UX: first interface cleanup
 
+- [x] Drag Layers rows to reorder objects with insertion markers and Undo;
+      keep card membership and move entire cards with their objects.
+- [x] Clear object selection by clicking the space around the canvas.
+
 - [ ] Review the editor's main navigation and remove duplicated or misplaced
       controls while preserving existing workflows.
 - [ ] Group object properties by purpose with a consistent order: content/data,

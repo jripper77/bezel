@@ -281,3 +281,22 @@ asset-placeholder fix, document state or delivery scheduling is reverted.
   expect the upstream Bezel name; translation-key parity and lookup checks pass.
 - Event priorities, media triggers and configurable override/return policies remain
   planned; this release implements interval-based playback and editing pause.
+
+
+### Layers drag-and-drop and workspace deselection (0.1.11)
+
+- Drag layer names/rows above or below a sibling; an insertion line shows the
+  proposed position. Pointer events work with Tauri's file-drop interception.
+  The library scrolls near its upper/lower edges; Escape cancels the operation.
+- Card rows move their complete block, including base and inactive faces.
+  Members reorder only inside their current face/base; this operation does not
+  change membership. Drop commits one Undo step; self/invalid/unchanged drops
+  do nothing. Normal name selection/rename and row buttons remain available.
+- Clicking the space surrounding the canvas clears selection without editing
+  the document. Canvas manipulation, resize handles and framing controls keep
+  their own behavior; clicks in side panels/toolbars do not clear selection.
+- Hidden layer names use the existing muted text color instead of reducing
+  opacity, preserving readable contrast on the selected-row background.
+- Validation: focused layer/card model tests and browser checks of both reorder
+  directions, Undo, Escape, card blocks, member boundaries, selection, rename,
+  visibility and accessibility in both languages and color schemes.

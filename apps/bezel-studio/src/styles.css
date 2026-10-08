@@ -139,7 +139,7 @@ select option, select optgroup { background-color: var(--surface-2); color: var(
 .layer-row .layer-name { text-align: left; border: 0; background: transparent; padding: 7px 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer-row .layer-name small { color: var(--muted); margin-left: 6px; }
 .layer-row .icon-button { width: 28px; min-height: 28px; border-color: transparent; background: transparent; }
-.layer-row.hidden-el .layer-name { opacity: 0.5; }
+.layer-row.hidden-el .layer-name { color: var(--muted); }
 
 .theme-grid { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .theme-card { width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); padding: 8px; cursor: pointer; text-align: left; display: grid; gap: 6px; }
@@ -657,3 +657,11 @@ button.layer-group-title { border: 0; background: transparent; text-align: left;
 .active-face .layer-group-title { color: var(--text); }
 .layer-children { margin-left: 8px; }
 .layer-row { min-width: 0; grid-template-columns: minmax(0, 1fr) auto auto auto auto; }
+
+.layer-row { position: relative; }
+.layer-row .layer-name:not(input) { cursor: grab; touch-action: none; }
+.layer-dragging, .layer-dragging .layer-name:not(input) { cursor: grabbing; user-select: none; }
+.layer-drop-before::before, .layer-drop-after::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; background: var(--accent); pointer-events: none; z-index: 2; }
+.layer-drop-before::before { top: -2px; }
+.layer-drop-after::after { bottom: -2px; }
+.layer-drag-ghost { transform: none; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

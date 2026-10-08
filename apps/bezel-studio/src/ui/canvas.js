@@ -363,6 +363,9 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   overlay.addEventListener('wheel', onFramingWheel, { passive: false });
   overlay.addEventListener('keydown', onFramingKey);
   overlay.addEventListener('dblclick', onDoubleClick);
+  scroll.addEventListener('click', evt => {
+    if (evt.button === 0 && !framing && !box.contains(evt.target) && selection().length) store.select([]);
+  });
   scroll.addEventListener('wheel', (evt) => {
     if (!evt.ctrlKey) return;
     evt.preventDefault();

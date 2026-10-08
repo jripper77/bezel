@@ -6,6 +6,7 @@
 import { ORIENTATIONS, isHorizontal, relayoutBox, roundBox, unionBox } from './geometry.js';
 import { createWidget, widgetOf } from './widgets.js';
 import { withChildren, transformCard } from './cards.js';
+import { layerDropIndex } from './layers.js';
 
 /** Most undo steps kept. */
 export const HISTORY_LIMIT = 200;
@@ -209,6 +210,14 @@ export const commands = {
     const floor = target.cardMember ? elements.findIndex(e => e.id === target.cardMember.parent) + 1 : 0;
     elements.splice(Math.max(floor, Math.min(index, elements.length)), 0, ...block);
     return { theme: { ...theme, elements } };
+  },
+
+  /** Drag a layer relative to a sibling without changing card membership. */
+  reorderLayer(theme, { id, target, before }) {
+    const index = layerDropIndex(theme.elements, id, target, before);
+    if (index === null) return { theme };
+    const result = commands.reorder(theme, { id, index });
+    return result.theme.elements.every((e, i) => e.id === theme.elements[i].id) ? { theme } : result;
   },
 
   /** Aligns boxes to the selection's bounds (or the canvas with one element). */

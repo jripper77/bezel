@@ -6,11 +6,10 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.10**. Cards can rotate their faces on a
-configurable timer (5?3600 seconds), using their existing transition in Light,
-preview and Live. Selecting a card or its member pauses Studio playback while
-editing; deselecting starts a new interval from the selected face. Playback does
-not change the saved theme or Undo history.
+Current development release: **0.1.11**. Drag rows in Layers to change their
+paint order, with a visible insertion line and Undo support. Cards move with all
+their objects; members reorder within their existing face or shared base.
+Clicking the space around the canvas clears the current object selection.
 
 Development happens on [`windows-improvements`](https://github.com/jripper77/bezel/tree/windows-improvements).
 See [FORK.md](FORK.md) for implementation details, validation and limitations.

@@ -12,6 +12,7 @@ import { formatBytes, wireSubtabs } from './storage.js';
 import { SHOW_ALL, axisOf, countText, emptyState, filterThemes, rememberedFilter, scopeIn, screenLabel, thumbnailKey } from '../theme-filter.js';
 import { createIconPicker } from './icon-picker.js';
 import { layerGroups } from '../editor/layers.js';
+import { wireLayerDrag } from './layer-drag.js';
 
 export { axisOf };
 
@@ -172,6 +173,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
   $('sensor-search').addEventListener('input', renderSensors);
 
   // -------------------------------------------------------------- layers --
+  const layerDrag = wireLayerDrag($('layer-list'), store);
   function layerRow(e, index, total, neighbors = null) {
     const selected = store.getState().selection.includes(e.id);
     const name = editing === e.id
@@ -241,6 +243,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
         })),
       ]);
     }));
+    layerDrag.refresh();
   }
 
   // -------------------------------------------------------------- themes --

@@ -63,6 +63,8 @@ fn theme() -> (Theme, BTreeMap<AssetRef, Vec<u8>>) {
     let asset = AssetRef("assets/spin.gif".into());
     theme.elements.push(Element {
         card: None,
+        is_group: false,
+        group_parent: None,
         card_member: None,
         id: ElementId(1),
         name: "spin".into(),

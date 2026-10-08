@@ -1,4 +1,4 @@
-import { isShown, withChildren } from '../editor/cards.js';
+import { groupTarget, selectionRoots, isShown, withChildren } from '../editor/cards.js';
 // The canvas: shows the rendered frame at a zoom level and handles direct
 // manipulation on a DOM overlay (selection, eight resize handles, snapping
 // guides, marquee). Everything is in canvas pixels until drawn. In framing
@@ -29,6 +29,10 @@ const DRAG_THRESHOLD = 3;
  */
 export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom = () => {}, describe = (n) => n, onFrameRequest = () => {} }) {
   const ctx = canvas.getContext('2d');
+  const bezel = box.closest('.bezel') ?? box;
+  const editingSpace = el('div', { class: 'editing-space' });
+  bezel.before(editingSpace);
+  editingSpace.append(bezel);
   let size = { width: canvas.width, height: canvas.height };
   let zoom = 1;
   let fitting = true;
@@ -120,7 +124,20 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     overlay.replaceChildren(...nodes);
   }
 
+  function editingRoom() {
+    if (press) return; // Do not move the canvas origin beneath an active gesture.
+    const boxes = theme().elements.filter(e => isShown(theme(), e)).map(e => e.frame)
+      .filter(f => [f.x, f.y, f.width, f.height].every(Number.isFinite));
+    const bounds = unionBox([{ x: 0, y: 0, ...size }, ...boxes]);
+    const gutter = distance => distance > 0 ? distance * zoom + 8 : 0;
+    editingSpace.style.paddingLeft = `${gutter(-bounds.x)}px`;
+    editingSpace.style.paddingTop = `${gutter(-bounds.y)}px`;
+    editingSpace.style.paddingRight = `${gutter(bounds.x + bounds.width - size.width)}px`;
+    editingSpace.style.paddingBottom = `${gutter(bounds.y + bounds.height - size.height)}px`;
+  }
+
   function drawOverlay() {
+    editingRoom();
     if (framing) {
       drawFramingOverlay();
       return;
@@ -128,6 +145,12 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     const t = theme();
     const sel = new Set(selection());
     const nodes = [];
+    for (const e of t.elements) {
+      const f = e.frame;
+      if (isShown(t, e) && !sel.has(e.id) && (f.x < 0 || f.y < 0 || f.x + f.width > size.width || f.y + f.height > size.height)) {
+        nodes.push(el('div', { class: 'off-canvas-box', style: boxStyle(f), role: 'img', 'aria-label': describe(e.name) }, [el('span', { class: 'off-canvas-label', text: e.name })]));
+      }
+    }
     const hovered = t.elements.find((e) => e.id === hoverId && !sel.has(e.id) && isShown(t, e));
     if (hovered) nodes.push(el('div', { class: 'hover-box', style: boxStyle(hovered.frame) }));
     const chosen = t.elements.filter((e) => sel.has(e.id) && (!e.cardMember || isShown(t, e)));
@@ -172,8 +195,12 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   }
 
   function onPointerDown(evt) {
-    if (evt.button !== 0) return;
-    overlay.setPointerCapture?.(evt.pointerId);
+    if (evt.button !== 0 || press) return;
+    const viewport = scroll.getBoundingClientRect();
+    if (evt.clientX >= viewport.left + scroll.clientWidth || evt.clientY >= viewport.top + scroll.clientHeight) return;
+    if (framing && !containsClient(evt.clientX, evt.clientY)) return;
+    evt.preventDefault();
+    scroll.setPointerCapture?.(evt.pointerId);
     if (framing) {
       framePress(evt);
       return;
@@ -186,10 +213,11 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
       press = { mode: 'resize', id: e.id, handle, frame: { ...e.frame }, start, client: [evt.clientX, evt.clientY], started: false };
       return;
     }
-    const id = hitTest(state.theme.elements.filter(e => isShown(state.theme, e)), start.x, start.y);
+    let id = hitTest(state.theme.elements.filter(e => isShown(state.theme, e)), start.x, start.y);
+    if (id !== null && !evt.ctrlKey && !evt.metaKey && !state.selection.includes(id)) id = groupTarget(state.theme, id);
     if (id === null) {
       if (!evt.shiftKey && !evt.ctrlKey && !evt.metaKey) store.select([]);
-      press = { mode: 'marquee', start, base: evt.shiftKey ? [...state.selection] : [], client: [evt.clientX, evt.clientY], started: false };
+      press = { mode: 'marquee', start, base: evt.shiftKey || evt.ctrlKey || evt.metaKey ? [...state.selection] : [], client: [evt.clientX, evt.clientY], started: false };
       return;
     }
     let sel = state.selection;
@@ -200,7 +228,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
       sel = [id];
       store.select(sel);
     }
-    const movable = state.theme.elements.filter((e) => sel.includes(e.id) && !e.locked && (!e.cardMember || isShown(state.theme, e)));
+    const movable = selectionRoots(state.theme, sel).filter((e) => sel.includes(e.id) && !e.locked && (!e.cardMember || isShown(state.theme, e)));
     press = { mode: 'move', ids: movable.map((e) => e.id), frames: movable.map((e) => ({ ...e.frame })), start, applied: { x: 0, y: 0 }, client: [evt.clientX, evt.clientY], started: false };
   }
 
@@ -276,7 +304,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     else {
       marquee = boxFromPoints(press.start.x, press.start.y, p.x, p.y);
       const hits = marqueeSelect(theme().elements.filter(e => isShown(theme(), e)), marquee);
-      store.select([...new Set([...press.base, ...hits])]);
+      store.select([...new Set([...press.base, ...hits.map(id => groupTarget(theme(), id))])]);
     }
     drawOverlay();
   }
@@ -317,7 +345,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
 
   /** A double click on the video background, off any element, asks for framing mode. */
   function onDoubleClick(evt) {
-    if (framing || theme().background.type !== 'video') return;
+    if (framing || theme().background.type !== 'video' || !containsClient(evt.clientX, evt.clientY)) return;
     const p = point(evt.clientX, evt.clientY);
     if (hitTest(theme().elements.filter(e => isShown(theme(), e)), p.x, p.y) === null) onFrameRequest();
   }
@@ -350,11 +378,12 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
     drawOverlay();
   }
 
-  overlay.addEventListener('pointerdown', onPointerDown);
-  overlay.addEventListener('pointermove', onPointerMove);
-  overlay.addEventListener('pointerup', onPointerUp);
-  overlay.addEventListener('pointercancel', onPointerUp);
-  overlay.addEventListener('pointerleave', () => {
+  scroll.addEventListener('pointerdown', onPointerDown);
+  scroll.addEventListener('pointermove', onPointerMove);
+  scroll.addEventListener('pointerup', onPointerUp);
+  scroll.addEventListener('pointercancel', onPointerUp);
+  scroll.addEventListener('lostpointercapture', onPointerUp);
+  scroll.addEventListener('pointerleave', () => {
     if (!press && hoverId !== null) {
       hoverId = null;
       drawOverlay();
@@ -362,10 +391,7 @@ export function createCanvasView({ store, scroll, box, canvas, overlay, onZoom =
   });
   overlay.addEventListener('wheel', onFramingWheel, { passive: false });
   overlay.addEventListener('keydown', onFramingKey);
-  overlay.addEventListener('dblclick', onDoubleClick);
-  scroll.addEventListener('click', evt => {
-    if (evt.button === 0 && !framing && !box.contains(evt.target) && selection().length) store.select([]);
-  });
+  scroll.addEventListener('dblclick', onDoubleClick);
   scroll.addEventListener('wheel', (evt) => {
     if (!evt.ctrlKey) return;
     evt.preventDefault();

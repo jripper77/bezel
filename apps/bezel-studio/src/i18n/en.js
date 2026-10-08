@@ -24,6 +24,10 @@ export default {
   "card.animateNext": "Animate next face",
   "card.animationHelp": "Use two faces with different objects to compare effects. A face change plays the transition, including Live. Motion is skipped when reduced motion is enabled.",
 
+  "widget.group": "Group",
+  "group.scope": "Select at least two unlocked objects in the same group or card face.",
+  "group.create": "Group objects (Ctrl+G)",
+  "group.ungroup": "Ungroup (Ctrl+Shift+G)",
   "widget.card": "Card",
   "card.faces": "Faces",
   "card.activeFace": "Displayed face",

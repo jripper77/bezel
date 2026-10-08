@@ -877,6 +877,8 @@ mod tests {
         let (mut theme, assets) = FsThemeStore.load(&location).unwrap();
         theme.elements.push(Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id: ElementId(1),
             name: "ping".into(),
@@ -1457,6 +1459,8 @@ mod tests {
         assets.insert(gif.clone(), spinning_gif());
         theme.elements.push(Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id: ElementId(1),
             name: "spin".into(),

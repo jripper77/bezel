@@ -223,7 +223,7 @@ select option, select optgroup { background-color: var(--surface-2); color: var(
 
 /* ---------------------------------------------------------------- stage -- */
 .stage { min-width: 0; min-height: 0; position: relative; background: radial-gradient(circle at 50% 40%, var(--surface-3), var(--bg) 70%); }
-.stage-scroll { position: absolute; inset: 0; overflow: auto; display: grid; place-items: center; padding: 32px; }
+.stage-scroll { position: absolute; inset: 0; overflow: auto; display: grid; place-items: safe center; padding: 32px; touch-action: none; }
 .bezel { padding: 16px; border-radius: 24px; background: linear-gradient(145deg, #1e293b, #070b16); box-shadow: 0 20px 60px rgb(0 0 0 / 35%); }
 .canvas-box { position: relative; background: #000; }
 .canvas-box canvas { display: block; width: 100%; height: 100%; image-rendering: auto; }
@@ -665,3 +665,7 @@ button.layer-group-title { border: 0; background: transparent; text-align: left;
 .layer-drop-before::before { top: -2px; }
 .layer-drop-after::after { bottom: -2px; }
 .layer-drag-ghost { transform: none; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.editing-space { width: max-content; }
+.off-canvas-box { position: absolute; border: 1px dashed var(--muted); pointer-events: none; }
+.off-canvas-label { position: absolute; top: -20px; left: 0; max-width: 180px; padding: 1px 4px; color: var(--text); background: var(--surface); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

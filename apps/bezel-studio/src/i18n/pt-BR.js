@@ -24,6 +24,10 @@ export default {
   "card.animateNext": "Animar próxima face",
   "card.animationHelp": "Use duas faces com objetos diferentes para comparar os efeitos. A troca de face anima a transição, inclusive no Live. O movimento é ignorado com movimento reduzido.",
 
+  "widget.group": "Grupo",
+  "group.scope": "Selecione pelo menos dois objetos desbloqueados no mesmo grupo ou face do cartão.",
+  "group.create": "Agrupar objetos (Ctrl+G)",
+  "group.ungroup": "Desagrupar (Ctrl+Shift+G)",
   "widget.card": "Cartão",
   "card.faces": "Faces",
   "card.activeFace": "Face exibida",

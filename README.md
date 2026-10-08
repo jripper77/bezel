@@ -6,10 +6,14 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.11**. Drag rows in Layers to change their
-paint order, with a visible insertion line and Undo support. Cards move with all
-their objects; members reorder within their existing face or shared base.
-Clicking the space around the canvas clears the current object selection.
+Current development release: **0.1.12**. Ordinary object groups support movement,
+resizing, nested members, visibility, opacity, clipboard and Undo. Select objects
+with a mouse rectangle, then use **Group objects** (Ctrl+G); **Ungroup**
+(Ctrl+Shift+G) releases the members. Layers show each group and its indented
+objects; select a member there, or Ctrl-click it on the canvas, to edit it directly.
+Groups require objects from the same existing group/card face. Off-canvas objects
+have editor outlines and remain reachable through the surrounding workspace;
+the physical screen still clips to its canvas. Layer drag-and-drop remains available.
 
 Development happens on [`windows-improvements`](https://github.com/jripper77/bezel/tree/windows-improvements).
 See [FORK.md](FORK.md) for implementation details, validation and limitations.
@@ -35,6 +39,9 @@ See [FORK.md](FORK.md) for implementation details, validation and limitations.
   color, outline, opacity and shadow editing, plus Italian search aliases.
 - **Customizable dates and clocks:** language, presets, custom formats and
   casing per object, including Italian dates and day names.
+- **Ordinary object groups:** group selected objects without creating a card or
+  animation, including nested groups and groups within card faces. Move/resize
+  a group together and edit individual members through Layers.
 - **Object copy and paste:** duplicate single objects or selections while
   preserving properties, with independent IDs and Undo support.
 - **Card widgets:** shared base and named faces, manual face selection, face

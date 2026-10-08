@@ -1,5 +1,5 @@
 import { cardPoses, drawCardProjection } from './editor/card-motion.js';
-import { isShown } from './editor/cards.js';
+import { isShown, effectiveOpacity, visibleWithoutFace } from './editor/cards.js';
 import { fadeLine } from './shape-fade.js';
 import { weatherText } from './weather-format.js';
 import { formatClock } from './clock-format.js';
@@ -282,13 +282,13 @@ function drawBackdrop(ctx, background, canvas, video) {
 function drawCardTransition(ctx, theme, parent, transition, t) {
   const { width, height } = theme.canvas, include = transition.settings.includeBase;
   const members = theme.elements.filter(e => e.id === parent.id || e.cardMember?.parent === parent.id);
-  const draw = (target, e) => drawElement(target, e.id === parent.id ? e : { ...e, opacity: (e.opacity ?? 1) * (parent.opacity ?? 1) }, t);
-  if (!include) for (const e of members) if (e.visible !== false && (e.id === parent.id || e.cardMember.face == null)) draw(ctx, e);
+  const draw = (target, e) => drawElement(target, { ...e, opacity: effectiveOpacity(theme, e) }, t);
+  if (!include) for (const e of members) if (visibleWithoutFace(theme, e) && (e.id === parent.id || e.cardMember.face == null)) draw(ctx, e);
   const combined = new OffscreenCanvas(width, height), cc = combined.getContext('2d');
   const group = new OffscreenCanvas(width, height), gc = group.getContext('2d');
   for (const pose of cardPoses(transition, parent.frame)) {
     gc.clearRect(0, 0, width, height);
-    for (const e of members) if (e.visible !== false && (e.cardMember?.face === pose.face || include && (e.id === parent.id || e.cardMember.face == null))) draw(gc, e);
+    for (const e of members) if (visibleWithoutFace(theme, e) && (e.cardMember?.face === pose.face || include && (e.id === parent.id || e.cardMember.face == null))) draw(gc, e);
     cc.save(); if (!pose.projection) cc.setTransform(...pose.matrix); cc.globalAlpha = pose.alpha;
     cc.globalCompositeOperation = transition.settings.effect === 'fade' ? 'lighter' : 'source-over';
     cc.filter = `brightness(${pose.shade})`; if (pose.projection) drawCardProjection(cc, group, pose.projection); else cc.drawImage(group, 0, 0); cc.restore();
@@ -314,10 +314,10 @@ export function renderApprox(theme, t, video = null, transitions = new Map()) {
     ctx.fillRect(0, 0, width, height);
   } else drawBackdrop(ctx, theme.background, theme.canvas, video);
   for (const e of theme.elements) {
+    if (e.isGroup) continue;
     if (transitions.has(e.id)) { drawCardTransition(ctx, theme, e, transitions.get(e.id), t); continue; }
     if (transitions.has(e.cardMember?.parent) || !isShown(theme, e)) continue;
-    const parent = e.cardMember && theme.elements.find(p => p.id === e.cardMember.parent);
-    drawElement(ctx, parent ? { ...e, opacity: (e.opacity ?? 1) * (parent.opacity ?? 1) } : e, t);
+    drawElement(ctx, { ...e, opacity: effectiveOpacity(theme, e) }, t);
   }
   return { width, height, rgba: ctx.getImageData(0, 0, width, height).data };
 }

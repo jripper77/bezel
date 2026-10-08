@@ -245,6 +245,12 @@ pub struct FadeDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ElementDto {
+    /// Ordinary group container; omitted in older themes.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_group: bool,
+    /// Ordinary group owning this object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_parent: Option<u32>,
     /// Optional card container, absent in existing themes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card: Option<CardDto>,
@@ -1281,6 +1287,8 @@ impl From<&Theme> for ThemeDto {
                             include_base: t.include_base,
                         }),
                     }),
+                    is_group: e.is_group,
+                    group_parent: e.group_parent.map(|id| id.0),
                     card_member: e.card_member.as_ref().map(|m| CardMemberDto {
                         parent: m.parent.0,
                         face: m.face,
@@ -1408,6 +1416,8 @@ impl TryFrom<&ThemeDto> for Theme {
                             })
                         })
                         .transpose()?,
+                    is_group: e.is_group,
+                    group_parent: e.group_parent.map(ElementId),
                     card_member: e.card_member.as_ref().map(|m| {
                         bezel_core::domain::theme::CardMember {
                             parent: ElementId(m.parent),
@@ -1425,10 +1435,9 @@ impl TryFrom<&ThemeDto> for Theme {
                 })
             })
             .collect::<R<Vec<_>>>()?;
-        if elements
-            .iter()
-            .any(|e| e.card.is_some() || e.card_member.is_some())
-        {
+        if elements.iter().any(|e| {
+            e.card.is_some() || e.card_member.is_some() || e.is_group || e.group_parent.is_some()
+        }) {
             let ids: std::collections::BTreeSet<_> = elements.iter().map(|e| e.id.0).collect();
             if ids.len() != elements.len() {
                 return err("duplicate element IDs in card theme");
@@ -1460,6 +1469,35 @@ impl TryFrom<&ThemeDto> for Theme {
                 }
             }
         }
+        for e in &elements {
+            if e.is_group
+                && (e.card.is_some()
+                    || !matches!(
+                        e.kind,
+                        ElementKind::Shape {
+                            fill: None,
+                            stroke: None,
+                            fade: None,
+                            video_window: false,
+                            ..
+                        }
+                    ))
+            {
+                return err("invalid ordinary group container");
+            }
+            let mut current = e;
+            let mut seen = std::collections::BTreeSet::from([e.id]);
+            while let Some(id) = current.group_parent {
+                let Some(parent) = elements.iter().find(|p| p.id == id && p.is_group) else {
+                    return err("invalid group membership");
+                };
+                if !seen.insert(id) || seen.len() > 64 || parent.card_member != current.card_member
+                {
+                    return err("invalid group hierarchy");
+                }
+                current = parent;
+            }
+        }
         Ok(Theme {
             name: d.name.clone(),
             canvas: Size::new(d.canvas.width, d.canvas.height),
@@ -1477,4 +1515,8 @@ impl TryFrom<&ThemeDto> for Theme {
 
 fn outline_icon() -> String {
     "outline".into()
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }

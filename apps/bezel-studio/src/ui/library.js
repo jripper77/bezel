@@ -215,12 +215,20 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
       return;
     }
     const indexOf = e => els.findIndex(item => item.id === e.id);
-    list.replaceChildren(...layerGroups(els).map(({ element: card, groups }) => {
-      const row = layerRow(card, indexOf(card), els.length);
+    const renderNodes = nodes => nodes.map((node, i) => {
+      const { element: card, groups, children } = node;
+      const row = layerRow(card, indexOf(card), els.length, {
+        up: i > 0 ? indexOf(nodes[i - 1].element) : null,
+        down: i + 1 < nodes.length ? indexOf(nodes[i + 1].element) : null,
+      });
+      if (card.isGroup) return el('li', { class: 'layer-card', dataset: { groupId: card.id } }, [
+        el('ul', { class: 'layer-list' }, [row]),
+        el('ul', { class: 'layer-list layer-children' }, renderNodes(children)),
+      ]);
       if (!groups.length) return row;
       return el('li', { class: 'layer-card', dataset: { cardId: card.id } }, [
         el('ul', { class: 'layer-list' }, [row]),
-        el('ul', { class: 'layer-groups' }, groups.map(({ face, elements }) => {
+        el('ul', { class: 'layer-groups' }, groups.map(({ face, elements, nodes: members }) => {
           const active = face !== null && card.card.activeFace === face;
           const label = face === null ? t('card.base') : card.card.faces[face];
           const heading = face === null
@@ -235,14 +243,12 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
             });
           return el('li', { class: `layer-group${active ? ' active-face' : ''}`, dataset: { face: face === null ? 'base' : face } }, [
             el('div', { class: 'layer-group-heading' }, [heading, el('small', { text: String(elements.length) })]),
-            el('ul', { class: 'layer-list layer-children' }, elements.map((e, i) => layerRow(e, indexOf(e), els.length, {
-              up: i > 0 ? indexOf(elements[i - 1]) : null,
-              down: i + 1 < elements.length ? indexOf(elements[i + 1]) : null,
-            }))),
+            el('ul', { class: 'layer-list layer-children' }, renderNodes(members)),
           ]);
         })),
       ]);
-    }));
+    });
+    list.replaceChildren(...renderNodes(layerGroups(els)));
     layerDrag.refresh();
   }
 

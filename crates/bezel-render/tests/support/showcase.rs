@@ -380,6 +380,8 @@ pub fn theme() -> Option<Theme> {
         .enumerate()
         .map(|(i, (frame, kind))| Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id: ElementId(i as u32 + 1),
             name: format!("element {}", i + 1),

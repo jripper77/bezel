@@ -1,4 +1,4 @@
-import { isShown } from '../editor/cards.js';
+import { isShown, canGroup } from '../editor/cards.js';
 import { CLOCK_PATTERNS, formatClock } from '../clock-format.js';
 // The right inspector: the theme when nothing is selected, one element's
 // properties, or align/distribute tools for several. Every edit is one
@@ -565,11 +565,11 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     const f = e.frame;
     const setFrame = (patch) => store.dispatch('setFrame', { id: e.id, frame: { ...f, ...patch } });
     const kindForms = { text: textForm, bar: barForm, ring: ringForm, needle: needleForm, graph: graphForm, shape: shapeForm };
-    const specific = e.kind.type === 'image' ? imageForm(e, assets) : (kindForms[e.kind.type]?.(e) ?? []);
+    const specific = e.isGroup ? [] : e.kind.type === 'image' ? imageForm(e, assets) : (kindForms[e.kind.type]?.(e) ?? []);
     return [
       el('h2', { text: t(`widget.${widgetOf(e)}`) }),
       textField(t('inspector.name'), e.name, (v) => v.trim() && update(e.id, { name: v.trim() })),
-      showAs(e, theme),
+      !e.isGroup && showAs(e, theme),
       ...(e.card ? cardForm(e) : membershipForm(e, theme)),
       el('h3', { text: t('inspector.position') }),
       el('div', { class: 'field-row' }, [
@@ -583,7 +583,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
         checkField(t('inspector.visible'), e.visible !== false, (v) => update(e.id, { visible: v })),
         checkField(t('inspector.locked'), Boolean(e.locked), (v) => update(e.id, { locked: v })),
       ]),
-      el('h3', { text: t('inspector.appearance') }),
+      ...(e.isGroup ? [el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids: [e.id] }) })] : [el('h3', { text: t('inspector.appearance') })]),
       ...specific,
       el('div', { class: 'actions' }, [
         el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('reorder', { id: e.id, index: theme.elements.length }) }, [t('inspector.front')]),
@@ -598,6 +598,8 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     const tool = (edge, paths) => el('button', { type: 'button', class: 'icon-button', title: t(`align.${edge}`), 'aria-label': t(`align.${edge}`), onclick: () => store.dispatch('align', { ids, edge }) }, [icon(paths)]);
     return [
       el('h2', { text: t('inspector.multi', { count: ids.length }) }),
+      el('button', { type: 'button', class: 'text-button', text: t('group.create'), disabled: !canGroup(store.getState().theme, ids), title: t('group.scope'), onclick: () => store.dispatch('groupSelection', { ids }) }),
+      ...(store.getState().theme.elements.some(e => ids.includes(e.id) && e.isGroup) ? [el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids }) })] : []),
       el('button', { type: 'button', class: 'text-button', text: t('card.group'), onclick: () => store.dispatch('cardFromSelection', { ids }) }),
       el('h3', { text: t('inspector.alignTools') }),
       el('div', { class: 'button-row' }, [

@@ -24,7 +24,7 @@ impl CardTimers {
         self.next = None;
         self.states.retain(|id, _| {
             theme.element(*id).is_some_and(|e| {
-                e.visible
+                theme.is_visible(e)
                     && e.card
                         .as_ref()
                         .is_some_and(|c| c.rotation_seconds.is_some() && c.faces.len() > 1)
@@ -35,7 +35,11 @@ impl CardTimers {
             return changed;
         }
         for e in &theme.elements {
-            let Some(card) = e.card.as_ref().filter(|c| e.visible && c.faces.len() > 1) else {
+            let Some(card) = e
+                .card
+                .as_ref()
+                .filter(|c| theme.is_visible(e) && c.faces.len() > 1)
+            else {
                 continue;
             };
             let Some(seconds) = card.rotation_seconds.filter(|s| (5..=3600).contains(s)) else {

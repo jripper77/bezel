@@ -404,6 +404,8 @@ mod tests {
         for (id, key) in (1..).zip(shown) {
             theme.elements.push(Element {
                 card: None,
+                is_group: false,
+                group_parent: None,
                 card_member: None,
                 id: ElementId(id),
                 name: (*key).to_string(),

@@ -18,6 +18,13 @@ Checked items are implemented; unchecked items are design notes for future work.
 - [ ] Configure states in Studio and switch them safely in Light, preserving
       display ownership and reporting missing themes or unavailable screens.
 
+## Ordinary object groups and selection
+
+- [x] Group/ungroup selected objects independently from card faces.
+- [x] Move, resize, duplicate and copy whole groups, with nested members and Undo.
+- [x] Show group containers and indented members in Layers; edit members individually.
+- [x] Select objects with a mouse rectangle and move objects outside the canvas.
+
 ## Card widget with a base and multiple faces
 
 Face transitions are implemented; face selection remains manual. Cards move and resize their

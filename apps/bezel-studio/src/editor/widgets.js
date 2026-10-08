@@ -103,6 +103,7 @@ export function boundKey(element) {
 
 /** Which widget an element was made from (for icons and names). */
 export function widgetOf(element) {
+  if (element.isGroup) return 'group';
   if (element.card) return 'card';
   const k = element.kind;
   if (k.type === 'text') {

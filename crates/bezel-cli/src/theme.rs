@@ -355,6 +355,8 @@ mod tests {
         theme.background = bezel_core::domain::theme::Background::Color(Rgba::opaque(1, 2, 3));
         theme.elements.push(Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id: ElementId(1),
             name: "usage".into(),

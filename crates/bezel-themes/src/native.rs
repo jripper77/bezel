@@ -242,6 +242,8 @@ mod tests {
     fn el(id: u32, kind: ElementKind) -> Element {
         Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id: ElementId(id),
             name: format!("element {id}"),
@@ -1013,6 +1015,39 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn groups_round_trip_and_reject_invalid_ownership() {
+        let (mut theme, _) = every_kind();
+        let mut group = theme.elements[0].clone();
+        group.id = ElementId(900);
+        group.is_group = true;
+        group.kind = ElementKind::Shape {
+            video_window: false,
+            fade: None,
+            shape: ShapeKind::Rect { radius: 0.0 },
+            fill: None,
+            stroke: None,
+        };
+        theme.elements[0].group_parent = Some(group.id);
+        theme.elements.push(group);
+        let bytes = manifest(&theme).unwrap();
+        assert_eq!(parse_manifest(&bytes).unwrap(), theme);
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        for parent in [900, 999, theme.elements[0].id.0] {
+            let mut bad = json.clone();
+            let last = bad["elements"].as_array().unwrap().len() - 1;
+            bad["elements"][last]["groupParent"] = serde_json::json!(parent);
+            assert!(parse_manifest(&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
+        let mut bad = json.clone();
+        bad["elements"][0]["isGroup"] = serde_json::json!(true);
+        assert!(parse_manifest(&serde_json::to_vec(&bad).unwrap()).is_err());
+        let (legacy, _) = every_kind();
+        let old = manifest(&legacy).unwrap();
+        assert!(!String::from_utf8_lossy(&old).contains("isGroup"));
+        assert_eq!(parse_manifest(&old).unwrap(), legacy);
+    }
+
     #[test]
     fn cards_round_trip_and_validate_ownership() {
         use bezel_core::domain::theme::{

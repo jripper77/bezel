@@ -416,6 +416,10 @@ pub enum ElementKind {
 /// One thing drawn on the canvas.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Element {
+    /// Invisible ordinary group container.
+    pub is_group: bool,
+    /// Ordinary group owning this object.
+    pub group_parent: Option<ElementId>,
     /// Optional multi-face container configuration.
     pub card: Option<Card>,
     /// Container and face owning this object; none means an independent object.
@@ -556,21 +560,88 @@ impl Theme {
         self.elements.iter().find(|e| e.id == id)
     }
 
-    /// Visibility includes the owning card and its active face.
+    /// Visibility includes group ancestors and the owning card's active face.
     pub fn is_visible(&self, element: &Element) -> bool {
-        if !element.visible {
-            return false;
+        if element.group_parent.is_none() {
+            if !element.visible {
+                return false;
+            }
+            if let Some(member) = &element.card_member {
+                if let Some(parent) = self.element(member.parent) {
+                    if parent.group_parent.is_none() {
+                        return parent.visible
+                            && parent
+                                .card
+                                .as_ref()
+                                .is_some_and(|c| member.face.is_none_or(|f| f == c.active_face));
+                    }
+                }
+            } else {
+                return true;
+            }
         }
-        let Some(member) = &element.card_member else {
-            return true;
-        };
-        self.element(member.parent).is_some_and(|parent| {
-            parent.visible
-                && parent
-                    .card
-                    .as_ref()
-                    .is_some_and(|card| member.face.is_none_or(|face| face == card.active_face))
+        self.owners(element).is_some_and(|owners| {
+            owners.iter().all(|e| {
+                e.visible
+                    && e.card_member.as_ref().is_none_or(|m| {
+                        self.element(m.parent)
+                            .and_then(|p| p.card.as_ref())
+                            .is_some_and(|c| m.face.is_none_or(|f| f == c.active_face))
+                    })
+            })
         })
+    }
+
+    /// Visibility for drawing either face during a card transition.
+    pub fn visible_without_face(&self, element: &Element) -> bool {
+        if element.group_parent.is_none() {
+            if let Some(m) = &element.card_member {
+                if let Some(p) = self.element(m.parent) {
+                    if p.group_parent.is_none() {
+                        return element.visible && p.visible;
+                    }
+                }
+            } else {
+                return element.visible;
+            }
+        }
+        self.owners(element)
+            .is_some_and(|owners| owners.iter().all(|e| e.visible))
+    }
+
+    /// Opacity inherited once from each distinct container.
+    pub fn rendered_opacity(&self, element: &Element) -> f32 {
+        if element.group_parent.is_none() {
+            if let Some(m) = &element.card_member {
+                if let Some(p) = self.element(m.parent) {
+                    if p.group_parent.is_none() {
+                        return element.opacity * p.opacity;
+                    }
+                }
+            } else {
+                return element.opacity;
+            }
+        }
+        self.owners(element)
+            .map_or(0.0, |owners| owners.iter().map(|e| e.opacity).product())
+    }
+
+    fn owners<'a>(&'a self, element: &'a Element) -> Option<Vec<&'a Element>> {
+        let mut owners = vec![element];
+        let mut index = 0;
+        while index < owners.len() {
+            let e = owners[index];
+            for id in [e.group_parent, e.card_member.as_ref().map(|m| m.parent)]
+                .into_iter()
+                .flatten()
+            {
+                if !owners.iter().any(|p| p.id == id) {
+                    owners.push(self.element(id)?);
+                }
+            }
+            index += 1;
+        }
+        Some(owners)
     }
 
     /// Assigned assets the theme references (for packaging and loading).
@@ -601,7 +672,7 @@ impl Theme {
 
     fn is_sampled(&self, element: &Element) -> bool {
         self.is_visible(element)
-            || (element.visible
+            || (self.visible_without_face(element)
                 && element.card_member.as_ref().is_some_and(|m| {
                     self.element(m.parent).is_some_and(|parent| {
                         parent.visible
@@ -693,6 +764,8 @@ mod tests {
     fn element(id: u32, kind: ElementKind) -> Element {
         Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id: ElementId(id),
             name: format!("e{id}"),

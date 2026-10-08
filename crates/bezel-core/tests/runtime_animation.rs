@@ -77,6 +77,8 @@ impl FrameRenderer for Clockwork {
 fn image(id: u32, asset: &str) -> Element {
     Element {
         card: None,
+        is_group: false,
+        group_parent: None,
         card_member: None,
         id: ElementId(id),
         name: asset.into(),

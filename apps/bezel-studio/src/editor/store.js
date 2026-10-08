@@ -5,7 +5,7 @@
 
 import { ORIENTATIONS, isHorizontal, relayoutBox, roundBox, unionBox } from './geometry.js';
 import { createWidget, widgetOf } from './widgets.js';
-import { withChildren, transformCard } from './cards.js';
+import { withChildren, transformCard, selectionRoots, owners, syncGroupBounds, canGroup } from './cards.js';
 import { layerDropIndex } from './layers.js';
 
 /** Most undo steps kept. */
@@ -43,12 +43,12 @@ export function merge(target, patch) {
 
 /** Pure theme commands. Each returns `{theme, selection?}`. */
 export const commands = {
-  add(theme, { widget, x, y, sensor, name, cardMember, names = ENGLISH }) {
+  add(theme, { widget, x, y, sensor, name, cardMember, groupParent, names = ENGLISH }) {
     const made = createWidget(widget, theme.canvas, sensor);
     const id = nextId(theme);
     const frame = roundBox({ x: x - made.width / 2, y: y - made.height / 2, width: made.width, height: made.height });
     if (made.card) made.card.faces = [names.face?.(1) ?? 'Face 1'];
-    const element = { ...(cardMember && !made.card ? { cardMember } : {}), id, name: uniqueName(theme, name ?? sensor?.label ?? names.widget(widget)), frame, opacity: 1, visible: true, locked: false, kind: made.kind, ...(made.card ? { card: made.card } : {}) };
+    const element = { ...(groupParent != null ? { groupParent } : {}), ...(cardMember && !made.card ? { cardMember } : {}), id, name: uniqueName(theme, name ?? sensor?.label ?? names.widget(widget)), frame, opacity: 1, visible: true, locked: false, kind: made.kind, ...(made.card ? { card: made.card } : {}) };
     return { theme: { ...theme, elements: [...theme.elements, element] }, selection: [id] };
   },
 
@@ -83,6 +83,7 @@ export const commands = {
     for (const e of elements) {
       const id = nextId(next);
       const copy = { ...clone(e), id, name: uniqueName(next, names.copy(e.name)), locked: false, frame: { ...e.frame, x: e.frame.x + offset, y: e.frame.y + offset } };
+      if (copy.groupParent != null) copy.groupParent = mapping.get(copy.groupParent) ?? null;
       if (copy.cardMember) copy.cardMember = mapping.has(copy.cardMember.parent) ? { ...copy.cardMember, parent: mapping.get(copy.cardMember.parent) } : null;
       next = { ...next, elements: [...next.elements, copy] };
       created.push(id);
@@ -91,16 +92,16 @@ export const commands = {
   },
 
   move(theme, { ids, dx, dy }) {
-    const parents = new Set(ids.filter(id => !theme.elements.find(e => e.id === id)?.locked));
+    const parents = new Set(selectionRoots(theme, ids).filter(e => !owners(theme, e).some(p => p.locked)).map(e => e.id));
     ids = withChildren(theme, [...parents]);
     return {
-      theme: mapElements(theme, ids, (e) => (e.locked && !parents.has(e.cardMember?.parent) ? e : { ...e, frame: { ...e.frame, x: Math.round(e.frame.x + dx), y: Math.round(e.frame.y + dy) } })),
+      theme: mapElements(theme, ids, (e) => (e.locked && !owners(theme, e).slice(1).some(p => parents.has(p.id)) ? e : { ...e, frame: { ...e.frame, x: Math.round(e.frame.x + dx), y: Math.round(e.frame.y + dy) } })),
     };
   },
 
   setFrame(theme, { id, frame }) {
     const e = theme.elements.find(e => e.id === id);
-    return { theme: e && !e.locked ? transformCard(theme, id, roundBox(frame)) : theme };
+    return { theme: e && !owners(theme, e).some(p => p.locked) ? transformCard(theme, id, roundBox(frame)) : theme };
   },
 
   cardFace(theme, { id, face }) {
@@ -146,13 +147,51 @@ export const commands = {
   attachCard(theme, { ids, parent, face = null }) {
     const card = theme.elements.find(e => e.id === parent && e.card);
     if (card && face !== null && (!Number.isInteger(face) || face < 0 || face >= card.card.faces.length)) return { theme };
-    const next = mapElements(theme, ids, e => e.card || e.id === parent ? e : { ...e, cardMember: card ? { parent, face } : null });
+    const roots = selectionRoots(theme, ids).filter(e => !e.card && e.id !== parent);
+    const rootIds = new Set(roots.map(e => e.id));
+    const members = new Set(withChildren(theme, [...rootIds]));
+    // A card cannot itself be nested inside another card.
+    if (theme.elements.some(e => members.has(e.id) && e.card)) return { theme };
+    const next = mapElements(theme, [...members], e => ({ ...e,
+      ...(rootIds.has(e.id) ? { groupParent: null } : {}),
+      cardMember: card ? { parent, face } : null,
+    }));
     if (!card) return { theme: next };
-    // A card's base is below its objects, including objects added earlier.
-    const members = next.elements.filter(e => e.cardMember?.parent === parent);
+    const block = next.elements.filter(e => e.cardMember?.parent === parent);
     const elements = next.elements.filter(e => e.cardMember?.parent !== parent);
-    elements.splice(elements.findIndex(e => e.id === parent) + 1, 0, ...members);
+    elements.splice(elements.findIndex(e => e.id === parent) + 1, 0, ...block);
     return { theme: { ...next, elements } };
+  },
+  groupSelection(theme, { ids, names = ENGLISH }) {
+    const members = selectionRoots(theme, ids).filter(e => !owners(theme, e).some(p => p.locked));
+    if (!canGroup(theme, ids)) return { theme };
+    const first = members[0];
+    const id = nextId(theme);
+    const group = { id, isGroup: true, groupParent: first.groupParent ?? null,
+      cardMember: first.cardMember ?? null, name: uniqueName(theme, names.widget('group')),
+      frame: unionBox(members.map(e => e.frame)), opacity: 1, visible: true, locked: false,
+      kind: { type: 'shape', shape: 'rect', radius: 0, fill: null, stroke: null } };
+    const direct = new Set(members.map(e => e.id)), all = new Set(withChildren(theme, [...direct]));
+    const block = theme.elements.filter(e => all.has(e.id)).map(e => direct.has(e.id) ? { ...e, groupParent: id } : e);
+    const elements = theme.elements.filter(e => !all.has(e.id));
+    const anchor = theme.elements.findIndex(e => e.id === first.id);
+    const index = theme.elements.slice(0, anchor).filter(e => !all.has(e.id)).length;
+    elements.splice(index, 0, group, ...block);
+    return { theme: { ...theme, elements }, selection: [id] };
+  },
+  ungroup(theme, { ids }) {
+    const groups = theme.elements.filter(e => ids.includes(e.id) && e.isGroup && !owners(theme, e).some(p => p.locked));
+    let elements = theme.elements, selection = [];
+    for (const original of groups) {
+      const group = elements.find(e => e.id === original.id);
+      const members = elements.filter(e => e.groupParent === group.id);
+      selection.push(...members.map(e => e.id));
+      elements = elements.filter(e => e.id !== group.id).map(e => e.groupParent === group.id ? {
+        ...e, groupParent: group.groupParent ?? null,
+        opacity: (e.opacity ?? 1) * (group.opacity ?? 1), visible: e.visible !== false && group.visible !== false,
+      } : e);
+    }
+    return groups.length ? { theme: { ...theme, elements }, selection: selection.filter(id => elements.some(e => e.id === id)) } : { theme };
   },
   cardFromSelection(theme, { ids, names = ENGLISH }) {
     const members = theme.elements.filter(e => ids.includes(e.id) && !e.card && !e.locked);
@@ -195,7 +234,7 @@ export const commands = {
     if (isHorizontal(orientation) === isHorizontal(theme.orientation)) return { theme: { ...theme, orientation } };
     const canvas = { width: theme.canvas.height, height: theme.canvas.width };
     let next = { ...theme, orientation, canvas };
-    for (const e of theme.elements.filter(e => !e.cardMember)) next = transformCard(next, e.id, relayoutBox(e.frame, theme.canvas, canvas));
+    for (const e of theme.elements.filter(e => !e.cardMember && e.groupParent == null)) next = transformCard(next, e.id, relayoutBox(e.frame, theme.canvas, canvas));
     return { theme: next };
   },
 
@@ -204,11 +243,14 @@ export const commands = {
     const from = theme.elements.findIndex((e) => e.id === id);
     if (from < 0) return { theme };
     const target = theme.elements[from];
-    const moved = new Set(target.card ? withChildren(theme, [id]) : [id]);
+    const moved = new Set(target.card || target.isGroup ? withChildren(theme, [id]) : [id]);
     const block = theme.elements.filter(e => moved.has(e.id));
     const elements = theme.elements.filter(e => !moved.has(e.id));
-    const floor = target.cardMember ? elements.findIndex(e => e.id === target.cardMember.parent) + 1 : 0;
-    elements.splice(Math.max(floor, Math.min(index, elements.length)), 0, ...block);
+    const parent = target.groupParent ?? target.cardMember?.parent;
+    const floor = parent != null ? elements.findIndex(e => e.id === parent) + 1 : 0;
+    const siblings = target.groupParent != null ? new Set(withChildren({ elements }, [target.groupParent])) : null;
+    const ceiling = siblings ? Math.max(floor, ...elements.flatMap((e, i) => siblings.has(e.id) ? [i + 1] : [])) : elements.length;
+    elements.splice(Math.max(floor, Math.min(index, ceiling)), 0, ...block);
     return { theme: { ...theme, elements } };
   },
 
@@ -222,7 +264,7 @@ export const commands = {
 
   /** Aligns boxes to the selection's bounds (or the canvas with one element). */
   align(theme, { ids, edge }) {
-    const targets = theme.elements.filter((e) => ids.includes(e.id) && !e.locked && !ids.includes(e.cardMember?.parent));
+    const targets = selectionRoots(theme, ids).filter(e => !owners(theme, e).some(p => p.locked));
     const bounds = targets.length > 1 ? unionBox(targets.map((e) => e.frame)) : { x: 0, y: 0, ...theme.canvas };
     if (!bounds) return { theme };
     const place = (f) => {
@@ -245,7 +287,7 @@ export const commands = {
   distribute(theme, { ids, axis }) {
     const pos = axis === 'x' ? 'x' : 'y';
     const len = axis === 'x' ? 'width' : 'height';
-    const targets = theme.elements.filter((e) => ids.includes(e.id) && !e.locked && !ids.includes(e.cardMember?.parent)).sort((a, b) => a.frame[pos] - b.frame[pos]);
+    const targets = selectionRoots(theme, ids).filter(e => !owners(theme, e).some(p => p.locked)).sort((a, b) => a.frame[pos] - b.frame[pos]);
     if (targets.length < 3) return { theme };
     const first = targets[0].frame;
     const last = targets[targets.length - 1].frame;
@@ -325,12 +367,14 @@ export function createStore(theme, { names = ENGLISH } = {}) {
       const command = commands[name];
       if (!command) throw new Error(`unknown command ${name}`);
       const before = state.theme;
-      let cardMember;
+      let cardMember, groupParent;
       if (name === 'add' && args.widget !== 'card' && state.selection.length === 1) {
         const selected = state.theme.elements.find(e => e.id === state.selection[0]);
+        groupParent = selected?.isGroup ? selected.id : selected?.groupParent;
         cardMember = selected?.card ? { parent: selected.id, face: selected.card.activeFace } : selected?.cardMember;
       }
-      const result = command(state.theme, { names, cardMember, ...args });
+      const result = command(state.theme, { names, cardMember, groupParent, ...args });
+      if (result.theme !== before) result.theme = syncGroupBounds(result.theme);
       if (result.theme === before && result.selection === undefined) return state;
       if (gesture) {
         if (!gesture.recorded) {

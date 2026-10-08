@@ -252,6 +252,8 @@ impl Builder {
         let id = ElementId(u32::try_from(self.elements.len()).unwrap_or(u32::MAX - 1) + 1);
         self.elements.push(Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id,
             name: name.into(),

@@ -39,6 +39,7 @@ export function shortcutFor(evt, focused) {
   if (mod && key === 'y') return { type: 'redo' };
   if (mod && key === 'c') return { type: 'copy' };
   if (mod && key === 'v') return { type: 'paste' };
+  if (mod && key === 'g') return { type: evt.shiftKey ? 'ungroup' : 'groupSelection' };
   if (mod && key === 'd') return { type: 'duplicate' };
   if (mod && key === 'a') return { type: 'selectAll' };
   if (key === 'Delete' || key === 'Backspace') return { type: 'remove' };

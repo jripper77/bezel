@@ -209,6 +209,9 @@ impl FrameRenderer for SkiaRenderer {
         self.draw_background(&mut canvas, theme, assets, &context);
         let transitions = self.cards.update(theme, context.animation);
         for (index, element) in theme.elements.iter().enumerate() {
+            if element.is_group {
+                continue;
+            }
             if let Some(transition) = transitions.get(&element.id) {
                 self.draw_card(&mut canvas, theme, element, *transition, assets, &context)?;
                 continue;
@@ -222,11 +225,9 @@ impl FrameRenderer for SkiaRenderer {
             }
             if theme.is_visible(element) {
                 let key = (index, element.id);
-                if let Some(member) = &element.card_member
-                    && let Some(parent) = theme.element(member.parent)
-                {
+                if element.card_member.is_some() || element.group_parent.is_some() {
                     let mut shown = element.clone();
-                    shown.opacity *= parent.opacity;
+                    shown.opacity = theme.rendered_opacity(element);
                     self.draw_element(&mut canvas, key, &shown, assets, &context);
                 } else {
                     self.draw_element(&mut canvas, key, element, assets, &context);
@@ -515,11 +516,9 @@ impl SkiaRenderer {
                         .as_ref()
                         .is_some_and(|m| m.parent == parent.id && m.face.is_none())
             }) {
-                if e.visible {
+                if theme.visible_without_face(e) {
                     let mut shown = e.clone();
-                    if e.id != parent.id {
-                        shown.opacity *= parent.opacity;
-                    }
+                    shown.opacity = theme.rendered_opacity(e);
                     self.draw_element(canvas, (index, e.id), &shown, assets, context);
                 }
             }
@@ -539,11 +538,9 @@ impl SkiaRenderer {
                         m.parent == parent.id
                             && (m.face == Some(pose.face) || include && m.face.is_none())
                     }) || include && e.id == parent.id;
-                    if selected && e.visible {
+                    if selected && theme.visible_without_face(e) {
                         let mut shown = e.clone();
-                        if e.id != parent.id {
-                            shown.opacity *= parent.opacity;
-                        }
+                        shown.opacity = theme.rendered_opacity(e);
                         self.draw_element(&mut group, (index, e.id), &shown, assets, context);
                         if let Some(window) = &mut window_group
                             && let ElementKind::Shape {
@@ -571,7 +568,7 @@ impl SkiaRenderer {
                     .iter()
                     .enumerate()
                     .filter(|(_, e)| {
-                        e.visible
+                        theme.visible_without_face(e)
                             && (e.card_member.as_ref().is_some_and(|m| {
                                 m.parent == parent.id
                                     && (m.face == Some(pose.face) || include && m.face.is_none())
@@ -579,9 +576,7 @@ impl SkiaRenderer {
                     })
                     .map(|(index, e)| {
                         let mut shown = e.clone();
-                        if e.id != parent.id {
-                            shown.opacity *= parent.opacity;
-                        }
+                        shown.opacity = theme.rendered_opacity(e);
                         (index, shown)
                     })
                     .collect();
@@ -1189,6 +1184,52 @@ mod tests {
         assert!(new_canvas(Size::new(MAX_CANVAS_SIDE + 1, 1)).is_err());
         assert!(new_canvas(Size::new(4, 4)).is_ok());
     }
+    #[test]
+    fn groups_render_nested_opacity_visibility_and_card_ownership_once() {
+        use bezel_core::domain::theme::{Card, CardMember};
+        let black = Rgba::opaque(0, 0, 0);
+        let red = Rgba::opaque(255, 0, 0);
+        let mut group = rect(BoxF::new(0.0, 0.0, 16.0, 16.0), CLEAR, 0.5);
+        group.id = ElementId(1);
+        group.is_group = true;
+        let mut child = rect(group.frame, red, 1.0);
+        child.id = ElementId(2);
+        child.group_parent = Some(group.id);
+        let mut theme = testkit::theme(16, 16, Background::Color(black), vec![group, child]);
+        let mut r = testkit::renderer();
+        let scene = Scene::empty();
+        let frame = render_over(&mut r, &theme, &scene, Backdrop::Poster);
+        assert!((126..=129).contains(&px(&frame, 4, 4).r));
+        theme.elements[0].visible = false;
+        assert_eq!(
+            px(&render_over(&mut r, &theme, &scene, Backdrop::Poster), 4, 4),
+            black
+        );
+        theme.elements[0].visible = true;
+        let mut parent = rect(theme.elements[0].frame, CLEAR, 0.5);
+        parent.id = ElementId(3);
+        parent.card = Some(Card {
+            faces: vec!["A".into(), "B".into()],
+            active_face: 0,
+            rotation_seconds: None,
+            transition: None,
+        });
+        for e in &mut theme.elements {
+            e.card_member = Some(CardMember {
+                parent: parent.id,
+                face: Some(0),
+            });
+        }
+        theme.elements.insert(0, parent);
+        let frame = render_over(&mut r, &theme, &scene, Backdrop::Poster);
+        assert!((62..=66).contains(&px(&frame, 4, 4).r));
+        theme.elements[0].card.as_mut().unwrap().active_face = 1;
+        assert_eq!(
+            px(&render_over(&mut r, &theme, &scene, Backdrop::Poster), 4, 4),
+            black
+        );
+    }
+
     #[test]
     fn card_faces_render_shared_base_and_inherit_parent_opacity() {
         use bezel_core::domain::theme::{Card, CardMember};

@@ -53,6 +53,8 @@ pub(crate) fn key(k: &str) -> SensorKey {
 pub(crate) fn element(frame: BoxF, kind: ElementKind) -> Element {
     Element {
         card: None,
+        is_group: false,
+        group_parent: None,
         card_member: None,
         id: ElementId(1),
         name: "e".into(),

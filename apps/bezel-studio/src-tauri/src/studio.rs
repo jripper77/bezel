@@ -2337,6 +2337,8 @@ mod tests {
             opacity: 1.0,
             visible: true,
             locked: false,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             card: Some(Card {
                 faces: vec!["A".into(), "B".into()],
@@ -2799,6 +2801,8 @@ mod tests {
     fn graphing(mut theme: Theme) -> Theme {
         theme.elements.push(Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id: ElementId(7),
             name: "usage".into(),
@@ -3046,6 +3050,8 @@ mod tests {
         let mut theme = s.theme().clone();
         theme.elements.push(Element {
             card: None,
+            is_group: false,
+            group_parent: None,
             card_member: None,
             id: ElementId(1),
             name: "ping".into(),

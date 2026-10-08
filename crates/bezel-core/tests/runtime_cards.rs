@@ -51,6 +51,8 @@ fn theme() -> Theme {
         opacity: 1.0,
         visible: true,
         locked: false,
+        is_group: false,
+        group_parent: None,
         card_member: None,
         card: Some(Card {
             faces: vec!["A".into(), "B".into(), "C".into()],

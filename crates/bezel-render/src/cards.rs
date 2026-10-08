@@ -63,7 +63,7 @@ impl Cards {
                 started: now,
                 settings: card.transition,
             });
-            if state.names != card.faces || !e.visible || !self.motion {
+            if state.names != card.faces || !theme.is_visible(e) || !self.motion {
                 *state = State {
                     names: card.faces.clone(),
                     active: card.active_face,

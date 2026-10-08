@@ -300,3 +300,36 @@ asset-placeholder fix, document state or delivery scheduling is reverted.
 - Validation: focused layer/card model tests and browser checks of both reorder
   directions, Undo, Escape, card blocks, member boundaries, selection, rename,
   visibility and accessibility in both languages and color schemes.
+
+
+### Ordinary groups and workspace selection (0.1.12)
+
+- Group at least two unlocked siblings with the inspector action or Ctrl+G.
+  Ordinary groups are invisible containers, separate from cards; they can nest
+  and live within a card's shared base or face. Members retain individual settings.
+  A group's frame tracks its members; moving/resizing transforms the entire
+  subtree, including card faces. Selecting a member from Layers or Ctrl-clicking
+  permits individual editing. Groups inherit visibility, opacity and editor locks.
+- Ctrl+Shift+G / Ungroup releases direct members into the previous parent,
+  preserving inherited visibility and opacity. Copy/duplicate remaps ownership;
+  copying an individual member detaches it. Removing the last member removes
+  the empty container. Group layer drag moves the whole block; member drops
+  remain within the same container. Each action supports Undo.
+- Optional theme metadata `isGroup` and `groupParent` identifies a transparent
+  Shape container and its members. Existing themes omit these fields and remain
+  compatible; older builds do not implement group editing/inheritance. Parsing
+  rejects missing/non-group owners, cycles, excessive depth, cross-face ownership
+  and painted group containers. Paint order remains flat in the theme file.
+- Pointer gestures start throughout the canvas workspace. Marquee selection
+  stays selected on release; Shift/Ctrl can add to a selection. Surrounding space
+  expands for off-canvas objects and shows editor-only outlines/name labels;
+  those objects can be moved/resized, including from Layers. Output stays clipped
+  to screen dimensions. Scrollbar interactions and video framing remain separate.
+- Validation: 35 focused editor/group/card/layer/shortcut model checks; native
+  group serialization/invalid ownership and pixel rendering checks; card
+  transition/cache/timer regressions; 12 browser checks across both languages
+  and color schemes, plus existing layer drag checks. Strict Studio Clippy passes
+  with the existing collapsible-if allowance. No serial protocol or scheduling
+  cadence changes were introduced. The video canvas framing gesture test passes;
+  two older video demo tests still expect an Auto rotation hint in device-video
+  mode and fail identically on the unmodified 0.1.11 sources.

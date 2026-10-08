@@ -1076,6 +1076,7 @@ document.addEventListener('keydown', (evt) => {
     case 'copy': store.copySelection(); break;
     case 'paste': store.paste(); break;
     case 'remove': if (ids.length) store.dispatch('remove', { ids }); break;
+    case 'groupSelection': case 'ungroup': if (ids.length) store.dispatch(action.type, { ids }); break;
     case 'duplicate': if (ids.length) store.dispatch('duplicate', { ids }); break;
     case 'selectAll': store.select(store.getState().theme.elements.map((e) => e.id)); break;
     case 'deselect': store.select([]); break;

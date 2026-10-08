@@ -5,6 +5,11 @@ The original project remains upstream. `main` follows the original; `windows-imp
 
 ## Implemented
 
+- **Device picker (0.1.20):** recognized models retain their name and resolution;
+  ambiguous models use USB manufacturer/product names or a readable protocol
+  family instead of a bare COM port. Addresses remain visible to distinguish
+  identical panels. This does not open a port to guess the model.
+
 - **Multiple displays and sensor sharing:** Studio remembers per-screen themes,
   orientation and live selection. Light's `--screens-config` starts the saved
   active screens together and shares sensor sampling rather than creating a
@@ -20,7 +25,8 @@ The original project remains upstream. `main` follows the original; `windows-imp
   catalogued local copy and offers original-file association when absent. The
   player releases its source on close and ignores late loading responses.
   Payloads are limited to 64 MiB, codecs depend on WebView, and device-only
-  videos cannot be downloaded through the current protocol.
+  videos have no verified download operation in the current driver; whether
+  Rev C firmware provides an undocumented read-back command remains unresolved.
 - **Windows shutdown:** Light applies the saved shutdown action through the
   worker's existing screen connection instead of releasing it afterwards.
   Screens without stored-media standby support are turned off.

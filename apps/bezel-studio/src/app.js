@@ -24,7 +24,7 @@ import { createPreviewAnimation } from './preview-animation.js';
 import { errorText, sensorLabel } from './messages.js';
 import { backgroundOf, droppable, fileNameOf, videoFacts } from './editor/background.js';
 import { framingOf, framingPercents } from './editor/video-framing.js';
-import { liveScreenIn } from './live-screen.js';
+import { deviceLabel, liveScreenIn } from './live-screen.js';
 import { libreStatus } from './libre-status.js';
 
 const bridge = createBridge(window);
@@ -513,8 +513,7 @@ const currentScreen = () => state.screens.find((s) => s.key === state.screen) ??
 function renderScreenSelect() {
   const select = $('screen-select');
   const options = state.screens.map((s) => {
-    const model = s.models.length === 1 ? s.models[0] : null;
-    return el('option', { value: s.key, text: model ? `${model.name} · ${model.width}×${model.height}` : s.key, selected: s.key === state.screen });
+    return el('option', { value: s.key, text: deviceLabel(s), selected: s.key === state.screen });
   });
   if (state.screen && !state.screens.some((s) => s.key === state.screen)) {
     options.push(el('option', { value: state.screen, text: state.screen, selected: true }));

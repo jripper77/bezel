@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { answersTo, liveScreenIn } from '../../src/live-screen.js';
+import { answersTo, deviceLabel, liveScreenIn } from '../../src/live-screen.js';
 import { SCENARIOS } from '../../src/demo-data.js';
 
 // The 8.8" (display /dev/ttyACM1, MCU /dev/ttyACM0) beside a 2.1" asleep,
@@ -42,4 +42,9 @@ test('a listed key wins over another screen\'s port', () => {
   // hardware): the one listed by it is the live one.
   const odd = { ...asleep21, key: '/dev/ttyACM0', wake: { ...asleep21.wake, address: '/dev/ttyACM0' } };
   assert.equal(liveScreenIn([turing88, odd], '/dev/ttyACM0'), odd);
+});
+
+test('ambiguous models retain a readable family when USB metadata is absent', () => {
+  assert.equal(deviceLabel({ key: 'COM3', family: 'turing-rev-a', models: [{ name: 'A' }, { name: 'B' }], display: {} }), 'Turing / UsbPCMonitor (Rev A) · COM3');
+  assert.equal(deviceLabel({ key: 'COM9', models: [], display: {}, family: 'unrecognized' }), 'COM9');
 });

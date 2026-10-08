@@ -50,6 +50,7 @@ pub struct SkiaRenderer {
     card_buffers: Vec<Pixmap>,
     face_cache: HashMap<FaceKey, CachedFace>,
     content_revision: u64,
+    face_cache_enabled: bool,
     render_stats: bezel_core::ports::RenderStats,
     card_scene: u64,
     card_scenes: HashMap<u64, crate::cards::Cards>,
@@ -130,6 +131,7 @@ impl SkiaRenderer {
             card_buffers: Vec::new(),
             face_cache: HashMap::new(),
             content_revision: 0,
+            face_cache_enabled: std::env::var_os("BEZEL_CARD_FACE_CACHE").is_some_and(|v| v == "1"),
             render_stats: bezel_core::ports::RenderStats::default(),
             card_scene: 0,
             card_scenes: HashMap::new(),
@@ -192,7 +194,10 @@ impl FrameRenderer for SkiaRenderer {
         assets: &BTreeMap<AssetRef, Vec<u8>>,
         context: RenderContext<'_>,
     ) -> Result<Frame> {
-        self.render_stats = bezel_core::ports::RenderStats::default();
+        self.render_stats = bezel_core::ports::RenderStats {
+            face_cache_enabled: self.face_cache_enabled,
+            ..bezel_core::ports::RenderStats::default()
+        };
         let size = theme.canvas;
         if size.area() == 0 {
             return Ok(Frame::filled(size, Rgba::default()));
@@ -524,106 +529,145 @@ impl SkiaRenderer {
             if let Some(window) = &mut window_group {
                 window.fill(Color::TRANSPARENT);
             }
-            let selected: Vec<_> = theme
-                .elements
-                .iter()
-                .enumerate()
-                .filter(|(_, e)| {
-                    e.visible
-                        && (e.card_member.as_ref().is_some_and(|m| {
-                            m.parent == parent.id
-                                && (m.face == Some(pose.face) || include && m.face.is_none())
-                        }) || include && e.id == parent.id)
-                })
-                .map(|(index, e)| {
-                    let mut shown = e.clone();
-                    if e.id != parent.id {
-                        shown.opacity *= parent.opacity;
-                    }
-                    (index, shown)
-                })
-                .collect();
-            // Animated image faces take the original drawing path. Static icons
-            // and all sensor/text widgets may reuse surfaces until inputs change.
-            let animated = selected.iter().any(|(_, e)| match &e.kind {
-                ElementKind::Image { asset, .. } => self
-                    .images
-                    .timeline(asset, assets, &mut self.diagnostics)
-                    .is_some(),
-                _ => false,
-            });
-            let key = (self.card_scene, parent.id, pose.face, include, has_windows);
-            let cached = self.face_cache.get(&key).filter(|face| {
-                self.content_revision != 0
-                    && !animated
-                    && face.revision == self.content_revision
-                    && face.pixels.width() == theme.canvas.width
-                    && face.pixels.height() == theme.canvas.height
-                    && face.elements == selected
-                    && face.time == context.time
-                    && face.language == context.language
-                    && face.snapshot == *context.snapshot
-                    && face.histories == *context.histories
-                    && face.quantities == *context.quantities
-            });
-            if let Some(face) = cached {
-                group.data_mut().copy_from_slice(face.pixels.data());
-                if let (Some(window), Some(kept)) = (&mut window_group, &face.window) {
-                    window.data_mut().copy_from_slice(kept.data());
-                }
-                self.render_stats.face_hits += 1;
-            } else {
+            if !self.face_cache_enabled {
+                // Original face drawing path: no key construction, image probing,
+                // cache insertion or surface copies. Keep timers for the A/B test.
                 self.render_stats.face_misses += 1;
                 let drawing = std::time::Instant::now();
-                for (index, shown) in &selected {
-                    self.draw_element(&mut group, (*index, shown.id), shown, assets, context);
-                    if let Some(window) = &mut window_group
-                        && let ElementKind::Shape {
-                            video_window: true,
-                            shape,
-                            fade,
-                            ..
-                        } = shown.kind
-                    {
-                        let mut mask = shown.clone();
-                        mask.kind = ElementKind::Shape {
-                            video_window: false,
-                            shape,
-                            fade,
-                            fill: Some(bezel_core::domain::theme::Paint::solid(Rgba::WHITE)),
-                            stroke: None,
-                        };
-                        self.draw_element(window, (*index, shown.id), &mask, assets, context);
+                for (index, e) in theme.elements.iter().enumerate() {
+                    let selected = e.card_member.as_ref().is_some_and(|m| {
+                        m.parent == parent.id
+                            && (m.face == Some(pose.face) || include && m.face.is_none())
+                    }) || include && e.id == parent.id;
+                    if selected && e.visible {
+                        let mut shown = e.clone();
+                        if e.id != parent.id {
+                            shown.opacity *= parent.opacity;
+                        }
+                        self.draw_element(&mut group, (index, e.id), &shown, assets, context);
+                        if let Some(window) = &mut window_group
+                            && let ElementKind::Shape {
+                                video_window: true,
+                                shape,
+                                fade,
+                                ..
+                            } = shown.kind
+                        {
+                            shown.kind = ElementKind::Shape {
+                                video_window: false,
+                                shape,
+                                fade,
+                                fill: Some(bezel_core::domain::theme::Paint::solid(Rgba::WHITE)),
+                                stroke: None,
+                            };
+                            self.draw_element(window, (index, e.id), &shown, assets, context);
+                        }
                     }
                 }
                 self.render_stats.face_draw_ms += drawing.elapsed().as_secs_f64() * 1000.0;
-                let bytes = group.data().len() * if has_windows { 2 } else { 1 };
-                if self.content_revision != 0 && !animated && bytes <= FACE_CACHE_BYTES {
-                    self.face_cache.remove(&key);
-                    let used: usize = self
-                        .face_cache
-                        .values()
-                        .map(|f| {
-                            f.pixels.data().len() + f.window.as_ref().map_or(0, |w| w.data().len())
-                        })
-                        .sum();
-                    if used + bytes > FACE_CACHE_BYTES {
-                        self.face_cache.clear();
+            } else {
+                let selected: Vec<_> = theme
+                    .elements
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| {
+                        e.visible
+                            && (e.card_member.as_ref().is_some_and(|m| {
+                                m.parent == parent.id
+                                    && (m.face == Some(pose.face) || include && m.face.is_none())
+                            }) || include && e.id == parent.id)
+                    })
+                    .map(|(index, e)| {
+                        let mut shown = e.clone();
+                        if e.id != parent.id {
+                            shown.opacity *= parent.opacity;
+                        }
+                        (index, shown)
+                    })
+                    .collect();
+                // Animated image faces take the original drawing path. Static icons
+                // and all sensor/text widgets may reuse surfaces until inputs change.
+                let animated = selected.iter().any(|(_, e)| match &e.kind {
+                    ElementKind::Image { asset, .. } => self
+                        .images
+                        .timeline(asset, assets, &mut self.diagnostics)
+                        .is_some(),
+                    _ => false,
+                });
+                let key = (self.card_scene, parent.id, pose.face, include, has_windows);
+                let cached = self.face_cache.get(&key).filter(|face| {
+                    self.content_revision != 0
+                        && !animated
+                        && face.revision == self.content_revision
+                        && face.pixels.width() == theme.canvas.width
+                        && face.pixels.height() == theme.canvas.height
+                        && face.elements == selected
+                        && face.time == context.time
+                        && face.language == context.language
+                        && face.snapshot == *context.snapshot
+                        && face.histories == *context.histories
+                        && face.quantities == *context.quantities
+                });
+                if let Some(face) = cached {
+                    group.data_mut().copy_from_slice(face.pixels.data());
+                    if let (Some(window), Some(kept)) = (&mut window_group, &face.window) {
+                        window.data_mut().copy_from_slice(kept.data());
                     }
-                    self.face_cache.insert(
-                        key,
-                        CachedFace {
-                            revision: self.content_revision,
-                            elements: selected,
-                            time: context.time,
-                            language: context.language,
-                            snapshot: context.snapshot.clone(),
-                            histories: context.histories.clone(),
-                            quantities: context.quantities.clone(),
-                            pixels: group.clone(),
-                            window: window_group.clone(),
-                        },
-                    );
+                    self.render_stats.face_hits += 1;
+                } else {
+                    self.render_stats.face_misses += 1;
+                    let drawing = std::time::Instant::now();
+                    for (index, shown) in &selected {
+                        self.draw_element(&mut group, (*index, shown.id), shown, assets, context);
+                        if let Some(window) = &mut window_group
+                            && let ElementKind::Shape {
+                                video_window: true,
+                                shape,
+                                fade,
+                                ..
+                            } = shown.kind
+                        {
+                            let mut mask = shown.clone();
+                            mask.kind = ElementKind::Shape {
+                                video_window: false,
+                                shape,
+                                fade,
+                                fill: Some(bezel_core::domain::theme::Paint::solid(Rgba::WHITE)),
+                                stroke: None,
+                            };
+                            self.draw_element(window, (*index, shown.id), &mask, assets, context);
+                        }
+                    }
+                    self.render_stats.face_draw_ms += drawing.elapsed().as_secs_f64() * 1000.0;
+                    let bytes = group.data().len() * if has_windows { 2 } else { 1 };
+                    if self.content_revision != 0 && !animated && bytes <= FACE_CACHE_BYTES {
+                        self.face_cache.remove(&key);
+                        let used: usize = self
+                            .face_cache
+                            .values()
+                            .map(|f| {
+                                f.pixels.data().len()
+                                    + f.window.as_ref().map_or(0, |w| w.data().len())
+                            })
+                            .sum();
+                        if used + bytes > FACE_CACHE_BYTES {
+                            self.face_cache.clear();
+                        }
+                        self.face_cache.insert(
+                            key,
+                            CachedFace {
+                                revision: self.content_revision,
+                                elements: selected,
+                                time: context.time,
+                                language: context.language,
+                                snapshot: context.snapshot.clone(),
+                                histories: context.histories.clone(),
+                                quantities: context.quantities.clone(),
+                                pixels: group.clone(),
+                                window: window_group.clone(),
+                            },
+                        );
+                    }
                 }
             }
             if let Some(projection) = pose.projection {
@@ -1337,6 +1381,7 @@ mod tests {
         let mut scene = Scene::empty();
         let mut cached = testkit::renderer();
         let mut fresh = testkit::renderer();
+        cached.face_cache_enabled = true;
         cached.set_content_revision(1);
         for r in [&mut cached, &mut fresh] {
             render_over(r, &theme, &scene, Backdrop::Poster);

@@ -438,6 +438,8 @@ pub struct RenderContext<'a> {
 /// Native card drawing costs, separate from serial delivery.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RenderStats {
+    /// Whether experimental face-surface reuse was enabled for this render.
+    pub face_cache_enabled: bool,
     /// Face surfaces reused in the last render.
     pub face_hits: u32,
     /// Face surfaces freshly drawn in the last render.

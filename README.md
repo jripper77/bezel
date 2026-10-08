@@ -6,10 +6,10 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.7**. Native card transitions reuse transparent
-face surfaces independently of the background, including device-video themes.
-The full-card Flip and serial protocol are preserved; real-device improvements
-are measured through Debug logs rather than assumed from panel specifications.
+Current development release: **0.1.8**. Card face-surface caching is disabled by
+default following a reported animation regression. The original face drawing path
+is restored, with Debug timing retained for comparison. The full-card Flip and
+serial protocol are preserved.
 
 Development happens on [`windows-improvements`](https://github.com/jripper77/bezel/tree/windows-improvements).
 See [FORK.md](FORK.md) for implementation details, validation and limitations.

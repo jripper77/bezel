@@ -226,3 +226,16 @@ An Image object awaiting file selection can be saved and reopened. Asset
 collection excludes an empty reference while preserving the object in the
 manifest. Actual resource paths still pass the existing path-safety checks.
 Zip and folder round trips cover placeholder preservation alongside real assets.
+
+
+### Face-cache rollback and comparison (0.1.8)
+
+Face-surface reuse is disabled by default after a reported loss of smoothness.
+The default path restores the original direct face drawing loop and skips cache
+keys, image timeline probes, insertion and surface copies. Existing rendering,
+worker and serial timing diagnostics remain; `face_cache_enabled` explicitly
+identifies the mode in Debug render statistics. The experimental path can be
+selected for an A/B comparison by launching with `BEZEL_CARD_FACE_CACHE=1`.
+Use the same theme, Flip settings and face-switch sequence for both captures;
+the saved effect may differ from unsaved editor settings. No serial behavior,
+asset-placeholder fix, document state or delivery scheduling is reverted.

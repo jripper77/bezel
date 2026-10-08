@@ -35,6 +35,8 @@ jobs:
           $version = (Get-Content VERSION -Raw).Trim()
           git archive --format=zip --output="dist/Bezel-Evo-$version-source.zip" HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed.' }
+          $hash = (Get-FileHash -LiteralPath "dist/Bezel-Evo-$version-source.zip").Hash.ToLowerInvariant()
+          Add-Content -LiteralPath "dist/Bezel-Evo-$version-SHA256SUMS.txt" -Value "$hash  Bezel-Evo-$version-source.zip" -Encoding ASCII
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bezel-evo-windows

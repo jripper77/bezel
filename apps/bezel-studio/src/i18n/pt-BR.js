@@ -1001,6 +1001,8 @@ export default {
   'themes.forScreen': 'Para esta tela',
   'themes.forScreenHint': 'Temas que cabem em {name}',
   'themes.forScreenNone': 'Conecte uma tela para ver os temas que cabem nela',
+  'themes.saveAs': 'Salvar como .bezeltheme…',
+  'themes.saveAsHint': 'Escolha onde salvar o tema atual, incluindo os recursos disponíveis. Ctrl+Shift+S.',
   'themes.import': 'Importar…',
   'themes.newHorizontal': 'Novo horizontal',
   'themes.newVertical': 'Novo vertical',

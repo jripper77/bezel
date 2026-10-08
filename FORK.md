@@ -333,3 +333,15 @@ asset-placeholder fix, document state or delivery scheduling is reverted.
   cadence changes were introduced. The video canvas framing gesture test passes;
   two older video demo tests still expect an Auto rotation hint in device-video
   mode and fail identically on the unmodified 0.1.11 sources.
+
+
+### Visible native theme Save As (0.1.13)
+
+- Themes exposes **Save as .bezeltheme...**, next to the existing library actions,
+  with a short explanation and Ctrl+Shift+S shortcut. It opens the existing
+  native Save As dialog; cancellation leaves the document unchanged.
+- The existing packaging path saves the current theme and its locally available
+  assets and makes that file the active save location. Device-storage-only video
+  references remain references, without downloading screen media.
+- This exposes existing behavior; no packaging, protocol or renderer changes.
+  Validation: targeted browser action/visual check and Windows build.

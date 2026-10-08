@@ -149,6 +149,7 @@ const library = createLibrary({
     newTheme: (axis) => newTheme(axis),
     refreshThemes: () => refreshThemes(),
     importTheme: () => importTheme(),
+    saveThemeAs: () => save(true),
     addImage: () => addImage(),
     addIcon: (item, svg, at, size) => addIcon(item, svg, at, size),
     addVideo: () => addMedia(),

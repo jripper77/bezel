@@ -414,6 +414,7 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
   $('theme-new-horizontal').addEventListener('click', () => actions.newTheme('horizontal'));
   $('theme-open').addEventListener('click', () => actions.refreshThemes());
   $('theme-import').addEventListener('click', () => actions.importTheme());
+  $('theme-save-as').addEventListener('click', () => actions.saveThemeAs());
 
   // --------------------------------------------------------------- media --
   /**

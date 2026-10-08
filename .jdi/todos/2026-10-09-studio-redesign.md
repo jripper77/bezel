@@ -1,5 +1,4 @@
 - "Prova senza schermo" (Connect): só existe no modo demo web; sem lógica no app Tauri. Omitido na phase studio-redesign.
 - udev one-click (Connect): hoje só há comando para copiar (ui/udev.js); instalação com um clique exige backend novo.
 - Badge "attiva ora" nas regras de trigger: não há estado runtime de trigger exposto ao Studio.
-- "Prova sulla faccia successiva" (CardMotion): sem ação equivalente no bridge.
 - Reinício de outras fontes de sensores além do LibreHardwareMonitor (popover SensorStatus).

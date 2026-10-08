@@ -365,3 +365,11 @@ asset-placeholder fix, document state or delivery scheduling is reverted.
   fold/edit/Undo/keyboard/accessibility regression in both languages/color schemes;
   visual/order/overflow smoke checks for all 11 palette widgets at 1280x800 and
   1000x700. Windows CLI/Studio build together; native rendering is unchanged.
+
+
+### Property section separators (0.1.15)
+
+- Replace boxed property sections and filled headers with horizontal separators.
+  Remove inner padding so fields align with the object name and use the panel's
+  full width. Section order, collapse state and keyboard focus remain intact.
+- Validation: visual smoke check and Windows build; no behavior changes.

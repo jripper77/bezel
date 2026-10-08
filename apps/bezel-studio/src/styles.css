@@ -671,11 +671,11 @@ button.layer-group-title { border: 0; background: transparent; text-align: left;
 .off-canvas-label { position: absolute; top: -20px; left: 0; max-width: 180px; padding: 1px 4px; color: var(--text); background: var(--surface); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Object properties share the same sections across widget types. */
-.property-section { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
-.property-section > summary { cursor: pointer; padding: 10px; background: var(--surface-2); border-radius: var(--radius); }
+.property-section { margin-top: 16px; border-top: 1px solid var(--border); }
+.property-section > summary { cursor: pointer; padding: 12px 0 8px; }
 .property-section > summary h3 { display: inline; margin: 0; color: var(--text); }
 .property-section > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.property-section-body { padding: 10px; }
+.property-section-body { padding: 0; }
 .property-section-body h4 { margin: 12px 0 8px; font-size: .75rem; color: var(--muted); }
 .property-section-body h4:first-child { margin-top: 0; }
 .property-section-body .actions { margin-top: 0; }

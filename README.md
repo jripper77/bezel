@@ -6,9 +6,9 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.14**. Object properties follow a consistent
+Current development release: **0.1.15**. Object properties follow a consistent
 order: name/type, position and size, content/data, appearance, membership,
-playback/animation and layer/object actions. Sections can be collapsed and retain
+playback/animation and layer/object actions. Sections are separated by horizontal lines and can be collapsed; they retain
 their state while editing; irrelevant sections are omitted. Sensor bindings,
 clock/weather configuration and image assets are separate from visual styling.
 

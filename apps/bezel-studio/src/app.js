@@ -521,6 +521,7 @@ function renderScreenSelect() {
   if (options.length === 0) options.push(el('option', { value: '', text: t('top.noScreen') }));
   select.replaceChildren(...options);
   const current = state.screens.find((s) => s.key === state.screen);
+  select.title = current ? deviceLabel(current) : state.screen ?? '';
   $('screen-dot').className = `dot${state.live ? ' live' : current?.state === 'awake' ? ' awake' : ''}`;
   let device = t('top.noScreen');
   if (state.screenError) device = t('status.devicesError', { message: errorText(t, state.screenError) });

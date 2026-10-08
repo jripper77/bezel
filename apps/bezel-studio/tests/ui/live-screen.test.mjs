@@ -48,3 +48,8 @@ test('ambiguous models retain a readable family when USB metadata is absent', ()
   assert.equal(deviceLabel({ key: 'COM3', family: 'turing-rev-a', models: [{ name: 'A' }, { name: 'B' }], display: {} }), 'Turing / UsbPCMonitor (Rev A) · COM3');
   assert.equal(deviceLabel({ key: 'COM9', models: [], display: {}, family: 'unrecognized' }), 'COM9');
 });
+
+test('the protocol family wins over Windows generic driver names', () => {
+  const screen = { key: 'COM3', family: 'turing-rev-a', models: [{ name: 'A' }, { name: 'B' }], display: { manufacturer: 'Microsoft', product: 'Dispositivo seriale USB (COM3)' } };
+  assert.equal(deviceLabel(screen), 'Turing / UsbPCMonitor (Rev A) · COM3');
+});

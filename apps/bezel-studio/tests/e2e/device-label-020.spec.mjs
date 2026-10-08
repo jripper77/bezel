@@ -5,7 +5,7 @@ test('device picker names ambiguous USB devices and retains distinct port addres
   await page.goto('/index.html?demo=two');
   await expect(page.locator('#theme-name')).toHaveValue('Demo');
   const picker = page.locator('#screen-select');
-  await expect(picker.locator('option[value="COM3"]')).toHaveText('Turing UsbMonitor · COM3');
+  await expect(picker.locator('option[value="COM3"]')).toHaveText('Turing Smart Screen (Rev C) · COM3');
   await expect(picker.locator('option[value="/dev/ttyACM1"]')).toHaveText('Turing Smart Screen 8.8" · 480×1920 · /dev/ttyACM1');
   await picker.selectOption('COM3');
   await expect(picker).toHaveValue('COM3');

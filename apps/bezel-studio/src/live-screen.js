@@ -26,7 +26,7 @@ export function liveScreenIn(screens, liveKey) {
   return screens.find((s) => s.key === liveKey) ?? screens.find((s) => answersTo(s, liveKey)) ?? null;
 }
 
-/** A recognized model, otherwise the USB name or protocol family; retain the
+/** A recognized model, otherwise the known protocol family or USB name; retain the
  * address so two identical panels remain distinguishable. Discovery need not
  * open a serial port or guess the exact model to provide a useful label. */
 export function deviceLabel(screen) {
@@ -42,6 +42,6 @@ export function deviceLabel(screen) {
     'turing-rev-c': 'Turing Smart Screen (Rev C)',
     'turing-usb': 'TURZX / Turing USB',
   }[screen.family];
-  const name = usbName || family || screen.models?.[0]?.name;
+  const name = family || usbName || screen.models?.[0]?.name;
   return name ? `${name} · ${screen.key}` : screen.key;
 }

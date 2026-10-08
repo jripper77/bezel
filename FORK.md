@@ -5,9 +5,11 @@ The original project remains upstream. `main` follows the original; `windows-imp
 
 ## Implemented
 
-- **Device picker (0.1.20):** recognized models retain their name and resolution;
-  ambiguous models use USB manufacturer/product names or a readable protocol
-  family instead of a bare COM port. Addresses remain visible to distinguish
+- **Device picker (0.1.21):** recognized models retain their name and resolution;
+  ambiguous models prefer a readable protocol family over USB driver names,
+  with manufacturer/product names as a fallback for unknown families. This
+  prevents Windows labels such as Microsoft USB Serial Device from overriding
+  the panel family. Addresses remain visible to distinguish
   identical panels. This does not open a port to guess the model.
 
 - **Multiple displays and sensor sharing:** Studio remembers per-screen themes,

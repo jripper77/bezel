@@ -1469,6 +1469,7 @@ mod tests {
             visible,
             locked: false,
             kind: ElementKind::Image {
+                fade: None,
                 asset: gif,
                 fit: Fit::Fill,
             },

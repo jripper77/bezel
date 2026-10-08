@@ -441,6 +441,7 @@ pub(crate) fn images(r: &mut SkiaRenderer) {
     });
     let scene = Scene::empty().asset("q.png", quadrants);
     let img = |fit| ElementKind::Image {
+        fade: None,
         asset: AssetRef("q.png".into()),
         fit,
     };
@@ -477,6 +478,7 @@ pub(crate) fn images(r: &mut SkiaRenderer) {
         vec![element(
             BoxF::new(0.0, 0.0, 8.0, 8.0),
             ElementKind::Image {
+                fade: None,
                 asset: AssetRef("a.gif".into()),
                 fit: Fit::Fill,
             },
@@ -1255,6 +1257,7 @@ fn device_video_windows_clear_alpha_with_border_layer_order_and_fade() {
     t.elements = vec![window(
         ShapeKind::Rect { radius: 0.0 },
         Some(Fade {
+            radial: None,
             angle: 0.0,
             start: 1.0,
             end: 0.0,
@@ -1286,6 +1289,7 @@ fn ordinary_shape_linear_transparency_blends_and_rotates() {
                 stroke: None,
                 video_window: false,
                 fade: Some(Fade {
+                    radial: None,
                     angle: 0.0,
                     start: 1.0,
                     end: 0.0,
@@ -1301,4 +1305,136 @@ fn ordinary_shape_linear_transparency_blends_and_rotates() {
     }
     let f = render(&mut r, &t, &Scene::empty());
     assert!(px(&f, 32, 0).a > 250 && px(&f, 32, 31).a < 5);
+}
+
+#[test]
+fn radial_image_mask_keeps_assets_and_multiplies_pixels() {
+    let asset = AssetRef("assets/mask.png".into());
+    let fade = bezel_core::domain::gradient::Fade {
+        radial: Some([0.5, 0.5, 0.5]),
+        angle: 0.,
+        start: 1.,
+        end: 0.,
+    };
+    let t = theme(
+        40,
+        40,
+        Background::Color(BLACK),
+        vec![element(
+            BoxF::new(0., 0., 40., 40.),
+            ElementKind::Image {
+                asset: asset.clone(),
+                fit: Fit::Fill,
+                fade: Some(fade),
+            },
+        )],
+    );
+    assert_eq!(t.assets(), vec![asset.clone()]);
+    assert_eq!(t.shown_images().count(), 1);
+    let mut scene = Scene::empty();
+    scene.assets.insert(asset, png(40, 40, |_, _| WHITE));
+    let mut r = crate::testkit::renderer();
+    let frame = render(&mut r, &t, &scene);
+    assert!(px(&frame, 20, 20).r > 235);
+    assert!(px(&frame, 0, 0).r < 5);
+}
+#[test]
+fn player_cover_progress_and_stopped_state_use_measured_context() {
+    let mut scene = Scene::empty();
+    scene
+        .snapshot
+        .media
+        .push(bezel_core::domain::playback::MediaSession {
+            source: "Spotify.exe".into(),
+            title: "Track".into(),
+            artist: "Artist".into(),
+            playing: true,
+            position: 30.,
+            duration: 60.,
+            cover: png(20, 20, |_, _| RED),
+        });
+    let t = theme(
+        200,
+        90,
+        Background::Color(BLACK),
+        vec![element(
+            BoxF::new(0., 0., 200., 90.),
+            ElementKind::Text {
+                content: TextContent::Player(bezel_core::domain::playback::Player {
+                    source: "Spotify".into(),
+                    show_cover: true,
+                    show_progress: true,
+                    show_source: false,
+                    hide_when_stopped: true,
+                    empty_text: "No media".into(),
+                }),
+                style: TextStyle {
+                    font: FontSpec {
+                        family: FAMILY.into(),
+                        weight: 400,
+                        italic: false,
+                        asset: None,
+                    },
+                    size: 12.,
+                    paint: Paint::solid(WHITE),
+                    align: HAlign::Left,
+                    valign: VAlign::Top,
+                    letter_spacing: 0.,
+                },
+            },
+        )],
+    );
+    let mut r = crate::testkit::renderer();
+    let frame = render(&mut r, &t, &scene);
+    assert_eq!(px(&frame, 20, 40), RED);
+    assert!(px(&frame, 115, 87).r > 200);
+    assert!(px(&frame, 190, 87).r < 100);
+    scene.snapshot.media[0].playing = false;
+    let frame = render(&mut r, &t, &scene);
+    assert_eq!(count(&frame, (0, 0, 200, 90), |p| p != BLACK), 0);
+}
+
+#[test]
+fn colored_weather_families_and_depth_have_distinct_vector_pixels() {
+    use bezel_core::domain::weather::{IconStyle, Weather};
+    let mut r = crate::testkit::renderer();
+    for code in [0, 1, 3, 45, 61, 71, 95, 999] {
+        let mut w = Weather {
+            city: "Roma".into(),
+            latitude: 41.9,
+            longitude: 12.5,
+            language: None,
+            fahrenheit: false,
+            show_icon: true,
+            icon_style: IconStyle::Colored,
+            icon_gap: Some(0.),
+            icon_size: Some(80.),
+        };
+        let keys = w.keys();
+        let scene = Scene::empty()
+            .with(keys[0].as_str(), 20.)
+            .with(keys[1].as_str(), code as f64);
+        let make = |w: Weather| {
+            theme(
+                200,
+                100,
+                Background::Color(BLACK),
+                vec![text(
+                    TextContent::Weather(w),
+                    style(12., HAlign::Left, VAlign::Top),
+                    BoxF::new(0., 0., 200., 100.),
+                )],
+            )
+        };
+        let colored = shot(
+            &mut r,
+            &format!("weather_color_{code}"),
+            &make(w.clone()),
+            &scene,
+        );
+        assert!(count(&colored, (0, 0, 80, 100), |p| p.r > 0 || p.g > 0 || p.b > 0) > 40);
+        w.icon_style = IconStyle::Dimensional;
+        let depth = shot(&mut r, &format!("weather_depth_{code}"), &make(w), &scene);
+        assert_ne!(colored, depth);
+    }
 }

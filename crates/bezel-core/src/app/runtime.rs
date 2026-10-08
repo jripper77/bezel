@@ -436,10 +436,12 @@ impl ThemeRuntime {
     }
 
     fn advance_cards(&mut self, now: Duration) {
-        if self
-            .card_timers
-            .update(&self.scene.theme, now, self.card_rotation)
-        {
+        if self.card_timers.update(
+            &self.scene.theme,
+            &self.scene.snapshot,
+            now,
+            self.card_rotation,
+        ) {
             self.recent_frame = None;
         }
     }

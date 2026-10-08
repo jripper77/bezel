@@ -78,12 +78,18 @@
     <main class="workspace">
       <nav class="library" data-i18n-aria-label="library.title">
         <div class="tabs" role="tablist" data-i18n-aria-label="library.title">
+          <div class="tab-design" role="presentation">
+          <span class="tab-domain" aria-hidden="true" data-i18n="library.design"></span>
           <button type="button" role="tab" id="tab-widgets" aria-controls="panel-widgets" aria-selected="true" data-tab="widgets" data-i18n="library.widgets"></button>
           <button type="button" role="tab" id="tab-sensors" aria-controls="panel-sensors" aria-selected="false" tabindex="-1" data-tab="sensors" data-i18n="library.sensors"></button>
           <button type="button" role="tab" id="tab-layers" aria-controls="panel-layers" aria-selected="false" tabindex="-1" data-tab="layers" data-i18n="library.layers"></button>
           <button type="button" role="tab" id="tab-themes" aria-controls="panel-themes" aria-selected="false" tabindex="-1" data-tab="themes" data-i18n="library.themes"></button>
           <button type="button" role="tab" id="tab-media" aria-controls="panel-media" aria-selected="false" tabindex="-1" data-tab="media" data-i18n="library.media"></button>
+          </div>
+          <div class="tab-device" role="presentation">
+          <span class="tab-domain" aria-hidden="true" data-i18n="library.device"></span>
           <button type="button" role="tab" id="tab-screen" aria-controls="panel-screen" aria-selected="false" tabindex="-1" data-tab="screen" data-i18n="library.screen"></button>
+          </div>
         </div>
         <section class="panel" role="tabpanel" id="panel-widgets" aria-labelledby="tab-widgets">
           <p class="hint" data-i18n="library.widgetsHint"></p>

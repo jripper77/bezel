@@ -125,7 +125,7 @@ export const commands = {
     if (!parent?.card || parent.card.faces.length <= 1) return { theme };
     const face = parent.card.activeFace;
     const elements = theme.elements.filter(e => !(e.cardMember?.parent === id && e.cardMember.face === face)).map(e => {
-      if (e.id === id) return { ...e, card: { ...e.card, faces: e.card.faces.filter((_, i) => i !== face), activeFace: Math.min(face, e.card.faces.length - 2) } };
+      if (e.id === id) return { ...e, card: { ...e.card, triggers:(e.card.triggers ?? []).filter(r=>r.face!==face).map(r=>({...r,face:r.face>face?r.face-1:r.face})), faces: e.card.faces.filter((_, i) => i !== face), activeFace: Math.min(face, e.card.faces.length - 2) } };
       if (e.cardMember?.parent === id && e.cardMember.face !== null && e.cardMember.face > face) return { ...e, cardMember: { ...e.cardMember, face: e.cardMember.face - 1 } };
       return e;
     });
@@ -138,7 +138,7 @@ export const commands = {
     if (![-1, 1].includes(direction) || to < 0 || to >= parent.card.faces.length) return { theme };
     const swap = i => i === from ? to : i === to ? from : i;
     const elements = theme.elements.map(e => {
-      if (e.id === id) { const faces = [...e.card.faces]; [faces[from], faces[to]] = [faces[to], faces[from]]; return { ...e, card: { ...e.card, faces, activeFace: to } }; }
+      if (e.id === id) { const faces = [...e.card.faces]; [faces[from], faces[to]] = [faces[to], faces[from]]; return { ...e, card: { ...e.card, triggers:(e.card.triggers ?? []).map(r=>({...r,face:swap(r.face)})), faces, activeFace: to } }; }
       if (e.cardMember?.parent === id && e.cardMember.face !== null) return { ...e, cardMember: { ...e.cardMember, face: swap(e.cardMember.face) } };
       return e;
     });

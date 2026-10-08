@@ -6,7 +6,7 @@ Bezel Evo combines a visual theme editor with a Light background runtime,
 local hardware monitoring and support for multiple displays. This repository
 contains the source and documentation for this fork.
 
-Current development release: **0.1.15**. Object properties follow a consistent
+Current development release: **0.1.16**. Object properties follow a consistent
 order: name/type, position and size, content/data, appearance, membership,
 playback/animation and layer/object actions. Sections are separated by horizontal lines and can be collapsed; they retain
 their state while editing; irrelevant sections are omitted. Sensor bindings,
@@ -50,12 +50,25 @@ See [FORK.md](FORK.md) for implementation details, validation and limitations.
 - **Card widgets:** shared base and named faces, manual face selection, face
   duplication and ordering, grouping existing objects, movement, resizing and
   clipboard support. Face changes support fade, slide and flip transitions,
-  configurable duration/direction and optional base movement. Automatic face changes are planned in [TODO.md](TODO.md).
-- **Weather widgets:** city search, units, language, icon style, size and spacing.
+  configurable duration/direction and optional base movement. Rotate faces on a timer
+  or select a face while an app runs, is closed, is in foreground or plays media.
+  Rules have priorities and a return delay; rotation resumes after the override.
+- **Weather widgets:** city search, units, language, icon size and spacing, with
+  outline, filled, colored and shaded 3D-style vector icons authored in this fork.
+- **Windows media player:** display title, artist, cover and timeline from Windows
+  media sessions. Filter an app (e.g. Spotify) or automatically prefer a playing
+  session; hide stopped sessions or configure the empty label. App-provided
+  metadata and timing vary; this widget does not send playback commands.
+- **Image and shape transparency:** shared linear/radial controls with center,
+  radius and start/end opacity. Images retain their existing fit/framing.
+- **Screen sleep timer:** discoverable under Screen settings; default 5 minutes,
+  per-display persistence and capability checks. Turing Rev C firmware supports
+  1 to 10 minutes after PC shutdown; active Live updates keep the display awake.
+  Choose Keep in the shutdown options to disable the Off fallback.
 - **Ring gradients:** start/end colors and an adjustable transition along the
   full arc, plus a checkbox to preview the ring at 100%.
 - **Stored-video backgrounds:** select a video in Screen Storage as the
-  background, with looping and shape windows. Shapes support linear opacity.
+  background, with looping and shape windows. Shape windows support linear/radial opacity.
 - **Local video previews:** a player in Media and Screen Storage with playback,
   pause and seeking. Storage uses an associated local copy and offers
   original-file association when missing. Previewing does not alter the theme.

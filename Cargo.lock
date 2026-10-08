@@ -454,6 +454,7 @@ name = "bezel-sensors"
 version = "0.0.0"
 dependencies = [
  "bezel-core",
+ "image",
  "nvml-wrapper",
  "rustix",
  "serde",
@@ -462,6 +463,9 @@ dependencies = [
  "sysinfo",
  "tracing",
  "ureq",
+ "windows",
+ "windows-core",
+ "windows-future",
  "windows-sys 0.61.2",
  "wmi",
 ]

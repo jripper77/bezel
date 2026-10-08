@@ -215,6 +215,14 @@ export function createStandbyPanel({ root, t, locale, bridge, notify, context, s
     }
     if (!offered(view.data)) return [el('p', { class: 'hint', text: t('standby.unsupported') })];
     const parts = [el('div', { class: 'standby-options', role: 'radiogroup', 'aria-labelledby': 'standby-title', 'aria-busy': String(view.busy) }, CHOICES.map(optionRow))];
+    const off=optionOf(view.data,'off');
+    parts.push(el('section',{class:'sleep-settings'},[
+      el('h3',{text:t('sleep.title')}),
+      el('p',{class:'hint',text:t('sleep.help')}),
+      el('button',{type:'button',class:'text-button',id:'configure-sleep-timer',text:t('sleep.configure'),disabled:view.busy || !off?.enabled,onclick:async()=>{
+        const key=view.key;const request=await askChoice('off');if(request)await write(request,key);
+      }}),
+    ]));
     if (view.data.choice === 'album' && optionOf(view.data, 'album').enabled) {
       parts.push(el('div', { class: 'button-row' }, [el('button', {
         type: 'button', class: 'text-button', dataset: { focus: 'manage' }, disabled: view.busy, onclick: () => void manageAlbum({ choosing: false }),

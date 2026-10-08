@@ -233,6 +233,9 @@ pub enum PaintDto {
 /// A linear transparency mask in a shape's box.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FadeDto {
+    /// Radial center X/Y and radius in normalized box coordinates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radial: Option<[f32; 3]>,
     /// Direction in degrees.
     pub angle: f32,
     /// Start opacity, 0..=1.
@@ -279,6 +282,8 @@ pub struct ElementDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CardDto {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<CardTriggerDto>,
     pub faces: Vec<String>,
     #[serde(default)]
     pub active_face: usize,
@@ -286,6 +291,19 @@ pub struct CardDto {
     pub rotation_seconds: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<CardTransitionDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardTriggerDto {
+    pub source: String,
+    #[serde(default)]
+    pub app: String,
+    pub face: usize,
+    #[serde(default)]
+    pub priority: u32,
+    #[serde(default)]
+    pub return_seconds: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -360,6 +378,20 @@ pub struct FormatDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ContentDto {
+    Player {
+        #[serde(default)]
+        source: String,
+        #[serde(default = "yes", rename = "showCover")]
+        show_cover: bool,
+        #[serde(default = "yes", rename = "showProgress")]
+        show_progress: bool,
+        #[serde(default, rename = "showSource")]
+        show_source: bool,
+        #[serde(default, rename = "hideWhenStopped")]
+        hide_when_stopped: bool,
+        #[serde(default, rename = "emptyText")]
+        empty_text: String,
+    },
     /// Current weather at a saved location.
     Weather {
         /// Displayed city.
@@ -465,6 +497,9 @@ pub enum KindDto {
     },
     /// Image.
     Image {
+        /// Optional image opacity gradient.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fade: Option<FadeDto>,
         /// Asset.
         asset: String,
         /// Fit.
@@ -876,6 +911,14 @@ fn kind_dto(k: &ElementKind) -> KindDto {
     match k {
         ElementKind::Text { content, style } => KindDto::Text {
             content: match content {
+                TextContent::Player(p) => ContentDto::Player {
+                    source: p.source.clone(),
+                    show_cover: p.show_cover,
+                    show_progress: p.show_progress,
+                    show_source: p.show_source,
+                    hide_when_stopped: p.hide_when_stopped,
+                    empty_text: p.empty_text.clone(),
+                },
                 TextContent::Static(text) => ContentDto::Static { text: text.clone() },
                 TextContent::Sensor {
                     key,
@@ -905,6 +948,8 @@ fn kind_dto(k: &ElementKind) -> KindDto {
                     icon_style: match w.icon_style {
                         bezel_core::domain::weather::IconStyle::Outline => "outline",
                         bezel_core::domain::weather::IconStyle::Filled => "filled",
+                        bezel_core::domain::weather::IconStyle::Colored => "colored",
+                        bezel_core::domain::weather::IconStyle::Dimensional => "dimensional",
                     }
                     .into(),
                     icon_gap: w.icon_gap,
@@ -933,7 +978,8 @@ fn kind_dto(k: &ElementKind) -> KindDto {
             },
             style: style_dto(style),
         },
-        ElementKind::Image { asset, fit } => KindDto::Image {
+        ElementKind::Image { asset, fit, fade } => KindDto::Image {
+            fade: fade.map(fade_dto),
             asset: asset.0.clone(),
             fit: fit_dto(*fit),
         },
@@ -951,6 +997,7 @@ fn kind_dto(k: &ElementKind) -> KindDto {
             KindDto::Shape {
                 video_window: *video_window,
                 fade: fade.map(|f| FadeDto {
+                    radial: f.radial,
                     angle: f.angle,
                     start: f.start,
                     end: f.end,
@@ -1041,6 +1088,26 @@ fn kind(k: &KindDto) -> R<ElementKind> {
     Ok(match k {
         KindDto::Text { content, style: s } => ElementKind::Text {
             content: match content {
+                ContentDto::Player {
+                    source,
+                    show_cover,
+                    show_progress,
+                    show_source,
+                    hide_when_stopped,
+                    empty_text,
+                } => {
+                    if source.chars().count() > 160 || empty_text.chars().count() > 512 {
+                        return err("player text is too long");
+                    }
+                    TextContent::Player(bezel_core::domain::playback::Player {
+                        source: source.clone(),
+                        show_cover: *show_cover,
+                        show_progress: *show_progress,
+                        show_source: *show_source,
+                        hide_when_stopped: *hide_when_stopped,
+                        empty_text: empty_text.clone(),
+                    })
+                }
                 ContentDto::Static { text } => TextContent::Static(text.clone()),
                 ContentDto::Sensor {
                     key: k,
@@ -1088,6 +1155,8 @@ fn kind(k: &KindDto) -> R<ElementKind> {
                         icon_style: match icon_style.as_str() {
                             "outline" => bezel_core::domain::weather::IconStyle::Outline,
                             "filled" => bezel_core::domain::weather::IconStyle::Filled,
+                            "colored" => bezel_core::domain::weather::IconStyle::Colored,
+                            "dimensional" => bezel_core::domain::weather::IconStyle::Dimensional,
                             _ => return err("invalid weather icon style"),
                         },
                         icon_gap: *icon_gap,
@@ -1117,7 +1186,12 @@ fn kind(k: &KindDto) -> R<ElementKind> {
             },
             style: style(s)?,
         },
-        KindDto::Image { asset, fit: f } => ElementKind::Image {
+        KindDto::Image {
+            asset,
+            fit: f,
+            fade,
+        } => ElementKind::Image {
+            fade: fade.as_ref().map(parse_fade).transpose()?,
             asset: AssetRef(asset.clone()),
             fit: fit(*f),
         },
@@ -1131,24 +1205,7 @@ fn kind(k: &KindDto) -> R<ElementKind> {
             stroke_width,
         } => ElementKind::Shape {
             video_window: *video_window,
-            fade: fade
-                .as_ref()
-                .map(|f| {
-                    if !f.angle.is_finite()
-                        || !f.start.is_finite()
-                        || !f.end.is_finite()
-                        || !(0.0..=1.0).contains(&f.start)
-                        || !(0.0..=1.0).contains(&f.end)
-                    {
-                        return err("invalid shape transparency");
-                    }
-                    Ok(bezel_core::domain::gradient::Fade {
-                        angle: f.angle,
-                        start: f.start,
-                        end: f.end,
-                    })
-                })
-                .transpose()?,
+            fade: fade.as_ref().map(parse_fade).transpose()?,
             shape: match shape.as_str() {
                 "rect" => ShapeKind::Rect { radius: *radius },
                 "ellipse" => ShapeKind::Ellipse,
@@ -1277,6 +1334,31 @@ impl From<&Theme> for ThemeDto {
                 .iter()
                 .map(|e| ElementDto {
                     card: e.card.as_ref().map(|c| CardDto {
+                        triggers: c
+                            .triggers
+                            .iter()
+                            .map(|r| CardTriggerDto {
+                                source: match r.source {
+                                    bezel_core::domain::playback::TriggerSource::Process => {
+                                        "process"
+                                    }
+                                    bezel_core::domain::playback::TriggerSource::ProcessClosed => {
+                                        "processClosed"
+                                    }
+                                    bezel_core::domain::playback::TriggerSource::Foreground => {
+                                        "foreground"
+                                    }
+                                    bezel_core::domain::playback::TriggerSource::MediaPlaying => {
+                                        "mediaPlaying"
+                                    }
+                                }
+                                .into(),
+                                app: r.app.clone(),
+                                face: r.face,
+                                priority: r.priority,
+                                return_seconds: r.return_seconds,
+                            })
+                            .collect(),
                         faces: c.faces.clone(),
                         active_face: c.active_face,
                         rotation_seconds: c.rotation_seconds,
@@ -1377,6 +1459,41 @@ impl TryFrom<&ThemeDto> for Theme {
                             {
                                 return err("card rotation interval must be 5 to 3600 seconds");
                             }
+                            if c.triggers.len() > 32 {
+                                return err("too many card triggers");
+                            }
+                            let triggers = c
+                                .triggers
+                                .iter()
+                                .map(|r| {
+                                    use bezel_core::domain::playback::{
+                                        CardTrigger, TriggerSource,
+                                    };
+                                    let source = match r.source.as_str() {
+                                        "process" => TriggerSource::Process,
+                                        "processClosed" => TriggerSource::ProcessClosed,
+                                        "foreground" => TriggerSource::Foreground,
+                                        "mediaPlaying" => TriggerSource::MediaPlaying,
+                                        _ => return err("unknown card trigger"),
+                                    };
+                                    if r.app.chars().count() > 160
+                                        || (r.app.trim().is_empty()
+                                            && source != TriggerSource::MediaPlaying)
+                                        || r.face >= c.faces.len()
+                                        || r.priority > 100
+                                        || r.return_seconds > 300
+                                    {
+                                        return err("invalid card trigger");
+                                    }
+                                    Ok(CardTrigger {
+                                        source,
+                                        app: r.app.clone(),
+                                        face: r.face,
+                                        priority: r.priority,
+                                        return_seconds: r.return_seconds,
+                                    })
+                                })
+                                .collect::<R<Vec<_>>>()?;
                             let transition = c
                                 .transition
                                 .as_ref()
@@ -1409,6 +1526,7 @@ impl TryFrom<&ThemeDto> for Theme {
                                 })
                                 .transpose()?;
                             Ok(bezel_core::domain::theme::Card {
+                                triggers,
                                 faces: c.faces.clone(),
                                 active_face: c.active_face,
                                 rotation_seconds: c.rotation_seconds,
@@ -1519,4 +1637,37 @@ fn outline_icon() -> String {
 
 fn is_false(value: &bool) -> bool {
     !value
+}
+
+fn fade_dto(f: bezel_core::domain::gradient::Fade) -> FadeDto {
+    FadeDto {
+        angle: f.angle,
+        start: f.start,
+        end: f.end,
+        radial: f.radial,
+    }
+}
+fn parse_fade(f: &FadeDto) -> R<bezel_core::domain::gradient::Fade> {
+    if !f.angle.is_finite()
+        || !f.start.is_finite()
+        || !f.end.is_finite()
+        || !(0.0..=1.0).contains(&f.start)
+        || !(0.0..=1.0).contains(&f.end)
+        || f.radial.is_some_and(|[x, y, r]| {
+            !x.is_finite()
+                || !y.is_finite()
+                || !r.is_finite()
+                || !(0.0..=1.0).contains(&x)
+                || !(0.0..=1.0).contains(&y)
+                || !(0.01..=2.0).contains(&r)
+        })
+    {
+        return err("invalid opacity gradient");
+    }
+    Ok(bezel_core::domain::gradient::Fade {
+        angle: f.angle,
+        start: f.start,
+        end: f.end,
+        radial: f.radial,
+    })
 }

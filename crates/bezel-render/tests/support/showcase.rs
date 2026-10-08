@@ -203,6 +203,7 @@ fn cpu(top: f32) -> Option<Vec<(BoxF, ElementKind)>> {
         segments: None,
     };
     let icon = ElementKind::Image {
+        fade: None,
         asset: AssetRef(ICON.into()),
         fit: Fit::Contain,
     };

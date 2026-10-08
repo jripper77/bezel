@@ -27,9 +27,9 @@ Checked items are implemented; unchecked items are design notes for future work.
 
 ## Card widget with a base and multiple faces
 
-Face transitions are implemented; face selection remains manual. Cards move and resize their
+Face transitions, timed rotation and Windows application/media state rules are implemented. Cards move and resize their
 objects together, including inactive faces. Objects retain their own appearance
-settings and are not clipped to the card bounds. Timers and entry/exit animations below are still planned.
+settings and are not clipped to the card bounds. Entry/exit animations and sensor-threshold triggers below remain planned.
 
 - [x] Create a dedicated Card container with a shared base and one initial face.
 - [x] Add, duplicate, rename and reorder faces; edit the base or a selected face.
@@ -41,7 +41,8 @@ settings and are not clipped to the card bounds. Timers and entry/exit animation
 - [x] Choose whether the shared base participates in the transition.
 - [x] Add editor controls to animate the next face. Respect reduced motion in the preview.
 - [ ] Support timed face changes and event-driven face selection, with priority,
-      minimum display time, return behavior and sensor threshold hysteresis.
+      minimum display time and sensor threshold hysteresis. Timers, rule priority
+      and return delay are implemented.
 - [x] Measure host frame-delivery rate, rendering and serial costs on the real
       8.8-inch screen; keep panel refresh distinct from host completion.
 - [x] Deliver independent per-display Studio workers; keep face caching optional after measurement.
@@ -52,13 +53,15 @@ settings and are not clipped to the card bounds. Timers and entry/exit animation
 
 ## Software and media triggers
 
-- [ ] Trigger a face or state when a specified application starts or stops.
-- [ ] Distinguish an application being open from media actively playing.
-- [ ] Investigate Windows media-session access for Spotify: playback state,
+- [x] Trigger a card face while a specified application is running or closed (tray states remain planned).
+- [x] Distinguish an application being open from media actively playing.
+- [x] Investigate Windows media-session access for Spotify: playback state,
       title, artist and cover art, including whether additional authorization is
-      needed and which fields are reliably available.
-- [ ] Show the Music/player face when Spotify plays; after a configurable pause
-      or stop delay, return to the previous face or state.
+      needed and which fields are reliably available. Windows exposes sessions
+      without OAuth; track fields/cover/timeline depend on the publishing app.
+- [x] Show a configured Music/player face while a matching media session plays;
+      after a configurable pause/stop delay, return to the previous card face.
+      Spotify is supported when it publishes a Windows media session.
 - [ ] Resolve simultaneous triggers and manual tray overrides predictably.
 
 The existing themes remain usable without cards, states or automatic triggers.
@@ -69,27 +72,27 @@ The existing themes remain usable without cards, states or automatic triggers.
 - [x] Layers: show each card face as a container, with its objects indented below
       it. Show the shared base separately; keep selection, visibility, ordering
       and card membership understandable when switching faces.
-- [x] Card timers: configure automatic face rotation (5?3600 seconds), using
+- [x] Card timers: configure automatic face rotation (5–3600 seconds), using
       the existing transition. Pause while editing a card/member in Studio;
       keep runtime playback outside saved themes and Undo.
-- [ ] Coordinate timers with event priorities, explicit overrides and return
+- [x] Coordinate timers with event priorities, explicit overrides and return
       behavior when software/media triggers are introduced.
-- [ ] Software events: assess process start/stop, foreground application and media
+- [x] Software events: assess process start/stop, foreground application and media
       session events before choosing supported triggers. Implement only sources
       that are available reliably and without per-frame polling.
-- [ ] Media-player widgets: show title, artist, cover and playback state; evaluate
-      progress and playback controls using Windows media sessions. Support Spotify
+- [x] Media-player widgets: show title, artist, cover and playback state; evaluate
+      progress using Windows media sessions (no playback controls in this release). Support Spotify
       where its session exposes data; define behavior for multiple sessions and
       absent/stopped media.
-- [ ] Images: add linear and radial opacity gradients, matching shape controls;
+- [x] Images: add linear and radial opacity gradients, matching shape controls;
       apply opacity to the image contents and retain image framing/fit behavior.
-- [ ] Shapes: add radial opacity gradients alongside existing linear opacity,
+- [x] Shapes: add radial opacity gradients alongside existing linear opacity,
       with editable center, extent and start/end opacity.
-- [ ] Screen sleep timer: configure minutes per display, default 5 minutes.
+- [x] Screen sleep timer: configure minutes per display, default 5 minutes.
       Expose device capabilities and supported limits, a disabled state and
       persistence. Define any host fallback explicitly; do not assume all panels
       have the same firmware sleep command.
-- [ ] Weather: add colored and 3D-style icon collections selectable per widget.
+- [x] Weather: add colored and 3D-style icon collections selectable per widget.
       Choose redistributable free assets, bundle licenses/credits and preserve
       existing monochrome styles and condition mappings.
 
@@ -99,12 +102,12 @@ The existing themes remain usable without cards, states or automatic triggers.
       keep card membership and move entire cards with their objects.
 - [x] Clear object selection by clicking the space around the canvas.
 
-- [ ] Review the editor's main navigation and remove duplicated or misplaced
+- [x] Review the editor's main navigation and remove duplicated or misplaced
       controls while preserving existing workflows.
 - [x] Group object properties by purpose with a consistent order: content/data,
       appearance, position/size, card membership and animation where applicable.
       Make common controls easy to find and show advanced controls in context.
-- [ ] Align labels, units, spacing and disabled states across widget types;
+- [x] Align labels, units, spacing and disabled states across widget types;
       validate the result in both small and large editor windows.
 
 ## New ideas
@@ -119,6 +122,6 @@ The existing themes remain usable without cards, states or automatic triggers.
       previous state on activity. Keep this policy distinct from the screen's
       sleep timer and from Windows standby; handle multiple displays and Light.
 
-Complete and measure the current animation release before implementing these
-items. Document trigger feasibility first; do not imply that every application
-exposes playback metadata or controls.
+Continue with the unchecked items above. Application/media rules and their
+capabilities are documented in FORK.md; not every application publishes playback
+metadata, artwork or a timeline.

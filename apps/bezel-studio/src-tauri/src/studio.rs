@@ -2341,6 +2341,7 @@ mod tests {
             group_parent: None,
             card_member: None,
             card: Some(Card {
+                triggers: Vec::new(),
                 faces: vec!["A".into(), "B".into()],
                 active_face: 0,
                 rotation_seconds: None,

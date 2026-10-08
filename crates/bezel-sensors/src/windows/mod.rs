@@ -3,6 +3,7 @@
 //! namespace or local web server for temperatures, fans and power. NVIDIA GPUs
 //! come from NVML like on Linux.
 
+mod activity;
 mod embedded;
 mod lhm_http;
 mod sys;
@@ -13,6 +14,7 @@ use crate::provider::Provider;
 /// Every Windows provider except the GPUs, in catalog order.
 pub(crate) fn providers() -> Vec<Box<dyn Provider>> {
     vec![
+        Box::new(activity::Activity::new()),
         Box::new(sys::Cpu::new()),
         Box::new(wmi::Lhm::new()),
         Box::new(sys::Memory::new()),

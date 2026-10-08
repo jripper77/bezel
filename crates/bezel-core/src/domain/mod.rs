@@ -31,3 +31,5 @@ pub mod theme;
 pub mod weather;
 
 pub mod gradient;
+
+pub mod playback;

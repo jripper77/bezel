@@ -463,6 +463,16 @@ impl Reading {
 /// Readings taken together.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Snapshot {
+    /// Operating-system media sessions; empty when unavailable.
+    pub media: Vec<super::playback::MediaSession>,
+    /// True when the operating-system media session list was read successfully.
+    pub media_available: bool,
+    /// Running executable names, normalized without .exe.
+    pub applications: std::collections::BTreeSet<String>,
+    /// Foreground executable, if Windows returned one.
+    pub foreground: Option<String>,
+    /// True after a successful process scan.
+    pub activity_available: bool,
     readings: BTreeMap<SensorKey, Reading>,
 }
 

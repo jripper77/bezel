@@ -67,9 +67,11 @@ mod tests {
     }
 }
 
-/// A linear transparency mask, applied in the element's box.
+/// A linear or radial transparency mask, applied in the element's box.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fade {
+    /// Optional normalized radial center and radius.
+    pub radial: Option<[f32; 3]>,
     /// Direction, degrees: 0 left to right, 90 top to bottom.
     pub angle: f32,
     /// Opacity at the start, 0..=1.
@@ -84,8 +86,40 @@ impl Fade {
         let (sin, cos) = self.angle.to_radians().sin_cos();
         let reach = cos.abs() + sin.abs();
         move |x, y| {
-            let t = (0.5 + ((x - 0.5) * cos + (y - 0.5) * sin) / reach).clamp(0.0, 1.0);
+            let t = self.radial.map_or_else(
+                || (0.5 + ((x - 0.5) * cos + (y - 0.5) * sin) / reach).clamp(0.0, 1.0),
+                |[cx, cy, radius]| {
+                    (((x - cx).powi(2) + (y - cy).powi(2)).sqrt() / radius.max(0.01))
+                        .clamp(0.0, 1.0)
+                },
+            );
             (self.start + (self.end - self.start) * t).clamp(0.0, 1.0)
         }
+    }
+}
+
+#[cfg(test)]
+mod fade_tests {
+    use super::*;
+    #[test]
+    fn radial_center_extent_and_inversion() {
+        let fade = Fade {
+            radial: Some([0.25, 0.75, 0.5]),
+            angle: 0.,
+            start: 1.,
+            end: 0.,
+        };
+        let ramp = fade.ramp();
+        assert_eq!(ramp(0.25, 0.75), 1.);
+        assert_eq!(ramp(0.75, 0.75), 0.);
+        assert_eq!(ramp(1., 0.), 0.);
+        let ramp = Fade {
+            start: 0.,
+            end: 1.,
+            ..fade
+        }
+        .ramp();
+        assert_eq!(ramp(0.25, 0.75), 0.);
+        assert_eq!(ramp(0.75, 0.75), 1.);
     }
 }

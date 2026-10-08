@@ -605,6 +605,7 @@ impl Importer {
             BoxF::new(x, y, w as f32, h as f32),
             visible,
             ElementKind::Image {
+                fade: None,
                 asset,
                 fit: Fit::Fill,
             },

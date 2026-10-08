@@ -226,6 +226,8 @@ pub struct Binding {
 /// What a text element prints.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TextContent {
+    /// Operating-system media session display.
+    Player(super::playback::Player),
     /// Current weather at a saved location.
     Weather(super::weather::Weather),
     /// Fixed text.
@@ -321,6 +323,8 @@ pub enum ElementKind {
     },
     /// A still or animated (GIF) image.
     Image {
+        /// Optional opacity mask, applied after fitting the image.
+        fade: Option<super::gradient::Fade>,
         /// Image asset.
         asset: AssetRef,
         /// How it fills the box.
@@ -443,6 +447,8 @@ pub struct Element {
 /// A card base is drawn as a normal shape; face objects keep stable theme IDs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Card {
+    /// State-driven face overrides.
+    pub triggers: Vec<super::playback::CardTrigger>,
     /// Face names, in presentation order.
     pub faces: Vec<String>,
     /// Face shown by the renderer.
@@ -677,7 +683,8 @@ impl Theme {
                     self.element(m.parent).is_some_and(|parent| {
                         parent.visible
                             && parent.card.as_ref().is_some_and(|card| {
-                                card.rotation_seconds.is_some()
+                                !card.triggers.is_empty()
+                                    || card.rotation_seconds.is_some()
                                     || card
                                         .transition
                                         .is_some_and(|t| t.effect != CardEffect::None)
@@ -712,6 +719,26 @@ impl Theme {
             } = &e.kind
             {
                 keys.extend(weather.keys());
+            }
+        }
+        for e in self.elements.iter().filter(|e| self.is_sampled(e)) {
+            if matches!(
+                e.kind,
+                ElementKind::Text {
+                    content: TextContent::Player(_),
+                    ..
+                }
+            ) {
+                keys.extend(SensorKey::new("media.sessions"));
+            }
+            if let Some(card) = &e.card {
+                for rule in &card.triggers {
+                    let key = match rule.source {
+                        super::playback::TriggerSource::MediaPlaying => "media.sessions",
+                        _ => "activity.processes",
+                    };
+                    keys.extend(SensorKey::new(key));
+                }
             }
         }
         keys
@@ -829,6 +856,7 @@ mod tests {
             element(
                 3,
                 ElementKind::Image {
+                    fade: None,
                     asset: AssetRef("assets/logo.png".into()),
                     fit: Fit::Contain,
                 },
@@ -888,6 +916,7 @@ mod tests {
             ..element(
                 id,
                 ElementKind::Image {
+                    fade: None,
                     asset: AssetRef(name.into()),
                     fit: Fit::Fill,
                 },

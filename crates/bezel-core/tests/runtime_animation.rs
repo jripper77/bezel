@@ -87,6 +87,7 @@ fn image(id: u32, asset: &str) -> Element {
         visible: true,
         locked: false,
         kind: ElementKind::Image {
+            fade: None,
             asset: AssetRef(asset.into()),
             fit: Fit::Fill,
         },

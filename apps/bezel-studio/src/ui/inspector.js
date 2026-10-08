@@ -302,6 +302,14 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       nodes.push(el('p', { id: 'clock-preview', class: 'hint', text: t('clock.preview', { value: formatClock(c.pattern, new Date(), c.language, c.casing) }) }));
       nodes.push(el('p', { class: 'hint', text: t('inspector.patternHelp') }));
     }
+    if (c.type === 'player') {
+      const set = patch => update(e.id, {kind:{content:patch}});
+      nodes.push(textField(t('player.source'), c.source ?? '', source=>set({source:source.slice(0,160)})),
+        textField(t('player.empty'), c.emptyText ?? '', emptyText=>set({emptyText:emptyText.slice(0,512)})),
+        checkField(t('player.hide'),c.hideWhenStopped,hideWhenStopped=>set({hideWhenStopped})),
+        el('p',{class:'hint',text:t('player.help')}));
+      for (const field of ['showCover','showProgress','showSource']) weatherAppearance.push(checkField(t(`player.${field}`),c[field],value=>set({[field]:value})));
+    }
     if (c.type === 'weather') {
       let query = c.city;
       const results = el('div', { id: 'weather-results', role: 'status', 'aria-live': 'polite' });
@@ -324,7 +332,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       nodes.push(checkField(t('inspector.fahrenheit'), c.fahrenheit, (fahrenheit) => update(e.id, { kind: { content: { fahrenheit } } })));
       weatherAppearance.push(checkField(t('weather.icon'), c.showIcon !== false, (showIcon) => update(e.id, { kind: { content: { showIcon } } })));
       if (c.showIcon !== false) {
-        weatherAppearance.push(selectField(t('weather.iconStyle'), c.iconStyle ?? 'outline', [['outline', t('icons.outline')], ['filled', t('icons.filled')]], (iconStyle) => update(e.id, { kind: { content: { iconStyle } } })));
+        weatherAppearance.push(selectField(t('weather.iconStyle'), c.iconStyle ?? 'outline', [['outline', t('icons.outline')], ['filled', t('icons.filled')], ['colored',t('weather.colored')], ['dimensional',t('weather.dimensional')]], (iconStyle) => update(e.id, { kind: { content: { iconStyle } } })));
         weatherAppearance.push(numberField(t('weather.iconGap'), c.iconGap ?? s.size * 0.3, (iconGap) => update(e.id, { kind: { content: { iconGap: Math.max(0, Math.min(256, iconGap)) } } }), { min: 0, max: 256, step: 'any' }));
         weatherAppearance.push(numberField(t('weather.iconSize'), c.iconSize ?? 0, (size) => update(e.id, { kind: { content: { iconSize: size <= 0 ? null : Math.min(512, size) } } }), { min: 0, max: 512 }));
       }
@@ -485,6 +493,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
         : el('p', { class: 'hint', text: t('inspector.addMediaFirst') }),
     ];
     const appearance = [
+      ...fadeFields(e),
       paint && colorField(t('inspector.color'), paint.color, (color) => change({ color })),
       paint?.style === 'outline' && numberField(t('inspector.strokeWidth'), paint.stroke, (stroke) => change({ stroke: Math.min(4, Math.max(0.5, stroke)) }), { min: 0.5, max: 4, step: 0.5 }),
       paint && numberField(t('icons.shadow'), paint.shadow, (shadow) => change({ shadow: Math.min(4, Math.max(0, shadow)) }), { min: 0, max: 4, step: 0.5 }),
@@ -494,6 +503,27 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     return { content, appearance };
   }
 
+  function fadeFields(e) {
+    const f = e.kind.fade;
+    const set = patch => update(e.id, { kind: { fade: patch } });
+    return [
+      selectField(t('fade.mode'), !f ? 'none' : f.radial ? 'radial' : 'linear',
+        ['none','linear','radial'].map(mode => [mode, t(`fade.${mode}`)]), mode => set(mode === 'none' ? null : {
+          angle: f?.angle ?? 0, start: f?.start ?? 1, end: f?.end ?? 0,
+          radial: mode === 'radial' ? f?.radial ?? [0.5,0.5,0.5] : null,
+        })),
+      ...(f ? [
+        ...(f.radial ? [
+          numberField(t('fade.centerX'), Math.round(f.radial[0]*100), x => set({ radial: [Math.max(0,Math.min(100,x))/100,f.radial[1],f.radial[2]] }), {min:0,max:100}),
+          numberField(t('fade.centerY'), Math.round(f.radial[1]*100), y => set({ radial: [f.radial[0],Math.max(0,Math.min(100,y))/100,f.radial[2]] }), {min:0,max:100}),
+          numberField(t('fade.extent'), Math.round(f.radial[2]*100), r => set({ radial: [f.radial[0],f.radial[1],Math.max(1,Math.min(200,r))/100] }), {min:1,max:200}),
+        ] : [numberField(t('shape.fadeAngle'), f.angle, angle => set({angle:Math.max(-360,Math.min(360,angle))}), {min:-360,max:360})]),
+        rangeField(t('shape.fadeStart'), Math.round(f.start*100), v => set({start:v/100}), {format:v=>`${v}%`}),
+        rangeField(t('shape.fadeEnd'), Math.round(f.end*100), v => set({end:v/100}), {format:v=>`${v}%`}),
+      ] : []),
+    ];
+  }
+
   function shapeForm(e) {
     const k = e.kind;
     return [
@@ -501,12 +531,7 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       k.shape === 'rect' && numberField(t('inspector.radius'), k.radius ?? 0, (v) => update(e.id, { kind: { radius: Math.max(0, v) } }), { min: 0 }),
       checkField(t('shape.videoWindow'), Boolean(k.videoWindow), (videoWindow) => update(e.id, { kind: { videoWindow } })),
       k.videoWindow ? el('div', {}, [el('p', { class: 'hint', text: t('shape.videoWindowHint') }), button(t('deviceVideo.choose'), () => video.openStorage())]) : colorField(t('inspector.fill'), typeof k.fill === 'string' ? k.fill : '#1e293bff', (v) => update(e.id, { kind: { fill: v } })),
-      checkField(t('shape.fade'), Boolean(k.fade), (on) => update(e.id, { kind: { fade: on ? { angle: 0, start: 1, end: 0 } : null } })),
-      k.fade && el('div', {}, [
-        numberField(t('shape.fadeAngle'), k.fade.angle, (angle) => update(e.id, { kind: { fade: { angle } } }), { min: -360, max: 360 }),
-        rangeField(t('shape.fadeStart'), Math.round(k.fade.start * 100), (v) => update(e.id, { kind: { fade: { start: v / 100 } } }), { format: (v) => `${v}%` }),
-        rangeField(t('shape.fadeEnd'), Math.round(k.fade.end * 100), (v) => update(e.id, { kind: { fade: { end: v / 100 } } }), { format: (v) => `${v}%` }),
-      ]),
+      ...fadeFields(e),
       el('div', { class: 'field-row' }, [
         numberField(t('inspector.strokeWidth'), k.strokeWidth ?? 0, (v) => update(e.id, { kind: { strokeWidth: Math.max(0, v), stroke: v > 0 ? (k.stroke ?? '#ffffffff') : null } }), { min: 0 }),
       ]),
@@ -562,6 +587,19 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
       action('card.animateNext', 'cardFace', c.faces.length < 2, { face: (c.activeFace + 1) % c.faces.length }),
       el('p', { class: 'hint', text: t('card.animationHelp') }),
     ];
+    const rules=c.triggers ?? [];
+    const change=(i,patch)=>update(e.id,{card:{triggers:rules.map((r,n)=>n===i?{...r,...patch}:r)}});
+    animation.push(el('h4',{text:t('trigger.title')}),el('p',{class:'hint',text:t('trigger.help')}));
+    rules.forEach((r,i)=>animation.push(el('div',{class:'trigger-rule'},[
+      el('h4',{text:t('trigger.rule',{value:i+1})}),
+      selectField(t('trigger.condition'),r.source,['process','processClosed','foreground','mediaPlaying'].map(v=>[v,t(`trigger.${v}`)]),source=>change(i,{source,app:r.app || (source==='mediaPlaying'?'':'Spotify')})),
+      textField(t('trigger.app'),r.app,app=>{if(app.trim() || r.source==='mediaPlaying')change(i,{app:app.slice(0,160)});}),
+      selectField(t('trigger.face'),String(r.face),c.faces.map((name,n)=>[String(n),name]),face=>change(i,{face:Number(face)})),
+      numberField(t('trigger.priority'),r.priority ?? 0,priority=>change(i,{priority:Math.max(0,Math.min(100,Math.round(priority)))}),{min:0,max:100}),
+      numberField(t('trigger.return'),r.returnSeconds ?? 0,returnSeconds=>change(i,{returnSeconds:Math.max(0,Math.min(300,Math.round(returnSeconds)))}),{min:0,max:300}),
+      button(t('trigger.remove'),()=>update(e.id,{card:{triggers:rules.filter((_,n)=>n!==i)}})),
+    ])));
+    animation.push(el('button',{type:'button',class:'text-button',text:t('trigger.add'),disabled:rules.length>=32 || c.faces.length<2,onclick:()=>update(e.id,{card:{triggers:[...rules,{source:'mediaPlaying',app:'Spotify',face:c.activeFace,priority:0,returnSeconds:3}]}})}));
     return { content, animation };
   }
   function membershipForm(e, theme) {

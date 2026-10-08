@@ -41,7 +41,7 @@ The original project remains upstream. `main` follows the original; `windows-imp
 
 ## Validation already performed
 
-- Latest Windows update: 100 CLI library tests, 141 core tests, 63 sensor tests
+- Earlier Windows validation: 100 CLI library tests, 141 core tests, 63 sensor tests
   (one ignored) and 187 Studio tests passed. All 282 UI unit tests and 28 browser
   checks for multiple screens, Libre health/restart and video previews passed
   across light/dark and English/Portuguese configurations.
@@ -373,3 +373,62 @@ asset-placeholder fix, document state or delivery scheduling is reverted.
   Remove inner padding so fields align with the object name and use the panel's
   full width. Section order, collapse state and keyboard focus remain intact.
 - Validation: visual smoke check and Windows build; no behavior changes.
+
+### Transparency, media context and first navigation cleanup (0.1.16)
+
+- Image and shape masks now share linear/radial controls. Radial coordinates and
+  radius are normalized to the object box (elliptical on a non-square object).
+  The mask multiplies premultiplied content/outline alpha; image fitting and
+  device-video windows keep their existing behavior. Old fades remain linear.
+- Screen settings expose Configure timer directly, including editing an already
+  active Off fallback. Default remains 5 minutes, with the existing Rev C limit
+  of 1 to 10 minutes and per-device saved choices. Keep disables this fallback;
+  active Live does not sleep. Unsupported firmware is disabled, not emulated.
+- Weather offers original colored and shaded vectors for all eight condition
+  families; outline and filled remain unchanged. The shaded style simulates
+  depth, without external fonts, downloaded images or additional asset licenses.
+- Windows process/foreground and media-session context is shared through sensor
+  snapshots by Studio and Light. A demand-driven background worker polls every
+  500 ms; sensor samples copy the cache without waiting on media apps. WinRT
+  async operations have a two-second total polling budget; stale snapshots
+  expire after four seconds. At most eight sessions are read. Artwork is capped
+  at 512 KiB input, 2048 pixels per dimension / 32 MiB decoding, then reduced
+  to a 256-pixel PNG. Cached cover bytes are reused until metadata changes.
+- Card rules cover running/closed executable, foreground app and media playing.
+  Executables match case-insensitively without .exe; media filters match source
+  app IDs by substring. Higher priority wins; equal priority keeps saved order.
+  An override pauses rotation, then restores the previous runtime face after its
+  rule's return delay. Editing and manual face/configuration changes reset the
+  transient playback state. Face reordering/deletion remaps/removes rule targets.
+  Short-lived processes can be missed between samples; these are state rules,
+  not a guaranteed event history. Sensor thresholds and tray-state overrides
+  remain separate future work.
+- Media player displays published title/artist, optional cover, progress/time
+  and app ID, with an app filter, empty text and hide-on-stop behavior. Blank
+  filter prefers a playing session, then the lowest source ID alphabetically.
+  Missing fields/cover and absent sessions remain usable; there are no playback
+  controls. Windows apps must publish a system media session; no OAuth or screen
+  scraping is used. Polling delivery follows the theme sensor refresh interval.
+- Navigation separates Design from Device. Properties retain the stable order
+  and horizontal separators, with the new controls under Content/Appearance or
+  Playback. Keyboard tab navigation, disabled states and narrow-window layouts
+  are retained.
+
+Windows API references: [media sessions](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession),
+[playback status](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessionplaybackinfo.playbackstatus).
+
+Validation: native masks/player pixels, theme compatibility/invalid-value rejection,
+trigger priority/return/editing tests, existing timer/sampling regressions, UI
+Undo/face remapping, accessible browser checks in English/Portuguese light/dark,
+and small/large windows. A real Windows probe returned process/foreground data
+and successfully read an empty media-session list; Spotify track/cover playback
+on the physical screen still needs an application publishing a live session.
+
+Checks for 0.1.16: 144 core library tests, 57 theme tests, renderer mask/player
+and all weather-family tests; 16 runtime sampling/animation/card regressions;
+64 sensor tests (two intentionally ignored) and the explicit real-Windows
+context probe; 203 Studio tests; CLI/Studio Clippy with warnings denied.
+Eleven card/timer UI model tests and ten accessible browser checks passed in
+light Portuguese / dark English, including timer persistence and 1000x700 /
+1600x1000 layouts. No physical Spotify/media
+session or firmware shutdown countdown was exercised during this release.

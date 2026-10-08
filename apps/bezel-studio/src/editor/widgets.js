@@ -30,7 +30,7 @@ export function defaultRange(quantity) {
 }
 
 /** Widget ids in palette order. */
-export const WIDGETS = Object.freeze(['text', 'value', 'clock', 'weather', 'image', 'shape', 'card', 'bar', 'ring', 'needle', 'graph']);
+export const WIDGETS = Object.freeze(['text', 'value', 'clock', 'weather', 'player', 'image', 'shape', 'card', 'bar', 'ring', 'needle', 'graph']);
 
 /**
  * The kind object and default size of a new widget.
@@ -60,6 +60,8 @@ export function createWidget(widget, canvas, sensor = {}) {
         width: short * 0.6,
         height: fontSize * 2,
       };
+    case 'player':
+      return { kind: {type:'text', content:{type:'player',source:'',showCover:true,showProgress:true,showSource:false,hideWhenStopped:false,emptyText:'No media session'},style:textStyle(Math.max(10,Math.round(fontSize*.65)))},width:short*.95,height:short*.4 };
     case 'weather':
       return { kind: { type: 'text', content: { type: 'weather', city: 'Roma', latitude: 41.9028, longitude: 12.4964, language: null, fahrenheit: false, showIcon: true }, style: textStyle(Math.max(10, Math.round(fontSize * 0.6))) }, width: short * 0.9, height: fontSize * 3.5 };
     case 'clock':
@@ -109,6 +111,7 @@ export function widgetOf(element) {
   if (k.type === 'text') {
     if (k.content.type === 'sensor') return 'value';
     if (k.content.type === 'weather') return 'weather';
+    if (k.content.type === 'player') return 'player';
     if (k.content.type === 'clock') return 'clock';
     return 'text';
   }

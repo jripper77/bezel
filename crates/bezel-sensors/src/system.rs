@@ -190,6 +190,13 @@ impl SensorSource for SystemSensors {
         });
         let mut out = Snapshot::default();
         for part in &parts {
+            out.media.extend(part.media.iter().cloned());
+            out.media_available |= part.media_available;
+            if part.activity_available {
+                out.activity_available = true;
+                out.applications.extend(part.applications.iter().cloned());
+                out.foreground.clone_from(&part.foreground);
+            }
             for (key, reading) in part.iter() {
                 out.insert(key.clone(), reading.clone());
             }

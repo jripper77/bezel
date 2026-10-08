@@ -10,6 +10,10 @@ pub enum IconStyle {
     Outline,
     /// Filled shapes.
     Filled,
+    /// Per-component weather colors.
+    Colored,
+    /// Shaded vectors with depth.
+    Dimensional,
 }
 
 /// A portable weather object. Coordinates are selected by city search.

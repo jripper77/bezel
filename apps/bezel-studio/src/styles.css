@@ -679,3 +679,14 @@ button.layer-group-title { border: 0; background: transparent; text-align: left;
 .property-section-body h4 { margin: 12px 0 8px; font-size: .75rem; color: var(--muted); }
 .property-section-body h4:first-child { margin-top: 0; }
 .property-section-body .actions { margin-top: 0; }
+
+/* Settings follow the same open sections as object properties. */
+.trigger-rule, .sleep-settings { border-top:1px solid var(--border); margin-top:12px; padding-top:8px; }
+.trigger-rule h4 { margin:4px 0 8px; }
+
+.tabs { display:block; }
+.tab-design { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:2px; }
+.tab-device { border-top:1px solid var(--border); margin-top:6px; padding-top:6px; display:flex; align-items:center; justify-content:space-between; }
+.tab-domain { color:var(--muted); font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; }
+.tab-design .tab-domain { grid-column:1 / -1; margin:2px 6px 4px; }
+.tab-device .tab-domain { margin-left:6px; }

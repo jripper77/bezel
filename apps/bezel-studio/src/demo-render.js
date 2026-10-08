@@ -38,6 +38,8 @@ function drawText(ctx, e, t) {
     text = formatClock(k.content.pattern, d, k.content.language, k.content.casing);
   } else if (k.content.type === 'weather') {
     text = weatherText(k.content, 20, 3);
+  } else if (k.content.type === 'player') {
+    text = `Demo track\nDemo artist${k.content.showSource ? '\nDemo media app' : ''}${k.content.showProgress ? '\n1:24 / 3:30' : ''}`;
   } else if (k.content.type === 'sensor') {
     text = `${k.content.prefix ?? ''}${Math.round(fraction(t, e.id) * 100)}${k.content.format?.showUnit === false ? '' : '%'}${k.content.suffix ?? ''}`;
   }
@@ -54,14 +56,24 @@ function drawText(ctx, e, t) {
     ctx.scale(side / 24, side / 24);
     ctx.strokeStyle = paint(s.paint); ctx.lineWidth = 1.6;
     const cloud = new Path2D('M5 16C-1 16 1 8 7 10C8 3 19 5 18 11C24 10 24 16 19 16Z');
-    if (k.content.iconStyle === 'filled') ctx.fill(cloud);
+    if (['colored','dimensional'].includes(k.content.iconStyle)) {
+      ctx.fillStyle='#dbeafe';ctx.strokeStyle='#93c5fd';
+      if (k.content.iconStyle==='dimensional') { const g=ctx.createLinearGradient(5,5,18,18);g.addColorStop(0,'#f0f9ff');g.addColorStop(1,'#6792bc');ctx.fillStyle=g;ctx.shadowColor='#0006';ctx.shadowBlur=2;ctx.shadowOffsetY=1; }
+      ctx.fill(cloud);
+    } else if (k.content.iconStyle === 'filled') ctx.fill(cloud);
     ctx.stroke(cloud);
     ctx.restore();
     f = { ...f, x: f.x + side + gap, width: Math.max(0, f.width - side - gap) };
   }
+  if (k.content.type==='player') {
+    ctx.textBaseline='top';
+    if(k.content.showCover){const side=Math.min(f.height,f.width*.4);ctx.fillStyle='#334155';ctx.fillRect(f.x,f.y,side,side);ctx.fillStyle=paint(s.paint);ctx.fillText('\u266b',f.x+side*.3,f.y+side*.3);f={...f,x:f.x+side+s.size*.3,width:f.width-side-s.size*.3};}
+    if(k.content.showProgress){ctx.fillStyle='#64748b';ctx.fillRect(f.x,f.y+f.height-4,f.width,4);ctx.fillStyle=paint(s.paint);ctx.fillRect(f.x,f.y+f.height-4,f.width*.4,4);}
+  }
+  ctx.fillStyle=paint(s.paint);
   const x = s.align === 'center' ? f.x + f.width / 2 : s.align === 'right' ? f.x + f.width : f.x;
   const y = s.valign === 'top' ? f.y : s.valign === 'bottom' ? f.y + f.height : f.y + f.height / 2;
-  if (k.content.type === 'weather') {
+  if (['weather','player'].includes(k.content.type)) {
     const lines = text.split('\n'); const lineHeight = Math.ceil(s.size * 1.2);
     const top = s.valign === 'top' ? f.y : s.valign === 'bottom' ? f.y + f.height - lines.length * lineHeight : f.y + (f.height - lines.length * lineHeight) / 2;
     ctx.textBaseline = 'top';
@@ -72,16 +84,23 @@ function drawText(ctx, e, t) {
 function drawElement(ctx, e, t) {
   const k = e.kind;
   const f = e.frame;
-  if (k.type === 'shape' && k.fade && f.width > 0 && f.height > 0) {
+  if (['shape', 'image'].includes(k.type) && k.fade && f.width > 0 && f.height > 0) {
     const layer = new OffscreenCanvas(Math.ceil(f.width), Math.ceil(f.height));
     const lc = layer.getContext('2d');
     lc.translate(-f.x, -f.y);
     drawElement(lc, { ...e, opacity: 1, kind: { ...k, fade: null } }, t);
     lc.globalCompositeOperation = 'destination-in';
-    const g = lc.createLinearGradient(...fadeLine(f, k.fade.angle));
+    lc.save();
+    if (k.fade.radial) { lc.translate(f.x, f.y); lc.scale(f.width, f.height); }
+    const g = k.fade.radial
+      ? lc.createRadialGradient(k.fade.radial[0], k.fade.radial[1], 0, ...k.fade.radial)
+      : lc.createLinearGradient(...fadeLine(f, k.fade.angle));
     g.addColorStop(0, `rgba(0,0,0,${k.fade.start})`);
     g.addColorStop(1, `rgba(0,0,0,${k.fade.end})`);
-    lc.fillStyle = g; lc.fillRect(f.x, f.y, f.width, f.height);
+    lc.fillStyle = g;
+    if (k.fade.radial) lc.fillRect(0, 0, 1, 1);
+    else lc.fillRect(f.x, f.y, f.width, f.height);
+    lc.restore();
     ctx.save(); ctx.globalAlpha = e.opacity ?? 1;
     ctx.drawImage(layer, f.x, f.y); ctx.restore();
     return;

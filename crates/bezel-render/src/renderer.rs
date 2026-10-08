@@ -296,6 +296,28 @@ fn value_fraction(binding: &Binding, context: &RenderContext<'_>) -> Option<f64>
 /// What a text element prints now.
 fn text_of(content: &TextContent, context: &RenderContext<'_>) -> String {
     match content {
+        TextContent::Player(p) => {
+            let Some(m) = bezel_core::domain::playback::session(context.snapshot, &p.source) else {
+                return p.empty_text.clone();
+            };
+            if p.hide_when_stopped && !m.playing {
+                return String::new();
+            }
+            let mut text = format!("{}\n{}", m.title, m.artist);
+            if p.show_source {
+                text.push_str(&format!("\n{}", m.source));
+            }
+            if p.show_progress && m.duration > 0. {
+                text.push_str(&format!(
+                    "\n{}:{:02} / {}:{:02}",
+                    m.position as u64 / 60,
+                    m.position as u64 % 60,
+                    m.duration as u64 / 60,
+                    m.duration as u64 % 60
+                ));
+            }
+            text
+        }
         TextContent::Static(text) => text.clone(),
         TextContent::Weather(w) => w.text(context.snapshot, context.language),
         TextContent::Sensor {
@@ -821,6 +843,9 @@ impl SkiaRenderer {
         }
         if let ElementKind::Shape {
             fade: Some(fade), ..
+        }
+        | ElementKind::Image {
+            fade: Some(fade), ..
         } = &element.kind
         {
             let frame = element.frame;
@@ -859,6 +884,59 @@ impl SkiaRenderer {
         match &element.kind {
             ElementKind::Text { content, style } => {
                 let mut area = area;
+                if let TextContent::Player(p) = content {
+                    let media = bezel_core::domain::playback::session(context.snapshot, &p.source);
+                    if p.hide_when_stopped && media.is_none_or(|m| !m.playing) {
+                        return;
+                    }
+                    if let Some(m) = media {
+                        if p.show_cover {
+                            let side = area.height.min(area.width * 0.4);
+                            if !m.cover.is_empty() {
+                                use std::hash::{Hash, Hasher};
+                                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                                m.cover.hash(&mut hash);
+                                let asset =
+                                    AssetRef(format!("runtime/player/{:x}.png", hash.finish()));
+                                let covers = BTreeMap::from([(asset.clone(), m.cover.clone())]);
+                                self.draw_image(
+                                    layer,
+                                    &asset,
+                                    Fit::Contain,
+                                    BoxF::new(area.x, area.y, side, side),
+                                    &covers,
+                                    context,
+                                );
+                            }
+                            area.x += side + style.size * 0.3;
+                            area.width = (area.width - side - style.size * 0.3).max(0.);
+                        }
+                        if p.show_progress && m.duration > 0. {
+                            let bar = BoxF::new(area.x, area.y + area.height - 4., area.width, 4.);
+                            crate::shape::draw(
+                                layer,
+                                bar,
+                                bezel_core::domain::theme::ShapeKind::Rect { radius: 2. },
+                                Some(&bezel_core::domain::theme::Paint::solid(Rgba {
+                                    r: 100,
+                                    g: 100,
+                                    b: 100,
+                                    a: 100,
+                                })),
+                                None,
+                            );
+                            let width = bar.width * (m.position / m.duration).clamp(0., 1.) as f32;
+                            crate::shape::draw(
+                                layer,
+                                BoxF::new(bar.x, bar.y, width, bar.height),
+                                bezel_core::domain::theme::ShapeKind::Rect { radius: 2. },
+                                Some(&style.paint),
+                                None,
+                            );
+                            area.height = (area.height - 8.).max(0.);
+                        }
+                    }
+                }
                 if let TextContent::Weather(w) = content
                     && w.show_icon
                 {
@@ -898,7 +976,7 @@ impl SkiaRenderer {
                 };
                 self.text.draw(layer, &job, assets, &mut self.diagnostics);
             }
-            ElementKind::Image { asset, fit } => {
+            ElementKind::Image { asset, fit, .. } => {
                 self.draw_image(layer, asset, *fit, area, assets, context);
             }
             ElementKind::Shape {
@@ -1209,6 +1287,7 @@ mod tests {
         let mut parent = rect(theme.elements[0].frame, CLEAR, 0.5);
         parent.id = ElementId(3);
         parent.card = Some(Card {
+            triggers: Vec::new(),
             faces: vec!["A".into(), "B".into()],
             active_face: 0,
             rotation_seconds: None,
@@ -1238,6 +1317,7 @@ mod tests {
         let green = Rgba::opaque(0, 255, 0);
         let mut parent = rect(BoxF::new(0.0, 0.0, 32.0, 16.0), black, 1.0);
         parent.card = Some(Card {
+            triggers: Vec::new(),
             faces: vec!["A".into(), "B".into()],
             active_face: 0,
             rotation_seconds: None,
@@ -1290,6 +1370,7 @@ mod tests {
         for effect in [CardEffect::Fade, CardEffect::Slide, CardEffect::Flip] {
             let mut parent = rect(BoxF::new(0.0, 0.0, 32.0, 16.0), black, 1.0);
             parent.card = Some(Card {
+                triggers: Vec::new(),
                 faces: vec!["A".into(), "B".into()],
                 active_face: 0,
                 rotation_seconds: None,
@@ -1395,6 +1476,7 @@ mod tests {
         use std::time::Duration;
         let mut parent = rect(BoxF::new(0., 0., 32., 16.), Rgba::opaque(20, 30, 40), 1.);
         parent.card = Some(Card {
+            triggers: Vec::new(),
             faces: vec!["A".into(), "B".into()],
             active_face: 0,
             rotation_seconds: None,
@@ -1490,6 +1572,7 @@ mod tests {
         // A GIF never reuses a face across animation times.
         theme.elements[1].card_member.as_mut().unwrap().face = Some(1);
         theme.elements[1].kind = ElementKind::Image {
+            fade: None,
             asset: AssetRef("a.gif".into()),
             fit: Fit::Fill,
         };
@@ -1529,6 +1612,7 @@ mod tests {
             1.0,
         );
         parent.card = Some(Card {
+            triggers: Vec::new(),
             faces: vec!["A".into(), "B".into()],
             active_face: 0,
             rotation_seconds: None,

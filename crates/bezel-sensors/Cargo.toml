@@ -29,9 +29,13 @@ rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"]
 sysinfo = { version = "0.39.6", default-features = false, features = ["system", "disk", "network"] }
 # LibreHardwareMonitor: legacy WMI or the local web server in recent releases.
 wmi = "0.18.4"
+windows = { version = "0.62.2", features = ["Win32_System_WinRT", "Media_Control", "Foundation", "Foundation_Collections", "Storage_Streams"] }
+windows-future = "0.3.2"
+windows-core = "0.62.2"
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
 # gpu.fps: RivaTuner Statistics Server's named shared memory, opened and
 # copied read-only (D-2026-09-30-release-polish-4).
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_UI_WindowsAndMessaging"] }
 
 [lints]
 workspace = true

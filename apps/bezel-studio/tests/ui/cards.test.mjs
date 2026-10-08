@@ -105,3 +105,10 @@ test('alignment and orientation changes keep card objects together', () => {
   s.dispatch('setOrientation', { orientation: 'landscape' });
   assert.deepEqual(offset(), before);
 });
+
+test('reordering and removing faces remaps rules with Undo',()=>{
+ const s=setup();s.dispatch('update',{id:1,patch:{card:{triggers:[{source:'mediaPlaying',app:'Spotify',face:1,priority:0,returnSeconds:3},{source:'process',app:'game.exe',face:0,priority:1,returnSeconds:0}]}}});
+ s.dispatch('reorderCardFace',{id:1,direction:-1});assert.deepEqual(element(s,1).card.triggers.map(r=>r.face),[0,1]);
+ s.dispatch('removeCardFace',{id:1});assert.deepEqual(element(s,1).card.triggers.map(r=>r.face),[0]);
+ s.undo();assert.deepEqual(element(s,1).card.triggers.map(r=>r.face),[0,1]);
+});

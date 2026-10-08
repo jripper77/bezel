@@ -55,6 +55,7 @@ fn theme() -> Theme {
         group_parent: None,
         card_member: None,
         card: Some(Card {
+            triggers: Vec::new(),
             faces: vec!["A".into(), "B".into(), "C".into()],
             active_face: 0,
             rotation_seconds: Some(5),

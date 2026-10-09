@@ -114,6 +114,8 @@ state.location = session?.location ?? null;
 state.screen = session?.screen ?? null;
 const screenDocuments = new Map();
 let switchingScreen = false;
+/** Sensor keys a sample read outside the catalog, for which the catalog was asked again. */
+const askedSensors = new Set();
 let previewWork = Promise.resolve();
 let autoWork = Promise.resolve();
 let liveWork = Promise.resolve();
@@ -496,9 +498,16 @@ async function sampleLoop() {
   const screen = state.screen;
   try {
     const s = await bridge.sample();
-    // Libre can finish opening hardware after Studio's initial catalog.
+    // Libre can finish opening hardware after Studio's initial catalog. A
+    // reading the catalog still lacks after it was asked again (a sensor the
+    // backend reads but does not list) is not asked for at every sample: each
+    // reload draws the sensor list again and drops a sensor being dragged.
     const knownSensors = new Set(state.catalog.map((sensor) => sensor.key));
-    if (Object.keys(s.readings).some((key) => !knownSensors.has(key))) await loadCatalog();
+    const unlisted = Object.keys(s.readings).filter((key) => !knownSensors.has(key) && !askedSensors.has(key));
+    if (unlisted.length > 0) {
+      for (const key of unlisted) askedSensors.add(key);
+      await loadCatalog();
+    }
     library.updateReadings(s.readings);
     if (!switchingScreen && screen === state.screen) syncLive(s);
     $('status-sensors').textContent = t('status.sensors', { ms: Math.round(s.sampleMillis) });

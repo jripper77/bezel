@@ -72,7 +72,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - Ids/`data-element-id`/`data-face`/`data-drop-*` preservados (drag de camadas intacto); specs listadas atualizadas só onde a classe mudou; axe light+dark verde.
 - **Dependencies:** T-3
 - **Test:** `npm test` (specs listadas + `tests/ui/library.test.mjs`)
-- **Status:** pending
+- **Status:** completed (commit b339dc0)
 
 ### Wave 4 (W2)
 

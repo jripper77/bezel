@@ -84,7 +84,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `tests/ui/storage.test.mjs` verde sem mudar assinaturas exportadas; specs listadas ajustadas só onde a classe mudou (`.drop-zone`, `.album-frame`, `.album-thumb`); axe light+dark verde.
 - **Dependencies:** T-4
 - **Test:** `npm test`
-- **Status:** pending
+- **Status:** completed (commits e2ab0ed, 119e5cf)
 
 ### Wave 5 (W3)
 

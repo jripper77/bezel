@@ -349,7 +349,16 @@ async function refreshAuto() {
   if (key === null) return;
   autoWork = bridge.videoAuto(theme).catch(() => null);
   const value = await autoWork;
-  if (state.auto.key !== key || screen !== state.screen || switchingScreen) return;
+  if (state.auto.key !== key) return;
+  if (screen !== state.screen || switchingScreen) {
+    // Told for another screen (the first answer, asked before the screen
+    // list came, or one asked during a switch): forget it and ask again, or
+    // Auto stays unknown while the key, which names no screen until live,
+    // does not change.
+    state.auto = { key: null, value: null };
+    if (!switchingScreen) void refreshAuto();
+    return;
+  }
   state.auto = { key, value };
   inspector.contextChanged();
   canvasView.drawOverlay();

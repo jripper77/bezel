@@ -17,6 +17,8 @@ import { createGifSearch } from './ui/gif-search.js';
 import { createCollectionPanel } from './ui/collection.js';
 import { createStandbyPanel } from './ui/standby.js';
 import { showAccessHelp } from './ui/udev.js';
+import { createConnect } from './ui/connect.js';
+import { createSensorStatus } from './ui/sensor-status.js';
 import { wireObjectMenu } from './ui/object-menu.js';
 import { shortcutFor } from './shortcuts.js';
 import { createRenderScheduler } from './render-scheduler.js';
@@ -47,6 +49,9 @@ const state = {
   desktopMode: [],
   screen: null,
   screenError: null,
+  // The screen whose port the system refused, with the error (it carries the
+  // udev command on Linux): the stage shows how to connect it.
+  denied: null,
   live: false,
   autostart: false,
   catalog: [],
@@ -87,6 +92,10 @@ function toast(message) {
  * command that fixes it (Linux), in a dialog.
  */
 function fail(e) {
+  if (e?.code === 'accessDenied' && state.screen) {
+    state.denied = { key: state.screen, error: e };
+    renderScreenSelect();
+  }
   if (e?.udevCommand) showAccessHelp(t, e, toast);
   else toast(errorText(t, e));
 }
@@ -208,6 +217,17 @@ const standby = createStandbyPanel({
   notify: toast,
   context: () => ({ screen: currentScreen() }),
   storageChanged: () => { storageStale = true; },
+});
+
+// The stage while no screen can be used (artboard Connect): what the bridge
+// lists, the udev command of a denied port and the theme import.
+const connect = createConnect({
+  t,
+  notify: toast,
+  errorText,
+  deviceLabel,
+  onImport: () => importTheme(),
+  onOpenScreen: () => library.selectTab('screen'),
 });
 
 // The Storage tab is the storage manager: shown, it takes the whole width of
@@ -482,14 +502,15 @@ async function sampleLoop() {
 }
 
 let libreRestarting = false;
+const sensorStatus = createSensorStatus({ t, onOpenSensors: () => library.selectTab('sensors') });
 function updateLibreStatus(readings) {
   const health = libreStatus(state.catalog, readings);
-  $('status-libre').hidden = !health;
+  sensorStatus.update(health, libreRestarting);
   if (!health) return;
   const status = libreRestarting ? 'restarting' : health.state;
   $('status-libre-dot').dataset.state = status;
   $('status-libre-label').textContent = t(`status.libre.${status}`);
-  $('status-libre').title = health.failed.length
+  $('status-libre-toggle').title = health.failed.length
     ? t('status.libreMissing', { hardware: health.failed.join(', ') })
     : t('status.libre.ok');
   $('restart-libre').disabled = libreRestarting;
@@ -532,10 +553,20 @@ function renderScreenSelect() {
   else if (current) device = state.live ? t('status.live') : t(`screen.state.${current.state}`);
   $('status-device').textContent = device;
   library.renderScreen(state.screens, state.screen, state.live, state.brightness, state.desktopMode, { restarting: state.restarting, hung: state.hung });
+  renderConnect();
   storage.update();
   standby.update();
   inspector.contextChanged();
   void refreshAuto();
+}
+
+/** The stage's "Connect your smart screen" while no screen can be used. */
+function renderConnect() {
+  if (state.denied && !state.screens.some((s) => s.key === state.denied.key)) state.denied = null;
+  const denied = state.denied?.key === state.screen
+    ? { ...state.denied, screen: state.screens.find((s) => s.key === state.denied.key) ?? null }
+    : null;
+  connect.update({ screens: state.screens, desktopMode: state.desktopMode, screenError: state.screenError, denied });
 }
 
 async function refreshScreens() {
@@ -609,6 +640,7 @@ async function setLive(on) {
   try {
     await bridge.setLive(on, state.screen);
     state.live = on;
+    if (state.denied?.key === state.screen) state.denied = null;
     if (on) await bridge.pushTheme(store.getState().theme);
   } catch (e) {
     state.live = false;
@@ -1105,6 +1137,7 @@ function setLocale(next) {
   standby.retranslate();
   collection.retranslate();
   if (canvasView.framing()) $('overlay').setAttribute('aria-label', t('framing.surface'));
+  sensorStatus.close();
   refreshChrome('select');
   renderScreenSelect();
   renderNow();

@@ -5,10 +5,10 @@
 // the window, quitting from the tray), the screen turns between vertical and
 // horizontal, imports list what had no equivalent, the preferences switch
 // the language and set the sensors, the sensor list tells the app what it
-// shows, a denied port shows the udev command, a panel in desktop mode goes
-// back only after a dialog, a hung screen is restarted after one, an
-// animated GIF moves in the preview by itself and a live screen that drops
-// is connected again, saying so.
+// shows, a denied port shows the udev command (in a dialog and on the
+// stage), a panel in desktop mode goes back only after a dialog, a hung
+// screen is restarted after one, an animated GIF moves in the preview by
+// itself and a live screen that drops is connected again, saying so.
 import { test, expect, watchErrors, expectAccessible, dragTo, literally, prefixOf } from './helpers.mjs';
 import { translator } from '../../src/i18n/index.js';
 
@@ -275,6 +275,9 @@ test('without a screen, live mode explains itself', async ({ page, t }) => {
   const errors = watchErrors(page);
   await page.goto('/index.html?demo=empty');
   await expect(page.locator('#screen-select')).toContainText(t('top.noScreen'));
+  const connect = page.getByRole('region', { name: t('connect.title') });
+  await expect(connect).toBeVisible();
+  await expect(connect).toContainText(t('connect.devices.searching'));
   await page.getByRole('switch').click({ force: true });
   await expect(page.locator('#toast')).toHaveText(t('toast.noScreen'));
   await expect(page.getByRole('switch')).not.toBeChecked();
@@ -283,6 +286,7 @@ test('without a screen, live mode explains itself', async ({ page, t }) => {
   await expectAccessible(page);
   await page.goto('/index.html?demo=error');
   await expect(page.locator('#status-device')).toContainText('permission denied');
+  await expect(page.getByRole('region', { name: t('connect.title') }).getByRole('alert')).toContainText('permission denied');
   expect(errors).toEqual([]);
 });
 
@@ -528,6 +532,11 @@ test('a denied port shows the udev command to copy', async ({ page, context, t }
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(live).not.toBeChecked();
+
+  // The stage says how to connect it, with the same command.
+  const connect = page.getByRole('region', { name: t('connect.title') });
+  await expect(connect).toContainText(denied);
+  await expect(connect.getByRole('group', { name: t('udev.command') })).toContainText('sudo install -m 644');
 
   // The storage tab says the same, with the command.
   await page.getByRole('tab', { name: t('library.screen') }).click();

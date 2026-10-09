@@ -77,9 +77,12 @@ test('the status bar keeps its regions', async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto('/index.html?demo=turing88');
   const bar = page.getByRole('status').filter({ has: page.locator('#status-main') });
-  for (const id of ['status-main', 'status-device', 'status-libre', 'status-libre-dot', 'status-libre-label', 'restart-libre']) {
+  for (const id of ['status-main', 'status-device', 'status-libre', 'status-libre-toggle', 'status-libre-dot', 'status-libre-label']) {
     await expect(bar.locator(`#${id}`)).toHaveCount(1);
   }
+  // Restarting Libre lives in the dot's dialog, out of the live region.
+  await expect(page.locator('#libre-popover #restart-libre')).toHaveCount(1);
+  await expect(page.locator('#status-libre-toggle')).toHaveAttribute('aria-controls', 'libre-popover');
   await expect(page.locator('#status-device')).not.toBeEmpty();
   await expectAccessible(page);
   expect(errors).toEqual([]);

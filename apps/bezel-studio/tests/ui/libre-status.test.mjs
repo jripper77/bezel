@@ -16,6 +16,7 @@ test('a working CPU cannot hide a failed Corsair reporting a synthetic zero', ()
   });
   assert.equal(health.state, 'partial');
   assert.deepEqual(health.failed, ['Corsair Input']);
+  assert.deepEqual(health.hardware, [{ name: 'CPU Package', ok: true }, { name: 'Corsair Input', ok: false }]);
 });
 
 test('missing/stale readings fail; legitimate zero measurements are healthy', () => {

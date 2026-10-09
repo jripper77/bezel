@@ -241,6 +241,7 @@
           </div>
         </div>
         <p class="visually-hidden" id="framing-live" aria-live="polite"></p>
+        <section class="connect" id="connect" aria-labelledby="connect-title" hidden></section>
         <div class="stage-scroll" id="stage-scroll">
           <div class="bezel" id="bezel">
             <div class="canvas-box" id="canvas-box">
@@ -268,13 +269,32 @@
       <span class="spacer"></span>
       <span id="status-sensors"></span>
       <span id="status-libre" hidden>
-        <span id="status-libre-dot" class="status-dot" aria-hidden="true"></span>
-        <span id="status-libre-label"></span>
-        <button id="restart-libre" type="button" class="status-restart" data-i18n="status.libreRestart"></button>
+        <button type="button" id="status-libre-toggle" class="status-chip" aria-haspopup="dialog" aria-expanded="false" aria-controls="libre-popover">
+          <span id="status-libre-dot" class="status-dot" aria-hidden="true"></span>
+          <span id="status-libre-label"></span>
+        </button>
       </span>
       <span id="status-render"></span>
       <span id="status-device"></span>
     </footer>
+    <div class="libre-popover" id="libre-popover" role="dialog" aria-labelledby="libre-popover-title" hidden>
+      <div class="libre-popover-head">
+        <span id="libre-popover-dot" class="status-dot" aria-hidden="true"></span>
+        <h2 id="libre-popover-title"></h2>
+        <button type="button" class="icon-button libre-popover-close" data-i18n-title="dialog.close" data-i18n-aria-label="dialog.close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <ul class="libre-hardware" id="libre-hardware" data-i18n-aria-label="sensorStatus.hardware"></ul>
+      <p class="libre-popover-note" id="libre-popover-note" hidden></p>
+      <div class="libre-popover-actions">
+        <button type="button" class="text-button" id="libre-open-sensors" data-i18n="sensorStatus.openSensors"></button>
+        <button type="button" class="primary-button" id="restart-libre">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
+          <span data-i18n="status.libreRestart"></span>
+        </button>
+      </div>
+    </div>
     <div class="toast" id="toast" role="alert" hidden></div>
   </body>
 </html>

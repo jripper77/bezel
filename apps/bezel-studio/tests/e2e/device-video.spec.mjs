@@ -22,7 +22,8 @@ test('stored screen video becomes theme background with loop, windows and linear
   await page.getByRole('button', { name: t('library.addWidget', { name: t('widget.shape') }), exact: true }).click();
   const window = detail.getByRole('checkbox', { name: t('shape.videoWindow'), exact: true });
   await window.check();
-  await detail.getByRole('checkbox', { name: t('shape.fade'), exact: true }).check();
+  const fade = detail.getByRole('combobox', { name: t('fade.mode'), exact: true });
+  await fade.selectOption('linear');
   await detail.getByLabel(t('shape.fadeAngle'), { exact: true }).fill('90');
   await detail.getByLabel(t('shape.fadeAngle'), { exact: true }).press('Tab');
   const start = detail.getByRole('slider', { name: new RegExp(t('shape.fadeStart')) });
@@ -31,9 +32,9 @@ test('stored screen video becomes theme background with loop, windows and linear
   await expect(window).toBeChecked();
   await expect(detail.getByLabel(t('shape.fadeAngle'), { exact: true })).toHaveValue('90');
   await expect(start).toHaveValue('80');
-  await detail.getByRole('checkbox', { name: t('shape.fade'), exact: true }).uncheck();
+  await fade.selectOption('none');
   await page.locator('#undo').click();
-  await expect(detail.getByRole('checkbox', { name: t('shape.fade'), exact: true })).toBeChecked();
+  await expect(fade).toHaveValue('linear');
   await expectAccessible(page);
   expect(errors).toEqual([]);
 });

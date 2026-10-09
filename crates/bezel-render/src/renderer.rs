@@ -928,22 +928,21 @@ impl SkiaRenderer {
                             } else {
                                 None
                             };
-                            if let Some(path) = cover_path {
-                                if let Some(mask) = layer.mask_of(&path) {
-                                    for (pixel, alpha) in layer
-                                        .pixmap
-                                        .data_mut()
-                                        .as_chunks_mut::<4>()
-                                        .0
-                                        .iter_mut()
-                                        .zip(mask.data())
-                                    {
-                                        for channel in pixel {
-                                            *channel = ((u16::from(*channel) * u16::from(*alpha)
-                                                + 127)
-                                                / 255)
-                                                as u8;
-                                        }
+                            if let Some(path) = cover_path
+                                && let Some(mask) = layer.mask_of(&path)
+                            {
+                                for (pixel, alpha) in layer
+                                    .pixmap
+                                    .data_mut()
+                                    .as_chunks_mut::<4>()
+                                    .0
+                                    .iter_mut()
+                                    .zip(mask.data())
+                                {
+                                    for channel in pixel {
+                                        *channel = ((u16::from(*channel) * u16::from(*alpha) + 127)
+                                            / 255)
+                                            as u8;
                                     }
                                 }
                             }

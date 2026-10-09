@@ -575,14 +575,14 @@ impl Theme {
                 return false;
             }
             if let Some(member) = &element.card_member {
-                if let Some(parent) = self.element(member.parent) {
-                    if parent.group_parent.is_none() {
-                        return parent.visible
-                            && parent
-                                .card
-                                .as_ref()
-                                .is_some_and(|c| member.face.is_none_or(|f| f == c.active_face));
-                    }
+                if let Some(parent) = self.element(member.parent)
+                    && parent.group_parent.is_none()
+                {
+                    return parent.visible
+                        && parent
+                            .card
+                            .as_ref()
+                            .is_some_and(|c| member.face.is_none_or(|f| f == c.active_face));
                 }
             } else {
                 return true;
@@ -604,10 +604,10 @@ impl Theme {
     pub fn visible_without_face(&self, element: &Element) -> bool {
         if element.group_parent.is_none() {
             if let Some(m) = &element.card_member {
-                if let Some(p) = self.element(m.parent) {
-                    if p.group_parent.is_none() {
-                        return element.visible && p.visible;
-                    }
+                if let Some(p) = self.element(m.parent)
+                    && p.group_parent.is_none()
+                {
+                    return element.visible && p.visible;
                 }
             } else {
                 return element.visible;
@@ -621,10 +621,10 @@ impl Theme {
     pub fn rendered_opacity(&self, element: &Element) -> f32 {
         if element.group_parent.is_none() {
             if let Some(m) = &element.card_member {
-                if let Some(p) = self.element(m.parent) {
-                    if p.group_parent.is_none() {
-                        return element.opacity * p.opacity;
-                    }
+                if let Some(p) = self.element(m.parent)
+                    && p.group_parent.is_none()
+                {
+                    return element.opacity * p.opacity;
                 }
             } else {
                 return element.opacity;

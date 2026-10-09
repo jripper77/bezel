@@ -740,10 +740,9 @@ impl Studio {
             .as_ref()
             .filter(|old| old.as_str() != key)
             .cloned()
+            && let Some(parked) = self.documents.remove(key)
         {
-            if let Some(parked) = self.documents.remove(key) {
-                self.documents.insert(previous, parked);
-            }
+            self.documents.insert(previous, parked);
         }
         self.selected_screen = Some(key.into());
     }
@@ -1177,15 +1176,13 @@ impl Studio {
             .video
             .as_ref()
             .is_some_and(|v| v.serial == probed.serial)
-        {
-            if let Some(studio) = self
+            && let Some(studio) = self
                 .documents
                 .values_mut()
                 .find(|s| s.video.as_ref().is_some_and(|v| v.serial == probed.serial))
-            {
-                studio.probed(probed);
-                return;
-            }
+        {
+            studio.probed(probed);
+            return;
         }
         let current = self
             .video
@@ -1282,14 +1279,12 @@ impl Studio {
             .video
             .as_ref()
             .is_some_and(|v| v.serial == taken.serial)
-        {
-            if let Some(studio) = self
+            && let Some(studio) = self
                 .documents
                 .values_mut()
                 .find(|s| s.video.as_ref().is_some_and(|v| v.serial == taken.serial))
-            {
-                return studio.poster_taken(taken);
-            }
+        {
+            return studio.poster_taken(taken);
         }
         let Background::Video {
             poster: Some(poster),
@@ -1515,14 +1510,13 @@ impl Studio {
 
     /// The theme video the live screen `key` could play but does not store.
     pub fn missing_video(&self, key: &str) -> Option<MissingVideo> {
-        if !self.live.as_ref().is_some_and(|live| live.key == key) {
-            if let Some(document) = self
+        if !self.live.as_ref().is_some_and(|live| live.key == key)
+            && let Some(document) = self
                 .documents
                 .values()
                 .find(|document| document.is_live(key))
-            {
-                return document.missing_video(key);
-            }
+        {
+            return document.missing_video(key);
         }
         if !self.is_live(key) {
             return None;
@@ -1545,10 +1539,10 @@ impl Studio {
     /// The live link of `key`, or why it cannot be had. In the final state
     /// of a shutdown no screen's link can be had, live or not.
     fn link_of(&mut self, key: &str) -> Result<Option<&mut Box<dyn ScreenLink>>> {
-        if !self.live.as_ref().is_some_and(|l| l.answers_to(key)) {
-            if let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key)) {
-                return studio.link_of(key);
-            }
+        if !self.live.as_ref().is_some_and(|l| l.answers_to(key))
+            && let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key))
+        {
+            return studio.link_of(key);
         }
         if self.shutting_down {
             return Err(BezelError::InUse {
@@ -1647,10 +1641,10 @@ impl Studio {
     /// the screen. `None` when `key` is not live; `InUse` while its link is
     /// out, and in the final state of a shutdown.
     pub fn lend_live_link(&mut self, key: &str) -> Result<Option<Box<dyn ScreenLink>>> {
-        if !self.live.as_ref().is_some_and(|l| l.answers_to(key)) {
-            if let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key)) {
-                return studio.lend_live_link(key);
-            }
+        if !self.live.as_ref().is_some_and(|l| l.answers_to(key))
+            && let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key))
+        {
+            return studio.lend_live_link(key);
         }
         if self.link_of(key)?.is_none() {
             return Ok(None);
@@ -1667,10 +1661,10 @@ impl Studio {
         link: Box<dyn ScreenLink>,
         resume: Resume,
     ) -> Option<Box<dyn ScreenLink>> {
-        if !self.live.as_ref().is_some_and(|l| l.answers_to(key)) {
-            if let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key)) {
-                return studio.return_live_link(key, link, resume);
-            }
+        if !self.live.as_ref().is_some_and(|l| l.answers_to(key))
+            && let Some(studio) = self.documents.values_mut().find(|s| s.is_live(key))
+        {
+            return studio.return_live_link(key, link, resume);
         }
         if !self.is_live(key) {
             return Some(link);
@@ -1888,14 +1882,12 @@ impl Studio {
             .live
             .as_ref()
             .is_some_and(|l| l.answers_to(&delivery.key))
-        {
-            if let Some(studio) = self
+            && let Some(studio) = self
                 .documents
                 .values_mut()
                 .find(|s| s.is_live(&delivery.key))
-            {
-                return studio.presented(delivery, outcome, now);
-            }
+        {
+            return studio.presented(delivery, outcome, now);
         }
         if !self.is_live(&delivery.key) || self.generation != delivery.generation {
             return Some(delivery.link);

@@ -1186,7 +1186,7 @@ export default {
   "card.facesHint": "Clique numa face para mostrá-la.",
   "connect.title": "Conecte sua smart screen",
   "connect.lead": "Use um cabo USB de dados. O Bezel reconhece as telas compatíveis e escolhe sozinho o protocolo certo.",
-  "connect.hide": "Ocultar e editar o tema",
+  "connect.hide": "Fechar",
   "connect.buses": "USB · serial · HID",
   "connect.devices.searching": "Procurando telas…",
   "connect.devices.found": "Encontrado, mas ainda não dá para usar",

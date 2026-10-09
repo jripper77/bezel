@@ -1186,7 +1186,7 @@ export default {
   "card.facesHint": "Clic su una faccia per mostrarla.",
   "connect.title": "Collega il tuo smart screen",
   "connect.lead": "Usa un cavo USB dati. Bezel riconosce gli schermi supportati e sceglie da solo il protocollo giusto.",
-  "connect.hide": "Nascondi e modifica il tema",
+  "connect.hide": "Chiudi",
   "connect.buses": "USB · seriale · HID",
   "connect.devices.searching": "Ricerca dispositivi in corso…",
   "connect.devices.found": "Trovato, ma non ancora utilizzabile",

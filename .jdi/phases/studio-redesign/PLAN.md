@@ -97,7 +97,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `inspector-sections.spec` reescrita para abas (ordem + persistência via Undo); specs que usam controles fora da aba padrão selecionam a aba por `getByRole('tab')`; item 4 removido do todo; axe light+dark verde.
 - **Dependencies:** T-5
 - **Test:** `npm run test:unit` (`inspector-tabs.test.mjs`); `npm test`
-- **Status:** pending
+- **Status:** completed (commit 2c415d3)
 
 ### Wave 6 (W4)
 

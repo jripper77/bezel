@@ -136,7 +136,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `cargo clippy -p bezel-studio --all-targets --locked -- -D warnings` limpo (11 `collapsible_if`), `cargo test` e `cargo fmt --check` limpos.
   - Suíte completa `npm test` verde (gate final da phase).
 - **Dependencies:** T-8
-- **Status:** in_progress (parte Rust feita em 17d6316, cherry-pick de 1d934ec; falta JS/e2e + video-background:30)
+- **Status:** completed (Rust 17d6316; i18n 60f174a; e2e 2677fc8, d332dac, 1dce63a, 0b0a08b, cf048fb)
 
 ## Execution
 - Total tasks: 8

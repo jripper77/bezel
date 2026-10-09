@@ -1,7 +1,7 @@
 # Phase 14: Studio redesign — Summary  (slug: studio-redesign)
 
-**Status:** partial
-**Tasks:** 8/9 complete (T-1..T-8), 0 blocked (T-9 parcial)
+**Status:** complete
+**Tasks:** 9/9 complete, 0 blocked
 
 ## Executed tasks
 - T-1: tokens light/dark (`:root` + `@media (prefers-color-scheme: dark)`), `--accent: #FF9248` único, `--accent-text` #1A0E05 (8.5:1), `--accent-ink`/`--focus-ring` para ícones e foco legíveis no claro; 26 hex fora dos blocos viraram `var(--…)`; IBM Plex Sans 400/500/600 + Mono 400/500 locais (npm oficiais `@ibm/plex-sans` 1.1.0 / `@ibm/plex-mono` 2.5.0, SHA-256 no README), 700→600; OFL em README/FORK/packaging + payload no `package-evo.ps1`; `static-guards.test.mjs` (6 testes) verde; topbar fixada em 52px para não mudar a escala do canvas. Commit 8e56327.
@@ -19,6 +19,7 @@
 - apps/bezel-studio/src/i18n/{it.js,index.js}, src/ui/{preferences,gif-search}.js, src/app.js, src/demo-backend.js, tests/ui/i18n.test.mjs, src-tauri/src/texts.rs
 - apps/bezel-studio/src/ui/{connect,sensor-status}.js (novos), src/libre-status.js, src/index.html, tests/e2e/{connect (novo),libre,scenarios,shell}.spec.mjs, tests/ui/libre-status.test.mjs
 - README.md, FORK.md, packaging/windows/README.md, scripts/windows/package-evo.ps1
+- T-9: apps/bezel-studio/src/{live-screen,app}.js, src/i18n/{en,pt-BR,it}.js, tests/ui/live-screen.test.mjs, tests/e2e/{device-video,scenarios}.spec.mjs, playwright.config.mjs e scripts/serve-e2e.py (novo; os dois últimos fora do files_modified)
 
 ## Tests
 - `npm run test:unit`: 322 testes, 321 passam, 1 falha pré-existente em HEAD f3b068d (`i18n.test.mjs` "no sentence is written in the UI code": strings de modelo em `live-screen.js`); cobertura de linhas 99.33%.
@@ -47,6 +48,21 @@
 - T-7 Playwright direcionado (`--workers=2`, falhas reexecutadas em série com `--last-failed --workers=1`): connect, libre, scenarios, shell, themes (+ layer-drag, storage-manager, video-background, workspace-selection numa primeira rodada) — tudo verde nos 4 projetos após a reexecução serial, exceto o baseline scenarios:421 (agora linha 425, combobox duplicado no diálogo de Preferências). Screenshots light/dark (locale it) do Connect vazio, do Connect com porta negada e do popover conferidos.
 - T-8: marca "Pixel" 5x7 (B em matriz de pontos, base no acento literal #FF9248, pixel ao vivo verde #34D399) em `src/icon.svg` e `src-tauri/icons/icon.svg` (idênticos). Novo `scripts/build-icons.mjs` gera os SVGs a partir da matriz e regenera os ícones Tauri com `@tauri-apps/cli@2.12.1` (conjunto padrão + `-p 1024 -p 64` → `icon-1024.png`, `64x64.png`, `tray.png`; descarta `android/` e `ios/`). Novo `tests/ui/app-icons.test.mjs` (6 testes): SVGs idênticos e atualizados, dimensões dos PNGs batem com o nome, `icon.ico` com 16/24/32/48/64/256, `icon.icns` válido. `npm run test:unit` 335/336 (única falha = baseline i18n "no sentence…"), cobertura de linhas 99.41%; `cargo test -p bezel-studio` 203/203; clippy sem avisos novos (12 `collapsible_if` pré-existentes em bezel-core/bezel-render/bezel-studio, escopo da T-9). Commit fd33b85 (cherry-pick de c22f054 (worktree studio-redesign-t8).)
 - T-9 (parte Rust): 12 `collapsible_if` (bezel-core theme.rs 3, bezel-render renderer.rs 1, studio.rs 8) viram let-chains, sem mudança de comportamento. `cargo clippy --workspace --all-targets --locked -- -D warnings` limpo; `cargo fmt --check` limpo; `cargo test --workspace --locked` 1038 passam, 0 falham, 15 ignorados (hardware). Commit 17d6316 (cherry-pick de 1d934ec).
+
+- T-9 (parte JS/e2e): causa real de cada falha do baseline.
+  - **i18n "no sentence…"** (app): os nomes das famílias de protocolo em `live-screen.js` eram literais. Viraram chaves `screen.family.{turing-rev-a,turing-rev-b,turing-rev-c,turing-usb}` em en/pt-BR/it (mesmo texto: nomes de produto); `deviceLabel(screen, t)` recebe o tradutor, `SCREEN_FAMILIES` exportado; app.js passa `t` (seletor, título, Connect). Teste não foi enfraquecido (NOT_PROSE intacto); `live-screen.test` +1 teste (toda família nomeada em todo locale). Commit 60f174a.
+  - **device-video:3** (spec desatualizada): marcava o checkbox "Transparência linear", que virou o menu Transparência (nenhuma/linear/radial) quando chegaram os fades radiais (be17aab; `features-016` já usava o menu). A spec escolhe `linear` no combobox `fade.mode` e espera `linear` de volta após Undo. Commit 2677fc8.
+  - **video-framing:48 e :228** (bug do app, regressão de a5c4128): `refreshAuto` descartava a resposta de `videoAuto` quando a tela mudava durante a espera, mas mantinha a chave. A primeira pergunta sai antes da lista de telas e a chave não inclui a tela fora do modo ao vivo, então nunca mudava e o Auto ficava "Auto" (sem ângulo) e o vídeo não era desvirado. Agora a resposta descartada limpa a chave e pergunta de novo (se não houver troca de tela em curso; ao fim da troca o render já chama `refreshAuto`). Commit d332dac.
+  - **scenarios:425** (spec errada): `getByRole('dialog').getByRole('combobox')` sem nome; o diálogo de Preferências tem dois desde o menu do canto do overlay de debug (115d00c) e o strict mode recusa. A spec nomeia o menu de idioma (`u('prefs.language')`). Commit 0b0a08b.
+  - **flake scenarios:56** (bug do app, de a5c4128): uma amostra com leitura fora do catálogo recarrega o catálogo, e cada recarga redesenha a lista de sensores. Uma leitura que o backend nunca lista (no demo, `gpu.1.fan`) fazia isso a cada amostra; a linha arrastada era trocada no meio do arraste, perdia o pointer capture e o drop não vinha (o inspector seguia na barra, `cpu.usage`). Agora o catálogo é pedido de novo uma vez por chave não listada (`askedSensors`). Reproduzido 1/60 antes; 0/260 depois (`--repeat-each` 25+40, 4 projetos). Commit 1dce63a.
+  - **Flakes de servidor** (infra de teste): `python -m http.server` escuta com backlog 5 e responde HTTP/1.0 (uma conexão por arquivo). No Windows, com workers paralelos, conexões além do backlog são recusadas (módulo não carrega, página fica pela metade: era o "flake de carga" de T-1..T-7; com `--workers=2` device-video falhava 2/4 assim) e uma rodada longa esgota os sockets (`net::ERR_NO_BUFFER_SPACE`). Novo `scripts/serve-e2e.py` (fora do files_modified, com `playwright.config.mjs`): serve `src/` igual, backlog 256, thread por conexão, HTTP/1.1 keep-alive. Commit cf048fb.
+  - storage-manager:73 e storage:189 confirmados verdes nos 4 projetos na suíte completa (já corrigidos em T-5).
+
+## Gates
+- `npm test` completo (apps/bezel-studio, workers padrão = 10, sem `--workers=2`): **1ª execução verde, exit 0** — unit 350/350 (cobertura de linhas 99.42%), Playwright 396/396 (light-pt, dark-pt, light-en, dark-en, com axe). Nenhum teste precisou de reexecução serial.
+- 2ª execução só do Playwright (10 workers, checagem de estabilidade): 395/396; falhou `card-animation:3` [light-en] ("flip": 3 quadros distintos amostrados, mínimo 4), amostragem por tempo sob carga de CPU; reexecutado em série com `--repeat-each=3`: 12/12 verdes. Não é regressão desta phase; fica como flake de carga conhecido.
+- `scripts/e2e-passed.mjs` não faz parte de `npm test` (script `e2e:passed` separado); não executado.
+- Rust: `cargo clippy --workspace --all-targets --locked -- -D warnings` limpo; `cargo test --workspace --locked` 1038 passam, 0 falham, 15 ignorados (hardware); `cargo fmt --all --check` limpo.
 
 ## Hardware validation
 - não aplicável (só CSS/fontes)

@@ -44,6 +44,7 @@ Original authorship and copyright notices are preserved. Bezel Evo is GPL-3.0-or
 source and release history are at https://github.com/jripper77/bezel.
 The embedded LibreHardwareMonitorLib 0.9.6 and dependencies retain their licenses
 under `sensors/`. Tabler and Material Design Icons retain MIT and Apache notices.
+IBM Plex: SIL OFL 1.1 (`LICENSE-IBM-Plex-OFL.txt`).
 The installer template is adapted from Tauri CLI 2.12.1 under MIT; its license is
 included. No personal logs, hardware aliases or development backups are shipped.
 

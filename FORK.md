@@ -95,6 +95,8 @@ Weather data: [Open-Meteo](https://open-meteo.com/) under [CC BY 4.0](https://cr
 
 The bundled MDI hardware subset is Apache 2.0; see `apps/bezel-studio/src/assets/mdi/LICENSE` and `NOTICE`. Brand/logo icons are excluded. The Tabler catalog keeps its MIT license.
 
+IBM Plex: SIL OFL 1.1. The Studio bundles IBM Plex Sans (400/500/600) and IBM Plex Mono (400/500) as unmodified woff2 files from IBM's official npm packages; see `apps/bezel-studio/src/assets/fonts/ibm-plex/LICENSE` and the `README.md` beside it for source URLs and SHA-256 checksums.
+
 ## Card widget (first version)
 
 Add **Card** from Widgets, or select several objects and choose **Create card

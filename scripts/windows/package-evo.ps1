@@ -51,6 +51,7 @@ try {
     Add-Payload (Join-Path $repository 'apps\bezel-studio\src\assets\tabler\LICENSE') 'LICENSE-Tabler-Icons.txt'
     Add-Payload (Join-Path $repository 'apps\bezel-studio\src\assets\mdi\LICENSE') 'LICENSE-Material-Design-Icons.txt'
     Add-Payload (Join-Path $repository 'apps\bezel-studio\src\assets\mdi\NOTICE') 'NOTICE-Material-Design-Icons.txt'
+    Add-Payload (Join-Path $repository 'apps\bezel-studio\src\assets\fonts\ibm-plex\LICENSE') 'LICENSE-IBM-Plex-OFL.txt'
     Add-Payload (Join-Path $repository 'packaging\windows\LICENSE-Tauri-template.txt') 'LICENSE-Tauri-template.txt'
     Add-Payload (Join-Path $repository 'packaging\windows\README.md') 'README.md'
     foreach ($root in @(@('themes', (Join-Path $repository 'themes')), @('sensors', $sensors))) {

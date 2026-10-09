@@ -194,6 +194,7 @@ retain their original authorship and copyright notices.
 - Bezel and this fork: [GPL-3.0-or-later](LICENSE).
 - Tabler Icons: [MIT](apps/bezel-studio/src/assets/tabler/LICENSE).
 - Material Design Icons: [Apache 2.0](apps/bezel-studio/src/assets/mdi/LICENSE), with its [notice](apps/bezel-studio/src/assets/mdi/NOTICE).
+- IBM Plex Sans and Mono: SIL OFL 1.1 ([license](apps/bezel-studio/src/assets/fonts/ibm-plex/LICENSE), [source and checksums](apps/bezel-studio/src/assets/fonts/ibm-plex/README.md)).
 - LibreHardwareMonitorLib: MPL-2.0; dependency licenses and source information
   are documented in the [helper README](apps/bezel-sensors-helper/README.md).
 - Weather: Open-Meteo and GeoNames, with attribution and service terms in the

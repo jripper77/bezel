@@ -34,7 +34,7 @@ export default defineConfig({
     project('dark-en', 'dark', 'en-US'),
   ],
   webServer: {
-    command: `${process.platform === 'win32' ? 'python' : 'python3'} -m http.server ${PORT} --directory src`,
+    command: `${process.platform === 'win32' ? 'python' : 'python3'} scripts/serve-e2e.py ${PORT} src`,
     url: `http://localhost:${PORT}/index.html`,
     reuseExistingServer: false,
     stdout: 'ignore',

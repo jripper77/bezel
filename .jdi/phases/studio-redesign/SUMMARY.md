@@ -1,7 +1,7 @@
 # Phase 14: Studio redesign — Summary  (slug: studio-redesign)
 
 **Status:** partial
-**Tasks:** 5/9 complete, 0 blocked (T-9 parcial)
+**Tasks:** 6/9 complete (T-1..T-5, T-8), 0 blocked (T-9 parcial)
 
 ## Executed tasks
 - T-1: tokens light/dark (`:root` + `@media (prefers-color-scheme: dark)`), `--accent: #FF9248` único, `--accent-text` #1A0E05 (8.5:1), `--accent-ink`/`--focus-ring` para ícones e foco legíveis no claro; 26 hex fora dos blocos viraram `var(--…)`; IBM Plex Sans 400/500/600 + Mono 400/500 locais (npm oficiais `@ibm/plex-sans` 1.1.0 / `@ibm/plex-mono` 2.5.0, SHA-256 no README), 700→600; OFL em README/FORK/packaging + payload no `package-evo.ps1`; `static-guards.test.mjs` (6 testes) verde; topbar fixada em 52px para não mudar a escala do canvas. Commit 8e56327.

@@ -125,6 +125,19 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
 - **Test:** `npm run test:unit`; `cargo test`/`cargo clippy` em `src-tauri`
 - **Status:** pending
 
+### Wave 8 (limpeza, adicionada pelo usuário em 2026-10-09)
+
+#### T-9: Limpeza do baseline — falhas pré-existentes + clippy
+- **Specialist:** jdi-doer-bezel
+- **Files modified:** `apps/bezel-studio/src/live-screen.js` (+ i18n se preciso), `crates/bezel-core/src/domain/theme.rs`, `apps/bezel-studio/src-tauri/src/studio.rs`, specs/código ligados às falhas e2e listadas abaixo
+- **Acceptance:**
+  - Unit: `i18n.test.mjs` "no sentence is written in the UI code…" passa sem enfraquecer o teste (literais de `live-screen.js` viram chaves i18n).
+  - E2E: `device-video:3`, `scenarios:421`, `storage-manager:73`, `storage:189`, `video-framing:48`, `video-framing:228` passam nos 4 projetos (corrigir a causa real; spec só se ela estiver errada); flake `scenarios:56` (drag) estabilizado.
+  - `cargo clippy -p bezel-studio --all-targets --locked -- -D warnings` limpo (11 `collapsible_if`), `cargo test` e `cargo fmt --check` limpos.
+  - Suíte completa `npm test` verde (gate final da phase).
+- **Dependencies:** T-8
+- **Status:** pending
+
 ## Execution
 - Total tasks: 8
 - Waves: 7 (W1 = waves 1–2; W2 = 3–4; W3 = 5; W4 = 6; W5 = 7)

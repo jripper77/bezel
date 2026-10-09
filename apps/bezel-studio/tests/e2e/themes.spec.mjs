@@ -49,7 +49,9 @@ test('the gallery lists the themes for this screen, with thumbnails', async ({ p
   await expect(broken.locator('.thumb-screen')).toHaveAttribute('data-state', 'none');
   await expect(broken.locator('.no-preview')).toHaveText(t('themes.noPreview'));
   await expect(cards(page).filter({ hasText: 'Midnight 5"' })).toContainText(screenLabel({ canvas: { width: 800, height: 480 }, diagonalHundredths: 500 }, lang));
-  await expect(cards(page).filter({ hasText: 'Midnight 2.1"' })).toContainText(`480×480 · ${t('themes.bundled')}`);
+  const bundled = cards(page).filter({ hasText: 'Midnight 2.1"' });
+  await expect(bundled.locator('.theme-screen')).toContainText('480×480');
+  await expect(bundled.locator('.tag')).toHaveText(t('themes.bundled'));
   await expect(page.locator('#theme-count')).toHaveText(t('themes.countAll', { count: total }));
   await expectAccessible(page);
 

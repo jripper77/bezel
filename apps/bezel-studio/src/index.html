@@ -74,21 +74,41 @@
         </div>
         <div class="library">
         <section class="panel" role="tabpanel" id="panel-widgets" aria-labelledby="tab-widgets">
+          <div class="panel-head"><h2 data-i18n="library.widgets"></h2></div>
           <p class="hint" data-i18n="library.widgetsHint"></p>
           <ul class="widget-grid" id="widget-grid"></ul>
         </section>
         <section class="panel" role="tabpanel" id="panel-sensors" aria-labelledby="tab-sensors" hidden>
+          <div class="panel-head"><h2 data-i18n="library.sensors"></h2></div>
           <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
             <span class="visually-hidden" data-i18n="library.searchSensors"></span>
             <input type="search" id="sensor-search" data-i18n-placeholder="library.searchSensors" data-i18n-aria-label="library.searchSensors" />
           </label>
-          <p class="hint" data-i18n="library.sensorsHint"></p>
+          <div class="chip-group" role="group" id="sensor-filter" data-i18n-aria-label="library.filterHardware"></div>
           <div id="sensor-list" class="sensor-list"></div>
+          <p class="hint panel-foot" data-i18n="library.sensorsHint"></p>
         </section>
         <section class="panel" role="tabpanel" id="panel-layers" aria-labelledby="tab-layers" hidden>
+          <div class="panel-head">
+            <h2 data-i18n="library.layers"></h2>
+            <span class="panel-meta" id="layer-count"></span>
+            <span class="panel-tools">
+              <button type="button" class="icon-button" id="layers-expand" data-i18n-title="layers.expandAll" data-i18n-aria-label="layers.expandAll">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5" /></svg>
+              </button>
+              <button type="button" class="icon-button" id="layers-collapse" data-i18n-title="layers.collapseAll" data-i18n-aria-label="layers.collapseAll">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4 5 5 5-5M7 20l5-5 5 5" /></svg>
+              </button>
+            </span>
+          </div>
           <ul class="layer-list" id="layer-list"></ul>
         </section>
         <section class="panel" role="tabpanel" id="panel-themes" aria-labelledby="tab-themes" hidden>
+          <div class="panel-head">
+            <h2 data-i18n="library.themes"></h2>
+            <p class="panel-meta theme-count" id="theme-count" role="status"></p>
+          </div>
           <div class="button-row pairs">
             <button type="button" class="text-button" id="theme-new-vertical">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="3" width="9" height="18" rx="2" /><path d="M12 9v6M9 12h6" /></svg>
@@ -98,11 +118,20 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7.5" width="18" height="9" rx="2" /><path d="M12 9v6M9 12h6" /></svg>
               <span data-i18n="themes.newHorizontal"></span>
             </button>
-            <button type="button" class="text-button" id="theme-open" data-i18n="themes.open"></button>
-            <button type="button" class="text-button" id="theme-import" data-i18n="themes.import"></button>
-            <button type="button" class="text-button" id="theme-save-as" data-i18n="themes.saveAs"></button>
+            <button type="button" class="text-button import-button" id="theme-import">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M5 21h14" /></svg>
+              <span data-i18n="themes.import"></span>
+            </button>
+            <button type="button" class="text-button" id="theme-open">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" /></svg>
+              <span data-i18n="themes.open"></span>
+            </button>
+            <button type="button" class="text-button" id="theme-save-as">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+              <span data-i18n="themes.saveAs"></span>
+            </button>
           </div>
-          <p class="hint" data-i18n="themes.saveAsHint"></p>
+          <p class="hint" data-i18n="themes.importHint"></p>
           <div id="import-report"></div>
           <div class="theme-filter">
             <div class="segmented" role="group" id="theme-scope" data-i18n-aria-label="themes.scopeLabel">
@@ -115,23 +144,32 @@
               <button type="button" data-axis="horizontal" aria-pressed="false" data-i18n="axis.horizontal"></button>
             </div>
           </div>
-          <p class="hint theme-count" id="theme-count" role="status"></p>
           <ul class="theme-grid" id="theme-grid"></ul>
+          <p class="hint panel-foot" data-i18n="themes.saveAsHint"></p>
         </section>
         <section class="panel" role="tabpanel" id="panel-media" aria-labelledby="tab-media" hidden>
+          <div class="panel-head"><h2 data-i18n="library.media"></h2></div>
           <div class="subtabs" role="tablist" data-i18n-aria-label="library.media">
             <button type="button" role="tab" id="subtab-media-theme" aria-controls="media-theme" aria-selected="true" data-subtab="theme" data-i18n="media.thisTheme"></button>
-              <button type="button" role="tab" id="subtab-media-collection" aria-controls="media-collection" aria-selected="false" tabindex="-1" data-subtab="collection" data-i18n="media.collection"></button>
-              <button type="button" role="tab" id="subtab-media-icons" aria-controls="media-icons" aria-selected="false" tabindex="-1" data-subtab="icons" data-i18n="media.icons"></button>
+            <button type="button" role="tab" id="subtab-media-collection" aria-controls="media-collection" aria-selected="false" tabindex="-1" data-subtab="collection" data-i18n="media.collection"></button>
+            <button type="button" role="tab" id="subtab-media-icons" aria-controls="media-icons" aria-selected="false" tabindex="-1" data-subtab="icons" data-i18n="media.icons"></button>
           </div>
-            <div role="tabpanel" id="media-icons" aria-labelledby="subtab-media-icons" hidden></div>
-            <div role="tabpanel" id="media-theme" aria-labelledby="subtab-media-theme">
-            <div class="button-row">
-              <button type="button" class="text-button" id="media-add" data-i18n="media.add"></button>
-              <button type="button" class="text-button" id="media-add-video" data-i18n="media.addVideo"></button>
+          <div role="tabpanel" id="media-icons" aria-labelledby="subtab-media-icons" hidden></div>
+          <div role="tabpanel" id="media-theme" aria-labelledby="subtab-media-theme">
+            <div class="media-drop">
+              <span class="media-drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M5 21h14" /></svg></span>
+              <p class="hint" data-i18n="media.dropHint"></p>
+              <p class="media-formats" data-i18n="media.formats"></p>
+              <div class="button-row">
+                <button type="button" class="text-button" id="media-add" data-i18n="media.add"></button>
+                <button type="button" class="text-button" id="media-add-video" data-i18n="media.addVideo"></button>
+              </div>
             </div>
-            <p class="hint" data-i18n="media.dropHint"></p>
-            <p class="hint" id="media-status" role="status" hidden data-i18n="media.adding"></p>
+            <p class="hint media-status" id="media-status" role="status" hidden data-i18n="media.adding"></p>
+            <div class="section-head">
+              <h3 data-i18n="media.inTheme"></h3>
+              <span class="panel-meta" id="media-count"></span>
+            </div>
             <ul class="media-list" id="media-list"></ul>
           </div>
           <div role="tabpanel" id="media-collection" aria-labelledby="subtab-media-collection" hidden>

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { axisOf, groupSensors, shownSensorKeys, thumbScreen } from '../../src/ui/library.js';
+import { ALL_CATEGORIES, axisOf, groupSensors, sensorCategories, shownSensorKeys, thumbScreen } from '../../src/ui/library.js';
 import { joinColor, splitColor } from '../../src/ui/fields.js';
 
 const catalog = [
@@ -19,6 +19,18 @@ test('the filter matches label or key, ignoring case', () => {
   assert.deepEqual(groupSensors(catalog, ' USAGE ').map(([c, items]) => [c, items.length]), [['cpu', 1], ['gpu', 1]]);
   assert.deepEqual(groupSensors(catalog, 'net.').map(([c]) => c), ['network']);
   assert.deepEqual(groupSensors(catalog, 'nothing'), []);
+});
+
+test('the hardware filter offers the catalog categories in display order', () => {
+  assert.deepEqual(sensorCategories(catalog), ['cpu', 'gpu', 'network', 'alpha', 'zeta']);
+  assert.deepEqual(sensorCategories([]), []);
+});
+
+test('one category keeps only its sensors, with the text filter on top', () => {
+  assert.deepEqual(groupSensors(catalog, '', 'gpu').map(([c, items]) => [c, items.map((s) => s.key)]), [['gpu', ['gpu.usage']]]);
+  assert.deepEqual(groupSensors(catalog, 'cpu', 'gpu'), []);
+  assert.deepEqual(groupSensors(catalog, '', ALL_CATEGORIES).length, 5);
+  assert.deepEqual(shownSensorKeys(catalog, '', true, 'network'), ['net.down'], 'only the shown category is measured');
 });
 
 test('the list shows the filtered sensors while open, and none while closed', () => {

@@ -78,7 +78,7 @@ pub fn language_slug(language: Language) -> &'static str {
 
 /// The language spelled `slug` (see [`language_slug`]).
 pub fn parse_language(slug: &str) -> Option<Language> {
-    [Language::PortugueseBr, Language::English]
+    [Language::PortugueseBr, Language::English, Language::Italian]
         .into_iter()
         .find(|l| language_slug(*l) == slug)
 }
@@ -110,10 +110,12 @@ mod tests {
 
     #[test]
     fn languages_are_spelled_like_the_ui() {
-        for language in [Language::PortugueseBr, Language::English] {
+        for language in [Language::PortugueseBr, Language::English, Language::Italian] {
             assert_eq!(parse_language(language_slug(language)), Some(language));
         }
         assert_eq!(parse_language("de"), None);
         assert_eq!(parse_language("pt"), None);
+        assert_eq!(parse_language("it"), Some(Language::Italian));
+        assert_eq!(parse_language("it-IT"), None);
     }
 }

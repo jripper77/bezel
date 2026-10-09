@@ -8,6 +8,7 @@
 import { el, icon } from './dom.js';
 import { ICONS } from './icons.js';
 import { errorMessage } from '../messages.js';
+import { guideLocale } from '../i18n/index.js';
 import {
   GIF_KINDS, GUIDE_PAGE, HELP_STEPS, PARTNER_PANEL, TILE_TEXT, createGifResults, createSearchTrigger, gridMove, keyFailure, keyStatus, queryOf, resultsMessage,
   searchFailure,
@@ -62,7 +63,7 @@ export function createGifSearch({ t, bridge, locale, onCollected = () => {} }) {
   }
 
   function openGuide() {
-    void bridge.openGuide(GUIDE_PAGE, locale()).catch(announceFailure);
+    void bridge.openGuide(GUIDE_PAGE, guideLocale(locale())).catch(announceFailure);
   }
 
   // ------------------------------------------------------------- help --

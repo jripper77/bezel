@@ -1,6 +1,6 @@
 import { iconSvg, loadIconCatalog } from './icon-catalog.js';
 // Bezel Studio: wires the store, the bridge and the views together.
-import { applyTranslations, pickLocale, translator } from './i18n/index.js';
+import { applyTranslations, guideLocale, pickLocale, translator } from './i18n/index.js';
 import { createBridge } from './bridge.js';
 import { createStore } from './editor/store.js';
 import { isHorizontal, isTurned, orientationOf } from './editor/geometry.js';
@@ -267,7 +267,7 @@ const inspector = createInspector({
     useImage: () => useImage(),
     openStorage: () => openStorage(),
     setFraming: (on) => setFramingMode(on),
-    openGuide: () => bridge.openGuide('ffmpeg', locale).catch((e) => fail(e)),
+    openGuide: () => bridge.openGuide('ffmpeg', guideLocale(locale)).catch((e) => fail(e)),
   },
 });
 

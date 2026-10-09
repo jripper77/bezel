@@ -8,7 +8,7 @@ import { ICONS } from './icons.js';
 import { errorText } from '../messages.js';
 
 /** The languages the studio speaks. */
-export const LANGUAGES = Object.freeze(['pt-BR', 'en']);
+export const LANGUAGES = Object.freeze(['pt-BR', 'en', 'it']);
 
 /**
  * The options of the language select: the system's (named) first, then

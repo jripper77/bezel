@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { LOCALES, applyTranslations, pickLocale, translator } from '../../src/i18n/index.js';
+import { LOCALES, applyTranslations, guideLocale, pickLocale, placeholders, translator } from '../../src/i18n/index.js';
 import { WIDGETS } from '../../src/editor/widgets.js';
 import { LANGUAGES, languageOptions } from '../../src/ui/preferences.js';
-import { DEMO_FOLDER, createDemoBackend } from '../../src/demo-backend.js';
+import { DEMO_FOLDER, DEMO_GUIDE_PAGES, createDemoBackend } from '../../src/demo-backend.js';
 import { GIF_KINDS, HELP_STEPS, TILE_TEXT, keyFailure, resultsMessage } from '../../src/gif-search.js';
 import { COLLECTION_FILTERS } from '../../src/collection.js';
 import { errorMessage } from '../../src/messages.js';
@@ -24,12 +24,71 @@ test('every locale has exactly the same keys', () => {
   for (const keys of rest) assert.deepEqual(keys, base);
 });
 
+test('the studio speaks Portuguese (Brazil), English and Italian', () => {
+  assert.deepEqual(Object.keys(LOCALES).sort(), ['en', 'it', 'pt-BR']);
+});
+
+/** For each locale, the keys of `en` it lacks and the keys it has that `en` does not. */
+function keyDrift(tables) {
+  const base = Object.keys(tables.en);
+  return Object.fromEntries(Object.entries(tables).map(([locale, table]) => [locale, {
+    missing: base.filter((key) => !Object.hasOwn(table, key)),
+    extra: Object.keys(table).filter((key) => !Object.hasOwn(tables.en, key)),
+  }]));
+}
+
+/** The keys whose text has other `{name}` placeholders than `en`'s, as "<locale>: <key>". */
+function placeholderDrift(tables) {
+  return Object.entries(tables).flatMap(([locale, table]) => Object.keys(tables.en)
+    .filter((key) => Object.hasOwn(table, key) && placeholders(table[key]).join() !== placeholders(tables.en[key]).join())
+    .map((key) => `${locale}: ${key}`));
+}
+
+test('the parity check names the keys a locale lacks or adds and the placeholders it changes', () => {
+  const tables = { en: { a: 'A {x}', b: 'B' }, it: { a: 'A {y}', c: 'C' } };
+  assert.deepEqual(keyDrift(tables), { en: { missing: [], extra: [] }, it: { missing: ['b'], extra: ['c'] } });
+  assert.deepEqual(placeholderDrift(tables), ['it: a']);
+});
+
+test('en, pt-BR and it have the same keys, each with the same placeholders', () => {
+  const clean = { missing: [], extra: [] };
+  assert.deepEqual(keyDrift(LOCALES), { en: clean, 'pt-BR': clean, it: clean });
+  assert.deepEqual(placeholderDrift(LOCALES), []);
+});
+
+test('every Italian text is written: none is empty', () => {
+  assert.deepEqual(Object.keys(LOCALES.it).filter((key) => !String(LOCALES.it[key]).trim()), []);
+});
+
+test('the card keeps its name: Card in English and Italian', () => {
+  for (const key of ['widget.card', 'card.container']) {
+    assert.equal(LOCALES.en[key], 'Card', key);
+    assert.equal(LOCALES.it[key], 'Card', key);
+  }
+  assert.equal(LOCALES['pt-BR']['widget.card'], 'Cartão');
+});
+
 test('locale choice follows the browser languages', () => {
   assert.equal(pickLocale(['pt-BR', 'en']), 'pt-BR');
   assert.equal(pickLocale(['pt-PT']), 'pt-BR');
   assert.equal(pickLocale(['de', 'en-US']), 'en');
   assert.equal(pickLocale(['de']), 'en');
   assert.equal(pickLocale([]), 'en');
+  assert.equal(pickLocale(['it-IT']), 'it');
+  assert.equal(pickLocale(['it']), 'it');
+  assert.equal(pickLocale(['de', 'it-CH', 'en']), 'it');
+});
+
+test('the guide opens in Portuguese for pt-BR and in English otherwise', () => {
+  assert.equal(guideLocale('pt-BR'), 'pt-BR');
+  assert.equal(guideLocale('en'), 'en');
+  assert.equal(guideLocale('it'), 'en');
+});
+
+test('the Italian translator substitutes params', () => {
+  const t = translator('it');
+  assert.equal(t('inspector.multi', { count: 2 }), '2 elementi selezionati');
+  assert.equal(t('top.save'), 'Salva');
 });
 
 test('translator substitutes params and falls back', () => {
@@ -571,7 +630,9 @@ test('the language choices name the system language and each language by its own
     ['', 'Igual ao do sistema (English)'],
     ['pt-BR', 'Português (Brasil)'],
     ['en', 'English'],
+    ['it', 'Italiano'],
   ]);
+  assert.equal(languageOptions(translator('it'), 'it')[0][1], 'Come il sistema (Italiano)');
   assert.equal(languageOptions(translator('en'), 'pt-BR')[0][1], 'Same as the system (Português (Brasil))');
 });
 
@@ -581,10 +642,21 @@ test('the demo keeps the chosen language and follows the browser otherwise', asy
   assert.deepEqual({ language, systemLanguage }, { language: null, systemLanguage: 'pt-BR' });
   await demo.setLanguage('en');
   assert.equal((await demo.preferences()).language, 'en');
+  await demo.setLanguage('it');
+  assert.equal((await demo.preferences()).language, 'it');
+  assert.equal((await createDemoBackend('turing88', {}, { languages: ['it-IT'] }).preferences()).systemLanguage, 'it');
   await assert.rejects(demo.setLanguage('de'), (e) => e.code === 'unknownLanguage' && e.args.language === 'de');
   await demo.setLanguage(null);
   assert.equal((await demo.preferences()).language, null);
   assert.equal((await createDemoBackend('turing88').preferences()).systemLanguage, 'en');
+});
+
+test('the demo opens the guide in English or Portuguese only, like the backend', async () => {
+  const opened = [];
+  const demo = createDemoBackend('turing88', {}, { onGuide: (page, language) => opened.push([page, language]) });
+  for (const language of ['en', 'pt-BR', guideLocale('it')]) await demo.openGuide(DEMO_GUIDE_PAGES[0], language);
+  assert.deepEqual(opened.map(([, language]) => language), ['en', 'pt-BR', 'en']);
+  await assert.rejects(demo.openGuide(DEMO_GUIDE_PAGES[0], 'it'), (e) => e.code === 'invalidInput');
 });
 
 test('the demo checks and keeps the sensor options like the backend', async () => {

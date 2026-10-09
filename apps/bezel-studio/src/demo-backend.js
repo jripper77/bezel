@@ -355,6 +355,10 @@ export function createDemoDecoder({ wait = (fn, ms) => setTimeout(fn, ms), cance
 
 /** The guide pages `open_guide` opens. */
 export const DEMO_GUIDE_PAGES = Object.freeze(['ffmpeg', 'gifs-and-stickers']);
+/** The languages the guide pages are written in, like `guide_url`. */
+export const DEMO_GUIDE_LANGUAGES = Object.freeze(['pt-BR', 'en']);
+/** The languages `setLanguage` takes, like the backend's `parse_language`. */
+export const DEMO_LANGUAGES = Object.freeze(['pt-BR', 'en', 'it']);
 
 /**
  * Holds a job phase in the middle until it is let go: a test sees the job
@@ -1351,7 +1355,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
     videoAuto: (next) => Promise.resolve(autoOf(next)),
     /** Opens a guide page (the demo shows which on the page). */
     openGuide: (page, language) => {
-      if (!DEMO_GUIDE_PAGES.includes(page) || !['pt-BR', 'en'].includes(language)) {
+      if (!DEMO_GUIDE_PAGES.includes(page) || !DEMO_GUIDE_LANGUAGES.includes(language)) {
         const detail = `guide page "${page}" in "${language}"`;
         return Promise.reject(Object.assign(new Error(`invalid input: ${detail}`), { code: 'invalidInput', args: { detail } }));
       }
@@ -1531,7 +1535,7 @@ export function createDemoBackend(scenario, clock = {}, hooks = {}) {
       return Promise.resolve();
     },
     setLanguage: (next) => {
-      if (next !== null && !['pt-BR', 'en'].includes(next)) {
+      if (next !== null && !DEMO_LANGUAGES.includes(next)) {
         return Promise.reject(Object.assign(new Error(`unknown language "${next}"`), { code: 'unknownLanguage', args: { language: next } }));
       }
       language = next;

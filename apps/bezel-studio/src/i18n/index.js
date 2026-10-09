@@ -2,19 +2,21 @@
 // substitution, and apply `data-i18n*` attributes to the DOM.
 import ptBR from './pt-BR.js';
 import en from './en.js';
+import it from './it.js';
 
-export const LOCALES = Object.freeze({ 'pt-BR': ptBR, en });
+export const LOCALES = Object.freeze({ 'pt-BR': ptBR, en, it });
 
 /**
  * The best supported locale for a list of browser languages.
  * @param {readonly string[]} languages e.g. navigator.languages
- * @returns {'pt-BR' | 'en'}
+ * @returns {'pt-BR' | 'en' | 'it'}
  */
 export function pickLocale(languages) {
   for (const lang of languages) {
     const lower = String(lang).toLowerCase();
     if (lower.startsWith('pt')) return 'pt-BR';
     if (lower.startsWith('en')) return 'en';
+    if (lower.startsWith('it')) return 'it';
   }
   return 'en';
 }
@@ -22,7 +24,7 @@ export function pickLocale(languages) {
 /**
  * A translator bound to a locale. Unknown keys come back as the key itself;
  * `t.has(key)` tells whether a key is known.
- * @param {'pt-BR' | 'en'} locale
+ * @param {'pt-BR' | 'en' | 'it'} locale
  */
 export function translator(locale) {
   const table = LOCALES[locale] ?? en;
@@ -32,6 +34,16 @@ export function translator(locale) {
   };
   t.has = (key) => key in table || key in en;
   return t;
+}
+
+/**
+ * The language of the guide pages for a UI locale: the guide is written in
+ * English and Portuguese only, so any other locale reads the English one.
+ * @param {string} locale
+ * @returns {'pt-BR' | 'en'}
+ */
+export function guideLocale(locale) {
+  return locale === 'pt-BR' ? 'pt-BR' : 'en';
 }
 
 /** The `{name}` placeholders of a text, sorted and once each. */

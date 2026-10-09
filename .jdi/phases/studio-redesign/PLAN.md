@@ -36,7 +36,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `static-guards.test.mjs` (roda em `npm run test:unit`): (a) CSP de `tauri.conf.json` igual à string fixada no teste; (b) nenhum `fonts.googleapis`/`fonts.gstatic` em `src/**` nem em `tauri.conf.json`; (c) nenhum hex em **valores de declaração** de styles.css fora dos blocos de token (seletores `#id` não contam); (d) todo `url()` de `@font-face` existe em disco e todo `font-weight` numérico ∈ {400,500,600}.
 - **Dependencies:** none
 - **Test:** `node --test tests/ui/static-guards.test.mjs`; `npm test` (axe light+dark sem violação de contraste)
-- **Status:** pending
+- **Status:** completed (commit 8e56327)
 
 #### T-2: Locale italiano + paridade + plumbing de idioma
 - **Specialist:** jdi-doer-bezel

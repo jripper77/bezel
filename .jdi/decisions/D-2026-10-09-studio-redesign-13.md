@@ -1,0 +1,1 @@
+D-2026-10-09-studio-redesign-13 (2026-10-09): O "×" do cartão Connect (T-7) fica, com rótulo neutro "Fechar"/"Close"/"Chiudi" (chave connect.hide): só esconde o cartão até a situação mudar. "Prova senza schermo" continua omitido (D-9) — significaria trocar para o backend demo, não fechar o cartão. Decisão do usuário no verify.

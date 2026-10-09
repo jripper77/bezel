@@ -13,13 +13,62 @@
 - nenhuma
 
 ## Files modified
+_Lista completa, gerada de `git diff --name-only f3b068d..HEAD` (inclui o fix pós-review be35503)._
+- FORK.md
+- README.md
+- apps/bezel-studio/playwright.config.mjs
+- apps/bezel-studio/scripts/build-icons.mjs
+- apps/bezel-studio/scripts/serve-e2e.py
+- apps/bezel-studio/src-tauri/icons/* (regenerados pela T-8)
+- apps/bezel-studio/src-tauri/src/studio.rs
+- apps/bezel-studio/src-tauri/src/texts.rs
+- apps/bezel-studio/src/app.js
+- apps/bezel-studio/src/assets/fonts/ibm-plex/* (5 woff2, LICENSE, README.md)
+- apps/bezel-studio/src/demo-backend.js
+- apps/bezel-studio/src/i18n/en.js
+- apps/bezel-studio/src/i18n/index.js
+- apps/bezel-studio/src/i18n/it.js
+- apps/bezel-studio/src/i18n/pt-BR.js
+- apps/bezel-studio/src/icon.svg
+- apps/bezel-studio/src/index.html
+- apps/bezel-studio/src/inspector-tabs.js
+- apps/bezel-studio/src/libre-status.js
+- apps/bezel-studio/src/live-screen.js
 - apps/bezel-studio/src/styles.css
-- apps/bezel-studio/src/assets/fonts/ibm-plex/{5 woff2, LICENSE, README.md}
+- apps/bezel-studio/src/ui/connect.js
+- apps/bezel-studio/src/ui/gif-search.js
+- apps/bezel-studio/src/ui/inspector.js
+- apps/bezel-studio/src/ui/library.js
+- apps/bezel-studio/src/ui/manager.js
+- apps/bezel-studio/src/ui/preferences.js
+- apps/bezel-studio/src/ui/sensor-status.js
+- apps/bezel-studio/src/ui/storage.js
+- apps/bezel-studio/tests/e2e/card-animation.spec.mjs
+- apps/bezel-studio/tests/e2e/cards.spec.mjs
+- apps/bezel-studio/tests/e2e/connect.spec.mjs
+- apps/bezel-studio/tests/e2e/device-video.spec.mjs
+- apps/bezel-studio/tests/e2e/editing-017.spec.mjs
+- apps/bezel-studio/tests/e2e/features-016.spec.mjs
+- apps/bezel-studio/tests/e2e/icons.spec.mjs
+- apps/bezel-studio/tests/e2e/inspector-sections.spec.mjs
+- apps/bezel-studio/tests/e2e/libre.spec.mjs
+- apps/bezel-studio/tests/e2e/ring-gradient.spec.mjs
+- apps/bezel-studio/tests/e2e/scenarios.spec.mjs
+- apps/bezel-studio/tests/e2e/shell.spec.mjs
+- apps/bezel-studio/tests/e2e/storage-manager.spec.mjs
+- apps/bezel-studio/tests/e2e/themes.spec.mjs
+- apps/bezel-studio/tests/e2e/weather.spec.mjs
+- apps/bezel-studio/tests/ui/app-icons.test.mjs
+- apps/bezel-studio/tests/ui/i18n.test.mjs
+- apps/bezel-studio/tests/ui/inspector-tabs.test.mjs
+- apps/bezel-studio/tests/ui/library.test.mjs
+- apps/bezel-studio/tests/ui/libre-status.test.mjs
+- apps/bezel-studio/tests/ui/live-screen.test.mjs
 - apps/bezel-studio/tests/ui/static-guards.test.mjs
-- apps/bezel-studio/src/i18n/{it.js,index.js}, src/ui/{preferences,gif-search}.js, src/app.js, src/demo-backend.js, tests/ui/i18n.test.mjs, src-tauri/src/texts.rs
-- apps/bezel-studio/src/ui/{connect,sensor-status}.js (novos), src/libre-status.js, src/index.html, tests/e2e/{connect (novo),libre,scenarios,shell}.spec.mjs, tests/ui/libre-status.test.mjs
-- README.md, FORK.md, packaging/windows/README.md, scripts/windows/package-evo.ps1
-- T-9: apps/bezel-studio/src/{live-screen,app}.js, src/i18n/{en,pt-BR,it}.js, tests/ui/live-screen.test.mjs, tests/e2e/{device-video,scenarios}.spec.mjs, playwright.config.mjs e scripts/serve-e2e.py (novo; os dois últimos fora do files_modified)
+- crates/bezel-core/src/domain/theme.rs
+- crates/bezel-render/src/renderer.rs
+- packaging/windows/README.md
+- scripts/windows/package-evo.ps1
 
 ## Tests
 - `npm run test:unit`: 322 testes, 321 passam, 1 falha pré-existente em HEAD f3b068d (`i18n.test.mjs` "no sentence is written in the UI code": strings de modelo em `live-screen.js`); cobertura de linhas 99.33%.

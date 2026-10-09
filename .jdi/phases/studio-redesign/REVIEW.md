@@ -77,3 +77,15 @@ Aprovado com avisos: sem blockers, todos os gates executados passaram e todas as
 1. O usuário decide sobre o botão × do Connect (W3): aprovar e registrar uma D-XX que esclareça o escopo de "Prova senza schermo", ou trocar o rótulo para "Fechar" (`dialog.close`).
 2. Instalar `cargo-llvm-cov` e `cargo-audit` e rodar Gate 3 e 5.11 para fechar o item 7 da DoD.
 3. Opcional: corrigir `PLAN.md:142`, completar "Files modified" na SUMMARY e tokenizar as sombras e `--marquee` (W6, W7). Considerar estabilizar `card-animation:3` (W4) para não depender do tempo de CPU.
+
+## Pós-review (correções após o verify, 2026-10-09)
+
+Decisões do usuário e correções aplicadas depois do verdict acima:
+- **W3 — "×" do Connect:** mantido com rótulo neutro "Fechar"/"Close"/"Chiudi" (`connect.hide`), commit be35503; decisão D-2026-10-09-studio-redesign-13.
+- **W7 — literais de cor:** sombra das abas segmentadas virou token `--seg-shadow` (light + dark); `--marquee` agora é `color-mix(in srgb, var(--accent) 14%, transparent)`. Commit be35503. Unit 350/350; e2e connect, workspace-selection, inspector-sections, storage: 76/76.
+- **W6 — docs:** PLAN.md "Total tasks: 9"; SUMMARY.md "Files modified" regenerado de `git diff --name-only f3b068d..HEAD`.
+- **W1 — gates Rust que faltavam** (`cargo-llvm-cov` 0.9.1 e `cargo-audit` 0.22.2 instalados):
+  - `cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|/)(main|build)\.rs$'`: exit 0, **TOTAL Lines 91.84%** (regions 91.31%, functions 88.43%).
+  - `cargo audit`: exit 0, 634 dependências, 1296 advisories, nenhuma vulnerabilidade.
+
+Warnings que permanecem: W4 (`card-animation:3`, flake por amostragem temporal sob carga) e W5 (arquivos fora de `files_modified`, todos justificados). O verdict permanece APPROVED_WITH_WARNINGS.

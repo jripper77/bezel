@@ -139,7 +139,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
 - **Status:** completed (Rust 17d6316; i18n 60f174a; e2e 2677fc8, d332dac, 1dce63a, 0b0a08b, cf048fb)
 
 ## Execution
-- Total tasks: 8
+- Total tasks: 9 (T-9 adicionada pelo usuário em 2026-10-09)
 - Waves: 7 (W1 = waves 1–2; W2 = 3–4; W3 = 5; W4 = 6; W5 = 7)
 - Speedup paralelo estimado: 8/7 ≈ 1.1x (styles.css, index.html e i18n serializam as tasks; só T-1 ∥ T-2)
 - Gate ao fim de cada wave: `npm run test:unit` e `npm test` em `apps/bezel-studio`; Rust só em T-2 e T-8.

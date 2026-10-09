@@ -110,7 +110,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `libre.spec` abre o popover antes de agir; `scenarios.spec` (empty/denied) atualizado; `connect.spec` com axe; `window-boundary.test` verde.
 - **Dependencies:** T-6
 - **Test:** `npm test`
-- **Status:** pending
+- **Status:** completed (commit 32ddef8)
 
 ### Wave 7 (W5)
 

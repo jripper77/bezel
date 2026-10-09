@@ -60,7 +60,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `shell.spec.mjs`: navegação por teclado no rail, barras flutuantes clicáveis, `expectAccessible` (4 projetos). `features-016` (overflow de `.library`) ajustado ao novo seletor.
 - **Dependencies:** T-1, T-2
 - **Test:** `npm test`
-- **Status:** pending
+- **Status:** completed (commit f08ef95)
 
 ### Wave 3 (W2)
 

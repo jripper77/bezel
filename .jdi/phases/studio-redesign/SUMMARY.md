@@ -1,11 +1,12 @@
 # Phase 14: Studio redesign — Summary  (slug: studio-redesign)
 
 **Status:** partial
-**Tasks:** 2/8 complete, 0 blocked
+**Tasks:** 3/8 complete, 0 blocked
 
 ## Executed tasks
 - T-1: tokens light/dark (`:root` + `@media (prefers-color-scheme: dark)`), `--accent: #FF9248` único, `--accent-text` #1A0E05 (8.5:1), `--accent-ink`/`--focus-ring` para ícones e foco legíveis no claro; 26 hex fora dos blocos viraram `var(--…)`; IBM Plex Sans 400/500/600 + Mono 400/500 locais (npm oficiais `@ibm/plex-sans` 1.1.0 / `@ibm/plex-mono` 2.5.0, SHA-256 no README), 700→600; OFL em README/FORK/packaging + payload no `package-evo.ps1`; `static-guards.test.mjs` (6 testes) verde; topbar fixada em 52px para não mudar a escala do canvas. Commit 8e56327.
 - T-2: `i18n/it.js` novo (1146 chaves, paridade total com en/pt-BR e mesmos placeholders; texto do mockup onde se aplica; "Card" mantido; "Powered by KLIPY" mantido como atribuição). `LOCALES` com `it`, `pickLocale(['it-IT'])==='it'`, `LANGUAGES` com `it`; `guideLocale()` (it→en) nas chamadas `openGuide` de app.js e ui/gif-search.js; demo-backend aceita `it` em `setLanguage` (`DEMO_LANGUAGES`) e guias só en/pt-BR (`DEMO_GUIDE_LANGUAGES`, como `guide_url`). `texts.rs`: `parse_language` aceita `Language::Italian`, teste cobre `it`. `i18n.test.mjs`: paridade explícita (faltando/sobrando por locale + placeholders por chave, com autoteste), "Card" en/it, guideLocale, demo em it. en.js/pt-BR.js sem mudança (`language.it` já existia). Commit 5e052b4.
+- T-3: rail vertical de ícones (`.tabs.rail`, `role=tablist`, `aria-orientation=vertical`, ↑/↓/Home/End em `ui/library.js` — arquivo fora do `files_modified`, mudança mínima no keydown), nome por `data-i18n-aria-label`; `nav.sidebar` = rail 64px + `.library` (scroller, layer-drag intacto); orientação + undo/redo/copy/paste em `.stage-tools` flutuante no topo do `#stage`, zoom em `.stage-zoom` embaixo à direita (mesmos ids); framing HUD desce para top 64px; statusbar com chips mono, altura 23px e sidebar 300px para manter a escala do canvas (medido: stage 660×725 igual ao baseline; com 320px/30px falhava workspace-selection por arredondamento). Nova chave `stage.tools` en/pt-BR/it. `shell.spec.mjs` novo (3 testes × 4 projetos), `features-016` checa `.sidebar/.rail/.library`. app.js e icons.js sem mudança. Commit f08ef95.
 
 ## Blocked tasks
 - nenhuma
@@ -24,6 +25,8 @@
 - T-2 `npm run test:unit`: 330 testes, 329 passam, 1 falha pré-existente (a mesma de `live-screen.js`); cobertura de linhas 99.41%.
 - T-2 Playwright (360, `--workers=2` + reexecução serial das falhas): restam as 24 falhas do baseline (6 × 4 projetos) + `scenarios:56` ("drag a widget onto the canvas") intermitente, que também falha em HEAD sem T-2 (4/12 em `--repeat-each=3` com as mudanças guardadas em stash) — flake pré-existente de drag, não regressão.
 - T-2 Rust: `cargo test -p bezel-studio` 203 + 1 passam (texts: 2/2); `cargo fmt --check` limpo. `cargo clippy -p bezel-studio --all-targets -- -D warnings` falha em `collapsible_if` pré-existente (bezel-core theme.rs ×3, studio.rs ×8; clippy 1.98), nenhum em texts.rs; com `--no-deps -A clippy::collapsible_if` passa limpo.
+- T-3 `npm run test:unit`: 330 testes, 329 passam (só a falha baseline de `live-screen.js`); cobertura de linhas 99.41%.
+- T-3 Playwright direcionado (`--workers=2`, falhas reexecutadas em série): shell, features-016, clipboard, workspace-selection, layer-drag, libre, standby, multi-screen, alignment-019, cards, storage, storage-manager, gif-search, live-screen-controls — todos verdes nos 4 projetos após reexecução serial (falhas paralelas só em light-pt, por carga). Screenshot visual light/dark não foi feito (sessão interrompida pelo usuário).
 
 ## Hardware validation
 - não aplicável (só CSS/fontes)

@@ -225,7 +225,7 @@ const connect = createConnect({
   t,
   notify: toast,
   errorText,
-  deviceLabel,
+  deviceLabel: (screen) => deviceLabel(screen, t),
   onImport: () => importTheme(),
   onOpenScreen: () => library.selectTab('screen'),
 });
@@ -535,7 +535,7 @@ const currentScreen = () => state.screens.find((s) => s.key === state.screen) ??
 function renderScreenSelect() {
   const select = $('screen-select');
   const options = state.screens.map((s) => {
-    return el('option', { value: s.key, text: deviceLabel(s), selected: s.key === state.screen });
+    return el('option', { value: s.key, text: deviceLabel(s, t), selected: s.key === state.screen });
   });
   if (state.screen && !state.screens.some((s) => s.key === state.screen)) {
     options.push(el('option', { value: state.screen, text: state.screen, selected: true }));
@@ -543,7 +543,7 @@ function renderScreenSelect() {
   if (options.length === 0) options.push(el('option', { value: '', text: t('top.noScreen') }));
   select.replaceChildren(...options);
   const current = state.screens.find((s) => s.key === state.screen);
-  select.title = current ? deviceLabel(current) : state.screen ?? '';
+  select.title = current ? deviceLabel(current, t) : state.screen ?? '';
   $('screen-dot').className = `dot${state.live ? ' live' : current?.state === 'awake' ? ' awake' : ''}`;
   let device = t('top.noScreen');
   if (state.screenError) device = t('status.devicesError', { message: errorText(t, state.screenError) });

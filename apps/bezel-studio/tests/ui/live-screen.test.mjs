@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { answersTo, deviceLabel, liveScreenIn } from '../../src/live-screen.js';
+import { answersTo, deviceLabel, liveScreenIn, SCREEN_FAMILIES } from '../../src/live-screen.js';
+import { LOCALES, translator } from '../../src/i18n/index.js';
 import { SCENARIOS } from '../../src/demo-data.js';
 
 // The 8.8" (display /dev/ttyACM1, MCU /dev/ttyACM0) beside a 2.1" asleep,
@@ -44,12 +45,21 @@ test('a listed key wins over another screen\'s port', () => {
   assert.equal(liveScreenIn([turing88, odd], '/dev/ttyACM0'), odd);
 });
 
+const t = translator('en');
+
+test('every protocol family is named in every language', () => {
+  for (const [locale, table] of Object.entries(LOCALES)) {
+    for (const family of SCREEN_FAMILIES) assert.ok(table[`screen.family.${family}`], `${locale}: ${family}`);
+  }
+  assert.equal(deviceLabel({ key: 'COM4', family: 'turing-usb', models: [], display: {} }, translator('it')), 'TURZX / Turing USB · COM4');
+});
+
 test('ambiguous models retain a readable family when USB metadata is absent', () => {
-  assert.equal(deviceLabel({ key: 'COM3', family: 'turing-rev-a', models: [{ name: 'A' }, { name: 'B' }], display: {} }), 'Turing / UsbPCMonitor (Rev A) · COM3');
-  assert.equal(deviceLabel({ key: 'COM9', models: [], display: {}, family: 'unrecognized' }), 'COM9');
+  assert.equal(deviceLabel({ key: 'COM3', family: 'turing-rev-a', models: [{ name: 'A' }, { name: 'B' }], display: {} }, t), 'Turing / UsbPCMonitor (Rev A) · COM3');
+  assert.equal(deviceLabel({ key: 'COM9', models: [], display: {}, family: 'unrecognized' }, t), 'COM9');
 });
 
 test('the protocol family wins over Windows generic driver names', () => {
   const screen = { key: 'COM3', family: 'turing-rev-a', models: [{ name: 'A' }, { name: 'B' }], display: { manufacturer: 'Microsoft', product: 'Dispositivo seriale USB (COM3)' } };
-  assert.equal(deviceLabel(screen), 'Turing / UsbPCMonitor (Rev A) · COM3');
+  assert.equal(deviceLabel(screen, t), 'Turing / UsbPCMonitor (Rev A) · COM3');
 });

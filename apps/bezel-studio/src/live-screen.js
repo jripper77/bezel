@@ -26,22 +26,23 @@ export function liveScreenIn(screens, liveKey) {
   return screens.find((s) => s.key === liveKey) ?? screens.find((s) => answersTo(s, liveKey)) ?? null;
 }
 
+/** The protocol families with a name of their own (`screen.family.<id>`). */
+export const SCREEN_FAMILIES = Object.freeze(['turing-rev-a', 'turing-rev-b', 'turing-rev-c', 'turing-usb']);
+
 /** A recognized model, otherwise the known protocol family or USB name; retain the
  * address so two identical panels remain distinguishable. Discovery need not
- * open a serial port or guess the exact model to provide a useful label. */
-export function deviceLabel(screen) {
+ * open a serial port or guess the exact model to provide a useful label.
+ * @param {object} screen
+ * @param {(key: string) => string} t the translator that names the family
+ */
+export function deviceLabel(screen, t) {
   const model = screen.models?.length === 1 ? screen.models[0] : null;
   if (model) return `${model.name} · ${model.width}×${model.height} · ${screen.key}`;
   const endpoint = screen.display ?? screen.wake;
   const manufacturer = endpoint?.manufacturer?.trim();
   const product = endpoint?.product?.trim();
   const usbName = [...new Set([manufacturer, product].filter(Boolean))].join(' ');
-  const family = {
-    'turing-rev-a': 'Turing / UsbPCMonitor (Rev A)',
-    'turing-rev-b': 'Turing Smart Screen (Rev B)',
-    'turing-rev-c': 'Turing Smart Screen (Rev C)',
-    'turing-usb': 'TURZX / Turing USB',
-  }[screen.family];
+  const family = SCREEN_FAMILIES.includes(screen.family) ? t(`screen.family.${screen.family}`) : null;
   const name = family || usbName || screen.models?.[0]?.name;
   return name ? `${name} · ${screen.key}` : screen.key;
 }

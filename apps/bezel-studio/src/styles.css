@@ -99,10 +99,10 @@ select option, select optgroup { background-color: var(--surface-2); color: var(
 /* Only the screen and the theme name give way when the window is narrow. */
 .topbar > * { flex: none; }
 .topbar > .spacer { flex: 1 1 0; }
-.brand { display: flex; align-items: center; gap: 8px; }
-.brand-label { display: grid; line-height: 1.2; }
-.brand-version { font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-.brand-name { font-weight: 600; font-size: 1.05rem; }
+.brand { display: flex; align-items: center; gap: 10px; height: 32px; padding-right: 12px; border-right: 1px solid var(--border); }
+.brand-label { display: grid; line-height: 1.15; font-family: var(--font-mono); }
+.brand-version { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.brand-name { font-weight: 600; font-size: 0.93rem; letter-spacing: 0.04em; text-transform: uppercase; }
 .topbar > .screen-chip { display: flex; flex: 0 1 auto; min-width: 0; align-items: center; gap: 6px; padding: 2px 4px 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }
 .screen-chip select { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; padding: 4px; max-width: 300px; text-overflow: ellipsis; }
 .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
@@ -113,7 +113,7 @@ select option, select optgroup { background-color: var(--surface-2); color: var(
 .theme-name input:hover, .theme-name input:focus { border-color: var(--border); background: var(--surface-2); }
 .toolbar { display: flex; gap: 4px; align-items: center; }
 
-/* Vertical | Horizontal and the 180° turn, next to the theme name. */
+/* Vertical | Horizontal and the 180° turn, in the bar over the stage. */
 .orientation-tools { display: flex; align-items: center; gap: 4px; }
 .orientation-tools .segmented { overflow: visible; border-radius: 8px; background: var(--surface-2); }
 .orientation-tools .segmented button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px 0 9px; background: transparent; color: var(--muted); font-weight: 600; }
@@ -147,14 +147,23 @@ select option, select optgroup { background-color: var(--surface-2); color: var(
 
 /* ------------------------------------------------------------ workspace -- */
 .workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; min-height: 0; }
-.library, .inspector { background: var(--surface); overflow: auto; min-height: 0; }
-.library { border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-.inspector { border-left: 1px solid var(--border); padding: 12px; }
+/* The sidebar: the rail of panel icons, then the panel it shows (300 px
+   in all, like the library it replaces: the stage keeps its size). */
+.sidebar { display: flex; min-width: 0; min-height: 0; background: var(--surface); border-right: 1px solid var(--border); }
+.library { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.inspector { background: var(--surface); overflow: auto; min-height: 0; border-left: 1px solid var(--border); padding: 12px; }
 
-.tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1; }
-.tabs [role="tab"] { border: 0; background: transparent; padding: 6px 8px; border-radius: 8px; cursor: pointer; color: var(--muted); font-weight: 600; font-size: 0.85rem; }
-.tabs [role="tab"][aria-selected="true"] { background: var(--accent-soft); color: var(--text); }
-.panel { padding: 10px 12px; }
+.rail { flex: 0 0 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; border-right: 1px solid var(--border); overflow-y: auto; overflow-x: hidden; }
+.rail .tab-design, .rail .tab-device { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.rail .tab-device::before { content: ""; width: 28px; height: 1px; margin: 6px 0 4px; background: var(--border); }
+.rail .tab-domain { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.68rem; font-weight: 600; margin: 2px 0 4px; }
+.rail [role="tab"] { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 56px; min-height: 52px; padding: 6px 2px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 0.75rem; font-weight: 500; cursor: pointer; }
+.rail [role="tab"] svg { flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.rail [role="tab"]:hover { color: var(--text); background: var(--surface-2); }
+.rail [role="tab"][aria-selected="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+.rail [role="tab"]:focus-visible { outline-offset: 0; }
+.rail-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
+.panel { padding: 12px; }
 
 .widget-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .widget-tile { width: 100%; aspect-ratio: 1; display: grid; place-items: center; gap: 4px; padding: 8px 4px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-2); cursor: grab; touch-action: none; user-select: none; font-size: 0.8rem; }
@@ -287,12 +296,21 @@ select option, select optgroup { background-color: var(--surface-2); color: var(
 .framing-grid::before { top: 0; bottom: 0; left: 33.333%; right: 33.333%; border-left-width: 1px; border-right-width: 1px; }
 .framing-grid::after { left: 0; right: 0; top: 33.333%; bottom: 33.333%; border-top-width: 1px; border-bottom-width: 1px; }
 .stage.framing .bezel { outline: 2px solid var(--accent); outline-offset: 4px; }
-.framing-hud { position: absolute; z-index: 2; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: max-content; max-width: calc(100% - 24px); padding: 8px 10px 8px 12px; border: 1px solid var(--accent); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.framing-hud { position: absolute; z-index: 3; top: 64px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: max-content; max-width: calc(100% - 24px); padding: 8px 10px 8px 12px; border: 1px solid var(--accent); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
 .framing-hud > svg { flex: none; width: 22px; height: 22px; fill: none; stroke: var(--accent-ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .framing-hud-text { display: grid; gap: 2px; min-width: 0; }
 .framing-numbers { font-weight: 600; font-variant-numeric: tabular-nums; }
 .framing-keys { color: var(--muted); font-size: 0.78rem; }
 .framing-hud .primary-button { flex: none; }
+/* Floating bars over the stage: orientation and editing on top, zoom below. */
+.stage-tools, .stage-zoom { position: absolute; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.stage-tools { top: 12px; left: 50%; transform: translateX(-50%); flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100% - 24px); }
+.stage-zoom { right: 16px; bottom: 16px; gap: 2px; border-radius: 10px; }
+.stage-tools .icon-button, .stage-zoom .icon-button, .stage-zoom .text-button { border-color: transparent; background: transparent; }
+.stage-tools .icon-button:hover:not(:disabled), .stage-zoom .icon-button:hover, .stage-zoom .text-button:hover { border-color: transparent; background: var(--surface-3); }
+.stage-tools .icon-button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.stage-zoom #zoom-fit { min-width: 56px; font-family: var(--font-mono); font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.tool-sep { flex: none; width: 1px; height: 20px; margin: 0 4px; background: var(--border); }
 .drop-ghost { position: fixed; z-index: 10; pointer-events: none; padding: 6px 10px; border-radius: 8px; background: var(--accent); color: var(--accent-text); font-weight: 600; box-shadow: var(--shadow); transform: translate(-50%, -50%); }
 .stage.drop-target .bezel { outline: 3px dashed var(--accent); outline-offset: 6px; }
 
@@ -317,8 +335,10 @@ select option, select optgroup { background-color: var(--surface-2); color: var(
 .empty-note { color: var(--muted); }
 
 /* ------------------------------------------------------------ statusbar -- */
-.statusbar { display: flex; gap: 16px; padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
-.statusbar { align-items: center; }
+/* 23 px tall, like the bar it replaces: the canvas keeps its scale. */
+.statusbar { display: flex; align-items: center; gap: 8px; height: 23px; padding: 0 12px; background: var(--surface); border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+#status-sensors, #status-render, #status-device { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); font-family: var(--font-mono); font-size: 0.75rem; white-space: nowrap; }
+#status-sensors:empty, #status-render:empty, #status-device:empty { display: none; }
 #status-libre:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
 .status-dot[data-state="ok"] { background: var(--signal-ok); }
@@ -414,7 +434,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* The Storage tab takes the whole window (D-2026-09-30-storage-manager-4). */
 .workspace.storage-wide { grid-template-columns: minmax(0, 1fr); }
 .workspace.storage-wide > .stage, .workspace.storage-wide > .inspector { display: none; }
-.workspace.storage-wide > .library { border-right: 0; }
+.workspace.storage-wide > .sidebar { border-right: 0; }
 .workspace.storage-wide #panel-screen { padding: 12px 20px 20px; }
 .workspace.storage-wide #panel-screen .subtabs { max-width: 360px; }
 .storage-toolbar .text-button svg { width: 16px; height: 16px; }
@@ -657,7 +677,7 @@ input[aria-invalid="true"] { border-color: var(--danger) !important; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .icon-button, .text-button, .widget-tile, .sensor-row, .theme-card, .switch .thumb, .orientation-tools .segmented button, .subtabs [role="tab"], .drop-zone, .file-option { transition: border-color 120ms ease, background 120ms ease, color 120ms ease, left 120ms ease; }
+  .icon-button, .text-button, .rail [role="tab"], .widget-tile, .sensor-row, .theme-card, .switch .thumb, .orientation-tools .segmented button, .subtabs [role="tab"], .drop-zone, .file-option { transition: border-color 120ms ease, background 120ms ease, color 120ms ease, left 120ms ease; }
   .usage > span { transition: width 200ms ease; }
   .theme-card .thumb-screen[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
   .gif-frame[data-state="loading"] { animation: thumb-wait 900ms ease-in-out infinite alternate; }
@@ -721,12 +741,6 @@ button.layer-group-title { border: 0; background: transparent; text-align: left;
 .trigger-rule, .sleep-settings { border-top:1px solid var(--border); margin-top:12px; padding-top:8px; }
 .trigger-rule h4 { margin:4px 0 8px; }
 
-.tabs { display:block; }
-.tab-design { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:2px; }
-.tab-device { border-top:1px solid var(--border); margin-top:6px; padding-top:6px; display:flex; align-items:center; justify-content:space-between; }
-.tab-domain { color:var(--muted); font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; }
-.tab-design .tab-domain { grid-column:1 / -1; margin:2px 6px 4px; }
-.tab-device .tab-domain { margin-left:6px; }
 
 .object-menu {position:fixed;z-index:10000;min-width:220px;max-height:calc(100vh - 8px);overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:5px;box-shadow:0 8px 30px var(--menu-shadow);}
 .object-menu button {display:block;text-align:left;width:100%;padding:7px 10px;border:0;background:transparent;color:inherit;cursor:pointer;border-radius:4px;}

@@ -626,6 +626,7 @@ export default {
   'stage.preview': 'Screen preview',
   'stage.selected': '{name} selected',
   'stage.title': 'Editing area',
+  'stage.tools': 'Screen tools',
   'standby.add.added': '“{name}” is in the album.',
   'standby.add.containHint': 'Fit: the whole photo, with black around it',
   'standby.add.coverHint': 'Fill: covers the whole screen; the edges of the photo may be cut',

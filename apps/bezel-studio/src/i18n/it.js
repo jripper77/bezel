@@ -626,6 +626,7 @@ export default {
   "stage.preview": "Anteprima dello schermo",
   "stage.selected": "{name} selezionato",
   "stage.title": "Area di lavoro",
+  "stage.tools": "Strumenti dello schermo",
   "standby.add.added": "“{name}” è nell'album.",
   "standby.add.containHint": "Adatta: tutta la foto, con il nero intorno",
   "standby.add.coverHint": "Riempi: copre tutto lo schermo; i bordi della foto possono essere tagliati",

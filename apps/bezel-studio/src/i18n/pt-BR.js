@@ -626,6 +626,7 @@ export default {
   'stage.preview': 'Pré-visualização da tela',
   'stage.selected': '{name} selecionado',
   'stage.title': 'Área de edição',
+  'stage.tools': 'Ferramentas da tela',
   'standby.add.added': '“{name}” está no álbum.',
   'standby.add.containHint': 'Caber: a foto inteira, com preto em volta',
   'standby.add.coverHint': 'Preencher: cobre a tela toda; as bordas da foto podem ser cortadas',

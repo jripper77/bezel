@@ -41,7 +41,7 @@ test('property navigation fits small and large windows',async ({page,t})=>{
  const errors=watchErrors(page);await page.goto('/index.html?demo=turing88');
  for(const size of [{width:1000,height:700},{width:1600,height:1000}]) {
   await page.setViewportSize(size);await page.locator('#tab-widgets').click();await add(page,t,'player');
-  expect(await page.locator('.library').evaluate(n=>n.scrollWidth<=n.clientWidth+1)).toBe(true);
+  for(const pane of ['.sidebar','.rail','.library']) expect(await page.locator(pane).evaluate(n=>n.scrollWidth<=n.clientWidth+1),pane).toBe(true);
   expect(await page.locator('#inspector').evaluate(n=>n.scrollWidth<=n.clientWidth+1)).toBe(true);
  }
  await page.screenshot({path:'../../target/features-016-ui.png'});await expectAccessible(page);expect(errors).toEqual([]);

@@ -16,53 +16,16 @@
           <span class="brand-version" id="app-version"></span>
         </span>
       </div>
+      <label class="theme-name">
+        <span class="visually-hidden" data-i18n="top.themeName"></span>
+        <input id="theme-name" type="text" spellcheck="false" data-i18n-aria-label="top.themeName" />
+      </label>
+      <div class="spacer"></div>
       <label class="screen-chip">
         <span class="visually-hidden" data-i18n="top.screen"></span>
         <span class="dot" id="screen-dot" aria-hidden="true"></span>
         <select id="screen-select" data-i18n-aria-label="top.screen"></select>
       </label>
-      <label class="theme-name">
-        <span class="visually-hidden" data-i18n="top.themeName"></span>
-        <input id="theme-name" type="text" spellcheck="false" data-i18n-aria-label="top.themeName" />
-      </label>
-      <div class="orientation-tools" role="group" data-i18n-aria-label="top.orientation">
-        <div class="segmented">
-          <button type="button" id="orient-vertical" aria-pressed="false" data-i18n-title="top.verticalHint">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="3" width="9" height="18" rx="2" /><path d="M11 18h2" /></svg>
-            <span data-i18n="axis.vertical"></span>
-          </button>
-          <button type="button" id="orient-horizontal" aria-pressed="false" data-i18n-title="top.horizontalHint">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7.5" width="18" height="9" rx="2" /><path d="M18 11v2" /></svg>
-            <span data-i18n="axis.horizontal"></span>
-          </button>
-        </div>
-        <button type="button" class="icon-button" id="orient-turn" aria-pressed="false" data-i18n-title="top.turnHint" data-i18n-aria-label="top.turn">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
-        </button>
-      </div>
-      <div class="toolbar" role="toolbar" data-i18n-aria-label="top.edit">
-        <button type="button" class="icon-button" id="undo" data-i18n-title="top.undo" data-i18n-aria-label="top.undo">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" /></svg>
-        </button>
-        <button type="button" class="icon-button" id="redo" data-i18n-title="top.redo" data-i18n-aria-label="top.redo">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" /></svg>
-        </button>
-        <button type="button" class="icon-button" id="copy" data-i18n-title="top.copy" data-i18n-aria-label="top.copy">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg>
-        </button>
-        <button type="button" class="icon-button" id="paste" data-i18n-title="top.paste" data-i18n-aria-label="top.paste">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v16h14V5h-4" /><rect x="9" y="3" width="6" height="4" rx="1" /></svg>
-        </button>
-      </div>
-      <div class="toolbar zoom" role="toolbar" data-i18n-aria-label="top.zoom">
-        <button type="button" class="icon-button" id="zoom-out" data-i18n-title="top.zoomOut" data-i18n-aria-label="top.zoomOut">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
-        </button>
-        <button type="button" class="text-button" id="zoom-fit" data-i18n-title="top.zoomFit"><span id="zoom-label">100%</span></button>
-        <button type="button" class="icon-button" id="zoom-in" data-i18n-title="top.zoomIn" data-i18n-aria-label="top.zoomIn">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14" /></svg>
-        </button>
-      </div>
       <div class="spacer"></div>
       <button type="button" class="icon-button" id="preferences" data-i18n-title="top.preferences" data-i18n-aria-label="top.preferences">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M15 4v4M4 12h3M11 12h9M9 10v4M4 18h11M19 18h1M17 16v4" /></svg>
@@ -76,21 +39,40 @@
     </header>
 
     <main class="workspace">
-      <nav class="library" data-i18n-aria-label="library.title">
-        <div class="tabs" role="tablist" data-i18n-aria-label="library.title">
+      <nav class="sidebar" data-i18n-aria-label="library.title">
+        <div class="tabs rail" role="tablist" aria-orientation="vertical" data-i18n-aria-label="library.title">
           <div class="tab-design" role="presentation">
-          <span class="tab-domain" aria-hidden="true" data-i18n="library.design"></span>
-          <button type="button" role="tab" id="tab-widgets" aria-controls="panel-widgets" aria-selected="true" data-tab="widgets" data-i18n="library.widgets"></button>
-          <button type="button" role="tab" id="tab-sensors" aria-controls="panel-sensors" aria-selected="false" tabindex="-1" data-tab="sensors" data-i18n="library.sensors"></button>
-          <button type="button" role="tab" id="tab-layers" aria-controls="panel-layers" aria-selected="false" tabindex="-1" data-tab="layers" data-i18n="library.layers"></button>
-          <button type="button" role="tab" id="tab-themes" aria-controls="panel-themes" aria-selected="false" tabindex="-1" data-tab="themes" data-i18n="library.themes"></button>
-          <button type="button" role="tab" id="tab-media" aria-controls="panel-media" aria-selected="false" tabindex="-1" data-tab="media" data-i18n="library.media"></button>
+            <span class="tab-domain" aria-hidden="true" data-i18n="library.design"></span>
+            <button type="button" role="tab" id="tab-widgets" aria-controls="panel-widgets" aria-selected="true" data-tab="widgets" data-i18n-aria-label="library.widgets" data-i18n-title="library.widgets">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><path d="M16.5 13v7M13 16.5h7" /></svg>
+              <span class="rail-label" data-i18n="library.widgets"></span>
+            </button>
+            <button type="button" role="tab" id="tab-sensors" aria-controls="panel-sensors" aria-selected="false" tabindex="-1" data-tab="sensors" data-i18n-aria-label="library.sensors" data-i18n-title="library.sensors">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" /></svg>
+              <span class="rail-label" data-i18n="library.sensors"></span>
+            </button>
+            <button type="button" role="tab" id="tab-layers" aria-controls="panel-layers" aria-selected="false" tabindex="-1" data-tab="layers" data-i18n-aria-label="library.layers" data-i18n-title="library.layers">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5z" /><path d="m3 13 9 5 9-5" /></svg>
+              <span class="rail-label" data-i18n="library.layers"></span>
+            </button>
+            <button type="button" role="tab" id="tab-themes" aria-controls="panel-themes" aria-selected="false" tabindex="-1" data-tab="themes" data-i18n-aria-label="library.themes" data-i18n-title="library.themes">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M3 7v10M21 7v10" /></svg>
+              <span class="rail-label" data-i18n="library.themes"></span>
+            </button>
+            <button type="button" role="tab" id="tab-media" aria-controls="panel-media" aria-selected="false" tabindex="-1" data-tab="media" data-i18n-aria-label="library.media" data-i18n-title="library.media">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="10" r="1.5" /><path d="m21 16-5-5-8 8" /></svg>
+              <span class="rail-label" data-i18n="library.media"></span>
+            </button>
           </div>
           <div class="tab-device" role="presentation">
-          <span class="tab-domain" aria-hidden="true" data-i18n="library.device"></span>
-          <button type="button" role="tab" id="tab-screen" aria-controls="panel-screen" aria-selected="false" tabindex="-1" data-tab="screen" data-i18n="library.screen"></button>
+            <span class="tab-domain" aria-hidden="true" data-i18n="library.device"></span>
+            <button type="button" role="tab" id="tab-screen" aria-controls="panel-screen" aria-selected="false" tabindex="-1" data-tab="screen" data-i18n-aria-label="library.screen" data-i18n-title="library.screen">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></svg>
+              <span class="rail-label" data-i18n="library.screen"></span>
+            </button>
           </div>
         </div>
+        <div class="library">
         <section class="panel" role="tabpanel" id="panel-widgets" aria-labelledby="tab-widgets">
           <p class="hint" data-i18n="library.widgetsHint"></p>
           <ul class="widget-grid" id="widget-grid"></ul>
@@ -174,6 +156,7 @@
             <div id="storage-panel" class="storage"></div>
           </div>
         </section>
+        </div>
       </nav>
 
       <section class="stage" id="stage" data-i18n-aria-label="stage.title">
@@ -186,6 +169,38 @@
           </div>
           <button type="button" class="primary-button" id="framing-done" data-i18n="framing.done"></button>
         </div>
+        <div class="stage-tools" role="group" data-i18n-aria-label="stage.tools">
+          <div class="orientation-tools" role="group" data-i18n-aria-label="top.orientation">
+            <div class="segmented">
+              <button type="button" id="orient-vertical" aria-pressed="false" data-i18n-title="top.verticalHint">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="3" width="9" height="18" rx="2" /><path d="M11 18h2" /></svg>
+                <span data-i18n="axis.vertical"></span>
+              </button>
+              <button type="button" id="orient-horizontal" aria-pressed="false" data-i18n-title="top.horizontalHint">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7.5" width="18" height="9" rx="2" /><path d="M18 11v2" /></svg>
+                <span data-i18n="axis.horizontal"></span>
+              </button>
+            </div>
+            <button type="button" class="icon-button" id="orient-turn" aria-pressed="false" data-i18n-title="top.turnHint" data-i18n-aria-label="top.turn">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v5h-5" /></svg>
+            </button>
+          </div>
+          <span class="tool-sep" aria-hidden="true"></span>
+          <div class="toolbar" role="toolbar" data-i18n-aria-label="top.edit">
+            <button type="button" class="icon-button" id="undo" data-i18n-title="top.undo" data-i18n-aria-label="top.undo">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" /></svg>
+            </button>
+            <button type="button" class="icon-button" id="redo" data-i18n-title="top.redo" data-i18n-aria-label="top.redo">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" /></svg>
+            </button>
+            <button type="button" class="icon-button" id="copy" data-i18n-title="top.copy" data-i18n-aria-label="top.copy">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg>
+            </button>
+            <button type="button" class="icon-button" id="paste" data-i18n-title="top.paste" data-i18n-aria-label="top.paste">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v16h14V5h-4" /><rect x="9" y="3" width="6" height="4" rx="1" /></svg>
+            </button>
+          </div>
+        </div>
         <p class="visually-hidden" id="framing-live" aria-live="polite"></p>
         <div class="stage-scroll" id="stage-scroll">
           <div class="bezel" id="bezel">
@@ -194,6 +209,15 @@
               <div class="overlay" id="overlay"></div>
             </div>
           </div>
+        </div>
+        <div class="toolbar zoom stage-zoom" role="toolbar" data-i18n-aria-label="top.zoom">
+          <button type="button" class="icon-button" id="zoom-out" data-i18n-title="top.zoomOut" data-i18n-aria-label="top.zoomOut">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+          </button>
+          <button type="button" class="text-button" id="zoom-fit" data-i18n-title="top.zoomFit"><span id="zoom-label">100%</span></button>
+          <button type="button" class="icon-button" id="zoom-in" data-i18n-title="top.zoomIn" data-i18n-aria-label="top.zoomIn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14" /></svg>
+          </button>
         </div>
       </section>
 

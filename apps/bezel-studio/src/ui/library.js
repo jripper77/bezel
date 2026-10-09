@@ -84,9 +84,11 @@ export function createLibrary({ store, canvas, stage, t, locale = () => 'en', th
   tabs.forEach((tab, i) => {
     tab.addEventListener('click', () => selectTab(tab));
     tab.addEventListener('keydown', (evt) => {
-      const step = evt.key === 'ArrowRight' ? 1 : evt.key === 'ArrowLeft' ? -1 : 0;
-      if (!step) return;
-      const next = tabs[(i + step + tabs.length) % tabs.length];
+      // A vertical rail: Up/Down move, Left/Right too, Home/End jump.
+      const keys = { ArrowDown: i + 1, ArrowRight: i + 1, ArrowUp: i - 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 };
+      if (!(evt.key in keys)) return;
+      evt.preventDefault();
+      const next = tabs[(keys[evt.key] + tabs.length) % tabs.length];
       selectTab(next);
       next.focus();
     });

@@ -47,7 +47,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `texts.rs`: `parse_language` aceita `Language::Italian`; teste `languages_are_spelled_like_the_ui` cobre `it`; `cargo test` + `cargo clippy -- -D warnings` limpos em `src-tauri`.
 - **Dependencies:** none
 - **Test:** `npm run test:unit`; `cargo test -p bezel-studio texts`
-- **Status:** pending
+- **Status:** completed (commit 5e052b4)
 
 ### Wave 2 (W1, sequencial)
 

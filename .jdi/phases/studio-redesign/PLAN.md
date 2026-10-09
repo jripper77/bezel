@@ -123,7 +123,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `app-icons.test.mjs`: cada PNG listado em `tauri.conf.json` e os extras têm as dimensões do nome; `icon.ico` (fonte do instalador NSIS e do exe) contém 16/24/32/48/64/256; svgs idênticos. `cargo test` + `cargo clippy -- -D warnings` limpos (build.rs reembute o ico).
 - **Dependencies:** T-7
 - **Test:** `npm run test:unit`; `cargo test`/`cargo clippy` em `src-tauri`
-- **Status:** pending
+- **Status:** completed (commit fd33b85, cherry-pick de c22f054)
 
 ### Wave 8 (limpeza, adicionada pelo usuário em 2026-10-09)
 
@@ -136,7 +136,7 @@ Extra achado: UI em italiano exige `parse_language` aceitar `it` em `src-tauri/s
   - `cargo clippy -p bezel-studio --all-targets --locked -- -D warnings` limpo (11 `collapsible_if`), `cargo test` e `cargo fmt --check` limpos.
   - Suíte completa `npm test` verde (gate final da phase).
 - **Dependencies:** T-8
-- **Status:** pending
+- **Status:** in_progress (parte Rust feita em 17d6316, cherry-pick de 1d934ec; falta JS/e2e + video-background:30)
 
 ## Execution
 - Total tasks: 8

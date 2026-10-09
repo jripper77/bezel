@@ -452,7 +452,7 @@ test('the language follows the system until one is chosen', async ({ page, t, la
 
   // Back to the system's.
   await page.getByRole('button', { name: u('top.preferences') }).click();
-  await page.getByRole('dialog').getByRole('combobox').selectOption('');
+  await page.getByRole('dialog').getByRole('combobox', { name: u('prefs.language') }).selectOption('');
   await expect(html).toHaveAttribute('lang', lang);
   await page.getByRole('dialog').getByRole('button', { name: t('prefs.done') }).click();
   await expect(page.getByRole('tab', { name: t('library.sensors') })).toBeVisible();

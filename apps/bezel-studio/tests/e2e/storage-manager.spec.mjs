@@ -73,8 +73,11 @@ async function focusOption(page, list, name) {
 test('storage manager moves files by drag and by keyboard after confirming', async ({ page, t, lang }) => {
   const errors = watchErrors(page);
   const { internal, card } = await openManager(page, t);
-  // The whole window, the two media side by side.
-  await expect(page.locator('#stage')).toBeHidden();
+  // The whole window, the two media side by side; of the editor only its
+  // editing bar stays (Undo brings the editor back).
+  await expect(page.locator('#preview')).toBeHidden();
+  await expect(page.locator('#inspector')).toBeHidden();
+  await expect(page.getByRole('button', { name: t('top.undo') })).toBeVisible();
   const left = await internal.boundingBox();
   const right = await card.boundingBox();
   expect(left.x + left.width).toBeLessThanOrEqual(right.x);

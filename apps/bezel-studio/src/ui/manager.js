@@ -41,7 +41,7 @@ let dialogs = 0;
  * @param {object} deps.host what the storage panel lends: `key()`, `data()`,
  *   `features()`, `busy()`, `live()`, `notify(text)`, `notice(n)`,
  *   `reload()`, `runPlan(plan)`, `runDeletes(files)`, `askBoot(file)`,
- *   `askDelete(file)`, `play(file)`, `dropZone(medium)`, `confirm(opts)`,
+ *   `askDelete(file)`, `play(file)`, `dropZone(medium)`, `usage(capacity)`, `confirm(opts)`,
  *   `bootSlot()`
  */
 export function createManagerView({ t, locale, bridge, host }) {
@@ -90,7 +90,8 @@ export function createManagerView({ t, locale, bridge, host }) {
 
   function thumbnail(file) {
     const fallback = icon(file.kind === 'video' ? ICONS.film : ICONS.image, 20);
-    if (!isBezel(file)) return el('span', { class: 'file-thumb', 'aria-hidden': 'true' }, [fallback]);
+    const kind = { kind: file.kind };
+    if (!isBezel(file)) return el('span', { class: 'file-thumb', 'aria-hidden': 'true', dataset: kind }, [fallback]);
     const key = thumbKey(file);
     if (!thumbs.has(key)) {
       thumbs.set(key, 'loading');
@@ -99,7 +100,7 @@ export function createManagerView({ t, locale, bridge, host }) {
     }
     const url = thumbs.get(key);
     const picture = typeof url === 'string' && url !== 'loading';
-    return el('span', { class: `file-thumb${picture ? ' has-picture' : ''}`, 'aria-hidden': 'true' }, [
+    return el('span', { class: `file-thumb${picture ? ' has-picture' : ''}`, 'aria-hidden': 'true', dataset: kind }, [
       fallback,
       el('img', { alt: '', dataset: { thumb: key }, src: picture ? url : null, width: 48, height: 48 }),
     ]);
@@ -342,15 +343,6 @@ export function createManagerView({ t, locale, bridge, host }) {
   }
 
   // ------------------------------------------------------------- columns --
-  function usage(capacity) {
-    const fraction = capacity.total ? Math.min(1, capacity.used / capacity.total) : 0;
-    return [
-      // A sliver stays visible for a little use.
-      el('div', { class: `usage${fraction > 0.9 ? ' full' : ''}`, 'aria-hidden': 'true' }, [el('span', { style: { width: capacity.used ? `max(4px, ${(fraction * 100).toFixed(1)}%)` : '0' } })]),
-      el('p', { class: 'usage-text', text: t('storage.usage', { used: bytes(capacity.used), total: bytes(capacity.total), free: bytes(capacity.free) }) }),
-    ];
-  }
-
   /**
    * One side of the manager: usage, the drop zone, restore, the toolbar and
    * the list, as a region named by its medium.
@@ -376,7 +368,7 @@ export function createManagerView({ t, locale, bridge, host }) {
       Object.assign(columns[medium], { count, slot });
       const errors = (data.folderErrors ?? []).filter((f) => f.medium === medium)
         .map((f) => el('p', { class: 'empty-note', text: t('storage.folderError', { reason: errorText(t, f.error) }) }));
-      children.push(...usage(capacity), host.dropZone(medium), toolbar(medium), count, ...errors, slot);
+      children.push(host.usage(capacity), host.dropZone(medium), toolbar(medium), count, ...errors, slot);
       slot.append(listOf(medium));
     }
     if (medium === 'sd') children.push(el('p', { class: 'hint', text: t('storage.cardHelp') }));

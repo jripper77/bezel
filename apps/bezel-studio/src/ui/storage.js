@@ -571,9 +571,11 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
   // ------------------------------------------------------------- manager --
   function dropZone(medium) {
     const zone = el('div', { class: 'drop-zone', dataset: { medium } }, [
-      icon(ICONS.upload, 20),
+      el('span', { class: 'drop-icon', 'aria-hidden': 'true' }, [icon(ICONS.upload, 18)]),
       el('span', { text: t('storage.dropHere') }),
-      el('button', { type: 'button', class: 'text-button', text: t('storage.choose'), disabled: busy(), dataset: { focus: `send-${medium}` }, onclick: () => choose(medium) }),
+      el('button', { type: 'button', class: 'text-button send-button', disabled: busy(), dataset: { focus: `send-${medium}` }, onclick: () => choose(medium) }, [
+        icon(ICONS.upload, 16), el('span', { text: t('storage.choose') }),
+      ]),
     ]);
     zone.addEventListener('dragover', (evt) => {
       evt.preventDefault();
@@ -587,6 +589,22 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
       if (source) send(source, medium);
     });
     return zone;
+  }
+
+  /**
+   * A medium's use: used of total in mono, the bar (`usedFraction`) and what
+   * is free, all in the screen's own numbers.
+   */
+  function usage(capacity) {
+    const fraction = usedFraction(capacity);
+    return el('div', { class: 'usage-card' }, [
+      el('p', { class: 'usage-figure', 'aria-hidden': 'true' }, [bytes(capacity.used), el('span', { class: 'usage-total', text: ` / ${bytes(capacity.total)}` })]),
+      // A sliver stays visible for a little use.
+      el('div', { class: `usage${fraction > 0.9 ? ' full' : ''}`, 'aria-hidden': 'true' }, [el('span', { style: { width: capacity.used ? `max(4px, ${(fraction * 100).toFixed(1)}%)` : '0' } })]),
+      el('p', { class: 'usage-free', 'aria-hidden': 'true', text: t('storage.usageFree', { free: bytes(capacity.free) }) }),
+      // The whole sentence, for screen readers.
+      el('p', { class: 'usage-text visually-hidden', text: t('storage.usage', { used: bytes(capacity.used), total: bytes(capacity.total), free: bytes(capacity.free) }) }),
+    ]);
   }
 
   const manager = createManagerView({
@@ -612,6 +630,7 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
       play,
       useBackground,
       dropZone,
+      usage,
       confirm,
       refocus,
     },
@@ -621,8 +640,11 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
   function bootSlot(features) {
     if (!features.boot) return null;
     return el('section', { class: 'boot-slot', 'aria-labelledby': 'storage-boot-title' }, [
-      el('h3', { id: 'storage-boot-title' }, [icon(ICONS.power, 16), t('storage.bootTitle')]),
-      el('p', { class: 'hint', text: t('storage.bootHelp') }),
+      el('span', { class: 'boot-icon', 'aria-hidden': 'true' }, [icon(ICONS.power, 18)]),
+      el('div', { class: 'boot-text' }, [
+        el('h3', { id: 'storage-boot-title', text: t('storage.bootTitle') }),
+        el('p', { class: 'hint', text: t('storage.bootHelp') }),
+      ]),
       buttonRow(el('button', { type: 'button', class: 'text-button', text: t('storage.defaultAction'), disabled: busy(), dataset: { focus: 'boot-default' }, onclick: askBootDefault })),
     ]);
   }
@@ -636,8 +658,11 @@ export function createStoragePanel({ root, t, locale, bridge, notify, context, r
     return el('div', { class: 'button-row storage-toolbar' }, [
       tool('tool-refresh', ICONS.refresh, t('storage.refresh'), load, busy()),
       tool('tool-stop', ICONS.stop, t('storage.stop'), stop, busy() || live, live ? t('storage.liveReason') : null),
-      tool('tool-cleanup', GLYPHS.sweep, t('storage.cleanup.open'), () => manager.cleanup(), busy() || !features.remove, cleanupReason),
-      tool('tool-cache', GLYPHS.box, t('storage.cache.open'), () => manager.cache(), busy()),
+      // The assistants that look after the whole screen, apart at the end.
+      el('span', { class: 'storage-assistants' }, [
+        tool('tool-cleanup', GLYPHS.sweep, t('storage.cleanup.open'), () => manager.cleanup(), busy() || !features.remove, cleanupReason),
+        tool('tool-cache', GLYPHS.box, t('storage.cache.open'), () => manager.cache(), busy()),
+      ]),
     ]);
   }
 

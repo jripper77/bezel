@@ -500,9 +500,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 /* ---------------------------------------------- storage manager (wide) -- */
 /* The Storage tab takes the whole window (D-2026-09-30-storage-manager-4). */
-.workspace.storage-wide { grid-template-columns: minmax(0, 1fr); }
-.workspace.storage-wide > .stage, .workspace.storage-wide > .inspector { display: none; }
-.workspace.storage-wide > .sidebar { border-right: 0; }
+/* The stage keeps only its editing bar, as a strip on top: Undo, Redo, Copy,
+   Paste and the orientation stay in reach and bring the editor back. */
+.workspace.storage-wide { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+.workspace.storage-wide > .inspector { display: none; }
+.workspace.storage-wide > .stage { grid-row: 1; display: flex; justify-content: center; padding: 6px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.workspace.storage-wide > .stage > :not(.stage-tools) { display: none; }
+.workspace.storage-wide .stage-tools { position: static; transform: none; max-width: 100%; box-shadow: none; }
+.workspace.storage-wide > .sidebar { grid-row: 2; border-right: 0; }
 .workspace.storage-wide #panel-screen { padding: 12px 20px 20px; }
 .workspace.storage-wide #panel-screen .subtabs { max-width: 360px; }
 .storage-toolbar .text-button svg { width: 16px; height: 16px; }

@@ -953,7 +953,8 @@ function openStorage() {
  */
 function dropTargetAt(x, y) {
   const hit = document.elementFromPoint(x, y);
-  if (hit?.closest('#stage')) return 'canvas';
+  // In the storage manager only the stage's editing bar shows: nothing drops there.
+  if (hit?.closest('#stage') && !storageWide()) return 'canvas';
   if (hit?.closest('#panel-media') && !$('panel-media').hidden) return 'media';
   return null;
 }
@@ -991,7 +992,7 @@ bridge.onFileDrop?.((evt) => {
 for (const [id, target] of [['stage', 'canvas'], ['panel-media', 'media']]) {
   const zone = $(id);
   zone.addEventListener('dragover', (evt) => {
-    if (!evt.dataTransfer?.types?.includes('Files')) return;
+    if (!evt.dataTransfer?.types?.includes('Files') || (target === 'canvas' && storageWide())) return;
     evt.preventDefault();
     markDropTarget(target);
   });
@@ -1000,7 +1001,7 @@ for (const [id, target] of [['stage', 'canvas'], ['panel-media', 'media']]) {
   });
   zone.addEventListener('drop', (evt) => {
     const file = evt.dataTransfer?.files?.[0];
-    if (!file) return;
+    if (!file || (target === 'canvas' && storageWide())) return;
     evt.preventDefault();
     dropFile(file.name, bridge.fileSource?.(file), target);
   });

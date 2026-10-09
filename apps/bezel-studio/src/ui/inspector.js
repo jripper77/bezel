@@ -12,10 +12,18 @@ import { ORIENTATIONS } from '../editor/geometry.js';
 import { fileNameOf, videoFacts, videoStatus } from '../editor/background.js';
 import { ROTATIONS, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, framingOf, framingPercents, reframed, resolvedRotation, withoutFraming } from '../editor/video-framing.js';
 import { formatBytes } from './storage.js';
+import { createTabMemory, previewCrop, tabAfterKey, tabsOf } from '../inspector-tabs.js';
 
 const BOUND = ['value', 'bar', 'ring', 'needle', 'graph'];
 /** "Frame on canvas": a frame's corners around a move cross. */
 const FRAME_ICON = ['M4 9V4h5', 'M15 4h5v5', 'M20 15v5h-5', 'M9 20H4v-5', 'M12 8v8', 'M8 12h8'];
+/** A group: two boxes in a dashed frame. */
+const GROUP_ICON = ['M4 4h4', 'M16 4h4v4', 'M20 16v4h-4', 'M8 20H4v-4', 'M8 8h5v5H8z', 'M11 11h5v5h-5z'];
+const CHEVRON_LEFT = ['M15 18l-6-6 6-6'];
+const CHEVRON_RIGHT = ['M9 18l6-6-6-6'];
+const PLUS = ['M12 5v14', 'M5 12h14'];
+/** The tallest the live preview is drawn, CSS pixels. */
+const PREVIEW_HEIGHT = 120;
 
 /** The video-background actions and what they depend on, when none are given. */
 const NO_VIDEO_ACTIONS = Object.freeze({
@@ -37,6 +45,8 @@ const NO_VIDEO_ACTIONS = Object.freeze({
  *   the preview may move, and its actions: pick a video (or GIF) for the
  *   background, pick a picture, show the storage tab (where the missing
  *   video is sent), frame it on the canvas, and open the ffmpeg guide
+ * @param {() => HTMLCanvasElement|null} [deps.frame] the canvas the rendered
+ *   frame is drawn on; the live preview copies the selected object from it
  */
 /** Buttons of one choice (`aria-pressed`), each with a stable id so focus stays on it. */
 function choice(id, label, value, options, onChange) {
@@ -47,7 +57,7 @@ function choice(id, label, value, options, onChange) {
   return el('div', { class: 'field' }, [el('span', { text: label }), group]);
 }
 
-export function createInspector({ root, store, t, sensors, minRefresh, editIcon = () => {}, searchCities = async () => [], video = NO_VIDEO_ACTIONS }) {
+export function createInspector({ root, store, t, sensors, minRefresh, editIcon = () => {}, searchCities = async () => [], video = NO_VIDEO_ACTIONS, frame: frameCanvas = () => document.getElementById('preview') }) {
   const update = (id, patch) => store.dispatch('update', { id, patch });
   // A framing slider being dragged: its moves are one gesture (one undo
   // step), and the form is not drawn again under the pointer meanwhile.
@@ -470,14 +480,15 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
 
   function graphForm(e) {
     const k = e.kind;
+    // Data: what it plots, its vertical scale and how far back it looks.
     const content = [
       sensorPicker(e.id, k.binding.key, (key) => ({ kind: { binding: { key } } })),
+      checkField(t('inspector.autoscale'), Boolean(k.autoscale), (v) => update(e.id, { kind: { autoscale: v } })),
       rangeFields(e.id, k.binding),
+      numberField(t('inspector.history'), k.history, (v) => update(e.id, { kind: { history: Math.min(Math.max(2, v), 3600) } }), { min: 2, max: 3600 }),
     ];
     const appearance = [
-      checkField(t('inspector.autoscale'), Boolean(k.autoscale), (v) => update(e.id, { kind: { autoscale: v } })),
       segmented(t('inspector.style'), k.style, [['line', t('graph.line')], ['area', t('graph.area')], ['bars', t('graph.bars')]], (v) => update(e.id, { kind: { style: v } })),
-      numberField(t('inspector.history'), k.history, (v) => update(e.id, { kind: { history: Math.min(Math.max(2, v), 3600) } }), { min: 2, max: 3600 }),
       colorField(t('inspector.color'), k.color, (v) => update(e.id, { kind: { color: v } })),
       k.style === 'area' && colorField(t('inspector.fill'), typeof k.fill === 'string' ? k.fill : '#38bdf840', (v) => update(e.id, { kind: { fill: v } })),
       numberField(t('inspector.lineWidth'), k.lineWidth, (v) => update(e.id, { kind: { lineWidth: Math.max(1, v) } }), { min: 1, step: 'any' }),
@@ -558,57 +569,101 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     });
   }
 
+  /** The faces of a card as chips: the one in view is pressed and says so; "+" adds one. */
+  function faceChips(e) {
+    const c = e.card;
+    const chips = c.faces.map((name, i) => {
+      const active = i === c.activeFace;
+      return el('button', {
+        type: 'button', class: 'face-chip', dataset: { face: String(i) }, 'aria-pressed': String(active), 'aria-current': active ? 'true' : null,
+        title: active ? t('layers.inViewHint') : null, onclick: () => !active && store.dispatch('cardFace', { id: e.id, face: i }),
+      }, [
+        el('span', { class: 'face-chip-name', text: name }),
+        active && el('span', { class: 'face-badge', 'aria-hidden': 'true', text: t('layers.inView') }),
+      ]);
+    });
+    const add = el('button', {
+      type: 'button', class: 'face-chip face-add', 'aria-label': t('card.addFace'), title: t('card.addFace'), disabled: c.faces.length >= 16,
+      onclick: () => store.dispatch('addCardFace', { id: e.id, name: t('card.faceName', { number: c.faces.length + 1 }) }),
+    }, [icon(PLUS, 18)]);
+    return el('div', { class: 'face-chips', role: 'group', 'aria-label': t('card.activeFace') }, [...chips, add]);
+  }
+
+  /** A card's rule list: when an app runs, plays or comes forward, show a face (no "active now": the Studio cannot know). */
+  function triggerForm(e) {
+    const c = e.card;
+    const rules = c.triggers ?? [];
+    const change = (i, patch) => update(e.id, { card: { triggers: rules.map((r, n) => n === i ? { ...r, ...patch } : r) } });
+    const faceOptions = c.faces.map((name, n) => [String(n), name]);
+    const rule = (r, i) => el('div', { class: 'trigger-rule', role: 'group', 'aria-label': t('trigger.rule', { value: i + 1 }) }, [
+      el('div', { class: 'trigger-rule-head' }, [
+        el('h4', { text: t('trigger.rule', { value: i + 1 }) }),
+        el('button', { type: 'button', class: 'icon-button danger', 'aria-label': t('trigger.remove'), title: t('trigger.remove'), onclick: () => update(e.id, { card: { triggers: rules.filter((_, n) => n !== i) } }) }, [icon(ICONS.trash, 16)]),
+      ]),
+      selectField(t('trigger.condition'), r.source, ['process', 'processClosed', 'foreground', 'mediaPlaying'].map(v => [v, t(`trigger.${v}`)]), source => change(i, { source, app: r.app || (source === 'mediaPlaying' ? '' : 'Spotify') })),
+      textField(t('trigger.app'), r.app, app => { if (app.trim() || r.source === 'mediaPlaying') change(i, { app: app.slice(0, 160) }); }),
+      selectField(t('trigger.face'), String(r.face), faceOptions, face => change(i, { face: Number(face) })),
+      el('div', { class: 'field-row' }, [
+        numberField(t('trigger.priority'), r.priority ?? 0, priority => change(i, { priority: Math.max(0, Math.min(100, Math.round(priority))) }), { min: 0, max: 100 }),
+        numberField(t('trigger.return'), r.returnSeconds ?? 0, returnSeconds => change(i, { returnSeconds: Math.max(0, Math.min(300, Math.round(returnSeconds))) }), { min: 0, max: 300 }),
+      ]),
+      selectField(t('trigger.returnFace'), r.returnFace == null ? 'previous' : String(r.returnFace), [['previous', t('trigger.previous')], ...faceOptions], v => change(i, { returnFace: v === 'previous' ? null : Number(v) })),
+    ]);
+    const add = () => update(e.id, { card: { triggers: [...rules, { source: 'mediaPlaying', app: 'Spotify', face: c.activeFace, priority: 0, returnSeconds: 3 }] } });
+    return [
+      section('triggers', t('trigger.title'), [
+        el('p', { class: 'hint', text: t('trigger.help') }),
+        ...rules.map(rule),
+        el('button', { type: 'button', class: 'text-button trigger-add', disabled: rules.length >= 32 || c.faces.length < 2, onclick: add }, [icon(PLUS, 16), t('trigger.add')]),
+      ]),
+    ];
+  }
+
+  /** How a card's faces change: timed rotation and the transition, with a try on the next face. */
+  function motionForm(e) {
+    const c = e.card;
+    const transition = c.transition && c.transition.effect !== 'none' ? c.transition : null;
+    const effect = value => update(e.id, { card: { transition: { effect: value, direction: c.transition?.direction ?? 'left', durationMs: c.transition?.durationMs ?? 650, includeBase: c.transition?.includeBase ?? true } } });
+    return [
+      section('rotation', t('card.rotation'), [
+        checkField(t('card.autoRotate'), c.rotationSeconds != null, enabled => update(e.id, { card: { rotationSeconds: enabled ? 10 : null } })),
+        c.rotationSeconds != null && numberField(t('card.rotationSeconds'), c.rotationSeconds, value => update(e.id, { card: { rotationSeconds: Math.max(5, Math.min(3600, Math.round(value))) } }), { min: 5, max: 3600, step: 1 }),
+        c.rotationSeconds != null && el('p', { class: 'hint', text: t('card.rotationHelp') }),
+      ]),
+      section('animation', t('card.animation'), [
+        selectField(t('card.effect'), c.transition?.effect ?? 'none', ['none', 'fade', 'slide', 'flip'].map(value => [value, t(`card.effect.${value}`)]), effect),
+        transition && rangeField(t('card.duration'), transition.durationMs, durationMs => update(e.id, { card: { transition: { durationMs } } }), { min: 150, max: 1500, step: 50, format: value => `${value} ms` }),
+        transition && selectField(t('card.direction'), transition.direction, ['left', 'right', 'up', 'down'].map(value => [value, t(`card.direction.${value}`)]), direction => update(e.id, { card: { transition: { direction } } })),
+        transition && checkField(t('card.includeBase'), transition.includeBase, includeBase => update(e.id, { card: { transition: { includeBase } } })),
+        el('button', { type: 'button', class: 'text-button play-button', disabled: c.faces.length < 2, onclick: () => store.dispatch('cardFace', { id: e.id, face: (c.activeFace + 1) % c.faces.length }) }, [icon(ICONS.play, 16), t('card.animateNext')]),
+        el('p', { class: 'hint', text: t('card.animationHelp') }),
+      ]),
+    ];
+  }
+
+  /** The Faces, Motion and Triggers tabs of a card (artboards CardFaces, CardMotion, CardTriggers). */
   function cardForm(e) {
     const c = e.card;
-    const action = (key, command, disabled = false, args = {}) => el('button', { type: 'button', class: 'text-button', text: t(key), disabled, onclick: () => store.dispatch(command, { id: e.id, ...args }) });
-    const content = [
-      selectField(t('card.activeFace'), String(c.activeFace), c.faces.map((name, i) => [String(i), name]), value => store.dispatch('cardFace', { id: e.id, face: Number(value) })),
-      textField(t('card.faceTitle'), c.faces[c.activeFace], name => {
-        if (!name.trim()) return;
-        const faces = [...c.faces]; faces[c.activeFace] = name.trim().slice(0, 32);
-        update(e.id, { card: { faces } });
-      }),
-      el('div', { class: 'actions' }, [
-        action('card.addFace', 'addCardFace', c.faces.length >= 16, { name: t('card.faceName', { number: c.faces.length + 1 }) }),
-        action('card.duplicateFace', 'duplicateCardFace', c.faces.length >= 16),
-        action('card.removeFace', 'removeCardFace', c.faces.length <= 1),
-        action('card.previous', 'reorderCardFace', c.activeFace === 0, { direction: -1 }),
-        action('card.next', 'reorderCardFace', c.activeFace === c.faces.length - 1, { direction: 1 }),
+    const command = (name, args = {}) => () => store.dispatch(name, { id: e.id, ...args });
+    const tool = (key, paths, onclick, disabled, extra = '') => el('button', { type: 'button', class: `icon-button ${extra}`.trim(), 'aria-label': t(key), title: t(key), disabled, onclick }, [icon(paths, 16)]);
+    const faces = [
+      section('faces', t('card.faces'), [faceChips(e), el('p', { class: 'hint', text: t('card.facesHint') })]),
+      el('div', { class: 'face-editor' }, [
+        textField(t('card.faceTitle'), c.faces[c.activeFace], name => {
+          if (!name.trim()) return;
+          const names = [...c.faces]; names[c.activeFace] = name.trim().slice(0, 32);
+          update(e.id, { card: { faces: names } });
+        }),
+        el('div', { class: 'face-tools' }, [
+          tool('card.previous', CHEVRON_LEFT, command('reorderCardFace', { direction: -1 }), c.activeFace === 0),
+          tool('card.next', CHEVRON_RIGHT, command('reorderCardFace', { direction: 1 }), c.activeFace === c.faces.length - 1),
+          el('button', { type: 'button', class: 'text-button', disabled: c.faces.length >= 16, onclick: command('duplicateCardFace') }, [icon(ICONS.copy, 16), t('card.duplicateFace')]),
+          tool('card.removeFace', ICONS.trash, command('removeCardFace'), c.faces.length <= 1, 'danger'),
+        ]),
       ]),
       el('p', { class: 'hint', text: t('card.help') }),
     ];
-    const animation = [
-      el('h4', { text: t('card.rotation') }),
-      checkField(t('card.autoRotate'), c.rotationSeconds != null, enabled => update(e.id, { card: { rotationSeconds: enabled ? 10 : null } })),
-      ...(c.rotationSeconds != null ? [
-        numberField(t('card.rotationSeconds'), c.rotationSeconds, value => update(e.id, { card: { rotationSeconds: Math.max(5, Math.min(3600, Math.round(value))) } }), { min: 5, max: 3600, step: 1 }),
-        el('p', { class: 'hint', text: t('card.rotationHelp') }),
-      ] : []),
-      el('h4', { text: t('card.animation') }),
-      selectField(t('card.effect'), c.transition?.effect ?? 'none', ['none', 'fade', 'slide', 'flip'].map(value => [value, t(`card.effect.${value}`)]), effect => update(e.id, { card: { transition: { effect, direction: c.transition?.direction ?? 'left', durationMs: c.transition?.durationMs ?? 650, includeBase: c.transition?.includeBase ?? true } } })),
-      ...(c.transition && c.transition.effect !== 'none' ? [
-        rangeField(t('card.duration'), c.transition.durationMs, durationMs => update(e.id, { card: { transition: { durationMs } } }), { min: 150, max: 1500, step: 50, format: value => `${value} ms` }),
-        selectField(t('card.direction'), c.transition.direction, ['left', 'right', 'up', 'down'].map(value => [value, t(`card.direction.${value}`)]), direction => update(e.id, { card: { transition: { direction } } })),
-        checkField(t('card.includeBase'), c.transition.includeBase, includeBase => update(e.id, { card: { transition: { includeBase } } })),
-      ] : []),
-      action('card.animateNext', 'cardFace', c.faces.length < 2, { face: (c.activeFace + 1) % c.faces.length }),
-      el('p', { class: 'hint', text: t('card.animationHelp') }),
-    ];
-    const rules=c.triggers ?? [];
-    const change=(i,patch)=>update(e.id,{card:{triggers:rules.map((r,n)=>n===i?{...r,...patch}:r)}});
-    animation.push(el('h4',{text:t('trigger.title')}),el('p',{class:'hint',text:t('trigger.help')}));
-    rules.forEach((r,i)=>animation.push(el('div',{class:'trigger-rule'},[
-      el('h4',{text:t('trigger.rule',{value:i+1})}),
-      selectField(t('trigger.condition'),r.source,['process','processClosed','foreground','mediaPlaying'].map(v=>[v,t(`trigger.${v}`)]),source=>change(i,{source,app:r.app || (source==='mediaPlaying'?'':'Spotify')})),
-      textField(t('trigger.app'),r.app,app=>{if(app.trim() || r.source==='mediaPlaying')change(i,{app:app.slice(0,160)});}),
-      selectField(t('trigger.face'),String(r.face),c.faces.map((name,n)=>[String(n),name]),face=>change(i,{face:Number(face)})),
-      numberField(t('trigger.priority'),r.priority ?? 0,priority=>change(i,{priority:Math.max(0,Math.min(100,Math.round(priority)))}),{min:0,max:100}),
-      selectField(t('trigger.returnFace'),r.returnFace==null?'previous':String(r.returnFace),[['previous',t('trigger.previous')],...c.faces.map((name,n)=>[String(n),name])],v=>change(i,{returnFace:v==='previous'?null:Number(v)})),
-      numberField(t('trigger.return'),r.returnSeconds ?? 0,returnSeconds=>change(i,{returnSeconds:Math.max(0,Math.min(300,Math.round(returnSeconds)))}),{min:0,max:300}),
-      button(t('trigger.remove'),()=>update(e.id,{card:{triggers:rules.filter((_,n)=>n!==i)}})),
-    ])));
-    animation.push(el('button',{type:'button',class:'text-button',text:t('trigger.add'),disabled:rules.length>=32 || c.faces.length<2,onclick:()=>update(e.id,{card:{triggers:[...rules,{source:'mediaPlaying',app:'Spotify',face:c.activeFace,priority:0,returnSeconds:3}]}})}));
-    return { content, animation };
+    return { faces, motion: motionForm(e), triggers: triggerForm(e) };
   }
   function membershipForm(e, theme) {
     if (e.card) return [];
@@ -624,37 +679,134 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     ].filter(Boolean);
   }
 
-  // Fold states are UI-only and survive property edits/re-renders.
-  const sectionOpen = new Map();
-  function section(key, label, nodes, scope = 'object') {
+  /** A titled group of fields; nothing when it has no fields. */
+  function section(key, label, nodes) {
     const contents = nodes.filter(Boolean);
     if (!contents.length) return null;
-    const stateKey = `${scope}.${key}`;
-    return el('details', { class: 'property-section', open: sectionOpen.get(stateKey) ?? true,
-      dataset: { section: key }, ontoggle: evt => {
-        if (root.contains(evt.currentTarget)) sectionOpen.set(stateKey, evt.currentTarget.open);
-      } }, [
-      el('summary', { onclick: evt => sectionOpen.set(stateKey, !evt.currentTarget.parentElement.open) }, [el('h3', { text: label })]),
+    return el('section', { class: 'property-section', dataset: { section: key } }, [
+      el('h3', { text: label }),
       el('div', { class: 'property-section-body' }, contents),
     ]);
   }
 
+  // The tab open for each kind of object: UI-only, it survives edits,
+  // re-renders and Undo.
+  const tabMemory = createTabMemory();
+
+  const tabName = (kind, tab) => t(kind === 'card' && tab !== 'look' ? `card.tab.${tab}` : `inspector.tab.${tab}`);
+
+  /**
+   * The panels of an object as tabs (ARIA tabs: ←/→, Home, End), only those
+   * with something in them; one alone is shown without a tab list.
+   */
+  function tabbed(kind, panels) {
+    const offered = tabsOf(kind).filter(tab => panels[tab]?.some(Boolean));
+    if (offered.length < 2) return offered.flatMap(tab => panels[tab]);
+    const open = tabMemory.current(kind, offered);
+    const list = el('div', { class: 'inspector-tabs', role: 'tablist', 'aria-label': t(kind === 'card' ? 'card.tabs' : 'inspector.tabs') });
+    const views = offered.map(tab => el('div', {
+      class: 'inspector-panel', role: 'tabpanel', id: `inspector-panel-${tab}`, 'aria-labelledby': `inspector-tab-${tab}`, hidden: tab !== open, dataset: { tab },
+    }, panels[tab].filter(Boolean)));
+    const show = (tab, focus) => {
+      tabMemory.choose(kind, tab);
+      for (const button of list.children) {
+        const on = button.dataset.tab === tab;
+        button.setAttribute('aria-selected', String(on));
+        button.tabIndex = on ? 0 : -1;
+        if (on && focus) button.focus();
+      }
+      for (const view of views) view.hidden = view.dataset.tab !== tab;
+    };
+    for (const tab of offered) {
+      list.append(el('button', {
+        type: 'button', role: 'tab', id: `inspector-tab-${tab}`, 'aria-controls': `inspector-panel-${tab}`, 'aria-selected': String(tab === open),
+        tabindex: tab === open ? '0' : '-1', dataset: { tab }, text: tabName(kind, tab), onclick: () => show(tab, false),
+      }));
+    }
+    list.addEventListener('keydown', evt => {
+      const next = tabAfterKey(offered, evt.target.dataset?.tab, evt.key);
+      if (!next) return;
+      evt.preventDefault();
+      show(next, true);
+    });
+    return [list, ...views];
+  }
+
+  /** The live preview: the object as the renderer drew it, copied from the frame (no render of its own). */
+  function preview(e) {
+    return el('figure', { class: 'inspector-preview', dataset: { elementId: String(e.id) } }, [
+      el('figcaption', { class: 'inspector-preview-label', text: t('inspector.previewLive') }),
+      el('div', { class: 'inspector-preview-stage' }, [
+        el('canvas', { width: 1, height: 1, role: 'img', 'aria-label': t('inspector.previewOf', { name: e.name }) }),
+        el('p', { class: 'hint inspector-preview-off', hidden: true, text: t('inspector.previewOff') }),
+      ]),
+    ]);
+  }
+
+  /** Copies the selected object out of the frame on the canvas into the live preview. */
+  function paintPreview() {
+    const figure = root.querySelector('.inspector-preview');
+    const source = frameCanvas();
+    if (!figure || !source) return;
+    const e = store.getState().theme.elements.find(x => String(x.id) === figure.dataset.elementId);
+    if (!e) return;
+    const stage = figure.querySelector('.inspector-preview-stage');
+    const target = stage.querySelector('canvas');
+    const width = stage.clientWidth > 16 ? stage.clientWidth - 16 : 240;
+    const crop = previewCrop(e.frame, { width: source.width, height: source.height }, { width, height: PREVIEW_HEIGHT });
+    target.hidden = !crop;
+    stage.querySelector('.inspector-preview-off').hidden = Boolean(crop);
+    if (!crop) return;
+    const ratio = window.devicePixelRatio || 1;
+    target.width = Math.max(1, Math.round(crop.width * ratio));
+    target.height = Math.max(1, Math.round(crop.height * ratio));
+    target.style.width = `${crop.width}px`;
+    target.style.height = `${crop.height}px`;
+    const ctx = target.getContext('2d');
+    ctx.clearRect(0, 0, target.width, target.height);
+    ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, target.width, target.height);
+  }
+
+  /** The object's kind icon, type and name. */
+  function header(e, widget, group) {
+    return [
+      el('div', { class: 'inspector-head' }, [
+        el('span', { class: 'inspector-tile' }, [icon(e.isGroup ? GROUP_ICON : ICONS[widget] ?? ICONS.shape, 18)]),
+        el('div', { class: 'inspector-title' }, [
+          el('h2', { text: t(`widget.${widget}`) }),
+          group && el('p', { class: 'hint', text: t('inspector.inGroup', { name: group.name }) }),
+        ]),
+      ]),
+      el('div', { class: 'property-identity' }, [
+        textField(t('inspector.name'), e.name, v => v.trim() && update(e.id, { name: v.trim() })),
+      ]),
+    ];
+  }
+
   function elementForm(e, theme, assets) {
     const f = e.frame, widget = widgetOf(e);
+    const kind = e.card ? 'card' : e.isGroup ? 'group' : widget;
     const setFrame = patch => store.dispatch('setFrame', { id: e.id, frame: { ...f, ...patch } });
     const kindForms = { text: textForm, bar: barForm, ring: ringForm, needle: needleForm, graph: graphForm };
     const specific = e.isGroup ? {} : e.kind.type === 'image' ? imageForm(e, assets) :
       e.kind.type === 'shape' ? { appearance: shapeForm(e) } : kindForms[e.kind.type]?.(e) ?? {};
-    const card = e.card ? cardForm(e) : null;
-    const membership = membershipForm(e, theme);
     const group = theme.elements.find(p => p.id === e.groupParent && p.isGroup);
-    if (group) membership.unshift(el('p', { class: 'hint', text: t('inspector.inGroup', { name: group.name }) }));
+    const look = [section('appearance', t('inspector.appearance'), [
+      ...(specific.appearance ?? []),
+      rangeField(t('inspector.opacity'), Math.round((e.opacity ?? 1) * 100), v => update(e.id, { opacity: v / 100 }), { format: v => `${v}%` }),
+      checkField(t('inspector.visible'), e.visible !== false, v => update(e.id, { visible: v })),
+    ])];
+    const panels = e.card ? { ...cardForm(e), look } : {
+      data: [
+        section('content', t('inspector.content'), [!e.isGroup && showAs(e, theme), ...(specific.content ?? [])]),
+        section('membership', t('inspector.membership'), membershipForm(e, theme)),
+      ],
+      look,
+    };
     return [
-      el('h2', { text: t(`widget.${widget}`) }),
-      el('div', { class: 'property-identity' }, [
-        textField(t('inspector.name'), e.name, v => v.trim() && update(e.id, { name: v.trim() })),
-        el('p', { class: 'hint', text: t('inspector.objectType', { type: t(`widget.${widget}`) }) }),
-      ]),
+      ...header(e, widget, group),
+      preview(e),
+      ...tabbed(kind, panels),
       section('position', t('inspector.position'), [
         el('div', { class: 'field-row' }, [
           numberField(t('inspector.x'), f.x, v => setFrame({ x: v })),
@@ -663,24 +815,14 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
           numberField(t('inspector.height'), f.height, v => setFrame({ height: Math.max(4, v) }), { min: 4 }),
         ]),
         checkField(t('inspector.locked'), Boolean(e.locked), v => update(e.id, { locked: v })),
-      ], widget),
-      section('content', card ? t('card.faces') : t('inspector.content'), [
-        !e.isGroup && showAs(e, theme), ...(specific.content ?? []), ...(card?.content ?? []),
-      ], widget),
-      section('appearance', t('inspector.appearance'), [
-        ...(specific.appearance ?? []),
-        rangeField(t('inspector.opacity'), Math.round((e.opacity ?? 1) * 100), v => update(e.id, { opacity: v / 100 }), { format: v => `${v}%` }),
-        checkField(t('inspector.visible'), e.visible !== false, v => update(e.id, { visible: v })),
-      ], widget),
-      section('membership', t('inspector.membership'), membership, widget),
-      section('animation', t('inspector.animation'), card?.animation ?? [], widget),
+      ]),
       section('actions', t('inspector.actions'), [el('div', { class: 'actions' }, [
         e.isGroup && el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids: [e.id] }) }),
         el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('reorder', { id: e.id, index: theme.elements.length }) }, [t('inspector.front')]),
         el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('reorder', { id: e.id, index: 0 }) }, [t('inspector.back')]),
         el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('duplicate', { ids: [e.id] }) }, [icon(ICONS.copy, 16), t('inspector.duplicate')]),
         el('button', { type: 'button', class: 'text-button danger', onclick: () => store.dispatch('remove', { ids: [e.id] }) }, [icon(ICONS.trash, 16), t('inspector.delete')]),
-      ])], widget),
+      ])]),
     ];
   }
 
@@ -689,26 +831,26 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     return [
       el('h2', { text: t('inspector.multi', { count: ids.length }) }),
       section('position', t('inspector.alignTools'), [
-      el('div', { class: 'button-row' }, [
-        tool('left', ICONS.alignLeft), tool('centerX', ICONS.alignCenterX), tool('right', ICONS.alignRight),
-        tool('top', ICONS.alignTop), tool('centerY', ICONS.alignCenterY), tool('bottom', ICONS.alignBottom),
+        el('div', { class: 'button-row' }, [
+          tool('left', ICONS.alignLeft), tool('centerX', ICONS.alignCenterX), tool('right', ICONS.alignRight),
+          tool('top', ICONS.alignTop), tool('centerY', ICONS.alignCenterY), tool('bottom', ICONS.alignBottom),
+        ]),
+        el('div', { class: 'button-row' }, [
+          el('button', { type: 'button', class: 'text-button', disabled: ids.length < 3, onclick: () => store.dispatch('distribute', { ids, axis: 'x' }) }, [icon(ICONS.distributeX, 16), t('align.distributeX')]),
+          el('button', { type: 'button', class: 'text-button', disabled: ids.length < 3, onclick: () => store.dispatch('distribute', { ids, axis: 'y' }) }, [icon(ICONS.distributeY, 16), t('align.distributeY')]),
+        ]),
       ]),
-      el('div', { class: 'button-row' }, [
-        el('button', { type: 'button', class: 'text-button', disabled: ids.length < 3, onclick: () => store.dispatch('distribute', { ids, axis: 'x' }) }, [icon(ICONS.distributeX, 16), t('align.distributeX')]),
-        el('button', { type: 'button', class: 'text-button', disabled: ids.length < 3, onclick: () => store.dispatch('distribute', { ids, axis: 'y' }) }, [icon(ICONS.distributeY, 16), t('align.distributeY')]),
-      ]),
-      ], 'selection'),
       section('membership', t('inspector.membership'), [
-      el('button', { type: 'button', class: 'text-button', text: t('group.create'), disabled: !canGroup(store.getState().theme, ids), title: t('group.scope'), onclick: () => store.dispatch('groupSelection', { ids }) }),
-      ...(store.getState().theme.elements.some(e => ids.includes(e.id) && e.isGroup) ? [el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids }) })] : []),
-      el('button', { type: 'button', class: 'text-button', text: t('card.group'), onclick: () => store.dispatch('cardFromSelection', { ids }) }),
-      ], 'selection'),
-      section('actions', t('inspector.actions'), [
-      el('div', { class: 'actions' }, [
-        el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('duplicate', { ids }) }, [icon(ICONS.copy, 16), t('inspector.duplicate')]),
-        el('button', { type: 'button', class: 'text-button danger', onclick: () => store.dispatch('remove', { ids }) }, [icon(ICONS.trash, 16), t('inspector.delete')]),
+        el('button', { type: 'button', class: 'text-button', text: t('group.create'), disabled: !canGroup(store.getState().theme, ids), title: t('group.scope'), onclick: () => store.dispatch('groupSelection', { ids }) }),
+        ...(store.getState().theme.elements.some(e => ids.includes(e.id) && e.isGroup) ? [el('button', { type: 'button', class: 'text-button', text: t('group.ungroup'), onclick: () => store.dispatch('ungroup', { ids }) })] : []),
+        el('button', { type: 'button', class: 'text-button', text: t('card.group'), onclick: () => store.dispatch('cardFromSelection', { ids }) }),
       ]),
-      ], 'selection'),
+      section('actions', t('inspector.actions'), [
+        el('div', { class: 'actions' }, [
+          el('button', { type: 'button', class: 'text-button', onclick: () => store.dispatch('duplicate', { ids }) }, [icon(ICONS.copy, 16), t('inspector.duplicate')]),
+          el('button', { type: 'button', class: 'text-button danger', onclick: () => store.dispatch('remove', { ids }) }, [icon(ICONS.trash, 16), t('inspector.delete')]),
+        ]),
+      ]),
     ];
   }
 
@@ -723,14 +865,18 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     if (chosen.length === 0) nodes = themeForm(theme, assets);
     else if (chosen.length === 1) nodes = elementForm(chosen[0], theme, assets);
     else nodes = multiForm(chosen.map((e) => e.id));
-    // Keep focus where the user was typing when the form re-renders: on the
-    // field of the same label, or of the same stable id (the framing's).
+    // Keep focus where the user was: on the same tab, on the field of the
+    // same label, or of the same stable id (the framing's).
     const active = document.activeElement;
-    const id = root.contains(active) && active.id?.startsWith('framing-') ? active.id : null;
-    const label = root.contains(active) && !id ? active.getAttribute('aria-label') : null;
+    const inside = root.contains(active);
+    const tab = inside && active.getAttribute('role') === 'tab' ? active.dataset.tab : null;
+    const id = inside && !tab && active.id?.startsWith('framing-') ? active.id : null;
+    const label = inside && !tab && !id ? active.getAttribute('aria-label') : null;
     root.replaceChildren(...nodes.filter(Boolean));
-    if (id) document.getElementById(id)?.focus();
+    if (tab) root.querySelector(`[role="tab"][data-tab="${CSS.escape(tab)}"]`)?.focus();
+    else if (id) document.getElementById(id)?.focus();
     else if (label) root.querySelector(`[aria-label="${CSS.escape(label)}"]`)?.focus();
+    paintPreview();
     shown = { assets, signature: videoSignature() };
   }
 
@@ -748,5 +894,8 @@ export function createInspector({ root, store, t, sensors, minRefresh, editIcon 
     if (signature !== shown.signature) render(shown.assets);
   }
 
-  return { render, contextChanged };
+  /** A new frame is on the canvas: the live preview copies the selected object from it again. */
+  const frameShown = () => paintPreview();
+
+  return { render, contextChanged, frameShown };
 }

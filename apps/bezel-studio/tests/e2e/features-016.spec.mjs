@@ -1,9 +1,11 @@
 import { test, expect, watchErrors, expectAccessible } from './helpers.mjs';
+const tab = (page,t,key) => page.locator('#inspector').getByRole('tab',{name:t(key),exact:true}).click();
 const add = (page,t,widget) => page.getByRole('button',{name:t('library.addWidget',{name:t(`widget.${widget}`)}),exact:true}).click();
 test('image and shape share radial controls; player and weather have their own appearance',async ({page,t})=>{
  const errors=watchErrors(page);await page.goto('/index.html?demo=turing88');
  for(const widget of ['shape','image']) {
   await add(page,t,widget);
+  if(widget==='image') await tab(page,t,'inspector.tab.look');
   const mode=page.locator('#inspector').getByRole('combobox',{name:t('fade.mode'),exact:true});
   await mode.selectOption('radial');
   const center=page.locator('#inspector').getByRole('spinbutton',{name:t('fade.centerX'),exact:true});
@@ -11,16 +13,16 @@ test('image and shape share radial controls; player and weather have their own a
   await mode.selectOption('linear');await expect(page.locator('#inspector').getByRole('spinbutton',{name:t('shape.fadeAngle'),exact:true})).toBeVisible();
  }
  await add(page,t,'player');await expect(page.locator('#inspector').getByRole('textbox',{name:t('player.source'),exact:true})).toBeVisible();
- await page.locator('#inspector').getByRole('checkbox',{name:t('player.showCover'),exact:true}).uncheck();
- await add(page,t,'weather');const style=page.locator('#inspector').getByRole('combobox',{name:t('weather.iconStyle'),exact:true});
+ await tab(page,t,'inspector.tab.look');await page.locator('#inspector').getByRole('checkbox',{name:t('player.showCover'),exact:true}).uncheck();
+ await add(page,t,'weather');await tab(page,t,'inspector.tab.look');const style=page.locator('#inspector').getByRole('combobox',{name:t('weather.iconStyle'),exact:true});
  await style.selectOption('colored');await expect(style).toHaveValue('colored');await style.selectOption('dimensional');await expect(style).toHaveValue('dimensional');
  await expectAccessible(page);expect(errors).toEqual([]);
 });
 test('card trigger edits, priorities and target faces survive Undo',async ({page,t})=>{
  const errors=watchErrors(page);await page.goto('/index.html?demo=turing88');await add(page,t,'card');
- const inspector=page.locator('#inspector');await expect(inspector.getByRole('button',{name:t('trigger.add'),exact:true})).toBeDisabled();
- await inspector.getByRole('button',{name:t('card.addFace'),exact:true}).click();
- await inspector.getByRole('button',{name:t('trigger.add'),exact:true}).click();
+ const inspector=page.locator('#inspector');await tab(page,t,'card.tab.triggers');await expect(inspector.getByRole('button',{name:t('trigger.add'),exact:true})).toBeDisabled();
+ await tab(page,t,'card.tab.faces');await inspector.getByRole('button',{name:t('card.addFace'),exact:true}).click();
+ await tab(page,t,'card.tab.triggers');await inspector.getByRole('button',{name:t('trigger.add'),exact:true}).click();
  const condition=inspector.getByRole('combobox',{name:t('trigger.condition'),exact:true});await expect(condition).toHaveValue('mediaPlaying');
  await condition.selectOption('foreground');await expect(condition).toHaveValue('foreground');
  const priority=inspector.getByRole('spinbutton',{name:t('trigger.priority'),exact:true});await priority.fill('7');await priority.press('Tab');await expect(priority).toHaveValue('7');

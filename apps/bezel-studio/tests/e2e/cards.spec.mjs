@@ -9,6 +9,10 @@ test('card faces, shared base, grouping and clipboard are editable', async ({ pa
     await page.locator('#tab-widgets').click();
     await page.getByRole('button', { name: t('library.addWidget', { name: t(`widget.${widget}`) }), exact: true }).click();
   };
+  // The face in view is the pressed chip of the card's Faces tab.
+  const faces = detail.getByRole('group', { name: t('card.activeFace'), exact: true });
+  const inView = faces.locator('[aria-pressed="true"]');
+  const tab = name => detail.getByRole('tab', { name: t(name), exact: true }).click();
   await add('card');
   const cardName = await detail.getByLabel(t('inspector.name'), { exact: true }).inputValue();
   await detail.getByLabel(t('card.faceTitle'), { exact: true }).fill('Metrics');
@@ -22,7 +26,7 @@ test('card faces, shared base, grouping and clipboard are editable', async ({ pa
   };
   await selectCard();
   await detail.getByRole('button', { name: t('card.addFace'), exact: true }).click();
-  await expect(detail.getByRole('combobox', { name: t('card.activeFace'), exact: true })).toHaveValue('1');
+  await expect(inView).toHaveAttribute('data-face', '1');
   await add('ring');
   await add('ring');
   await expect(detail.getByRole('combobox', { name: t('card.face'), exact: true })).toHaveValue('1');
@@ -41,12 +45,13 @@ test('card faces, shared base, grouping and clipboard are editable', async ({ pa
   await page.locator('#undo').click();
   expect(await rowIds()).toEqual(originalOrder);
   await tree.getByRole('button', { name: 'Metrics', exact: true }).click();
-  await expect(detail.getByRole('combobox', { name: t('card.activeFace'), exact: true })).toHaveValue('0');
+  await expect(inView).toHaveAttribute('data-face', '0');
   await expect(tree.locator('[data-face="0"]')).toHaveClass(/active-face/);
   await tree.locator('[data-face="1"] .layer-name').first().click();
   await expect(detail.getByRole('combobox', { name: t('card.face'), exact: true })).toHaveValue('1');
   await expect(tree.locator('[data-face="1"]')).toHaveClass(/active-face/);
   await selectCard();
+  await tab('card.tab.motion');
   await detail.getByRole('checkbox', { name: t('card.autoRotate'), exact: true }).check();
   await expect(detail.getByRole('spinbutton', { name: t('card.rotationSeconds'), exact: true })).toHaveValue('10');
   await detail.getByRole('spinbutton', { name: t('card.rotationSeconds'), exact: true }).fill('5');
@@ -55,16 +60,17 @@ test('card faces, shared base, grouping and clipboard are editable', async ({ pa
   await page.screenshot({ path: test.info().outputPath('card-timer.png') });
   await detail.getByRole('checkbox', { name: t('card.autoRotate'), exact: true }).uncheck();
   await expect(detail.getByRole('spinbutton', { name: t('card.rotationSeconds'), exact: true })).toHaveCount(0);
+  await tab('card.tab.faces');
   await detail.getByRole('button', { name: t('card.duplicateFace'), exact: true }).click();
-  await expect(detail.getByRole('combobox', { name: t('card.activeFace'), exact: true })).toHaveValue('2');
+  await expect(inView).toHaveAttribute('data-face', '2');
   await detail.getByRole('button', { name: t('card.previous'), exact: true }).click();
-  await expect(detail.getByRole('combobox', { name: t('card.activeFace'), exact: true })).toHaveValue('1');
+  await expect(inView).toHaveAttribute('data-face', '1');
   await page.locator('#copy').click(); await page.locator('#paste').click();
   await expect(detail).toContainText(t('inspector.multi', { count: 6 }));
   await page.locator('#undo').click();
   await selectCard();
   await detail.getByRole('button', { name: t('card.removeFace'), exact: true }).click();
-  await expect(detail.getByRole('combobox', { name: t('card.activeFace'), exact: true }).locator('option')).toHaveCount(2);
+  await expect(faces.locator('[data-face]')).toHaveCount(2);
   await expectAccessible(page);
   expect(errors).toEqual([]);
   await page.screenshot({ path: test.info().outputPath('card-editor.png') });

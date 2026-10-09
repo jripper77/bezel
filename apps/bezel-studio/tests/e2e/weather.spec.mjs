@@ -13,6 +13,7 @@ test('weather city selection, appearance options and Undo', async ({ page, t }) 
   await expect(detail).toContainText(t('weather.location', { city: 'Milano' }));
   await detail.getByRole('combobox', { name: t('weather.language'), exact: true }).selectOption('it');
   await detail.getByRole('checkbox', { name: t('inspector.fahrenheit'), exact: true }).check();
+  await detail.getByRole('tab', { name: t('inspector.tab.look'), exact: true }).click();
   await detail.getByRole('combobox', { name: t('weather.iconStyle'), exact: true }).selectOption('filled');
   await detail.getByLabel(t('weather.iconGap'), { exact: true }).fill('20');
   await detail.getByLabel(t('weather.iconGap'), { exact: true }).press('Tab');
@@ -23,7 +24,9 @@ test('weather city selection, appearance options and Undo', async ({ page, t }) 
   await expect(detail.getByRole('checkbox', { name: t('weather.icon'), exact: true })).toBeChecked();
   await page.locator('#copy').click(); await page.locator('#paste').click();
   await expect(detail).toContainText(t('weather.location', { city: 'Milano' }));
+  await detail.getByRole('tab', { name: t('inspector.tab.data'), exact: true }).click();
   await expect(detail.getByRole('checkbox', { name: t('inspector.fahrenheit'), exact: true })).toBeChecked();
+  await detail.getByRole('tab', { name: t('inspector.tab.look'), exact: true }).click();
   await expect(detail.getByRole('combobox', { name: t('weather.iconStyle'), exact: true })).toHaveValue('filled');
   await expect(detail.getByLabel(t('weather.iconGap'), { exact: true })).toHaveValue('20');
   await expect(detail.getByLabel(t('weather.iconSize'), { exact: true })).toHaveValue('64');

@@ -21,6 +21,7 @@ test('card built in the editor previews fade, slide and flip with changing frame
   await detail.getByRole('button', { name: t('card.addFace'), exact: true }).click();
   await add('ring');
   await selectCard();
+  await detail.getByRole('tab', { name: t('card.tab.motion'), exact: true }).click();
   await detail.getByRole('combobox', { name: t('card.effect'), exact: true }).selectOption('flip');
   await expect(detail.getByRole('combobox', { name: t('card.effect'), exact: true })).toHaveValue('flip');
   const duration = detail.getByRole('slider', { name: new RegExp(t('card.duration')) });

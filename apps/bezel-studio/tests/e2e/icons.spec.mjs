@@ -22,11 +22,13 @@ test('offline icons search, insert as SVG and undo in one step', async ({ page, 
   await page.getByLabel(t('icons.size'), { exact: true }).fill('96');
   await page.getByLabel(t('icons.size'), { exact: true }).press('Tab');
   await page.locator('[data-icon="cpu"]').click();
-  await expect(page.getByRole('combobox', { name: t('inspector.asset'), exact: true })).toHaveValue(/tabler-cpu.*\.svg$/);
-  await expect(page.getByRole('spinbutton', { name: t('inspector.width'), exact: true })).toHaveValue('96');
-  const asset = page.getByRole('combobox', { name: t('inspector.asset'), exact: true });
-  const original = await asset.inputValue();
   const detail = page.locator('#inspector');
+  // The picture is on the Data tab, its paint on Look: the file is read on either.
+  const asset = detail.getByRole('combobox', { name: t('inspector.asset'), exact: true, includeHidden: true });
+  await expect(detail.getByRole('combobox', { name: t('inspector.asset'), exact: true })).toHaveValue(/tabler-cpu.*\.svg$/);
+  await expect(page.getByRole('spinbutton', { name: t('inspector.width'), exact: true })).toHaveValue('96');
+  const original = await asset.inputValue();
+  await detail.getByRole('tab', { name: t('inspector.tab.look'), exact: true }).click();
   await detail.locator('input[type="color"]').first().fill('#ff0000');
   await detail.locator('input[type="color"]').first().press('Tab');
   await expect(asset).not.toHaveValue(original);
@@ -55,7 +57,7 @@ test('offline icons search, insert as SVG and undo in one step', async ({ page, 
   await page.getByRole('tab', { name: t('library.media'), exact: true }).click();
   await search.fill('thermometer');
   await dragTo(page, page.locator('[data-icon="thermometer"]'), page.locator('#canvas-box'));
-  await expect(page.getByRole('combobox', { name: t('inspector.asset'), exact: true })).toHaveValue(/tabler-thermometer.*\.svg$/);
+  await expect(asset).toHaveValue(/tabler-thermometer.*\.svg$/);
   await search.fill('heart');
   await page.locator('[data-icon="heart-filled"]').click();
   await expect(asset).toHaveValue(/tabler-heart-filled.*\.svg$/);
@@ -79,9 +81,10 @@ test('electrical aliases and hardware pump icons remain editable and undoable', 
   await page.locator('#icon-source').selectOption('mdi');
   await page.locator('[data-icon="mdi-water-pump"]').click();
   const detail = page.locator('#inspector');
-  const asset = detail.getByRole('combobox', { name: t('inspector.asset'), exact: true });
+  const asset = detail.getByRole('combobox', { name: t('inspector.asset'), exact: true, includeHidden: true });
   await expect(asset).toHaveValue(/mdi-water-pump.*\.svg$/);
   const original = await asset.inputValue();
+  await detail.getByRole('tab', { name: t('inspector.tab.look'), exact: true }).click();
   await detail.locator('input[type="color"]').first().fill('#ff0000');
   await detail.locator('input[type="color"]').first().press('Tab');
   await expect(asset).not.toHaveValue(original);

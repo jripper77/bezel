@@ -870,19 +870,62 @@ button.layer-group-title { border: 0; background: transparent; text-align: left;
 .off-canvas-box { position: absolute; border: 1px dashed var(--muted); pointer-events: none; }
 .off-canvas-label { position: absolute; top: -20px; left: 0; max-width: 180px; padding: 1px 4px; color: var(--text); background: var(--surface); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Object properties share the same sections across widget types. */
-.property-section { margin-top: 16px; border-top: 1px solid var(--border); }
-.property-section > summary { cursor: pointer; padding: 12px 0 8px; }
-.property-section > summary h3 { display: inline; margin: 0; color: var(--text); }
-.property-section > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* Object properties (artboards CardFaces/CardMotion/CardTriggers, Graph*, Player*):
+   kind and name, the live preview, Data/Look tabs (a card: Faces, Motion,
+   Triggers, Look), then position and actions for every tab. */
+.inspector-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.inspector-tile { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); }
+.inspector-tile svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.inspector-title { display: grid; gap: 2px; min-width: 0; }
+.inspector .inspector-title h2 { margin: 0; color: var(--text); font-size: 0.95rem; letter-spacing: 0; text-transform: none; }
+.inspector-title .hint { margin: 0; font-size: 0.8rem; }
+.property-identity .field { margin-bottom: 10px; }
+.inspector-preview { margin: 0 0 12px; padding: 8px 10px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--screen); }
+.inspector-preview-label { margin: 0 0 6px; color: var(--screen-thumb-ink); font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.inspector-preview-stage { display: grid; place-items: center; min-height: 40px; }
+.inspector-preview-stage canvas { display: block; max-width: 100%; }
+.inspector-preview-stage .inspector-preview-off { margin: 0; color: var(--screen-thumb-ink); font-size: 0.8rem; }
+.inspector-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--seg-track); }
+.inspector-tabs [role="tab"] { flex: 1 1 0; min-width: 0; min-height: 30px; padding: 4px 2px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 0.8rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.inspector-tabs [role="tab"]:hover { color: var(--text); }
+.inspector-tabs [role="tab"][aria-selected="true"] { background: var(--seg-thumb); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(15 23 42 / 12%); }
+.inspector-tabs [role="tab"]:focus-visible { outline-offset: 0; }
+.property-section { margin-top: 18px; }
+.inspector .property-section > h3 { margin: 0 0 8px; }
+.inspector > .property-section { padding-top: 14px; border-top: 1px solid var(--border); }
+.inspector > .inspector-tabs + .inspector-panel > .property-section:first-child { margin-top: 14px; }
 .property-section-body { padding: 0; }
 .property-section-body h4 { margin: 12px 0 8px; font-size: .75rem; color: var(--muted); }
 .property-section-body h4:first-child { margin-top: 0; }
 .property-section-body .actions { margin-top: 0; }
+.icon-button.danger { color: var(--danger); }
 
-/* Settings follow the same open sections as object properties. */
-.trigger-rule, .sleep-settings { border-top:1px solid var(--border); margin-top:12px; padding-top:8px; }
-.trigger-rule h4 { margin:4px 0 8px; }
+/* A card's faces: chips (the one in view pressed, with its badge) and the face being edited. */
+.face-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.face-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text); font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 0.04em; cursor: pointer; }
+.face-chip:hover { border-color: var(--accent); }
+.face-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.face-chip:disabled { opacity: 0.45; cursor: default; }
+.face-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.face-add { justify-content: center; width: 42px; padding: 0; color: var(--accent-ink); }
+.face-add svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.face-editor { display: grid; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.face-editor .field { margin: 0; }
+.face-editor .field input[type="text"] { background: var(--surface); font-family: var(--font-mono); }
+.face-tools { display: flex; gap: 6px; }
+.face-tools .text-button { flex: 1 1 auto; min-width: 0; background: var(--surface); }
+.face-tools .icon-button { flex: none; background: var(--surface); }
+.play-button { width: 100%; min-height: 36px; margin-top: 6px; font-weight: 600; }
+.play-button svg { color: var(--accent-ink); }
+
+/* Triggers: one card per rule; no "active now" badge (the Studio cannot know). */
+.trigger-rule { margin-top: 10px; padding: 8px 12px 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.trigger-rule-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.trigger-rule .trigger-rule-head h4 { margin: 0; color: var(--muted); font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.trigger-rule-head .icon-button { width: 28px; min-height: 28px; border-color: transparent; background: transparent; }
+.trigger-rule .field input[type="text"], .trigger-rule .field input[type="number"], .trigger-rule .field select { background: var(--surface); }
+.trigger-add { width: 100%; margin-top: 10px; }
+.sleep-settings { border-top:1px solid var(--border); margin-top:12px; padding-top:8px; }
 
 
 .object-menu {position:fixed;z-index:10000;min-width:220px;max-height:calc(100vh - 8px);overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:5px;box-shadow:0 8px 30px var(--menu-shadow);}

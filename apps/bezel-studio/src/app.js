@@ -357,6 +357,7 @@ async function drawPreview() {
     const frame = await work;
     if (screen !== state.screen || switchingScreen) return;
     canvasView.drawFrame(frame);
+    inspector.frameShown();
     $('status-render').textContent = t('status.render', { ms: Math.round(frame.millis) });
     animation.shown({ nextMs: frame.nextMs ?? null, elapsed: performance.now() - started });
   } catch (e) {
